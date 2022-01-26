@@ -1,0 +1,19 @@
+{
+	"compilerOptions": {
+		"types": [],
+		"module": "commonjs",
+		"target": "es2019",
+		"esModuleInterop": true,
+		"preserveConstEnums": true,
+		"sourceMap": true,
+		"resolveJsonModule": true,
+		"skipLibCheck": true,
+		"experimentalDecorators": true,
+		"emitDecoratorMetadata": true,
+		"baseUrl": ".",
+		"rootDir": "src",
+		"outDir": "./lib"
+	},
+	"include": ["src/**/*"],
+	"exclude": ["node_modules"]
+}
