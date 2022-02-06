@@ -2,6 +2,7 @@ import { BN, Provider } from '@project-serum/anchor';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 
 import {
+	BulkAccountLoader,
 	ClearingHouse,
 	initialize,
 	ClearingHouseUser,
@@ -16,10 +17,15 @@ import {
 	TEN_THOUSAND,
 	isOrderRiskIncreasing,
 	Wallet,
+	getClearingHouse,
+	getPollingClearingHouseConfig,
+	getClearingHouseUser,
+	getPollingClearingHouseUserConfig,
 } from '@drift-labs/sdk';
 
 import { Node, OrderList, sortDirectionForOrder } from './OrderList';
 import { CloudWatchClient } from './cloudWatchClient';
+import { bulkPollingUserSubscribe } from '@drift-labs/sdk/lib/accounts/bulkUserSubscription';
 
 require('dotenv').config();
 //@ts-ignore
@@ -168,23 +174,37 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		}
 	};
 
+	const userAccountLoader = new BulkAccountLoader(
+		connection,
+		'processed',
+		5000
+	);
 	const userMap = new Map<
 		string,
 		{ user: ClearingHouseUser; upToDate: boolean }
 	>();
 	const fetchAllUsers = async () => {
 		const programUserAccounts = await clearingHouse.program.account.user.all();
+		const userArray: ClearingHouseUser[] = [];
 		for (const programUserAccount of programUserAccounts) {
 			const userAccountPubkey = programUserAccount.publicKey.toString();
 			if (userMap.has(userAccountPubkey)) {
 				continue;
 			}
-			const user = ClearingHouseUser.from(
-				clearingHouse,
-				programUserAccount.account.authority
+			const user = getClearingHouseUser(
+				getPollingClearingHouseUserConfig(
+					clearingHouse,
+					programUserAccount.account.authority,
+					userAccountLoader
+				)
 			);
-			await user.subscribe();
-			userMap.set(userAccountPubkey, { user, upToDate: true });
+			userArray.push(user);
+		}
+
+		await bulkPollingUserSubscribe(userArray, userAccountLoader);
+		for (const user of userArray) {
+			const userAccountPubkey = await user.getUserAccountPublicKey();
+			userMap.set(userAccountPubkey.toString(), { user, upToDate: true });
 			processUser(user);
 		}
 	};
@@ -370,10 +390,13 @@ const clearingHousePublicKey = new PublicKey(
 	sdkConfig.CLEARING_HOUSE_PROGRAM_ID
 );
 
-const clearingHouse = ClearingHouse.from(
-	connection,
-	provider.wallet,
-	clearingHousePublicKey
+const clearingHouse = getClearingHouse(
+	getPollingClearingHouseConfig(
+		connection,
+		provider.wallet,
+		clearingHousePublicKey,
+		new BulkAccountLoader(connection, 'confirmed', 1000)
+	)
 );
 
 recursiveTryCatch(() => runBot(wallet, clearingHouse));
