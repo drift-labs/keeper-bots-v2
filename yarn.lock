@@ -30,17 +30,17 @@
   dependencies:
     regenerator-runtime "^0.13.4"
 
-"@drift-labs/sdk@^0.1.18-orders.1":
-  version "0.1.18-orders.1"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.1.18-orders.1.tgz#31bedd1adb60d8b7e70026242fa21ca8ac77b818"
-  integrity sha512-fFuSPaGelZiu1i8S+UFhioGpGVif62JYsc2VUXv3lBOpfrntnv/p/GTMA4s/X9OkxK99zwP59MEdrPzFgLHx/A==
+"@drift-labs/sdk@^0.1.18-orders.2":
+  version "0.1.18-orders.2"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.1.18-orders.2.tgz#48cbf6ee985fcc35872169e69da753630ad52247"
+  integrity sha512-IgYnwyZ+Gmb8Kzr8fuoepohHWUkcNvFqFCu/N0z1uCiPlqn40IYAZTeyGHbJo6z9KCIIl5RCcU3N9hHjj4Ey4Q==
   dependencies:
     "@project-serum/anchor" "0.19.1-beta.1"
     "@pythnetwork/client" "^2.5.1"
     "@solana/spl-token" "^0.1.6"
     "@solana/web3.js" "^1.22.0"
-    "@types/bn.js" "^5.1.0"
     strict-event-emitter-types "^2.0.0"
+    uuid "^8.3.2"
 
 "@eslint/eslintrc@^0.4.3":
   version "0.4.3"
