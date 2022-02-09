@@ -117,11 +117,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		});
 	};
 
-	const updateUserOrders = (
-		user: ClearingHouseUser,
-		userAccountPublicKey: PublicKey,
-		userOrdersAccountPublicKey: PublicKey
-	): BN => {
+	const updateUserOrders = (user: ClearingHouseUser): BN => {
 		const marginRatio = user.getMarginRatio();
 		const tooMuchLeverage = marginRatio.lte(
 			user.clearingHouse.getStateAccount().marginRatioInitial
@@ -134,36 +130,26 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			const orderIsRiskIncreasing = isOrderRiskIncreasing(user, order);
 
 			if (tooMuchLeverage && orderIsRiskIncreasing) {
-				orderList.remove(order.orderId.toNumber());
+				orderList.updateUserCanTake(order.orderId.toNumber(), false);
 			} else if (orderIsRiskIncreasing && order.reduceOnly) {
-				orderList.remove(order.orderId.toNumber());
+				orderList.updateUserCanTake(order.orderId.toNumber(), false);
 			} else {
-				orderList.insert(
-					order,
-					userAccountPublicKey,
-					userOrdersAccountPublicKey
-				);
+				orderList.updateUserCanTake(order.orderId.toNumber(), true);
 			}
 		}
 		return marginRatio;
 	};
 	const processUser = async (user: ClearingHouseUser) => {
 		const userAccountPublicKey = await user.getUserAccountPublicKey();
-		const userOrdersAccountPublicKey =
-			await user.getUserOrdersAccountPublicKey();
 
 		user.eventEmitter.on('userPositionsData', () => {
-			updateUserOrders(user, userAccountPublicKey, userOrdersAccountPublicKey);
+			updateUserOrders(user);
 			userMap.set(userAccountPublicKey.toString(), { user, upToDate: true });
 		});
 
 		// eslint-disable-next-line no-constant-condition
 		while (true) {
-			const marginRatio = updateUserOrders(
-				user,
-				userAccountPublicKey,
-				userOrdersAccountPublicKey
-			);
+			const marginRatio = updateUserOrders(user);
 			const marginRatioNumber = convertToNumber(marginRatio, TEN_THOUSAND);
 			const oneMinute = 1000 * 60;
 			const sleepTime = Math.min(
@@ -226,7 +212,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		if (isVariant(record.action, 'place')) {
 			const userOrdersAccountPublicKey = await getUserOrdersAccountPublicKey(
 				clearingHouse.program.programId,
-				record.authority
+				record.user
 			);
 			orderList.insert(order, record.user, userOrdersAccountPublicKey);
 		} else if (isVariant(record.action, 'cancel')) {
@@ -289,7 +275,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			}
 			const { upToDate: userUpToDate } = mapValue;
 
-			if (!currentNode.haveFilled && userUpToDate) {
+			if (!currentNode.haveFilled && userUpToDate && currentNode.userCanTake) {
 				break;
 			}
 
@@ -395,7 +381,7 @@ const clearingHouse = getClearingHouse(
 		connection,
 		provider.wallet,
 		clearingHousePublicKey,
-		new BulkAccountLoader(connection, 'confirmed', 1000)
+		new BulkAccountLoader(connection, 'confirmed', 500)
 	)
 );
 

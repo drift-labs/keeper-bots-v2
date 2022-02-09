@@ -18,6 +18,7 @@ export class Node {
 	previous?: Node;
 	haveFilled = false;
 	sortDirection: SortDirection;
+	userCanTake = true;
 
 	constructor(
 		order: Order,
@@ -179,6 +180,13 @@ export class OrderList {
 			const node = this.nodeMap.get(order.orderId.toNumber());
 			Object.assign(node.order, order);
 			node.haveFilled = false;
+		}
+	}
+
+	public updateUserCanTake(orderId: number, userCanTake: boolean): void {
+		if (this.nodeMap.has(orderId)) {
+			const node = this.nodeMap.get(orderId);
+			node.userCanTake = userCanTake;
 		}
 	}
 
