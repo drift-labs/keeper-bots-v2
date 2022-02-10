@@ -38,7 +38,7 @@ export class Node {
 			return order.price;
 		}
 
-		if (isVariant(order.orderType, 'stopLimit')) {
+		if (isVariant(order.orderType, 'triggerLimit')) {
 			if (isVariant(order.triggerCondition, 'below')) {
 				if (isVariant(order.direction, 'long')) {
 					return order.price.lt(order.triggerPrice)
@@ -232,8 +232,8 @@ export class OrderList {
 
 export function sortDirectionForOrder(order: Order): SortDirection {
 	if (
-		isVariant(order.orderType, 'stop') ||
-		isVariant(order.orderType, 'stopLimit')
+		isVariant(order.orderType, 'triggerMarket') ||
+		isVariant(order.orderType, 'triggerLimit')
 	) {
 		return isVariant(order.triggerCondition, 'below') ? 'desc' : 'asc';
 	}
