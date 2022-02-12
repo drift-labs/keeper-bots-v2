@@ -264,9 +264,12 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				const userAccount = await clearingHouse.program.account.user.fetch(
 					node.userAccount
 				);
-				const user = ClearingHouseUser.from(
-					clearingHouse,
-					userAccount.authority
+				const user = getClearingHouseUser(
+					getPollingClearingHouseUserConfig(
+						clearingHouse,
+						userAccount.authority,
+						userAccountLoader
+					)
 				);
 				await user.subscribe();
 				mapValue = { user, upToDate: true };
