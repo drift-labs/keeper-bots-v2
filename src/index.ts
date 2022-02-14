@@ -122,19 +122,22 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		const tooMuchLeverage = marginRatio.lte(
 			user.clearingHouse.getStateAccount().marginRatioInitial
 		);
-		for (const order of user.getUserOrdersAccount().orders) {
-			const ordersLists = marketOrderLists.get(order.marketIndex.toNumber());
-			const sortDirection = sortDirectionForOrder(order);
-			const orderList =
-				sortDirection === 'desc' ? ordersLists.desc : ordersLists.asc;
-			const orderIsRiskIncreasing = isOrderRiskIncreasing(user, order);
 
-			if (tooMuchLeverage && orderIsRiskIncreasing) {
-				orderList.updateUserCanTake(order.orderId.toNumber(), false);
-			} else if (orderIsRiskIncreasing && order.reduceOnly) {
-				orderList.updateUserCanTake(order.orderId.toNumber(), false);
-			} else {
-				orderList.updateUserCanTake(order.orderId.toNumber(), true);
+		if (user.getUserOrdersAccount()) {
+			for (const order of user.getUserOrdersAccount().orders) {
+				const ordersLists = marketOrderLists.get(order.marketIndex.toNumber());
+				const sortDirection = sortDirectionForOrder(order);
+				const orderList =
+					sortDirection === 'desc' ? ordersLists.desc : ordersLists.asc;
+				const orderIsRiskIncreasing = isOrderRiskIncreasing(user, order);
+
+				if (tooMuchLeverage && orderIsRiskIncreasing) {
+					orderList.updateUserCanTake(order.orderId.toNumber(), false);
+				} else if (orderIsRiskIncreasing && order.reduceOnly) {
+					orderList.updateUserCanTake(order.orderId.toNumber(), false);
+				} else {
+					orderList.updateUserCanTake(order.orderId.toNumber(), true);
+				}
 			}
 		}
 		return marginRatio;
