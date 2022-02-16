@@ -107,9 +107,14 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		ascList.printTop();
 	};
 
-	for (const [_, ordersList] of marketOrderLists) {
-		printTopOfOrdersList(ordersList.asc, ordersList.desc);
-	}
+	const printOrderLists = () => {
+		for (const [_, ordersList] of marketOrderLists) {
+			printTopOfOrdersList(ordersList.asc, ordersList.desc);
+		}
+	};
+	printOrderLists();
+	const printOrderListsIntervalId = setInterval(printOrderLists, 60000);
+	intervalIds.push(printOrderListsIntervalId);
 
 	const sleep = (ms: number) => {
 		return new Promise((resolve) => {
@@ -132,10 +137,26 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				const orderIsRiskIncreasing = isOrderRiskIncreasing(user, order);
 
 				if (tooMuchLeverage && orderIsRiskIncreasing) {
+					const existingNode = orderList.nodeMap.get(order.orderId.toNumber());
+					if (existingNode && existingNode.userCanTake) {
+						console.log(
+							`User has too much leverage and order is risk increasing. Order ${order.orderId.toString()} disabled`
+						);
+					}
 					orderList.updateUserCanTake(order.orderId.toNumber(), false);
 				} else if (orderIsRiskIncreasing && order.reduceOnly) {
+					const existingNode = orderList.nodeMap.get(order.orderId.toNumber());
+					if (existingNode && existingNode.userCanTake) {
+						console.log(
+							`Order ${order.orderId.toString()} is risk increasing but reduce only. Disabling`
+						);
+					}
 					orderList.updateUserCanTake(order.orderId.toNumber(), false);
 				} else {
+					const existingNode = orderList.nodeMap.get(order.orderId.toNumber());
+					if (existingNode && !existingNode.userCanTake) {
+						console.log(`Order ${order.orderId.toString()} re-enabled`);
+					}
 					orderList.updateUserCanTake(order.orderId.toNumber(), true);
 				}
 			}
@@ -218,17 +239,25 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				record.user
 			);
 			orderList.insert(order, record.user, userOrdersAccountPublicKey);
-			console.log(`Order ${order.orderId.toString()} placed. Added to order list`);
+			console.log(
+				`Order ${order.orderId.toString()} placed. Added to order list`
+			);
 		} else if (isVariant(record.action, 'cancel')) {
 			orderList.remove(order.orderId.toNumber());
-			console.log(`Order ${order.orderId.toString()} canceled. Removed from order list`);
+			console.log(
+				`Order ${order.orderId.toString()} canceled. Removed from order list`
+			);
 		} else if (isVariant(record.action, 'fill')) {
 			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
 				orderList.remove(order.orderId.toNumber());
-				console.log(`Order ${order.orderId.toString()} completely filled. Removed from order list`);
+				console.log(
+					`Order ${order.orderId.toString()} completely filled. Removed from order list`
+				);
 			} else {
 				orderList.update(order);
-				console.log(`Order ${order.orderId.toString()} partially filled. Updated`);
+				console.log(
+					`Order ${order.orderId.toString()} partially filled. Updated`
+				);
 			}
 		}
 		printTopOfOrdersList(ordersList.asc, ordersList.desc);
@@ -309,7 +338,10 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		let nodeToFill: Node | undefined = undefined;
 		if (orderLists.asc.head && orderLists.asc.head.pricesCross(markPrice)) {
 			nodeToFill = await findNodeToFill(orderLists.asc.head, markPrice);
-		} else if (
+		}
+
+		if (
+			nodeToFill === undefined &&
 			orderLists.desc.head &&
 			orderLists.desc.head.pricesCross(markPrice)
 		) {
