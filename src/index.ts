@@ -218,13 +218,17 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				record.user
 			);
 			orderList.insert(order, record.user, userOrdersAccountPublicKey);
+			console.log(`Order ${order.orderId.toString()} placed. Added to order list`);
 		} else if (isVariant(record.action, 'cancel')) {
 			orderList.remove(order.orderId.toNumber());
+			console.log(`Order ${order.orderId.toString()} canceled. Removed from order list`);
 		} else if (isVariant(record.action, 'fill')) {
 			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
 				orderList.remove(order.orderId.toNumber());
+				console.log(`Order ${order.orderId.toString()} completely filled. Removed from order list`);
 			} else {
 				orderList.update(order);
+				console.log(`Order ${order.orderId.toString()} partially filled. Updated`);
 			}
 		}
 		printTopOfOrdersList(ordersList.asc, ordersList.desc);
