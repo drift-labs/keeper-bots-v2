@@ -118,8 +118,6 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		}
 	};
 	printOrderLists();
-	const printOrderListsIntervalId = setInterval(printOrderLists, 60000);
-	intervalIds.push(printOrderListsIntervalId);
 
 	const sleep = (ms: number) => {
 		return new Promise((resolve) => {
@@ -152,6 +150,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 							`User has too much leverage and order is risk increasing. Removing order ${order.orderId.toString()}`
 						);
 						orderList.remove(orderId);
+						printTopOfOrdersList(ordersLists.asc, ordersLists.desc);
 					}
 				} else if (orderIsRiskIncreasing && order.reduceOnly) {
 					if (openOrders.has(orderId) && orderList.has(orderId)) {
@@ -159,6 +158,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 							`Order ${order.orderId.toString()} is risk increasing but reduce only. Removing`
 						);
 						orderList.remove(orderId);
+						printTopOfOrdersList(ordersLists.asc, ordersLists.desc);
 					}
 				} else {
 					if (openOrders.has(orderId) && !orderList.has(orderId)) {
@@ -168,6 +168,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 							userAccountPublicKey,
 							userOrdersAccountPublicKey
 						);
+						printTopOfOrdersList(ordersLists.asc, ordersLists.desc);
 					}
 				}
 			}
@@ -409,6 +410,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 						orderLists[nodeToFill.sortDirection].remove(
 							nodeToFill.order.orderId.toNumber()
 						);
+						printTopOfOrdersList(orderLists.asc, orderLists.desc);
 					}
 				});
 		}
