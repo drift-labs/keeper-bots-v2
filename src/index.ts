@@ -67,6 +67,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			asc: shorts,
 		});
 	}
+	const openOrders = new Set<number>();
 
 	// explicitly grab order index before we initially build order list
 	// so we're less likely to have missed records while we fetch order accounts
@@ -91,6 +92,9 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			const orderList =
 				sortDirection === 'desc' ? ordersList.desc : ordersList.asc;
 			orderList.insert(order, userAccountPublicKey, userOrderAccountPublicKey);
+			if (isVariant(order.status, 'open')) {
+				openOrders.add(order.orderId.toNumber());
+			}
 		}
 	}
 
@@ -122,7 +126,11 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		});
 	};
 
-	const updateUserOrders = (user: ClearingHouseUser): BN => {
+	const updateUserOrders = (
+		user: ClearingHouseUser,
+		userAccountPublicKey: PublicKey,
+		userOrdersAccountPublicKey: PublicKey
+	): BN => {
 		const marginRatio = user.getMarginRatio();
 		const tooMuchLeverage = marginRatio.lte(
 			user.clearingHouse.getStateAccount().marginRatioInitial
@@ -136,28 +144,30 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 					sortDirection === 'desc' ? ordersLists.desc : ordersLists.asc;
 				const orderIsRiskIncreasing = isOrderRiskIncreasing(user, order);
 
+				const orderId = order.orderId.toNumber();
 				if (tooMuchLeverage && orderIsRiskIncreasing) {
-					const existingNode = orderList.nodeMap.get(order.orderId.toNumber());
-					if (existingNode && existingNode.userCanTake) {
+					if (openOrders.has(orderId) && orderList.has(orderId)) {
 						console.log(
-							`User has too much leverage and order is risk increasing. Order ${order.orderId.toString()} disabled`
+							`User has too much leverage and order is risk increasing. Removing order ${order.orderId.toString()}`
 						);
+						orderList.remove(orderId);
 					}
-					orderList.updateUserCanTake(order.orderId.toNumber(), false);
 				} else if (orderIsRiskIncreasing && order.reduceOnly) {
-					const existingNode = orderList.nodeMap.get(order.orderId.toNumber());
-					if (existingNode && existingNode.userCanTake) {
+					if (openOrders.has(orderId) && orderList.has(orderId)) {
 						console.log(
-							`Order ${order.orderId.toString()} is risk increasing but reduce only. Disabling`
+							`Order ${order.orderId.toString()} is risk increasing but reduce only. Removing`
+						);
+						orderList.remove(orderId);
+					}
+				} else {
+					if (openOrders.has(orderId) && !orderList.has(orderId)) {
+						console.log(`Order ${order.orderId.toString()} added back`);
+						orderList.insert(
+							order,
+							userAccountPublicKey,
+							userOrdersAccountPublicKey
 						);
 					}
-					orderList.updateUserCanTake(order.orderId.toNumber(), false);
-				} else {
-					const existingNode = orderList.nodeMap.get(order.orderId.toNumber());
-					if (existingNode && !existingNode.userCanTake) {
-						console.log(`Order ${order.orderId.toString()} re-enabled`);
-					}
-					orderList.updateUserCanTake(order.orderId.toNumber(), true);
 				}
 			}
 		}
@@ -165,15 +175,21 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	};
 	const processUser = async (user: ClearingHouseUser) => {
 		const userAccountPublicKey = await user.getUserAccountPublicKey();
+		const userOrdersAccountPublicKey =
+			await user.getUserOrdersAccountPublicKey();
 
 		user.eventEmitter.on('userPositionsData', () => {
-			updateUserOrders(user);
+			updateUserOrders(user, userAccountPublicKey, userOrdersAccountPublicKey);
 			userMap.set(userAccountPublicKey.toString(), { user, upToDate: true });
 		});
 
 		// eslint-disable-next-line no-constant-condition
 		while (true) {
-			const marginRatio = updateUserOrders(user);
+			const marginRatio = updateUserOrders(
+				user,
+				userAccountPublicKey,
+				userOrdersAccountPublicKey
+			);
 			const marginRatioNumber = convertToNumber(marginRatio, TEN_THOUSAND);
 			const oneMinute = 1000 * 60;
 			const sleepTime = Math.min(
@@ -239,17 +255,20 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				record.user
 			);
 			orderList.insert(order, record.user, userOrdersAccountPublicKey);
+			openOrders.add(order.orderId.toNumber());
 			console.log(
 				`Order ${order.orderId.toString()} placed. Added to order list`
 			);
 		} else if (isVariant(record.action, 'cancel')) {
 			orderList.remove(order.orderId.toNumber());
+			openOrders.delete(order.orderId.toNumber());
 			console.log(
 				`Order ${order.orderId.toString()} canceled. Removed from order list`
 			);
 		} else if (isVariant(record.action, 'fill')) {
 			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
 				orderList.remove(order.orderId.toNumber());
+				openOrders.delete(order.orderId.toNumber());
 				console.log(
 					`Order ${order.orderId.toString()} completely filled. Removed from order list`
 				);
@@ -313,8 +332,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				processUser(user);
 			}
 			const { upToDate: userUpToDate } = mapValue;
-
-			if (!currentNode.haveFilled && userUpToDate && currentNode.userCanTake) {
+			if (!currentNode.haveFilled && userUpToDate) {
 				break;
 			}
 
