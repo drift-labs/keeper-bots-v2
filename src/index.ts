@@ -26,6 +26,7 @@ import {
 import { Node, OrderList, sortDirectionForOrder } from './OrderList';
 import { CloudWatchClient } from './cloudWatchClient';
 import { bulkPollingUserSubscribe } from '@drift-labs/sdk/lib/accounts/bulkUserSubscription';
+import { getErrorCode } from './error';
 
 require('dotenv').config();
 //@ts-ignore
@@ -387,7 +388,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 					console.log(`Tx: ${txSig}`);
 					cloudWatchClient.logFill(true);
 				})
-				.catch(() => {
+				.catch((error) => {
 					nodeToFill.haveFilled = false;
 					userMap.set(nodeToFill.userAccount.toString(), {
 						user,
@@ -397,6 +398,18 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 						`Error filling user (account: ${nodeToFill.userAccount.toString()}) order: ${nodeToFill.order.orderId.toString()}`
 					);
 					cloudWatchClient.logFill(false);
+
+					// If we get an error that order does not exist, assume its been filled by somebody else and we
+					// have received the history record yet
+					const errorCode = getErrorCode(error);
+					if (errorCode === 6043) {
+						console.log(
+							`Order ${nodeToFill.order.orderId.toString()} not found when trying to fill. Removing from order list`
+						);
+						orderLists[nodeToFill.sortDirection].remove(
+							nodeToFill.order.orderId.toNumber()
+						);
+					}
 				});
 		}
 		perMarketMutex[marketIndex.toNumber()] = 0;
