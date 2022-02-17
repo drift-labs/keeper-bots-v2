@@ -409,7 +409,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	};
 
 	tryFill();
-	const handleFillIntervalId = setInterval(tryFill, 1000); // every second
+	const handleFillIntervalId = setInterval(tryFill, 500); // every half second
 	intervalIds.push(handleFillIntervalId);
 };
 
