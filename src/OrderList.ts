@@ -81,10 +81,10 @@ export class Node {
 		}
 		if (this.order.triggerPrice.gt(ZERO)) {
 			msg += ` ${
-				isVariant(this.order.triggerPrice, 'below') ? 'BELOW' : 'ABOVE'
+				isVariant(this.order.triggerCondition, 'below') ? 'BELOW' : 'ABOVE'
 			}`;
 			msg += ` ${convertToNumber(
-				this.order.price,
+				this.order.triggerPrice,
 				MARK_PRICE_PRECISION
 			).toFixed(3)}`;
 		}
