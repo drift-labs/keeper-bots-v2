@@ -21,6 +21,7 @@ import {
 	getPollingClearingHouseConfig,
 	getClearingHouseUser,
 	getPollingClearingHouseUserConfig,
+	QUOTE_PRECISION,
 } from '@drift-labs/sdk';
 
 import { Node, OrderList, sortDirectionForOrder } from './OrderList';
@@ -216,6 +217,14 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		const userArray: ClearingHouseUser[] = [];
 		for (const programUserAccount of programUserAccounts) {
 			const userAccountPubkey = programUserAccount.publicKey.toString();
+
+			// if the user has less than one dollar in account, disregard initially
+			// if an order comes from this user, we can add them then.
+			// This makes it so that we don't need to listen to inactive users
+			if (programUserAccount.account.collateral.lt(QUOTE_PRECISION)) {
+				continue;
+			}
+
 			if (userMap.has(userAccountPubkey)) {
 				continue;
 			}
