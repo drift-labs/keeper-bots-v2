@@ -13,7 +13,13 @@ yarn
 tsc
 ```
 
+### Initialize User
+```shell
+yarn
+node lib/initializeUser.js
+```
+
 ### Run Node Serve
 ```shell
-node src/index.js
+node lib/index.js
 ```

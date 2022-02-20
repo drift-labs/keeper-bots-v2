@@ -38,7 +38,7 @@ const cloudWatchClient = new CloudWatchClient(
 	process.env.ENABLE_CLOUDWATCH === 'true'
 );
 
-function getWallet(): Wallet {
+export function getWallet(): Wallet {
 	const privateKey = process.env.FILLER_PRIVATE_KEY;
 	const keypair = Keypair.fromSecretKey(
 		Uint8Array.from(privateKey.split(',').map((val) => Number(val)))
