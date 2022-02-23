@@ -378,57 +378,65 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			);
 		}
 
-		nodesToFill
-			.filter((nodeToFill) => !nodeToFill.haveFilled)
-			.forEach((nodeToFill) => {
-				const { user } = userMap.get(nodeToFill.userAccount.toString());
-				userMap.set(nodeToFill.userAccount.toString(), {
-					user,
-					upToDate: false,
-				});
-				nodeToFill.haveFilled = true;
-
+		const unfilledNodes = nodesToFill.filter(
+			(nodeToFill) => !nodeToFill.haveFilled
+		);
+		for (const nodeToFill of unfilledNodes) {
+			const mapValue = userMap.get(nodeToFill.userAccount.toString());
+			if (!mapValue) {
 				console.log(
-					`trying to fill (account: ${nodeToFill.userAccount.toString()})`
+					`User not found in user map ${nodeToFill.userAccount.toString()}`
 				);
-				clearingHouse
-					.fillOrder(
-						nodeToFill.userAccount,
-						nodeToFill.userOrdersAccount,
-						nodeToFill.order
-					)
-					.then((txSig) => {
-						console.log(
-							`Filled user (account: ${nodeToFill.userAccount.toString()}) order: ${nodeToFill.order.orderId.toString()}`
-						);
-						console.log(`Tx: ${txSig}`);
-						cloudWatchClient.logFill(true);
-					})
-					.catch((error) => {
-						nodeToFill.haveFilled = false;
-						userMap.set(nodeToFill.userAccount.toString(), {
-							user,
-							upToDate: true,
-						});
-						console.log(
-							`Error filling user (account: ${nodeToFill.userAccount.toString()}) order: ${nodeToFill.order.orderId.toString()}`
-						);
-						cloudWatchClient.logFill(false);
-
-						// If we get an error that order does not exist, assume its been filled by somebody else and we
-						// have received the history record yet
-						const errorCode = getErrorCode(error);
-						if (errorCode === 6043) {
-							console.log(
-								`Order ${nodeToFill.order.orderId.toString()} not found when trying to fill. Removing from order list`
-							);
-							orderLists[nodeToFill.sortDirection].remove(
-								nodeToFill.order.orderId.toNumber()
-							);
-							printTopOfOrdersList(orderLists.asc, orderLists.desc);
-						}
-					});
+				continue;
+			}
+			const { user } = mapValue;
+			userMap.set(nodeToFill.userAccount.toString(), {
+				user,
+				upToDate: false,
 			});
+			nodeToFill.haveFilled = true;
+
+			console.log(
+				`trying to fill (account: ${nodeToFill.userAccount.toString()})`
+			);
+			clearingHouse
+				.fillOrder(
+					nodeToFill.userAccount,
+					nodeToFill.userOrdersAccount,
+					nodeToFill.order
+				)
+				.then((txSig) => {
+					console.log(
+						`Filled user (account: ${nodeToFill.userAccount.toString()}) order: ${nodeToFill.order.orderId.toString()}`
+					);
+					console.log(`Tx: ${txSig}`);
+					cloudWatchClient.logFill(true);
+				})
+				.catch((error) => {
+					nodeToFill.haveFilled = false;
+					userMap.set(nodeToFill.userAccount.toString(), {
+						user,
+						upToDate: true,
+					});
+					console.log(
+						`Error filling user (account: ${nodeToFill.userAccount.toString()}) order: ${nodeToFill.order.orderId.toString()}`
+					);
+					cloudWatchClient.logFill(false);
+
+					// If we get an error that order does not exist, assume its been filled by somebody else and we
+					// have received the history record yet
+					const errorCode = getErrorCode(error);
+					if (errorCode === 6043) {
+						console.log(
+							`Order ${nodeToFill.order.orderId.toString()} not found when trying to fill. Removing from order list`
+						);
+						orderLists[nodeToFill.sortDirection].remove(
+							nodeToFill.order.orderId.toNumber()
+						);
+						printTopOfOrdersList(orderLists.asc, orderLists.desc);
+					}
+				});
+		}
 		perMarketMutex[marketIndex.toNumber()] = 0;
 	};
 
