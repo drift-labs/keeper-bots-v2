@@ -299,17 +299,23 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		}
 		updateOrderListMutex = 1;
 
-		let head = clearingHouse.getOrderHistoryAccount().head.toNumber();
-		while (nextOrderHistoryIndex !== head) {
-			const nextRecord =
-				clearingHouse.getOrderHistoryAccount().orderRecords[
-					nextOrderHistoryIndex
-				];
-			await handleOrderRecord(nextRecord);
-			nextOrderHistoryIndex += 1;
-			head = clearingHouse.getOrderHistoryAccount().head.toNumber();
+		try {
+			let head = clearingHouse.getOrderHistoryAccount().head.toNumber();
+			while (nextOrderHistoryIndex !== head) {
+				const nextRecord =
+					clearingHouse.getOrderHistoryAccount().orderRecords[
+						nextOrderHistoryIndex
+					];
+				await handleOrderRecord(nextRecord);
+				nextOrderHistoryIndex += 1;
+				head = clearingHouse.getOrderHistoryAccount().head.toNumber();
+			}
+		} catch (e) {
+			console.log(`Unexpected error in update order list`);
+			console.error(e);
+		} finally {
+			updateOrderListMutex = 0;
 		}
-		updateOrderListMutex = 0;
 	};
 	clearingHouse.eventEmitter.on('orderHistoryAccountUpdate', updateOrderList);
 	await updateOrderList();
