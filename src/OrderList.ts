@@ -143,7 +143,7 @@ export class OrderList {
 		let currentNode = this.head;
 		while (
 			currentNode.next !== undefined &&
-			this.prependNode(currentNode.next, newNode)
+			!this.prependNode(currentNode.next, newNode)
 		) {
 			currentNode = currentNode.next;
 		}
