@@ -22,6 +22,7 @@ import {
 	getClearingHouseUser,
 	getPollingClearingHouseUserConfig,
 	QUOTE_PRECISION,
+	ZERO,
 } from '@drift-labs/sdk';
 
 import { Node, OrderList, sortDirectionForOrder } from './OrderList';
@@ -157,6 +158,14 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 					if (openOrders.has(orderId) && orderList.has(orderId)) {
 						console.log(
 							`Order ${order.orderId.toString()} is risk increasing but reduce only. Removing`
+						);
+						orderList.remove(orderId);
+						printTopOfOrdersList(ordersLists.asc, ordersLists.desc);
+					}
+				} else if (user.getUserAccount().collateral.eq(ZERO)) {
+					if (openOrders.has(orderId) && orderList.has(orderId)) {
+						console.log(
+							`Removing order ${order.orderId.toString()} as authority ${user.authority.toString()} has no collateral`
 						);
 						orderList.remove(orderId);
 						printTopOfOrdersList(ordersLists.asc, ordersLists.desc);
