@@ -301,13 +301,16 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 		try {
 			let head = clearingHouse.getOrderHistoryAccount().head.toNumber();
+			let orderHistoryLength =
+				clearingHouse.getOrderHistoryAccount().orderRecords.length;
 			while (nextOrderHistoryIndex !== head) {
 				const nextRecord =
 					clearingHouse.getOrderHistoryAccount().orderRecords[
 						nextOrderHistoryIndex
 					];
 				await handleOrderRecord(nextRecord);
-				nextOrderHistoryIndex += 1;
+				nextOrderHistoryIndex =
+					nextOrderHistoryIndex + (1 % orderHistoryLength);
 				head = clearingHouse.getOrderHistoryAccount().head.toNumber();
 			}
 		} catch (e) {
