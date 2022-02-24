@@ -301,7 +301,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 		try {
 			let head = clearingHouse.getOrderHistoryAccount().head.toNumber();
-			let orderHistoryLength =
+			const orderHistoryLength =
 				clearingHouse.getOrderHistoryAccount().orderRecords.length;
 			while (nextOrderHistoryIndex !== head) {
 				const nextRecord =
@@ -310,7 +310,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 					];
 				await handleOrderRecord(nextRecord);
 				nextOrderHistoryIndex =
-					nextOrderHistoryIndex + (1 % orderHistoryLength);
+					(nextOrderHistoryIndex + 1) % orderHistoryLength;
 				head = clearingHouse.getOrderHistoryAccount().head.toNumber();
 			}
 		} catch (e) {
