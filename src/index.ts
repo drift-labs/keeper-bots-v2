@@ -332,6 +332,24 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	clearingHouse.eventEmitter.on('orderHistoryAccountUpdate', updateOrderList);
 	await updateOrderList();
 
+	const fetchUserAndAddToUserMap = async (userAccountPublicKey: PublicKey) => {
+		const userAccount = await clearingHouse.program.account.user.fetch(
+			userAccountPublicKey
+		);
+		const user = getClearingHouseUser(
+			getPollingClearingHouseUserConfig(
+				clearingHouse,
+				userAccount.authority,
+				userAccountLoader
+			)
+		);
+		await user.subscribe();
+		processUser(user);
+		const mapValue = { user, upToDate: true };
+		userMap.set(userAccountPublicKey.toString(), mapValue);
+		return mapValue;
+	};
+
 	const findNodesToFill = async (
 		node: Node,
 		markPrice: BN
@@ -346,20 +364,10 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 			let mapValue = userMap.get(node.userAccount.toString());
 			if (!mapValue) {
-				const userAccount = await clearingHouse.program.account.user.fetch(
-					node.userAccount
+				console.log(
+					`User not found in user map ${node.userAccount.toString()}. Adding before filling.`
 				);
-				const user = getClearingHouseUser(
-					getPollingClearingHouseUserConfig(
-						clearingHouse,
-						userAccount.authority,
-						userAccountLoader
-					)
-				);
-				await user.subscribe();
-				mapValue = { user, upToDate: true };
-				userMap.set(node.userAccount.toString(), mapValue);
-				processUser(user);
+				mapValue = await fetchUserAndAddToUserMap(node.userAccount);
 			}
 			const { upToDate: userUpToDate } = mapValue;
 			if (!currentNode.haveFilled && userUpToDate) {
@@ -401,11 +409,12 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				(nodeToFill) => !nodeToFill.haveFilled
 			);
 			for (const nodeToFill of unfilledNodes) {
-				const mapValue = userMap.get(nodeToFill.userAccount.toString());
+				let mapValue = userMap.get(nodeToFill.userAccount.toString());
 				if (!mapValue) {
 					console.log(
-						`User not found in user map ${nodeToFill.userAccount.toString()}`
+						`User not found in user map ${nodeToFill.userAccount.toString()}. Adding`
 					);
+					mapValue = await fetchUserAndAddToUserMap(nodeToFill.userAccount);
 					continue;
 				}
 				const { user } = mapValue;
