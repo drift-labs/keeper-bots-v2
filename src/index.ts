@@ -425,7 +425,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				nodeToFill.haveFilled = true;
 
 				console.log(
-					`trying to fill (account: ${nodeToFill.userAccount.toString()})`
+					`trying to fill (account: ${nodeToFill.userAccount.toString()}) order ${nodeToFill.order.orderId.toString()}`
 				);
 				clearingHouse
 					.fillOrder(
@@ -455,6 +455,8 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 						// have received the history record yet
 						const errorCode = getErrorCode(error);
 						if (errorCode === 6043) {
+							// try to fetch user orders account to make sure its up to date
+							user.fetchAccounts();
 							console.log(
 								`Order ${nodeToFill.order.orderId.toString()} not found when trying to fill. Removing from order list`
 							);
