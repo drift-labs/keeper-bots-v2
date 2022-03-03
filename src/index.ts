@@ -424,6 +424,14 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				});
 				nodeToFill.haveFilled = true;
 
+				// double check that prices still cross before sending tx
+				const updatedMarkPrice = calculateMarkPrice(
+					clearingHouse.getMarket(marketIndex)
+				);
+				if (!nodeToFill.pricesCross(updatedMarkPrice)) {
+					continue;
+				}
+
 				console.log(
 					`trying to fill (account: ${nodeToFill.userAccount.toString()}) order ${nodeToFill.order.orderId.toString()}`
 				);
