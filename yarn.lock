@@ -30,10 +30,10 @@
   dependencies:
     regenerator-runtime "^0.13.4"
 
-"@drift-labs/sdk@0.1.23-master.0":
-  version "0.1.23-master.0"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.1.23-master.0.tgz#8c5e0bbfafc14f96e0f0eb00576c7dcae80dd704"
-  integrity sha512-HH9QT7d9XSNNQ/7j8cvfXdnA+tx9J7riiGE1k0bxtJOqoFC9hdiLmo3Oarp219zEEivz2eYtxFeSsGeF9l03Ww==
+"@drift-labs/sdk@0.1.23-master.3":
+  version "0.1.23-master.3"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.1.23-master.3.tgz#81b8cbc2b7076168185677a52999bf5d7ddf7299"
+  integrity sha512-oblNwTbPTFpq5IA1C6KNsys9t9rAPyL0EFpwQ5WlTT5uDWtBSKMhL4srf+aWwQVqdyQWPScO00f+2GZ0Y3ujsA==
   dependencies:
     "@project-serum/anchor" "0.19.1-beta.1"
     "@pythnetwork/client" "^2.5.1"
@@ -142,9 +142,9 @@
     buffer-layout "^1.2.0"
 
 "@pythnetwork/client@^2.5.1":
-  version "2.5.1"
-  resolved "https://registry.yarnpkg.com/@pythnetwork/client/-/client-2.5.1.tgz#f15c1f2394157f4a97fa8725b93ad887d534e776"
-  integrity sha512-QXt31aWuVi02yvjmNEFDKurTkeTL/BEM4Ney4uixUbkxZDSrYRUuYNXPTrylRLdT3C3DlbF858/Jt7DwtLMR2w==
+  version "2.6.0"
+  resolved "https://registry.yarnpkg.com/@pythnetwork/client/-/client-2.6.0.tgz#4c514ac5ca3a3963d4fe86ac7477baa8265a14df"
+  integrity sha512-bb2nUfSXvooVEG/Ec5QnYXD3gMPg4tYqzFAl3yMvjGRjdzH/mD6bKfCdvUCuNDR7/Tz/ofIS5vH2Fj/11rliQw==
   dependencies:
     "@solana/web3.js" "^1.30.2"
     assert "^2.0.0"
@@ -169,10 +169,30 @@
     buffer-layout "^1.2.0"
     dotenv "10.0.0"
 
-"@solana/web3.js@^1.17.0", "@solana/web3.js@^1.21.0", "@solana/web3.js@^1.22.0", "@solana/web3.js@^1.30.2":
+"@solana/web3.js@^1.17.0", "@solana/web3.js@^1.21.0", "@solana/web3.js@^1.22.0":
   version "1.31.0"
   resolved "https://registry.yarnpkg.com/@solana/web3.js/-/web3.js-1.31.0.tgz#7a313d4c1a90b77f27ddbfe845a10d6883e06452"
   integrity sha512-7nHHx1JNFnrt15e9y8m38I/EJCbaB+bFC3KZVM1+QhybCikFxGMtGA5r7PDC3GEL1R2RZA8yKoLkDKo3vzzqnw==
+  dependencies:
+    "@babel/runtime" "^7.12.5"
+    "@ethersproject/sha2" "^5.5.0"
+    "@solana/buffer-layout" "^3.0.0"
+    bn.js "^5.0.0"
+    borsh "^0.4.0"
+    bs58 "^4.0.1"
+    buffer "6.0.1"
+    cross-fetch "^3.1.4"
+    jayson "^3.4.4"
+    js-sha3 "^0.8.0"
+    rpc-websockets "^7.4.2"
+    secp256k1 "^4.0.2"
+    superstruct "^0.14.2"
+    tweetnacl "^1.0.0"
+
+"@solana/web3.js@^1.30.2":
+  version "1.36.0"
+  resolved "https://registry.yarnpkg.com/@solana/web3.js/-/web3.js-1.36.0.tgz#79d7d5217b49b80139f4de68953adc5b9a9a264f"
+  integrity sha512-RNT1451iRR7TyW7EJKMCrH/0OXawIe4zVm0DWQASwXlR/u1jmW6FrmH0lujIh7cGTlfOVbH+2ZU9AVUPLBFzwA==
   dependencies:
     "@babel/runtime" "^7.12.5"
     "@ethersproject/sha2" "^5.5.0"
@@ -1085,9 +1105,9 @@ has-flag@^4.0.0:
   integrity sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==
 
 has-symbols@^1.0.1, has-symbols@^1.0.2:
-  version "1.0.2"
-  resolved "https://registry.yarnpkg.com/has-symbols/-/has-symbols-1.0.2.tgz#165d3070c00309752a1236a479331e3ac56f1423"
-  integrity sha512-chXa79rL/UC2KlX17jo3vRGz0azaWEx5tGqZg5pO3NUyEJVB17dMruQlzCCOfUvElghKcm5194+BCRvi2Rv/Gw==
+  version "1.0.3"
+  resolved "https://registry.yarnpkg.com/has-symbols/-/has-symbols-1.0.3.tgz#bb7b2c4349251dce87b125f7bdf874aa7c8b39f8"
+  integrity sha512-l3LCuF6MgDNwTDKkdYGEihYjt5pRPbEg46rtlmnSPlUbgmB8LOIrKJbYYFBSbnPaJexMKtiPO8hmeRjRz2Td+A==
 
 has-tostringtag@^1.0.0:
   version "1.0.0"

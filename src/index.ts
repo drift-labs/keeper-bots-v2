@@ -23,6 +23,8 @@ import {
 	getPollingClearingHouseUserConfig,
 	QUOTE_PRECISION,
 	ZERO,
+	calculateBaseAssetAmountMarketCanExecute,
+	calculateBaseAssetAmountUserCanExecute,
 } from '@drift-labs/sdk';
 
 import { Node, OrderList, sortDirectionForOrder } from './OrderList';
@@ -418,11 +420,6 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 					continue;
 				}
 				const { user } = mapValue;
-				userMap.set(nodeToFill.userAccount.toString(), {
-					user,
-					upToDate: false,
-				});
-				nodeToFill.haveFilled = true;
 
 				// double check that prices still cross before sending tx
 				const updatedMarkPrice = calculateMarkPrice(
@@ -431,6 +428,37 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				if (!nodeToFill.pricesCross(updatedMarkPrice)) {
 					continue;
 				}
+
+				if (
+					isVariant(nodeToFill.order.orderType, 'limit') ||
+					isVariant(nodeToFill.order.orderType, 'triggerLimit')
+				) {
+					const baseAssetAmountMarketCanExecute =
+						calculateBaseAssetAmountMarketCanExecute(market, nodeToFill.order);
+					const baseAssetAmountUserCanExecute =
+						calculateBaseAssetAmountUserCanExecute(
+							market,
+							nodeToFill.order,
+							user
+						);
+
+					if (
+						baseAssetAmountMarketCanExecute.lt(
+							market.amm.minimumBaseAssetTradeSize
+						) ||
+						baseAssetAmountUserCanExecute.lt(
+							market.amm.minimumBaseAssetTradeSize
+						)
+					) {
+						continue;
+					}
+				}
+
+				userMap.set(nodeToFill.userAccount.toString(), {
+					user,
+					upToDate: false,
+				});
+				nodeToFill.haveFilled = true;
 
 				console.log(
 					`trying to fill (account: ${nodeToFill.userAccount.toString()}) order ${nodeToFill.order.orderId.toString()}`
