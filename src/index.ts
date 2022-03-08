@@ -57,6 +57,13 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	console.log('SOL balance:', lamportsBalance / 10 ** 9);
 	await clearingHouse.subscribe(['orderHistoryAccount']);
+	clearingHouse.eventEmitter.on('error', (e) => {
+		console.log('clearing house error');
+		console.error(e);
+		clearingHouse.unsubscribe();
+		clearingHouse.subscribe(['orderHistoryAccount']);
+	});
+
 	console.log(clearingHouse.program.programId.toString());
 
 	const marketOrderLists = new Map<
