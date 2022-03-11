@@ -194,12 +194,15 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		}
 		return marginRatio;
 	};
+
+	let lastUserUpdate = Date.now();
 	const processUser = async (user: ClearingHouseUser) => {
 		const userAccountPublicKey = await user.getUserAccountPublicKey();
 		const userOrdersAccountPublicKey =
 			await user.getUserOrdersAccountPublicKey();
 
 		user.eventEmitter.on('userPositionsData', () => {
+			lastUserUpdate = Date.now();
 			updateUserOrders(user, userAccountPublicKey, userOrdersAccountPublicKey);
 			userMap.set(userAccountPublicKey.toString(), { user, upToDate: true });
 		});
@@ -220,6 +223,18 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			await sleep(sleepTime);
 		}
 	};
+	const checkLastUserUpdate = () => {
+		const time = Date.now();
+		const fiveMinutes = 5 * 60 * 100;
+		if (time - lastUserUpdate > fiveMinutes) {
+			cloudWatchClient.logNoUserUpdate();
+		}
+	};
+	const checkLastUserUpdateIntervalId = setInterval(
+		checkLastUserUpdate,
+		60 * 1000
+	);
+	intervalIds.push(checkLastUserUpdateIntervalId);
 
 	const userAccountLoader = new BulkAccountLoader(
 		connection,
@@ -311,11 +326,13 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		printTopOfOrdersList(ordersList.asc, ordersList.desc);
 	};
 
+	let lastOrderUpdate = Date.now();
 	const updateOrderList = async () => {
 		if (updateOrderListMutex === 1) {
 			return;
 		}
 		updateOrderListMutex = 1;
+		lastOrderUpdate = Date.now();
 
 		try {
 			let head = clearingHouse.getOrderHistoryAccount().head.toNumber();
@@ -340,6 +357,19 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	};
 	clearingHouse.eventEmitter.on('orderHistoryAccountUpdate', updateOrderList);
 	await updateOrderList();
+
+	const checkLastOrderHistoryUpdate = () => {
+		const time = Date.now();
+		const fiveMinutes = 5 * 60 * 100;
+		if (time - lastOrderUpdate > fiveMinutes) {
+			cloudWatchClient.logNoOrderUpdate();
+		}
+	};
+	const checkLastOrderHistoryUpdateIntervalId = setInterval(
+		checkLastOrderHistoryUpdate,
+		60 * 1000
+	);
+	intervalIds.push(checkLastOrderHistoryUpdateIntervalId);
 
 	const fetchUserAndAddToUserMap = async (userAccountPublicKey: PublicKey) => {
 		const userAccount = await clearingHouse.program.account.user.fetch(

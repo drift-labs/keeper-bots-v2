@@ -30,4 +30,48 @@ export class CloudWatchClient {
 			}
 		});
 	}
+
+	public logNoOrderUpdate(): void {
+		if (!this.enabled) {
+			return;
+		}
+
+		const params = {
+			MetricData: [
+				{
+					MetricName: 'NoOrderUpdate',
+					Unit: 'None',
+					Value: 1,
+				},
+			],
+			Namespace: 'Orders',
+		};
+		this.cloudWatch.putMetricData(params, (err) => {
+			if (err) {
+				console.error(err);
+			}
+		});
+	}
+
+	public logNoUserUpdate(): void {
+		if (!this.enabled) {
+			return;
+		}
+
+		const params = {
+			MetricData: [
+				{
+					MetricName: 'NoUserUpdate',
+					Unit: 'None',
+					Value: 1,
+				},
+			],
+			Namespace: 'Orders',
+		};
+		this.cloudWatch.putMetricData(params, (err) => {
+			if (err) {
+				console.error(err);
+			}
+		});
+	}
 }
