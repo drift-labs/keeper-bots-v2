@@ -360,8 +360,8 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 	const checkLastOrderHistoryUpdate = () => {
 		const time = Date.now();
-		const tenMinutes = 10 * 60 * 1000;
-		if (time - lastOrderUpdate > tenMinutes) {
+		const twentyMinutes = 20 * 60 * 1000;
+		if (time - lastOrderUpdate > twentyMinutes) {
 			cloudWatchClient.logNoOrderUpdate();
 		}
 	};
