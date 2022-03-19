@@ -582,12 +582,14 @@ const clearingHousePublicKey = new PublicKey(
 	sdkConfig.CLEARING_HOUSE_PROGRAM_ID
 );
 
+const bulkAccountLoader = new BulkAccountLoader(connection, 'confirmed', 500);
+bulkAccountLoader.loggingEnabled = true;
 const clearingHouse = getClearingHouse(
 	getPollingClearingHouseConfig(
 		connection,
 		provider.wallet,
 		clearingHousePublicKey,
-		new BulkAccountLoader(connection, 'confirmed', 500)
+		bulkAccountLoader
 	)
 );
 
