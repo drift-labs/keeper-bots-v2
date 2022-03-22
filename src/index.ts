@@ -60,8 +60,9 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	clearingHouse.eventEmitter.on('error', (e) => {
 		console.log('clearing house error');
 		console.error(e);
-		clearingHouse.unsubscribe();
-		clearingHouse.subscribe(['orderHistoryAccount']);
+		clearingHouse.unsubscribe().then(() => {
+			clearingHouse.subscribe(['orderHistoryAccount']);
+		});
 	});
 
 	console.log(clearingHouse.program.programId.toString());
