@@ -25,6 +25,7 @@ import {
 	ZERO,
 	calculateBaseAssetAmountMarketCanExecute,
 	calculateBaseAssetAmountUserCanExecute,
+	isOrderReduceOnly,
 } from '@drift-labs/sdk';
 
 import { Node, OrderList, sortDirectionForOrder } from './OrderList';
@@ -152,6 +153,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				const orderList =
 					sortDirection === 'desc' ? ordersLists.desc : ordersLists.asc;
 				const orderIsRiskIncreasing = isOrderRiskIncreasing(user, order);
+				const orderIsReduceOnly = isOrderReduceOnly(user, order);
 
 				const orderId = order.orderId.toNumber();
 				if (tooMuchLeverage && orderIsRiskIncreasing) {
@@ -162,7 +164,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 						orderList.remove(orderId);
 						printTopOfOrdersList(ordersLists.asc, ordersLists.desc);
 					}
-				} else if (orderIsRiskIncreasing && order.reduceOnly) {
+				} else if (!orderIsReduceOnly && order.reduceOnly) {
 					if (openOrders.has(orderId) && orderList.has(orderId)) {
 						console.log(
 							`Order ${order.orderId.toString()} is risk increasing but reduce only. Removing`
