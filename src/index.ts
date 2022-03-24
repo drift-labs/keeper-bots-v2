@@ -143,9 +143,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		userOrdersAccountPublicKey: PublicKey
 	): BN => {
 		const marginRatio = user.getMarginRatio();
-		const tooMuchLeverage = marginRatio.lte(
-			user.clearingHouse.getStateAccount().marginRatioInitial
-		);
+		const tooMuchLeverage = user.getFreeCollateral().eq(ZERO);
 
 		if (user.getUserOrdersAccount()) {
 			for (const order of user.getUserOrdersAccount().orders) {
