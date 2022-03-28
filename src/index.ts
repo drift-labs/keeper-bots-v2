@@ -334,6 +334,12 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 					`Order ${order.orderId.toString()} canceled. Removed from dlob`
 				);
 			});
+		} else if (isVariant(record.action, 'expire')) {
+			dlob.remove(order, () => {
+				console.log(
+					`Order ${order.orderId.toString()} expired. Removed from dlob`
+				);
+			});
 		} else if (isVariant(record.action, 'fill')) {
 			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
 				dlob.remove(order, () => {
