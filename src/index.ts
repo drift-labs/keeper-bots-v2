@@ -2,6 +2,7 @@ import { BN, Provider } from '@project-serum/anchor';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 
 import {
+	bulkPollingUserSubscribe,
 	BulkAccountLoader,
 	ClearingHouse,
 	initialize,
@@ -26,12 +27,16 @@ import {
 	calculateBaseAssetAmountMarketCanExecute,
 	calculateBaseAssetAmountUserCanExecute,
 	isOrderReduceOnly,
+	OracleSubscriber,
+	getOracleClient,
+	PollingOracleSubscriber,
+	calculateMarkOracleSpread,
 } from '@drift-labs/sdk';
 
-import { Node, OrderList, sortDirectionForOrder } from './OrderList';
+import { Node } from './dlob/OrderList';
 import { CloudWatchClient } from './cloudWatchClient';
-import { bulkPollingUserSubscribe } from '@drift-labs/sdk/lib/accounts/bulkUserSubscription';
 import { getErrorCode } from './error';
+import { DLOB, DLOBOrderLists } from './dlob/DLOB';
 
 require('dotenv').config();
 //@ts-ignore
@@ -53,6 +58,23 @@ export function getWallet(): Wallet {
 const endpoint = process.env.ENDPOINT;
 const connection = new Connection(endpoint);
 
+const wallet = getWallet();
+const provider = new Provider(connection, wallet, Provider.defaultOptions());
+const clearingHousePublicKey = new PublicKey(
+	sdkConfig.CLEARING_HOUSE_PROGRAM_ID
+);
+
+const bulkAccountLoader = new BulkAccountLoader(connection, 'confirmed', 500);
+// bulkAccountLoader.loggingEnabled = true;
+const clearingHouse = getClearingHouse(
+	getPollingClearingHouseConfig(
+		connection,
+		provider.wallet,
+		clearingHousePublicKey,
+		bulkAccountLoader
+	)
+);
+
 const intervalIds = [];
 const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
@@ -68,20 +90,28 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 	console.log(clearingHouse.program.programId.toString());
 
-	const marketOrderLists = new Map<
-		number,
-		{ desc: OrderList; asc: OrderList }
-	>();
-	for (const market of Markets) {
-		const longs = new OrderList(market.marketIndex, 'desc');
-		const shorts = new OrderList(market.marketIndex, 'asc');
+	const dlob = new DLOB();
 
-		marketOrderLists.set(market.marketIndex.toNumber(), {
-			desc: longs,
-			asc: shorts,
-		});
+	const oracleSubscribers = new Map<string, OracleSubscriber>();
+	for (const market of Markets) {
+		const oracleClient = getOracleClient(
+			market.oracleSource,
+			connection,
+			sdkConfig.ENV
+		);
+		const publicKey = new PublicKey(
+			sdkConfig.ENV === 'mainnet-beta'
+				? market.mainnetPublicKey
+				: market.devnetPublicKey
+		);
+		const oracleSubscriber = new PollingOracleSubscriber(
+			publicKey,
+			oracleClient,
+			bulkAccountLoader
+		);
+		await oracleSubscriber.subscribe();
+		oracleSubscribers.set(publicKey.toString(), oracleSubscriber);
 	}
-	const openOrders = new Set<number>();
 
 	// explicitly grab order index before we initially build order list
 	// so we're less likely to have missed records while we fetch order accounts
@@ -97,37 +127,38 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		const userAccountPublicKey = userOrdersAccount.user;
 
 		for (const order of userOrdersAccount.orders) {
-			if (isVariant(order, 'init') || isVariant(order.orderType, 'market')) {
-				continue;
-			}
-
-			const ordersList = marketOrderLists.get(order.marketIndex.toNumber());
-			const sortDirection = sortDirectionForOrder(order);
-			const orderList =
-				sortDirection === 'desc' ? ordersList.desc : ordersList.asc;
-			orderList.insert(order, userAccountPublicKey, userOrderAccountPublicKey);
-			if (isVariant(order.status, 'open')) {
-				openOrders.add(order.orderId.toNumber());
-			}
+			dlob.insert(order, userAccountPublicKey, userOrderAccountPublicKey);
 		}
 	}
+	console.log('initial number of orders', dlob.openOrders.size);
 
-	const printTopOfOrdersList = (ascList: OrderList, descList: OrderList) => {
-		console.log(`Market ${Markets[descList.marketIndex.toNumber()].symbol}`);
-		descList.printTop();
+	const printTopOfOrderLists = (dlobOrderLists: DLOBOrderLists) => {
+		const marketIndex = dlobOrderLists.fixed.desc.marketIndex;
+		const market = clearingHouse.getMarket(marketIndex);
+		const oraclePriceData = oracleSubscribers
+			.get(market.amm.oracle.toString())
+			.getOraclePriceData();
+		const markPrice = calculateMarkPrice(market);
+		const markOracleSpread = calculateMarkOracleSpread(market, oraclePriceData);
+
+		console.log(`Market ${Markets[marketIndex.toNumber()].symbol} Orders`);
+		dlobOrderLists.fixed.desc.printTop();
 		console.log(
 			`Mark`,
-			convertToNumber(
-				calculateMarkPrice(clearingHouse.getMarket(descList.marketIndex)),
-				MARK_PRICE_PRECISION
-			).toFixed(3)
+			convertToNumber(markPrice, MARK_PRICE_PRECISION).toFixed(3)
 		);
-		ascList.printTop();
+		dlobOrderLists.fixed.asc.printTop();
+		dlobOrderLists.floating.desc.printTop();
+		console.log(
+			`Mark Oracle Spread`,
+			convertToNumber(markOracleSpread, MARK_PRICE_PRECISION).toFixed(3)
+		);
+		dlobOrderLists.floating.asc.printTop();
 	};
 
 	const printOrderLists = () => {
-		for (const [_, ordersList] of marketOrderLists) {
-			printTopOfOrdersList(ordersList.asc, ordersList.desc);
+		for (const [_, orderLists] of dlob.orderLists) {
+			printTopOfOrderLists(orderLists);
 		}
 	};
 	printOrderLists();
@@ -148,48 +179,48 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 		if (user.getUserOrdersAccount()) {
 			for (const order of user.getUserOrdersAccount().orders) {
-				const ordersLists = marketOrderLists.get(order.marketIndex.toNumber());
-				const sortDirection = sortDirectionForOrder(order);
-				const orderList =
-					sortDirection === 'desc' ? ordersLists.desc : ordersLists.asc;
 				const orderIsRiskIncreasing = isOrderRiskIncreasing(user, order);
 				const orderIsReduceOnly = isOrderReduceOnly(user, order);
 
-				const orderId = order.orderId.toNumber();
 				if (tooMuchLeverage && orderIsRiskIncreasing) {
-					if (openOrders.has(orderId) && orderList.has(orderId)) {
+					dlob.disable(order, () => {
 						console.log(
-							`User has too much leverage and order is risk increasing. Removing order ${order.orderId.toString()}`
+							`User has too much leverage and order is risk increasing. Disabling order ${order.orderId.toString()}`
 						);
-						orderList.remove(orderId);
-						printTopOfOrdersList(ordersLists.asc, ordersLists.desc);
-					}
+						printTopOfOrderLists(
+							dlob.orderLists.get(order.marketIndex.toNumber())
+						);
+					});
 				} else if (!orderIsReduceOnly && order.reduceOnly) {
-					if (openOrders.has(orderId) && orderList.has(orderId)) {
+					dlob.disable(order, () => {
 						console.log(
-							`Order ${order.orderId.toString()} is risk increasing but reduce only. Removing`
+							`Order ${order.orderId.toString()} is risk increasing but reduce only. Disabling`
 						);
-						orderList.remove(orderId);
-						printTopOfOrdersList(ordersLists.asc, ordersLists.desc);
-					}
+						printTopOfOrderLists(
+							dlob.orderLists.get(order.marketIndex.toNumber())
+						);
+					});
 				} else if (user.getUserAccount().collateral.eq(ZERO)) {
-					if (openOrders.has(orderId) && orderList.has(orderId)) {
+					dlob.disable(order, () => {
 						console.log(
-							`Removing order ${order.orderId.toString()} as authority ${user.authority.toString()} has no collateral`
+							`Disabling order ${order.orderId.toString()} as authority ${user.authority.toString()} has no collateral`
 						);
-						orderList.remove(orderId);
-						printTopOfOrdersList(ordersLists.asc, ordersLists.desc);
-					}
+						printTopOfOrderLists(
+							dlob.orderLists.get(order.marketIndex.toNumber())
+						);
+					});
 				} else {
-					if (openOrders.has(orderId) && !orderList.has(orderId)) {
-						console.log(`Order ${order.orderId.toString()} added back`);
-						orderList.insert(
-							order,
-							userAccountPublicKey,
-							userOrdersAccountPublicKey
-						);
-						printTopOfOrdersList(ordersLists.asc, ordersLists.desc);
-					}
+					dlob.enable(
+						order,
+						userAccountPublicKey,
+						userOrdersAccountPublicKey,
+						() => {
+							console.log(`Enabling order ${order.orderId.toString()}`);
+							printTopOfOrderLists(
+								dlob.orderLists.get(order.marketIndex.toNumber())
+							);
+						}
+					);
 				}
 			}
 		}
@@ -289,42 +320,37 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			return;
 		}
 
-		const sortDirection = sortDirectionForOrder(order);
-		const ordersList = marketOrderLists.get(order.marketIndex.toNumber());
-		const orderList =
-			sortDirection === 'desc' ? ordersList.desc : ordersList.asc;
-
 		if (isVariant(record.action, 'place')) {
 			const userOrdersAccountPublicKey = await getUserOrdersAccountPublicKey(
 				clearingHouse.program.programId,
 				record.user
 			);
-			orderList.insert(order, record.user, userOrdersAccountPublicKey);
-			openOrders.add(order.orderId.toNumber());
-			console.log(
-				`Order ${order.orderId.toString()} placed. Added to order list`
-			);
+			dlob.insert(order, record.user, userOrdersAccountPublicKey, () => {
+				console.log(`Order ${order.orderId.toString()} placed. Added to dlob`);
+			});
 		} else if (isVariant(record.action, 'cancel')) {
-			orderList.remove(order.orderId.toNumber());
-			openOrders.delete(order.orderId.toNumber());
-			console.log(
-				`Order ${order.orderId.toString()} canceled. Removed from order list`
-			);
+			dlob.remove(order, () => {
+				console.log(
+					`Order ${order.orderId.toString()} canceled. Removed from dlob`
+				);
+			});
 		} else if (isVariant(record.action, 'fill')) {
 			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
-				orderList.remove(order.orderId.toNumber());
-				openOrders.delete(order.orderId.toNumber());
-				console.log(
-					`Order ${order.orderId.toString()} completely filled. Removed from order list`
-				);
+				dlob.remove(order, () => {
+					console.log(
+						`Order ${order.orderId.toString()} completely filled. Removed from dlob`
+					);
+				});
 			} else {
-				orderList.update(order);
-				console.log(
-					`Order ${order.orderId.toString()} partially filled. Updated`
-				);
+				dlob.update(order, () => {
+					console.log(
+						`Order ${order.orderId.toString()} partially filled. Updated dlob`
+					);
+				});
 			}
 		}
-		printTopOfOrdersList(ordersList.asc, ordersList.desc);
+
+		printTopOfOrderLists(dlob.orderLists.get(order.marketIndex.toNumber()));
 	};
 
 	let lastOrderUpdate = Date.now();
@@ -429,19 +455,63 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 		try {
 			const market = clearingHouse.getMarket(marketIndex);
-			const orderLists = marketOrderLists.get(marketIndex.toNumber());
+			const fixedOrderLists = dlob.getOrderLists(
+				marketIndex.toNumber(),
+				'fixed'
+			);
 			const markPrice = calculateMarkPrice(market);
+			const oraclePriceData = oracleSubscribers
+				.get(market.amm.oracle.toString())
+				.getOraclePriceData();
+			const markOracleSpread = calculateMarkOracleSpread(
+				market,
+				oraclePriceData
+			);
 
 			const nodesToFill: Node[] = [];
-			if (orderLists.asc.head && orderLists.asc.head.pricesCross(markPrice)) {
+			if (
+				fixedOrderLists.asc.head &&
+				fixedOrderLists.asc.head.pricesCross(markPrice)
+			) {
 				nodesToFill.push(
-					...(await findNodesToFill(orderLists.asc.head, markPrice))
+					...(await findNodesToFill(fixedOrderLists.asc.head, markPrice))
 				);
 			}
 
-			if (orderLists.desc.head && orderLists.desc.head.pricesCross(markPrice)) {
+			if (
+				fixedOrderLists.desc.head &&
+				fixedOrderLists.desc.head.pricesCross(markPrice)
+			) {
 				nodesToFill.push(
-					...(await findNodesToFill(orderLists.desc.head, markPrice))
+					...(await findNodesToFill(fixedOrderLists.desc.head, markPrice))
+				);
+			}
+
+			const floatingOrderLists = dlob.getOrderLists(
+				marketIndex.toNumber(),
+				'floating'
+			);
+			if (
+				floatingOrderLists.asc.head &&
+				floatingOrderLists.asc.head.pricesCross(markOracleSpread)
+			) {
+				nodesToFill.push(
+					...(await findNodesToFill(
+						floatingOrderLists.asc.head,
+						markOracleSpread
+					))
+				);
+			}
+
+			if (
+				floatingOrderLists.desc.head &&
+				floatingOrderLists.desc.head.pricesCross(markOracleSpread)
+			) {
+				nodesToFill.push(
+					...(await findNodesToFill(
+						floatingOrderLists.desc.head,
+						markOracleSpread
+					))
 				);
 			}
 
@@ -459,20 +529,16 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				}
 				const { user } = mapValue;
 
-				// double check that prices still cross before sending tx
-				const updatedMarkPrice = calculateMarkPrice(
-					clearingHouse.getMarket(marketIndex)
-				);
-				if (!nodeToFill.pricesCross(updatedMarkPrice)) {
-					continue;
-				}
-
 				if (
 					isVariant(nodeToFill.order.orderType, 'limit') ||
 					isVariant(nodeToFill.order.orderType, 'triggerLimit')
 				) {
 					const baseAssetAmountMarketCanExecute =
-						calculateBaseAssetAmountMarketCanExecute(market, nodeToFill.order);
+						calculateBaseAssetAmountMarketCanExecute(
+							market,
+							nodeToFill.order,
+							oraclePriceData
+						);
 					const baseAssetAmountUserCanExecute =
 						calculateBaseAssetAmountUserCanExecute(
 							market,
@@ -534,10 +600,12 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 							console.log(
 								`Order ${nodeToFill.order.orderId.toString()} not found when trying to fill. Removing from order list`
 							);
-							orderLists[nodeToFill.sortDirection].remove(
+							fixedOrderLists[nodeToFill.sortDirection].remove(
 								nodeToFill.order.orderId.toNumber()
 							);
-							printTopOfOrdersList(orderLists.asc, orderLists.desc);
+							printTopOfOrderLists(
+								dlob.orderLists.get(nodeToFill.order.marketIndex.toNumber())
+							);
 						}
 					});
 			}
@@ -576,22 +644,5 @@ async function recursiveTryCatch(f: () => void) {
 		await recursiveTryCatch(f);
 	}
 }
-
-const wallet = getWallet();
-const provider = new Provider(connection, wallet, Provider.defaultOptions());
-const clearingHousePublicKey = new PublicKey(
-	sdkConfig.CLEARING_HOUSE_PROGRAM_ID
-);
-
-const bulkAccountLoader = new BulkAccountLoader(connection, 'confirmed', 500);
-bulkAccountLoader.loggingEnabled = true;
-const clearingHouse = getClearingHouse(
-	getPollingClearingHouseConfig(
-		connection,
-		provider.wallet,
-		clearingHousePublicKey,
-		bulkAccountLoader
-	)
-);
 
 recursiveTryCatch(() => runBot(wallet, clearingHouse));

@@ -8,6 +8,9 @@ import {
 } from '@drift-labs/sdk';
 import { BN } from '@project-serum/anchor';
 import { PublicKey } from '@solana/web3.js';
+import { listTypeForOrder } from './DLOB';
+
+export type SortDirection = 'asc' | 'desc';
 
 export class Node {
 	order: Order;
@@ -92,7 +95,33 @@ export class Node {
 	}
 }
 
-export type SortDirection = 'asc' | 'desc';
+export class FloatingNode extends Node {
+	getSortingPrice(order: Order): BN {
+		return order.oraclePriceOffset;
+	}
+
+	public pricesCross(markOracleSpread: BN): boolean {
+		return this.sortDirection === 'desc'
+			? markOracleSpread.lt(this.sortPrice)
+			: markOracleSpread.gt(this.sortPrice);
+	}
+
+	public getLabel(): string {
+		let msg = `Order ${this.order.orderId.toString()}`;
+		msg += ` ${isVariant(this.order.direction, 'long') ? 'LONG' : 'SHORT'} `;
+		msg += `${convertToNumber(
+			this.order.baseAssetAmount,
+			AMM_RESERVE_PRECISION
+		).toFixed(3)}`;
+		msg += ` @ Oracle ${
+			this.order.oraclePriceOffset.gte(ZERO) ? '+' : '-'
+		} ${convertToNumber(
+			this.order.oraclePriceOffset.abs(),
+			MARK_PRICE_PRECISION
+		).toFixed(3)}`;
+		return msg;
+	}
+}
 
 export class OrderList {
 	marketIndex: BN;
@@ -115,12 +144,16 @@ export class OrderList {
 			return;
 		}
 
-		const newNode = new Node(
-			order,
-			userAccount,
-			orderAccount,
-			this.sortDirection
-		);
+		const newNode =
+			listTypeForOrder(order) === 'fixed'
+				? new Node(order, userAccount, orderAccount, this.sortDirection)
+				: new FloatingNode(
+						order,
+						userAccount,
+						orderAccount,
+						this.sortDirection
+				  );
+
 		if (this.nodeMap.has(order.orderId.toNumber())) {
 			return;
 		}
