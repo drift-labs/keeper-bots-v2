@@ -65,7 +65,7 @@ const clearingHousePublicKey = new PublicKey(
 );
 
 const bulkAccountLoader = new BulkAccountLoader(connection, 'confirmed', 500);
-// bulkAccountLoader.loggingEnabled = true;
+bulkAccountLoader.loggingEnabled = true;
 const clearingHouse = getClearingHouse(
 	getPollingClearingHouseConfig(
 		connection,
@@ -270,6 +270,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		'processed',
 		5000
 	);
+	userAccountLoader.loggingEnabled = true;
 	const userMap = new Map<
 		string,
 		{ user: ClearingHouseUser; upToDate: boolean }
