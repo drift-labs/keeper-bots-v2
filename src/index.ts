@@ -87,20 +87,22 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 	console.log(clearingHouse.program.programId.toString());
 
-	const dlob = new DLOB();
+	let markets = clearingHouse.getMarketsAccount().markets.filter(market => market.initialized);
+	const updateMarkets = () => {
+		markets = clearingHouse.getMarketsAccount().markets.filter(market => market.initialized);
+	}
+	const updateMarketsIntervalId = setInterval(updateMarkets, 15 * 60 * 1000); // every 15 minutes
+	intervalIds.push(updateMarketsIntervalId);
 
+	const dlob = new DLOB();
 	const oracleSubscribers = new Map<string, OracleSubscriber>();
-	for (const market of Markets) {
+	for (const market of markets) {
 		const oracleClient = getOracleClient(
-			market.oracleSource,
+			market.amm.oracleSource,
 			connection,
 			sdkConfig.ENV
 		);
-		const publicKey = new PublicKey(
-			sdkConfig.ENV === 'mainnet-beta'
-				? market.mainnetPublicKey
-				: market.devnetPublicKey
-		);
+		const publicKey = market.amm.oracle;
 		const oracleSubscriber = new PollingOracleSubscriber(
 			publicKey,
 			oracleClient,
@@ -622,8 +624,8 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	};
 
 	const tryFill = () => {
-		for (const market of Markets) {
-			tryFillForMarket(market.marketIndex);
+		for (const marketIndex in markets) {
+			tryFillForMarket(new BN(marketIndex));
 		}
 	};
 
