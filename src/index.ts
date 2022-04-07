@@ -65,7 +65,6 @@ const clearingHousePublicKey = new PublicKey(
 );
 
 const bulkAccountLoader = new BulkAccountLoader(connection, 'confirmed', 500);
-bulkAccountLoader.loggingEnabled = true;
 const clearingHouse = getClearingHouse(
 	getPollingClearingHouseConfig(
 		connection,
@@ -254,11 +253,19 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			await sleep(sleepTime);
 		}
 	};
+
+	const userAccountLoader = new BulkAccountLoader(
+		connection,
+		'processed',
+		5000
+	);
+
 	const checkLastUserUpdate = () => {
 		const time = Date.now();
 		const tenMinutes = 10 * 60 * 1000;
 		if (time - lastUserUpdate > tenMinutes) {
 			cloudWatchClient.logNoUserUpdate();
+			userAccountLoader.loggingEnabled = true;
 		}
 	};
 	const checkLastUserUpdateIntervalId = setInterval(
@@ -267,12 +274,6 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	);
 	intervalIds.push(checkLastUserUpdateIntervalId);
 
-	const userAccountLoader = new BulkAccountLoader(
-		connection,
-		'processed',
-		5000
-	);
-	userAccountLoader.loggingEnabled = true;
 	const userMap = new Map<
 		string,
 		{ user: ClearingHouseUser; upToDate: boolean }
@@ -395,6 +396,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		const time = Date.now();
 		const thirtyMinutes = 30 * 60 * 1000;
 		if (time - lastOrderUpdate > thirtyMinutes) {
+			bulkAccountLoader.loggingEnabled = true;
 			cloudWatchClient.logNoOrderUpdate();
 		}
 	};
