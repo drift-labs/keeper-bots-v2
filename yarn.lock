@@ -30,10 +30,10 @@
   dependencies:
     regenerator-runtime "^0.13.4"
 
-"@drift-labs/sdk@0.1.29-master.1":
-  version "0.1.29-master.1"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.1.29-master.1.tgz#09551aab4de431234ababbe1922cdf681ea811db"
-  integrity sha512-c9fkasfOWr6qqFDUqg2MS0Us/2DVmBnTPt9Du8A4OTv0adFY7B6t8vA0UyqATpIJMWq/4E4Np91M1JbxOg/YjQ==
+"@drift-labs/sdk@0.1.30-master.0":
+  version "0.1.30-master.0"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.1.30-master.0.tgz#a96a79d0dcfda7dfe1c7c0ccda226ac0c7599f6b"
+  integrity sha512-Uzcv1b1qj7LjWSjeu8ONGf1nUXnXoEAagefHG5zN9hiookshUdPDind4PSbd6tZssyFNw1M/tzuX1vwUMn+uqw==
   dependencies:
     "@project-serum/anchor" "0.19.1-beta.1"
     "@pythnetwork/client" "^2.5.1"
