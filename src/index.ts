@@ -436,6 +436,19 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				break;
 			}
 
+			const order = node.order;
+			if (order.postOnly && !order.oraclePriceOffset.eq(ZERO)) {
+				if (isVariant(order.direction, 'long') && markPrice.gte(order.price)) {
+					currentNode = currentNode.next;
+					continue;
+				}
+
+				if (isVariant(order.direction, 'short') && markPrice.lte(order.price)) {
+					currentNode = currentNode.next;
+					continue;
+				}
+			}
+
 			let mapValue = userMap.get(node.userAccount.toString());
 			if (!mapValue) {
 				console.log(
