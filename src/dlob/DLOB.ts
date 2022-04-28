@@ -1,21 +1,30 @@
-import { OrderList, sortDirectionForOrder } from './OrderList';
-import { isVariant, Markets, Order, ZERO } from '@drift-labs/sdk';
+import { NodeType, nodeTypeForOrder, OrderList } from './OrderList';
+import { isVariant, Markets, Order } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
 
 type OrderLists = {
-	desc: OrderList;
-	asc: OrderList;
+	ask: {
+		// Taker asks, Stop Limits, Take Profit Limits
+		asc: OrderList;
+	};
+	mark: {
+		// Maker asks, Stop Markets, Take Profits, Stop Limits, Take Profit Limits
+		asc: OrderList;
+		// Maker bids, Stop Markets, Take Profits
+		desc: OrderList;
+	};
+	bid: {
+		// Taker bids, Stop Limits, Take Profit Limits
+		desc: OrderList;
+	};
 };
 
-export type DLOBOrderLists = { fixed: OrderLists; floating: OrderLists };
+export type DLOBOrderLists = {
+	fixed: OrderLists;
+	floating: OrderLists;
+};
 
 type OrderBookCallback = () => void;
-
-export type ListType = 'fixed' | 'floating';
-
-export function listTypeForOrder(order: Order): ListType {
-	return order.oraclePriceOffset.eq(ZERO) ? 'fixed' : 'floating';
-}
 
 export class DLOB {
 	openOrders = new Set<number>();
@@ -25,12 +34,28 @@ export class DLOB {
 		for (const market of Markets) {
 			this.orderLists.set(market.marketIndex.toNumber(), {
 				fixed: {
-					asc: new OrderList(market.marketIndex, 'asc'),
-					desc: new OrderList(market.marketIndex, 'desc'),
+					ask: {
+						asc: new OrderList(market.marketIndex, 'asc'),
+					},
+					mark: {
+						asc: new OrderList(market.marketIndex, 'asc'),
+						desc: new OrderList(market.marketIndex, 'desc'),
+					},
+					bid: {
+						desc: new OrderList(market.marketIndex, 'desc'),
+					},
 				},
 				floating: {
-					asc: new OrderList(market.marketIndex, 'asc'),
-					desc: new OrderList(market.marketIndex, 'desc'),
+					ask: {
+						asc: new OrderList(market.marketIndex, 'asc'),
+					},
+					mark: {
+						asc: new OrderList(market.marketIndex, 'asc'),
+						desc: new OrderList(market.marketIndex, 'desc'),
+					},
+					bid: {
+						desc: new OrderList(market.marketIndex, 'desc'),
+					},
 				},
 			});
 		}
@@ -46,15 +71,11 @@ export class DLOB {
 			return;
 		}
 
-		const listType = listTypeForOrder(order);
-		const sortDirection = sortDirectionForOrder(order);
-
 		const orderId = order.orderId.toNumber();
 		if (isVariant(order.status, 'open')) {
 			this.openOrders.add(orderId);
 		}
-		this.orderLists
-			.get(order.marketIndex.toNumber())[listType][sortDirection].insert(order, userAccount, userOrders);
+		this.getListForOrder(order).insert(order, userAccount, userOrders);
 
 		if (onInsert) {
 			onInsert();
@@ -62,13 +83,9 @@ export class DLOB {
 	}
 
 	public remove(order: Order, onRemove?: OrderBookCallback): void {
-		const listType = listTypeForOrder(order);
-		const sortDirection = sortDirectionForOrder(order);
-
 		const orderId = order.orderId.toNumber();
 		this.openOrders.delete(orderId);
-		this.orderLists
-			.get(order.marketIndex.toNumber())[listType][sortDirection].remove(orderId);
+		this.getListForOrder(order).remove(orderId);
 
 		if (onRemove) {
 			onRemove();
@@ -76,24 +93,15 @@ export class DLOB {
 	}
 
 	public update(order: Order, onUpdate?: OrderBookCallback): void {
-		const listType = listTypeForOrder(order);
-		const sortDirection = sortDirectionForOrder(order);
-
-		this.orderLists
-			.get(order.marketIndex.toNumber())[listType][sortDirection].update(order);
+		this.getListForOrder(order).update(order);
 		if (onUpdate) {
 			onUpdate();
 		}
 	}
 
 	public disable(order: Order, onDisable?: OrderBookCallback): void {
-		const listType = listTypeForOrder(order);
-		const sortDirection = sortDirectionForOrder(order);
-
 		const orderId = order.orderId.toNumber();
-		const orderList = this.orderLists.get(order.marketIndex.toNumber())[
-			listType
-		][sortDirection];
+		const orderList = this.getListForOrder(order);
 		if (this.openOrders.has(orderId) && orderList.has(orderId)) {
 			orderList.remove(orderId);
 			if (onDisable) {
@@ -108,13 +116,8 @@ export class DLOB {
 		userOrders: PublicKey,
 		onEnable?: OrderBookCallback
 	): void {
-		const listType = listTypeForOrder(order);
-		const sortDirection = sortDirectionForOrder(order);
-
 		const orderId = order.orderId.toNumber();
-		const orderList = this.orderLists.get(order.marketIndex.toNumber())[
-			listType
-		][sortDirection];
+		const orderList = this.getListForOrder(order);
 		if (this.openOrders.has(orderId) && !orderList.has(orderId)) {
 			orderList.insert(order, userAccount, userOrders);
 
@@ -124,7 +127,55 @@ export class DLOB {
 		}
 	}
 
-	public getOrderLists(marketIndex: number, type: ListType): OrderLists {
+	public getListForOrder(order: Order): OrderList {
+		const nodeType = nodeTypeForOrder(order);
+		const orderLists = this.getOrderLists(
+			order.marketIndex.toNumber(),
+			nodeType
+		);
+
+		if (isVariant(order.orderType, 'limit') && order.postOnly) {
+			return isVariant(order.direction, 'long')
+				? orderLists.mark.desc
+				: orderLists.mark.asc;
+		}
+
+		if (isVariant(order.orderType, 'triggerLimit')) {
+			if (
+				isVariant(order.triggerCondition, 'below') &&
+				isVariant(order.direction, 'long')
+			) {
+				return order.price.lt(order.triggerPrice)
+					? orderLists.bid.desc
+					: orderLists.mark.desc;
+			}
+
+			if (
+				isVariant(order.triggerCondition, 'above') &&
+				isVariant(order.direction, 'short')
+			) {
+				return order.price.gt(order.triggerPrice)
+					? orderLists.ask.asc
+					: orderLists.mark.asc;
+			}
+
+			return isVariant(order.triggerCondition, 'below')
+				? orderLists.mark.desc
+				: orderLists.mark.asc;
+		}
+
+		if (isVariant(order.orderType, 'triggerMarket')) {
+			return isVariant(order.triggerCondition, 'below')
+				? orderLists.mark.desc
+				: orderLists.mark.asc;
+		}
+
+		return isVariant(order.direction, 'long')
+			? orderLists.bid.desc
+			: orderLists.ask.asc;
+	}
+
+	public getOrderLists(marketIndex: number, type: NodeType): OrderLists {
 		return this.orderLists.get(marketIndex)[type];
 	}
 }
