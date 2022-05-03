@@ -297,7 +297,6 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		const tenMinutes = 10 * 60 * 1000;
 		if (time - lastUserUpdate > tenMinutes) {
 			cloudWatchClient.logNoUserUpdate();
-			userAccountLoader.loggingEnabled = true;
 		}
 	};
 	const checkLastUserUpdateIntervalId = setInterval(
@@ -428,7 +427,6 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		const time = Date.now();
 		const thirtyMinutes = 30 * 60 * 1000;
 		if (time - lastOrderUpdate > thirtyMinutes) {
-			bulkAccountLoader.loggingEnabled = true;
 			cloudWatchClient.logNoOrderUpdate();
 		}
 	};
