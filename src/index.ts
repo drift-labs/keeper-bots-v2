@@ -655,7 +655,6 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 							`Filled user (account: ${nodeToFill.userAccount.toString()}) order: ${nodeToFill.order.orderId.toString()}`
 						);
 						console.log(`Tx: ${txSig}`);
-						cloudWatchClient.logFill(true);
 					})
 					.catch((error) => {
 						nodeToFill.haveFilled = false;
@@ -666,7 +665,6 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 						console.log(
 							`Error filling user (account: ${nodeToFill.userAccount.toString()}) order: ${nodeToFill.order.orderId.toString()}`
 						);
-						cloudWatchClient.logFill(false);
 
 						// If we get an error that order does not exist, assume its been filled by somebody else and we
 						// have received the history record yet
