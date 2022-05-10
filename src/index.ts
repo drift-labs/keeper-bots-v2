@@ -33,6 +33,7 @@ import {
 	calculateAskPrice,
 	calculateBidPrice,
 	calculateOracleSpread,
+	isOracleValid,
 } from '@drift-labs/sdk';
 
 import { Node, OrderList } from './dlob/OrderList';
@@ -310,7 +311,8 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		{ user: ClearingHouseUser; upToDate: boolean }
 	>();
 	const fetchAllUsers = async () => {
-		const programUserAccounts = await clearingHouse.program.account.user.all();
+		const programUserAccounts =
+			(await clearingHouse.program.account.user.all()) as any[];
 		const userArray: ClearingHouseUser[] = [];
 		for (const programUserAccount of programUserAccounts) {
 			const userAccountPubkey = programUserAccount.publicKey.toString();
@@ -437,9 +439,9 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	intervalIds.push(checkLastOrderHistoryUpdateIntervalId);
 
 	const fetchUserAndAddToUserMap = async (userAccountPublicKey: PublicKey) => {
-		const userAccount = await clearingHouse.program.account.user.fetch(
+		const userAccount = (await clearingHouse.program.account.user.fetch(
 			userAccountPublicKey
-		);
+		)) as any;
 		const user = getClearingHouseUser(
 			getPollingClearingHouseUserConfig(
 				clearingHouse,
@@ -558,37 +560,55 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			const oraclePriceData = oracleSubscribers
 				.get(market.amm.oracle.toString())
 				.getOraclePriceData();
-			const askOracleSpread = calculateOracleSpread(askPrice, oraclePriceData);
-			const markOracleSpread = calculateOracleSpread(
-				markPrice,
-				oraclePriceData
-			);
-			const bidOracleSpread = calculateOracleSpread(bidPrice, oraclePriceData);
 
-			nodesToFill.push(
-				...(await findNodesToFillFromOrderList(
-					floatingOrderLists.bid.desc,
-					askOracleSpread
-				))
+			const oracleIsValid = isOracleValid(
+				market.amm,
+				oraclePriceData,
+				clearingHouse.getStateAccount().oracleGuardRails,
+				bulkAccountLoader.mostRecentSlot
 			);
-			nodesToFill.push(
-				...(await findNodesToFillFromOrderList(
-					floatingOrderLists.ask.asc,
-					bidOracleSpread
-				))
-			);
-			nodesToFill.push(
-				...(await findNodesToFillFromOrderList(
-					floatingOrderLists.mark.desc,
-					markOracleSpread
-				))
-			);
-			nodesToFill.push(
-				...(await findNodesToFillFromOrderList(
-					floatingOrderLists.mark.asc,
-					markOracleSpread
-				))
-			);
+
+			if (oracleIsValid) {
+				const askOracleSpread = calculateOracleSpread(
+					askPrice,
+					oraclePriceData
+				);
+				const markOracleSpread = calculateOracleSpread(
+					markPrice,
+					oraclePriceData
+				);
+				const bidOracleSpread = calculateOracleSpread(
+					bidPrice,
+					oraclePriceData
+				);
+
+				nodesToFill.push(
+					...(await findNodesToFillFromOrderList(
+						floatingOrderLists.bid.desc,
+						askOracleSpread
+					))
+				);
+				nodesToFill.push(
+					...(await findNodesToFillFromOrderList(
+						floatingOrderLists.ask.asc,
+						bidOracleSpread
+					))
+				);
+				nodesToFill.push(
+					...(await findNodesToFillFromOrderList(
+						floatingOrderLists.mark.desc,
+						markOracleSpread
+					))
+				);
+				nodesToFill.push(
+					...(await findNodesToFillFromOrderList(
+						floatingOrderLists.mark.asc,
+						markOracleSpread
+					))
+				);
+			} else {
+				console.log(`Oracle invalid for market ${marketIndex.toString()}`);
+			}
 
 			const unfilledNodes = nodesToFill.filter(
 				(nodeToFill) => !nodeToFill.haveFilled
