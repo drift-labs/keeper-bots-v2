@@ -14,7 +14,6 @@ export type SortDirection = 'asc' | 'desc';
 export class Node {
 	order: Order;
 	userAccount: PublicKey;
-	userOrdersAccount: PublicKey;
 	sortPrice: BN;
 	next?: Node;
 	previous?: Node;
@@ -24,52 +23,20 @@ export class Node {
 	constructor(
 		order: Order,
 		userAccount: PublicKey,
-		orderAccount: PublicKey,
 		sortDirection: SortDirection
 	) {
 		this.order = order;
 		this.userAccount = userAccount;
-		this.userOrdersAccount = orderAccount;
 		this.sortPrice = this.getSortingPrice(order);
 		this.sortDirection = sortDirection;
 	}
 
 	getSortingPrice(order: Order): BN {
-		if (isVariant(order.orderType, 'limit')) {
-			return order.price;
-		}
-
-		if (isVariant(order.orderType, 'triggerLimit')) {
-			if (isVariant(order.triggerCondition, 'below')) {
-				if (isVariant(order.direction, 'long')) {
-					return order.price.lt(order.triggerPrice)
-						? order.price
-						: order.triggerPrice;
-				}
-				return order.triggerPrice;
-			} else {
-				if (isVariant(order.triggerCondition, 'above')) {
-					if (isVariant(order.direction, 'short')) {
-						return order.price.gt(order.triggerPrice)
-							? order.price
-							: order.triggerPrice;
-					}
-					return order.triggerPrice;
-				}
-			}
-		}
-
-		return order.triggerPrice;
-	}
-
-	public pricesCross(price: BN): boolean {
-		return this.sortDirection === 'desc'
-			? price.lt(this.sortPrice)
-			: price.gt(this.sortPrice);
+		return order.price;
 	}
 
 	public getLabel(): string {
-		let msg = `Order ${this.order.orderId.toString()}`;
+		let msg = `Order ${getOrderId(this.order, this.userAccount)}`;
 		msg += ` ${isVariant(this.order.direction, 'long') ? 'LONG' : 'SHORT'} `;
 		msg += `${convertToNumber(
 			this.order.baseAssetAmount,
@@ -100,7 +67,7 @@ export class FloatingNode extends Node {
 	}
 
 	public getLabel(): string {
-		let msg = `Order ${this.order.orderId.toString()}`;
+		let msg = `Order ${getOrderId(this.order, this.userAccount)}`;
 		msg += ` ${isVariant(this.order.direction, 'long') ? 'LONG' : 'SHORT'} `;
 		msg += `${convertToNumber(
 			this.order.baseAssetAmount,
@@ -122,41 +89,37 @@ export function nodeTypeForOrder(order: Order): NodeType {
 	return order.oraclePriceOffset.eq(ZERO) ? 'fixed' : 'floating';
 }
 
+export function getOrderId(order: Order, userAccount: PublicKey): string {
+	return `${userAccount.toString()}-${order.orderId.toString()}`;
+}
+
 export class OrderList {
 	marketIndex: BN;
 	head?: Node;
 	length = 0;
 	sortDirection: SortDirection;
-	nodeMap = new Map<number, Node>();
+	nodeMap = new Map<string, Node>();
 
 	constructor(marketIndex: BN, sortDirection: SortDirection) {
 		this.marketIndex = marketIndex;
 		this.sortDirection = sortDirection;
 	}
 
-	public insert(
-		order: Order,
-		userAccount: PublicKey,
-		orderAccount: PublicKey
-	): void {
+	public insert(order: Order, userAccount: PublicKey): void {
 		if (isVariant(order.status, 'init')) {
 			return;
 		}
 
 		const newNode =
 			nodeTypeForOrder(order) === 'fixed'
-				? new Node(order, userAccount, orderAccount, this.sortDirection)
-				: new FloatingNode(
-						order,
-						userAccount,
-						orderAccount,
-						this.sortDirection
-				  );
+				? new Node(order, userAccount, this.sortDirection)
+				: new FloatingNode(order, userAccount, this.sortDirection);
 
-		if (this.nodeMap.has(order.orderId.toNumber())) {
+		const orderId = getOrderId(order, userAccount);
+		if (this.nodeMap.has(orderId)) {
 			return;
 		}
-		this.nodeMap.set(order.orderId.toNumber(), newNode);
+		this.nodeMap.set(orderId, newNode);
 
 		this.length += 1;
 
@@ -206,15 +169,17 @@ export class OrderList {
 		}
 	}
 
-	public update(order: Order): void {
-		if (this.nodeMap.has(order.orderId.toNumber())) {
-			const node = this.nodeMap.get(order.orderId.toNumber());
+	public update(order: Order, userAccount: PublicKey): void {
+		const orderId = getOrderId(order, userAccount);
+		if (this.nodeMap.has(orderId)) {
+			const node = this.nodeMap.get(orderId);
 			Object.assign(node.order, order);
 			node.haveFilled = false;
 		}
 	}
 
-	public remove(orderId: number): void {
+	public remove(order: Order, userAccount: PublicKey): void {
+		const orderId = getOrderId(order, userAccount);
 		if (this.nodeMap.has(orderId)) {
 			const node = this.nodeMap.get(orderId);
 			if (node.next) {
@@ -237,8 +202,8 @@ export class OrderList {
 		}
 	}
 
-	public has(orderId: number): boolean {
-		return this.nodeMap.has(orderId);
+	public has(order: Order, userAccount: PublicKey): boolean {
+		return this.nodeMap.has(getOrderId(order, userAccount));
 	}
 
 	public print(): void {
