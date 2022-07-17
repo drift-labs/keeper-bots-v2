@@ -10,6 +10,7 @@ import {
 	getLimitPrice,
 	isAuctionComplete,
 	isVariant,
+	isOneOfVariant,
 	MARK_PRICE_PRECISION,
 	OraclePriceData,
 	Order,
@@ -328,6 +329,24 @@ export class DLOB {
 	} {
 		// no cross
 		if (bid.price.lt(ask.price)) {
+			// even if prices dont cross, if market order auction has finished, we want to trigger order
+			if (bid.node && isOneOfVariant(bid.node, ['market', 'triggerMarket']) && isAuctionComplete(bid.node.order, slot)) {
+				return {
+					match: {
+						node: bid.node,
+					},
+					crossingSide: 'none',
+				};
+			}
+			if (ask.node && isOneOfVariant(ask.node, ['market', 'triggerMarket']) && isAuctionComplete(ask.node.order, slot)) {
+				return {
+					match: {
+						node: ask.node,
+					},
+					crossingSide: 'none',
+				};
+			}
+
 			return {
 				crossingSide: 'none',
 			};
