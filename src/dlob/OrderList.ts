@@ -1,12 +1,12 @@
 import {
 	AMM_RESERVE_PRECISION,
+	BN,
 	convertToNumber,
 	isVariant,
 	MARK_PRICE_PRECISION,
 	Order,
 	ZERO,
 } from '@drift-labs/sdk';
-import { BN } from '@project-serum/anchor';
 import { PublicKey } from '@solana/web3.js';
 
 export type SortDirection = 'asc' | 'desc';

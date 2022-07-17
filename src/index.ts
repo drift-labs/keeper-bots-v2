@@ -1,7 +1,7 @@
-import { BN } from '@project-serum/anchor';
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 
 import {
+	BN,
 	BulkAccountLoader,
 	ClearingHouse,
 	initialize,
@@ -21,13 +21,17 @@ import {
 	EventSubscriber,
 	Order,
 	OrderAction,
+	SlotSubscriber,
+	ClearingHouseUser,
+	bulkPollingUserSubscribe,
 } from '@drift-labs/sdk';
 
 import { getErrorCode } from './error';
 import { DLOB } from './dlob/DLOB';
+import { ProgramAccount } from '@project-serum/anchor';
 
 require('dotenv').config();
-const driftEnv: DriftEnv = process.env.ENV;
+const driftEnv = process.env.ENV as DriftEnv;
 //@ts-ignore
 const sdkConfig = initialize({ env: process.env.ENV });
 
@@ -70,18 +74,26 @@ const eventSubscriber = new EventSubscriber(connection, clearingHouse.program, {
 	},
 });
 
+const slotSubscriber = new SlotSubscriber(connection, {});
+
 const intervalIds = [];
 const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	console.log('SOL balance:', lamportsBalance / 10 ** 9);
+	await clearingHouse.subscribe();
 	clearingHouse.eventEmitter.on('error', (e) => {
 		console.log('clearing house error');
 		console.error(e);
 	});
 
-	console.log(clearingHouse.program.programId.toString());
+	eventSubscriber.subscribe();
+	await slotSubscriber.subscribe();
 
-	const dlob = new DLOB();
+	const dlob = new DLOB(
+		clearingHouse
+			.getMarketAccounts()
+			.map((marketAccount) => marketAccount.marketIndex)
+	);
 	const programAccounts = await clearingHouse.program.account.user.all();
 	for (const programAccount of programAccounts) {
 		// @ts-ignore
@@ -95,15 +107,16 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	console.log('initial number of orders', dlob.openOrders.size);
 
 	const printTopOfOrderLists = (marketIndex: BN) => {
-		const market = clearingHouse.getMarket(marketIndex);
+		const market = clearingHouse.getMarketAccount(marketIndex);
 
+		const slot = slotSubscriber.getSlot();
 		const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
 		const vMid = vAsk.add(vBid).div(new BN(2));
 
-		const bestAsk = dlob.getBestAsk(marketIndex, vAsk, oraclePriceData);
-		const bestBid = dlob.getBestBid(marketIndex, vBid, oraclePriceData);
+		const bestAsk = dlob.getBestAsk(marketIndex, vAsk, slot, oraclePriceData);
+		const bestBid = dlob.getBestBid(marketIndex, vBid, slot, oraclePriceData);
 
 		console.log(`Market ${Markets[marketIndex.toNumber()].symbol} Orders`);
 		console.log(`vAsk`, convertToNumber(vAsk, MARK_PRICE_PRECISION).toFixed(3));
@@ -126,13 +139,75 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	};
 	printOrderLists();
 
+	const userAccountLoader = new BulkAccountLoader(
+		connection,
+		'processed',
+		5000
+	);
+
+	const userMap = new Map<string, ClearingHouseUser>();
+	const fetchAllUsers = async () => {
+		const programUserAccounts =
+			(await clearingHouse.program.account.user.all()) as ProgramAccount<UserAccount>[];
+		const userArray: ClearingHouseUser[] = [];
+		for (const programUserAccount of programUserAccounts) {
+			if (userMap.has(programUserAccount.publicKey.toString())) {
+				continue;
+			}
+
+			const user = new ClearingHouseUser({
+				clearingHouse,
+				userAccountPublicKey: programUserAccount.publicKey,
+				accountSubscription: {
+					type: 'polling',
+					accountLoader: userAccountLoader,
+				},
+			});
+			userArray.push(user);
+		}
+
+		await bulkPollingUserSubscribe(userArray, userAccountLoader);
+		for (const user of userArray) {
+			const userAccountPubkey = await user.getUserAccountPublicKey();
+			userMap.set(userAccountPubkey.toString(), user);
+		}
+	};
+	await fetchAllUsers();
+
+	const addToUserMap = async (userAccountPublicKey: PublicKey) => {
+		const user = new ClearingHouseUser({
+			clearingHouse,
+			userAccountPublicKey,
+			accountSubscription: {
+				type: 'polling',
+				accountLoader: userAccountLoader,
+			},
+		});
+		await user.subscribe();
+		userMap.set(userAccountPublicKey.toString(), user);
+	};
+
 	const handleOrderRecord = async (record: OrderRecord) => {
 		if (!record.taker.equals(PublicKey.default)) {
 			handleOrder(record.takerOrder, record.taker, record.action);
 		}
 
+		if (
+			!record.taker.equals(PublicKey.default) &&
+			!userMap.has(record.taker.toString())
+		) {
+			await addToUserMap(record.taker);
+		}
+
 		if (!record.maker.equals(PublicKey.default)) {
 			handleOrder(record.makerOrder, record.maker, record.action);
+		}
+
+		if (
+			!record.maker.equals(PublicKey.default) &&
+			!userMap.has(record.maker.toString())
+		) {
+			await addToUserMap(record.maker);
 		}
 
 		printTopOfOrderLists(record.marketIndex);
@@ -214,6 +289,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				marketIndex,
 				vBid,
 				vAsk,
+				slotSubscriber.getSlot(),
 				oracleIsValid ? oraclePriceData : undefined
 			);
 
@@ -221,8 +297,9 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 			for (const match of unfilledMatches) {
 				if (
-					isVariant(match.node.order.orderType, 'limit') ||
-					isVariant(match.node.order.orderType, 'triggerLimit')
+					!match.makerNode &&
+					(isVariant(match.node.order.orderType, 'limit') ||
+						isVariant(match.node.order.orderType, 'triggerLimit'))
 				) {
 					const baseAssetAmountMarketCanExecute =
 						calculateBaseAssetAmountMarketCanExecute(
@@ -257,8 +334,15 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 						order: match.makerNode.order,
 					};
 				}
+
+				const user = userMap.get(match.node.userAccount.toString());
 				clearingHouse
-					.fillOrder(match.node.userAccount, match.node.order, makerInfo)
+					.fillOrder(
+						match.node.userAccount,
+						user.getUserAccount(),
+						match.node.order,
+						makerInfo
+					)
 					.then((txSig) => {
 						console.log(
 							`Filled user (account: ${match.node.userAccount.toString()}) order: ${match.node.order.orderId.toString()}`
@@ -294,7 +378,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	};
 
 	const tryFill = () => {
-		for (const marketAccount in clearingHouse.getMarketAccounts()) {
+		for (const marketAccount of clearingHouse.getMarketAccounts()) {
 			tryFillForMarket(marketAccount);
 		}
 	};

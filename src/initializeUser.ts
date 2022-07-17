@@ -7,8 +7,7 @@ import {
 import { Provider } from '@project-serum/anchor';
 import {
 	BulkAccountLoader,
-	getClearingHouse,
-	getPollingClearingHouseConfig,
+	ClearingHouse,
 	initialize,
 	Wallet,
 } from '@drift-labs/sdk';
@@ -36,14 +35,15 @@ const clearingHousePublicKey = new PublicKey(
 	sdkConfig.CLEARING_HOUSE_PROGRAM_ID
 );
 
-const clearingHouse = getClearingHouse(
-	getPollingClearingHouseConfig(
-		connection,
-		provider.wallet,
-		clearingHousePublicKey,
-		new BulkAccountLoader(connection, 'confirmed', 500)
-	)
-);
+const clearingHouse = new ClearingHouse({
+	connection,
+	wallet: provider.wallet,
+	programID: clearingHousePublicKey,
+	accountSubscription: {
+		type: 'polling',
+		accountLoader: new BulkAccountLoader(connection, 'confirmed', 500),
+	},
+});
 
 async function main(): Promise<TransactionSignature> {
 	await clearingHouse.subscribe();

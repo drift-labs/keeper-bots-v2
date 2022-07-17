@@ -6,16 +6,16 @@ import {
 	OrderList,
 } from './OrderList';
 import {
+	BN,
 	getLimitPrice,
+	isAuctionComplete,
 	isVariant,
 	MARK_PRICE_PRECISION,
-	Markets,
 	OraclePriceData,
 	Order,
 	ZERO,
 } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
-import { BN } from '@project-serum/anchor';
 
 type OrderLists = {
 	ask: OrderList;
@@ -48,16 +48,16 @@ export class DLOB {
 	openOrders = new Set<string>();
 	orderLists = new Map<number, DLOBOrderLists>();
 
-	public constructor() {
-		for (const market of Markets) {
-			this.orderLists.set(market.marketIndex.toNumber(), {
+	public constructor(marketIndexes: BN[]) {
+		for (const marketIndex of marketIndexes) {
+			this.orderLists.set(marketIndex.toNumber(), {
 				fixed: {
-					ask: new OrderList(market.marketIndex, 'asc'),
-					bid: new OrderList(market.marketIndex, 'desc'),
+					ask: new OrderList(marketIndex, 'asc'),
+					bid: new OrderList(marketIndex, 'desc'),
 				},
 				floating: {
-					ask: new OrderList(market.marketIndex, 'asc'),
-					bid: new OrderList(market.marketIndex, 'desc'),
+					ask: new OrderList(marketIndex, 'asc'),
+					bid: new OrderList(marketIndex, 'desc'),
 				},
 			});
 		}
@@ -163,12 +163,13 @@ export class DLOB {
 		marketIndex: BN,
 		vBid: BN,
 		vAsk: BN,
+		slot: number,
 		oraclePriceData?: OraclePriceData
 	): DLOBMatch[] {
 		const matches = new Array<DLOBMatch>();
 
-		const askGenerator = this.getAsks(marketIndex, vAsk, oraclePriceData);
-		const bidGenerator = this.getBids(marketIndex, vBid, oraclePriceData);
+		const askGenerator = this.getAsks(marketIndex, vAsk, slot, oraclePriceData);
+		const bidGenerator = this.getBids(marketIndex, vBid, slot, oraclePriceData);
 
 		let nextAsk = askGenerator.next();
 		let nextBid = bidGenerator.next();
@@ -176,7 +177,8 @@ export class DLOB {
 		while (nextAsk.done && nextBid.done) {
 			const { match, crossingSide } = this.getMatch(
 				nextAsk.value,
-				nextBid.value
+				nextBid.value,
+				slot
 			);
 
 			if (match) {
@@ -198,11 +200,14 @@ export class DLOB {
 				nextBid = bidGenerator.next();
 			}
 		}
+
+		return matches;
 	}
 
 	*getAsks(
 		marketIndex: BN,
 		vAsk: BN,
+		slot: number,
 		oraclePriceData?: OraclePriceData
 	): Generator<DLOBPrice> {
 		const orderLists = this.orderLists.get(marketIndex.toNumber());
@@ -216,7 +221,7 @@ export class DLOB {
 		while (vAskNode && fixedNode && floatingNode) {
 			const fixedNodePrice = fixedNode ? fixedNode.order.price : HUGE_BN;
 			const floatingNodePrice = floatingNode
-				? getLimitPrice(floatingNode.order, oraclePriceData)
+				? getLimitPrice(floatingNode.order, oraclePriceData, slot)
 				: HUGE_BN;
 
 			if (
@@ -259,6 +264,7 @@ export class DLOB {
 	*getBids(
 		marketIndex: BN,
 		vBid: BN,
+		slot: number,
 		oraclePriceData?: OraclePriceData
 	): Generator<DLOBPrice> {
 		const orderLists = this.orderLists.get(marketIndex.toNumber());
@@ -272,7 +278,7 @@ export class DLOB {
 		while (vBidNode && fixedNode && floatingNode) {
 			const fixedNodePrice = fixedNode ? fixedNode.order.price : ZERO;
 			const floatingNodePrice = floatingNode
-				? getLimitPrice(floatingNode.order, oraclePriceData)
+				? getLimitPrice(floatingNode.order, oraclePriceData, slot)
 				: ZERO;
 
 			if (
@@ -314,7 +320,8 @@ export class DLOB {
 
 	getMatch(
 		ask: DLOBPrice,
-		bid: DLOBPrice
+		bid: DLOBPrice,
+		slot: number
 	): {
 		match?: DLOBMatch;
 		crossingSide: 'ask' | 'bid' | 'none';
@@ -328,9 +335,13 @@ export class DLOB {
 
 		// User bid crosses the vamm ask
 		if (!ask.node) {
+			const auctionComplete = isAuctionComplete(bid.node.order, slot);
+			// Only count as a match if the auction is complete
+			// cant fill against vamm until auction complete
+			const node = auctionComplete ? bid.node : undefined;
 			return {
 				match: {
-					node: bid.node,
+					node,
 				},
 				crossingSide: bid.side,
 			};
@@ -338,9 +349,13 @@ export class DLOB {
 
 		// User ask crosses the vamm bid
 		if (!bid.node) {
+			const auctionComplete = isAuctionComplete(ask.node.order, slot);
+			// Only count as a match if the auction is complete
+			// cant fill against vamm until auction complete
+			const node = auctionComplete ? ask.node : undefined;
 			return {
 				match: {
-					node: ask.node,
+					node,
 				},
 				crossingSide: ask.side,
 			};
@@ -393,16 +408,18 @@ export class DLOB {
 	public getBestAsk(
 		marketIndex: BN,
 		vAsk: BN,
+		slot: number,
 		oraclePriceData: OraclePriceData
 	): BN {
-		return this.getAsks(marketIndex, vAsk, oraclePriceData).next().value;
+		return this.getAsks(marketIndex, vAsk, slot, oraclePriceData).next().value;
 	}
 
 	public getBestBid(
 		marketIndex: BN,
 		vBid: BN,
+		slot: number,
 		oraclePriceData: OraclePriceData
 	): BN {
-		return this.getBids(marketIndex, vBid, oraclePriceData).next().value;
+		return this.getBids(marketIndex, vBid, slot, oraclePriceData).next().value;
 	}
 }
