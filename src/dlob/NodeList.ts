@@ -1,119 +1,36 @@
-import {
-	AMM_RESERVE_PRECISION,
-	BN,
-	convertToNumber,
-	isVariant,
-	MARK_PRICE_PRECISION,
-	Order,
-	ZERO,
-} from '@drift-labs/sdk';
+import { BN, isVariant, Order } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
+import { createNode, DLOBNode, DLOBNodeMap } from './DLOBNode';
 
 export type SortDirection = 'asc' | 'desc';
-
-export class Node {
-	order: Order;
-	userAccount: PublicKey;
-	sortPrice: BN;
-	next?: Node;
-	previous?: Node;
-	haveFilled = false;
-	sortDirection: SortDirection;
-
-	constructor(
-		order: Order,
-		userAccount: PublicKey,
-		sortDirection: SortDirection
-	) {
-		this.order = order;
-		this.userAccount = userAccount;
-		this.sortPrice = this.getSortingPrice(order);
-		this.sortDirection = sortDirection;
-	}
-
-	getSortingPrice(order: Order): BN {
-		return order.price;
-	}
-
-	public getLabel(): string {
-		let msg = `Order ${getOrderId(this.order, this.userAccount)}`;
-		msg += ` ${isVariant(this.order.direction, 'long') ? 'LONG' : 'SHORT'} `;
-		msg += `${convertToNumber(
-			this.order.baseAssetAmount,
-			AMM_RESERVE_PRECISION
-		).toFixed(3)}`;
-		if (this.order.price.gt(ZERO)) {
-			msg += ` @ ${convertToNumber(
-				this.order.price,
-				MARK_PRICE_PRECISION
-			).toFixed(3)}`;
-		}
-		if (this.order.triggerPrice.gt(ZERO)) {
-			msg += ` ${
-				isVariant(this.order.triggerCondition, 'below') ? 'BELOW' : 'ABOVE'
-			}`;
-			msg += ` ${convertToNumber(
-				this.order.triggerPrice,
-				MARK_PRICE_PRECISION
-			).toFixed(3)}`;
-		}
-		return msg;
-	}
-}
-
-export class FloatingNode extends Node {
-	getSortingPrice(order: Order): BN {
-		return order.oraclePriceOffset;
-	}
-
-	public getLabel(): string {
-		let msg = `Order ${getOrderId(this.order, this.userAccount)}`;
-		msg += ` ${isVariant(this.order.direction, 'long') ? 'LONG' : 'SHORT'} `;
-		msg += `${convertToNumber(
-			this.order.baseAssetAmount,
-			AMM_RESERVE_PRECISION
-		).toFixed(3)}`;
-		msg += ` @ Oracle ${
-			this.order.oraclePriceOffset.gte(ZERO) ? '+' : '-'
-		} ${convertToNumber(
-			this.order.oraclePriceOffset.abs(),
-			MARK_PRICE_PRECISION
-		).toFixed(3)}`;
-		return msg;
-	}
-}
-
-export type NodeType = 'fixed' | 'floating';
-
-export function nodeTypeForOrder(order: Order): NodeType {
-	return order.oraclePriceOffset.eq(ZERO) ? 'fixed' : 'floating';
-}
 
 export function getOrderId(order: Order, userAccount: PublicKey): string {
 	return `${userAccount.toString()}-${order.orderId.toString()}`;
 }
 
-export class OrderList {
-	marketIndex: BN;
-	head?: Node;
-	length = 0;
-	sortDirection: SortDirection;
-	nodeMap = new Map<string, Node>();
+export interface DLOBNodeGenerator {
+	getGenerator(): Generator<DLOBNode>;
+}
 
-	constructor(marketIndex: BN, sortDirection: SortDirection) {
-		this.marketIndex = marketIndex;
-		this.sortDirection = sortDirection;
-	}
+export class NodeList<NodeType extends keyof DLOBNodeMap>
+	implements DLOBNodeGenerator
+{
+	head?: DLOBNodeMap[NodeType];
+	length = 0;
+	nodeMap = new Map<string, DLOBNodeMap[NodeType]>();
+
+	constructor(
+		private nodeType: NodeType,
+		public marketIndex: BN,
+		private sortDirection: SortDirection
+	) {}
 
 	public insert(order: Order, userAccount: PublicKey): void {
 		if (isVariant(order.status, 'init')) {
 			return;
 		}
 
-		const newNode =
-			nodeTypeForOrder(order) === 'fixed'
-				? new Node(order, userAccount, this.sortDirection)
-				: new FloatingNode(order, userAccount, this.sortDirection);
+		const newNode = createNode(this.nodeType, order, userAccount);
 
 		const orderId = getOrderId(order, userAccount);
 		if (this.nodeMap.has(orderId)) {
@@ -151,12 +68,15 @@ export class OrderList {
 		newNode.previous = currentNode;
 	}
 
-	prependNode(currentNode: Node, newNode: Node): boolean {
+	prependNode(
+		currentNode: DLOBNodeMap[NodeType],
+		newNode: DLOBNodeMap[NodeType]
+	): boolean {
 		const currentOrder = currentNode.order;
 		const newOrder = newNode.order;
 
-		const currentOrderSortPrice = currentNode.sortPrice;
-		const newOrderSortPrice = newNode.sortPrice;
+		const currentOrderSortPrice = currentNode.sortValue;
+		const newOrderSortPrice = newNode.sortValue;
 
 		if (newOrderSortPrice.eq(currentOrderSortPrice)) {
 			return newOrder.ts.lt(currentOrder.ts);
@@ -202,6 +122,14 @@ export class OrderList {
 		}
 	}
 
+	*getGenerator(): Generator<DLOBNode> {
+		let node = this.head;
+		while (node !== undefined) {
+			yield node;
+			node = node.next;
+		}
+	}
+
 	public has(order: Order, userAccount: PublicKey): boolean {
 		return this.nodeMap.has(getOrderId(order, userAccount));
 	}
@@ -221,4 +149,14 @@ export class OrderList {
 			console.log('---');
 		}
 	}
+}
+
+export function* getVirtualNodeGenerator(price: BN): Generator<DLOBNode> {
+	yield {
+		getPrice: () => price,
+		isVirtual: () => true,
+		order: undefined,
+		userAccount: undefined,
+		haveFilled: false,
+	};
 }

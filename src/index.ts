@@ -6,7 +6,6 @@ import {
 	ClearingHouse,
 	initialize,
 	isVariant,
-	Markets,
 	OrderRecord,
 	convertToNumber,
 	MARK_PRICE_PRECISION,
@@ -61,6 +60,7 @@ const clearingHouse = new ClearingHouse({
 		accountLoader: bulkAccountLoader,
 	},
 	env: driftEnv,
+	marketIndexes: [new BN(0)],
 });
 
 const eventSubscriber = new EventSubscriber(connection, clearingHouse.program, {
@@ -115,10 +115,12 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		const vBid = calculateBidPrice(market, oraclePriceData);
 		const vMid = vAsk.add(vBid).div(new BN(2));
 
-		const bestAsk = dlob.getBestAsk(marketIndex, vAsk, slot, oraclePriceData);
-		const bestBid = dlob.getBestBid(marketIndex, vBid, slot, oraclePriceData);
+		const bestAsk = dlob.getAsk(marketIndex, vAsk, slot, oraclePriceData);
+		const bestBid = dlob.getBid(marketIndex, vBid, slot, oraclePriceData);
 
-		console.log(`Market ${Markets[marketIndex.toNumber()].symbol} Orders`);
+		console.log(
+			`Market ${sdkConfig.MARKETS[marketIndex.toNumber()].symbol} Orders`
+		);
 		console.log(`vAsk`, convertToNumber(vAsk, MARK_PRICE_PRECISION).toFixed(3));
 		console.log(
 			`Ask`,
@@ -285,7 +287,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			const vAsk = calculateAskPrice(market, oraclePriceData);
 			const vBid = calculateBidPrice(market, oraclePriceData);
 
-			const matches = dlob.findMatches(
+			const matches = dlob.findNodesToFill(
 				marketIndex,
 				vBid,
 				vAsk,

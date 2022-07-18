@@ -6,9 +6,11 @@ import {
 } from '@solana/web3.js';
 import { Provider } from '@project-serum/anchor';
 import {
+	BN,
 	BulkAccountLoader,
 	ClearingHouse,
 	initialize,
+	QUOTE_PRECISION,
 	Wallet,
 } from '@drift-labs/sdk';
 
@@ -43,11 +45,17 @@ const clearingHouse = new ClearingHouse({
 		type: 'polling',
 		accountLoader: new BulkAccountLoader(connection, 'confirmed', 500),
 	},
+	env: 'devnet',
 });
 
 async function main(): Promise<TransactionSignature> {
 	await clearingHouse.subscribe();
-	const [txSig] = await clearingHouse.initializeUserAccount();
+	// const [txSig] = await clearingHouse.initializeUserAccount();
+	const [txSig] = await clearingHouse.deposit(
+		new BN(1000).mul(QUOTE_PRECISION),
+		new BN(0),
+		new PublicKey('2gjtVvrw4erNK35ViLxzoQ9ReS7ShHXhncioYBd9iuV4')
+	);
 	return txSig;
 }
 
