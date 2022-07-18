@@ -60,7 +60,6 @@ const clearingHouse = new ClearingHouse({
 		accountLoader: bulkAccountLoader,
 	},
 	env: driftEnv,
-	marketIndexes: [new BN(0)],
 });
 
 const eventSubscriber = new EventSubscriber(connection, clearingHouse.program, {
@@ -113,25 +112,23 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
-		const vMid = vAsk.add(vBid).div(new BN(2));
 
-		const bestAsk = dlob.getAsk(marketIndex, vAsk, slot, oraclePriceData);
-		const bestBid = dlob.getBid(marketIndex, vBid, slot, oraclePriceData);
+		const bestAsk = dlob.getBestAsk(marketIndex, vAsk, slot, oraclePriceData);
+		const bestBid = dlob.getBestBid(marketIndex, vBid, slot, oraclePriceData);
+		const mid = bestAsk.add(bestBid).div(new BN(2));
 
 		console.log(
 			`Market ${sdkConfig.MARKETS[marketIndex.toNumber()].symbol} Orders`
 		);
-		console.log(`vAsk`, convertToNumber(vAsk, MARK_PRICE_PRECISION).toFixed(3));
 		console.log(
 			`Ask`,
 			convertToNumber(bestAsk, MARK_PRICE_PRECISION).toFixed(3)
 		);
-		console.log(`vMid`, convertToNumber(vMid, MARK_PRICE_PRECISION).toFixed(3));
+		console.log(`Mid`, convertToNumber(mid, MARK_PRICE_PRECISION).toFixed(3));
 		console.log(
 			`Bid`,
 			convertToNumber(bestBid, MARK_PRICE_PRECISION).toFixed(3)
 		);
-		console.log(`vBid`, convertToNumber(vBid, MARK_PRICE_PRECISION).toFixed(3));
 	};
 
 	const printOrderLists = () => {

@@ -151,10 +151,10 @@ export class NodeList<NodeType extends keyof DLOBNodeMap>
 	}
 }
 
-export function* getVirtualNodeGenerator(price: BN): Generator<DLOBNode> {
+export function* getVammNodeGenerator(price: BN): Generator<DLOBNode> {
 	yield {
 		getPrice: () => price,
-		isVirtual: () => true,
+		isVammNode: () => true,
 		order: undefined,
 		userAccount: undefined,
 		haveFilled: false,

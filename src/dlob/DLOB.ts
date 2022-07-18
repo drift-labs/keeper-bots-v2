@@ -1,4 +1,4 @@
-import { getOrderId, getVirtualNodeGenerator, NodeList } from './NodeList';
+import { getOrderId, getVammNodeGenerator, NodeList } from './NodeList';
 import {
 	BN,
 	isAuctionComplete,
@@ -32,7 +32,8 @@ export type NodeToFill = {
 	makerNode?: DLOBNode;
 };
 
-type CrossedNodes = NodeToFill & {
+// maker node must be there for crossed nodes
+type CrossedNodesToFill = NodeToFill & {
 	makerNode: DLOBNode;
 };
 
@@ -55,7 +56,7 @@ export class DLOB {
 				},
 				market: {
 					ask: new NodeList('market', marketIndex, 'asc'),
-					bid: new NodeList('market', marketIndex, 'desc'),
+					bid: new NodeList('market', marketIndex, 'asc'), // always sort ascending for market orders
 				},
 			});
 		}
@@ -138,7 +139,32 @@ export class DLOB {
 		slot: number,
 		oraclePriceData?: OraclePriceData
 	): NodeToFill[] {
-		const nodesToFill = new Array<NodeToFill>();
+		// Find all the crossing nodes
+		const crossingNodesToFill: Array<NodeToFill> = this.findCrossingNodesToFill(
+			marketIndex,
+			vBid,
+			vAsk,
+			slot,
+			oraclePriceData
+		);
+		// Find all market nodes to fill
+		const marketNodesToFill = this.findMarketNodesToFill(
+			marketIndex,
+			vBid,
+			vAsk,
+			slot
+		);
+		return crossingNodesToFill.concat(marketNodesToFill);
+	}
+
+	public findCrossingNodesToFill(
+		marketIndex: BN,
+		vBid: BN,
+		vAsk: BN,
+		slot: number,
+		oraclePriceData?: OraclePriceData
+	): CrossedNodesToFill[] {
+		const nodesToFill = new Array<CrossedNodesToFill>();
 
 		const askGenerator = this.getAsks(marketIndex, vAsk, slot, oraclePriceData);
 		const bidGenerator = this.getBids(marketIndex, vBid, slot, oraclePriceData);
@@ -172,7 +198,16 @@ export class DLOB {
 				break;
 			}
 		}
+		return nodesToFill;
+	}
 
+	public findMarketNodesToFill(
+		marketIndex: BN,
+		vBid: BN,
+		vAsk: BN,
+		slot: number
+	): NodeToFill[] {
+		const nodesToFill = new Array<NodeToFill>();
 		// Then see if there are orders to fill against vamm
 		for (const marketBid of this.getNodeList(
 			marketIndex.toNumber(),
@@ -197,7 +232,6 @@ export class DLOB {
 				});
 			}
 		}
-
 		return nodesToFill;
 	}
 
@@ -213,7 +247,7 @@ export class DLOB {
 			nodeLists.limit.ask.getGenerator(),
 			nodeLists.floatingLimit.ask.getGenerator(),
 			nodeLists.market.ask.getGenerator(),
-			getVirtualNodeGenerator(vAsk),
+			getVammNodeGenerator(vAsk),
 		].map((generator) => {
 			return {
 				next: generator.next(),
@@ -225,11 +259,11 @@ export class DLOB {
 		while (!asksExhausted) {
 			const bestGenerator = generators.reduce(
 				(bestGenerator, currentGenerator) => {
-					if (currentGenerator.next.value === undefined) {
+					if (currentGenerator.next.done) {
 						return bestGenerator;
 					}
 
-					if (bestGenerator.next.value === undefined) {
+					if (bestGenerator.next.done) {
 						return currentGenerator;
 					}
 
@@ -265,11 +299,11 @@ export class DLOB {
 	): Generator<DLOBNode> {
 		const nodeLists = this.orderLists.get(marketIndex.toNumber());
 
-		const generators = [
+		const bidGenerators = [
 			nodeLists.limit.bid.getGenerator(),
 			nodeLists.floatingLimit.bid.getGenerator(),
 			nodeLists.market.bid.getGenerator(),
-			getVirtualNodeGenerator(vBid),
+			getVammNodeGenerator(vBid),
 		].map((generator) => {
 			return {
 				next: generator.next(),
@@ -279,13 +313,13 @@ export class DLOB {
 
 		let bidsExhausted = false; // there will always be the vBid
 		while (!bidsExhausted) {
-			const bestGenerator = generators.reduce(
+			const bestGenerator = bidGenerators.reduce(
 				(bestGenerator, currentGenerator) => {
-					if (currentGenerator.next.value === undefined) {
+					if (currentGenerator.next.done) {
 						return bestGenerator;
 					}
 
-					if (bestGenerator.next.value === undefined) {
+					if (bestGenerator.next.done) {
 						return currentGenerator;
 					}
 
@@ -321,7 +355,7 @@ export class DLOB {
 		oraclePriceData: OraclePriceData,
 		slot: number
 	): {
-		crossingNodes?: CrossedNodes;
+		crossingNodes?: CrossedNodesToFill;
 		crossingSide?: Side;
 	} {
 		const bidPrice = bidNode.getPrice(oraclePriceData, slot);
@@ -333,7 +367,7 @@ export class DLOB {
 
 		// User bid crosses the vamm ask
 		// Cant match orders
-		if (askNode.isVirtual()) {
+		if (askNode.isVammNode()) {
 			return {
 				crossingSide: 'bid',
 			};
@@ -341,7 +375,7 @@ export class DLOB {
 
 		// User ask crosses the vamm bid
 		// Cant match orders
-		if (bidNode.isVirtual()) {
+		if (bidNode.isVammNode()) {
 			return {
 				crossingSide: 'ask',
 			};
@@ -393,7 +427,7 @@ export class DLOB {
 		};
 	}
 
-	public getAsk(
+	public getBestAsk(
 		marketIndex: BN,
 		vAsk: BN,
 		slot: number,
@@ -404,7 +438,7 @@ export class DLOB {
 			.value.getPrice(oraclePriceData, slot);
 	}
 
-	public getBid(
+	public getBestBid(
 		marketIndex: BN,
 		vBid: BN,
 		slot: number,

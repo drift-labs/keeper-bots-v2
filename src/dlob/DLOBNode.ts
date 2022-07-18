@@ -14,7 +14,7 @@ import { getOrderId } from './NodeList';
 
 export interface DLOBNode {
 	getPrice(oraclePriceData: OraclePriceData, slot: number): BN;
-	isVirtual(): boolean;
+	isVammNode(): boolean;
 	order: Order | undefined;
 	haveFilled: boolean;
 	userAccount: PublicKey | undefined;
@@ -63,7 +63,7 @@ export abstract class OrderNode implements DLOBNode {
 		return getLimitPrice(this.order, oraclePriceData, slot);
 	}
 
-	isVirtual(): boolean {
+	isVammNode(): boolean {
 		return false;
 	}
 
