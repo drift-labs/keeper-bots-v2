@@ -235,6 +235,12 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 					)} canceled. Removed from dlob`
 				);
 			});
+		} else if (isVariant(action, 'trigger')) {
+			dlob.trigger(order, userAccount, () => {
+				console.log(
+					`Order ${dlob.getOpenOrderId(order, userAccount)} triggered`
+				);
+			});
 		} else if (isVariant(action, 'fill')) {
 			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
 				dlob.remove(order, userAccount, () => {
@@ -264,13 +270,13 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		}
 	});
 
-	const perMarketMutex: Array<number> = [];
+	const perMarketMutexFills: Array<number> = [];
 	const tryFillForMarket = async (market: MarketAccount) => {
 		const marketIndex = market.marketIndex;
-		if (perMarketMutex[marketIndex.toNumber()] === 1) {
+		if (perMarketMutexFills[marketIndex.toNumber()] === 1) {
 			return;
 		}
-		perMarketMutex[marketIndex.toNumber()] = 1;
+		perMarketMutexFills[marketIndex.toNumber()] = 1;
 
 		try {
 			const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
@@ -278,13 +284,13 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				market.amm,
 				oraclePriceData,
 				clearingHouse.getStateAccount().oracleGuardRails,
-				bulkAccountLoader.mostRecentSlot
+				slotSubscriber.getSlot()
 			);
 
 			const vAsk = calculateAskPrice(market, oraclePriceData);
 			const vBid = calculateBidPrice(market, oraclePriceData);
 
-			const matches = dlob.findNodesToFill(
+			const nodesToFill = dlob.findNodesToFill(
 				marketIndex,
 				vBid,
 				vAsk,
@@ -292,18 +298,20 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				oracleIsValid ? oraclePriceData : undefined
 			);
 
-			const unfilledMatches = matches.filter((match) => !match.node.haveFilled);
+			for (const nodeToFill of nodesToFill) {
+				if (nodeToFill.node.haveFilled) {
+					continue;
+				}
 
-			for (const match of unfilledMatches) {
 				if (
-					!match.makerNode &&
-					(isVariant(match.node.order.orderType, 'limit') ||
-						isVariant(match.node.order.orderType, 'triggerLimit'))
+					!nodeToFill.makerNode &&
+					(isVariant(nodeToFill.node.order.orderType, 'limit') ||
+						isVariant(nodeToFill.node.order.orderType, 'triggerLimit'))
 				) {
 					const baseAssetAmountMarketCanExecute =
 						calculateBaseAssetAmountMarketCanExecute(
 							market,
-							match.node.order,
+							nodeToFill.node.order,
 							oraclePriceData
 						);
 
@@ -316,42 +324,42 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 					}
 				}
 
-				match.node.haveFilled = true;
+				nodeToFill.node.haveFilled = true;
 
 				console.log(
-					`trying to fill (account: ${match.node.userAccount.toString()}) order ${match.node.order.orderId.toString()}`
+					`trying to fill (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()}`
 				);
 
-				if (match.makerNode) {
-					`including maker: ${match.makerNode.userAccount.toString()}) with order ${match.makerNode.order.orderId.toString()}`;
+				if (nodeToFill.makerNode) {
+					`including maker: ${nodeToFill.makerNode.userAccount.toString()}) with order ${nodeToFill.makerNode.order.orderId.toString()}`;
 				}
 
 				let makerInfo;
-				if (match.makerNode) {
+				if (nodeToFill.makerNode) {
 					makerInfo = {
-						maker: match.makerNode.userAccount,
-						order: match.makerNode.order,
+						maker: nodeToFill.makerNode.userAccount,
+						order: nodeToFill.makerNode.order,
 					};
 				}
 
-				const user = userMap.get(match.node.userAccount.toString());
+				const user = userMap.get(nodeToFill.node.userAccount.toString());
 				clearingHouse
 					.fillOrder(
-						match.node.userAccount,
+						nodeToFill.node.userAccount,
 						user.getUserAccount(),
-						match.node.order,
+						nodeToFill.node.order,
 						makerInfo
 					)
 					.then((txSig) => {
 						console.log(
-							`Filled user (account: ${match.node.userAccount.toString()}) order: ${match.node.order.orderId.toString()}`
+							`Filled user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
 						);
 						console.log(`Tx: ${txSig}`);
 					})
 					.catch((error) => {
-						match.node.haveFilled = false;
+						nodeToFill.node.haveFilled = false;
 						console.log(
-							`Error filling user (account: ${match.node.userAccount.toString()}) order: ${match.node.order.orderId.toString()}`
+							`Error filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
 						);
 
 						// If we get an error that order does not exist, assume its been filled by somebody else and we
@@ -359,20 +367,26 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 						// TODO this might not hold if events arrive out of order
 						const errorCode = getErrorCode(error);
 						if (errorCode === 6043) {
-							dlob.remove(match.node.order, match.node.userAccount, () => {
-								console.log(
-									`Order ${match.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-								);
-							});
-							printTopOfOrderLists(match.node.order.marketIndex);
+							dlob.remove(
+								nodeToFill.node.order,
+								nodeToFill.node.userAccount,
+								() => {
+									console.log(
+										`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
+									);
+								}
+							);
+							printTopOfOrderLists(nodeToFill.node.order.marketIndex);
 						}
 					});
 			}
 		} catch (e) {
-			console.log(`Unexpected error for market ${marketIndex.toString()}`);
+			console.log(
+				`Unexpected error for market ${marketIndex.toString()} during fills`
+			);
 			console.error(e);
 		} finally {
-			perMarketMutex[marketIndex.toNumber()] = 0;
+			perMarketMutexFills[marketIndex.toNumber()] = 0;
 		}
 	};
 
@@ -385,6 +399,75 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	tryFill();
 	const handleFillIntervalId = setInterval(tryFill, 500); // every half second
 	intervalIds.push(handleFillIntervalId);
+
+	const perMarketMutexTriggers: Array<number> = [];
+	const tryTriggerForMarket = async (market: MarketAccount) => {
+		const marketIndex = market.marketIndex;
+		if (perMarketMutexTriggers[marketIndex.toNumber()] === 1) {
+			return;
+		}
+		perMarketMutexTriggers[marketIndex.toNumber()] = 1;
+
+		try {
+			const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
+
+			const nodesToTrigger = dlob.findNodesToTrigger(
+				marketIndex,
+				slotSubscriber.getSlot(),
+				oraclePriceData.price
+			);
+
+			for (const nodeToTrigger of nodesToTrigger) {
+				if (nodeToTrigger.node.haveTrigger) {
+					continue;
+				}
+
+				nodeToTrigger.node.haveTrigger = true;
+
+				console.log(
+					`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) order ${nodeToTrigger.node.order.orderId.toString()}`
+				);
+
+				const user = userMap.get(nodeToTrigger.node.userAccount.toString());
+				clearingHouse
+					.triggerOrder(
+						nodeToTrigger.node.userAccount,
+						user.getUserAccount(),
+						nodeToTrigger.node.order
+					)
+					.then((txSig) => {
+						console.log(
+							`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+						);
+						console.log(`Tx: ${txSig}`);
+					})
+					.catch((error) => {
+						nodeToTrigger.node.haveTrigger = false;
+						console.log(
+							`Error triggering user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+						);
+						console.error(error);
+					});
+			}
+		} catch (e) {
+			console.log(
+				`Unexpected error for market ${marketIndex.toString()} during triggers`
+			);
+			console.error(e);
+		} finally {
+			perMarketMutexTriggers[marketIndex.toNumber()] = 0;
+		}
+	};
+
+	const tryTrigger = () => {
+		for (const marketAccount of clearingHouse.getMarketAccounts()) {
+			tryTriggerForMarket(marketAccount);
+		}
+	};
+
+	tryTrigger();
+	const handleTriggerIntervalId = setInterval(tryTrigger, 500); // every half second
+	intervalIds.push(handleTriggerIntervalId);
 };
 
 async function recursiveTryCatch(f: () => void) {

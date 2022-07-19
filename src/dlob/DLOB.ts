@@ -2,13 +2,14 @@ import { getOrderId, getVammNodeGenerator, NodeList } from './NodeList';
 import {
 	BN,
 	isAuctionComplete,
+	isOneOfVariant,
 	isVariant,
 	OraclePriceData,
 	Order,
 	ZERO,
 } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
-import { DLOBNode, DLOBNodeType } from './DLOBNode';
+import { DLOBNode, DLOBNodeType, TriggerOrderNode } from './DLOBNode';
 
 export type MarketNodeLists = {
 	limit: {
@@ -23,6 +24,10 @@ export type MarketNodeLists = {
 		ask: NodeList<'market'>;
 		bid: NodeList<'market'>;
 	};
+	trigger: {
+		above: NodeList<'trigger'>;
+		below: NodeList<'trigger'>;
+	};
 };
 
 type OrderBookCallback = () => void;
@@ -35,6 +40,10 @@ export type NodeToFill = {
 // maker node must be there for crossed nodes
 type CrossedNodesToFill = NodeToFill & {
 	makerNode: DLOBNode;
+};
+
+export type NodeToTrigger = {
+	node: TriggerOrderNode;
 };
 
 type Side = 'ask' | 'bid';
@@ -57,6 +66,10 @@ export class DLOB {
 				market: {
 					ask: new NodeList('market', marketIndex, 'asc'),
 					bid: new NodeList('market', marketIndex, 'asc'), // always sort ascending for market orders
+				},
+				trigger: {
+					above: new NodeList('trigger', marketIndex, 'asc'),
+					below: new NodeList('trigger', marketIndex, 'desc'),
 				},
 			});
 		}
@@ -105,27 +118,45 @@ export class DLOB {
 		}
 	}
 
-	public getListForOrder(order: Order): NodeList<any> {
-		return this.getNodeList(
-			order.marketIndex.toNumber(),
-			this.nodeTypeForOrder(order),
-			isVariant(order.direction, 'long') ? 'bid' : 'ask'
-		);
-	}
+	public trigger(
+		order: Order,
+		userAccount: PublicKey,
+		onTrigger?: OrderBookCallback
+	): void {
+		const triggerList = this.orderLists.get(order.marketIndex.toNumber())
+			.trigger[isVariant(order.triggerCondition, 'above') ? 'above' : 'below'];
+		triggerList.remove(order, userAccount);
 
-	nodeTypeForOrder(order: Order): DLOBNodeType {
-		if (isVariant(order.orderType, 'market')) {
-			return 'market';
+		this.getListForOrder(order).insert(order, userAccount);
+		if (onTrigger) {
+			onTrigger();
 		}
-		return order.oraclePriceOffset.gt(ZERO) ? 'floatingLimit' : 'limit';
 	}
 
-	public getNodeList(
-		marketIndex: number,
-		type: DLOBNodeType,
-		side: Side
-	): NodeList<any> {
-		return this.orderLists.get(marketIndex)[type][side];
+	public getListForOrder(order: Order): NodeList<any> {
+		const isInactiveTriggerOrder =
+			isOneOfVariant(order.orderType, ['triggerMarket', 'triggerLimit']) &&
+			!order.triggered;
+
+		let type: DLOBNodeType;
+		if (isInactiveTriggerOrder) {
+			type = 'trigger';
+		} else if (isOneOfVariant(order.orderType, ['market', 'triggerMarket'])) {
+			type = 'market';
+		} else if (order.oraclePriceOffset.gt(ZERO)) {
+			type = 'floatingLimit';
+		} else {
+			type = 'limit';
+		}
+
+		let subType: string;
+		if (isInactiveTriggerOrder) {
+			subType = isVariant(order.triggerCondition, 'above') ? 'above' : 'below';
+		} else {
+			subType = isVariant(order.direction, 'long') ? 'bid' : 'ask';
+		}
+
+		return this.orderLists.get(order.marketIndex.toNumber())[type][subType];
 	}
 
 	public getOpenOrderId(order: Order, userAccount: PublicKey): string {
@@ -148,12 +179,7 @@ export class DLOB {
 			oraclePriceData
 		);
 		// Find all market nodes to fill
-		const marketNodesToFill = this.findMarketNodesToFill(
-			marketIndex,
-			vBid,
-			vAsk,
-			slot
-		);
+		const marketNodesToFill = this.findMarketNodesToFill(marketIndex, slot);
 		return crossingNodesToFill.concat(marketNodesToFill);
 	}
 
@@ -201,19 +227,10 @@ export class DLOB {
 		return nodesToFill;
 	}
 
-	public findMarketNodesToFill(
-		marketIndex: BN,
-		vBid: BN,
-		vAsk: BN,
-		slot: number
-	): NodeToFill[] {
+	public findMarketNodesToFill(marketIndex: BN, slot: number): NodeToFill[] {
 		const nodesToFill = new Array<NodeToFill>();
 		// Then see if there are orders to fill against vamm
-		for (const marketBid of this.getNodeList(
-			marketIndex.toNumber(),
-			'market',
-			'bid'
-		).getGenerator()) {
+		for (const marketBid of this.getMarketBids(marketIndex)) {
 			if (isAuctionComplete(marketBid.order, slot)) {
 				nodesToFill.push({
 					node: marketBid,
@@ -221,11 +238,7 @@ export class DLOB {
 			}
 		}
 
-		for (const marketAsk of this.getNodeList(
-			marketIndex.toNumber(),
-			'market',
-			'ask'
-		).getGenerator()) {
+		for (const marketAsk of this.getMarketAsks(marketIndex)) {
 			if (isAuctionComplete(marketAsk.order, slot)) {
 				nodesToFill.push({
 					node: marketAsk,
@@ -233,6 +246,14 @@ export class DLOB {
 			}
 		}
 		return nodesToFill;
+	}
+
+	public getMarketBids(marketIndex: BN): Generator<DLOBNode> {
+		return this.orderLists[marketIndex.toNumber()].market.bid.getGenerator();
+	}
+
+	public getMarketAsks(marketIndex: BN): Generator<DLOBNode> {
+		return this.orderLists[marketIndex.toNumber()].market.ask.getGenerator();
 	}
 
 	*getAsks(
@@ -447,5 +468,38 @@ export class DLOB {
 		return this.getBids(marketIndex, vBid, slot, oraclePriceData)
 			.next()
 			.value.getPrice(oraclePriceData, slot);
+	}
+
+	public findNodesToTrigger(
+		marketIndex: BN,
+		slot: number,
+		oraclePrice: BN
+	): NodeToTrigger[] {
+		const nodesToTrigger = [];
+		for (const triggerOrder of this.orderLists
+			.get(marketIndex.toNumber())
+			.trigger.above.getGenerator()) {
+			if (oraclePrice > triggerOrder.order.triggerPrice) {
+				if (isAuctionComplete(triggerOrder.order, slot)) {
+					nodesToTrigger.push(triggerOrder);
+				}
+			} else {
+				break;
+			}
+		}
+
+		for (const triggerOrder of this.orderLists
+			.get(marketIndex.toNumber())
+			.trigger.below.getGenerator()) {
+			if (oraclePrice < triggerOrder.order.triggerPrice) {
+				if (isAuctionComplete(triggerOrder.order, slot)) {
+					nodesToTrigger.push(triggerOrder);
+				}
+			} else {
+				break;
+			}
+		}
+
+		return nodesToTrigger;
 	}
 }

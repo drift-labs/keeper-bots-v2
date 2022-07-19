@@ -25,6 +25,7 @@ export abstract class OrderNode implements DLOBNode {
 	userAccount: PublicKey;
 	sortValue: BN;
 	haveFilled = false;
+	haveTrigger = false;
 
 	constructor(order: Order, userAccount: PublicKey) {
 		this.order = order;
@@ -66,10 +67,6 @@ export abstract class OrderNode implements DLOBNode {
 	isVammNode(): boolean {
 		return false;
 	}
-
-	getOrder(): Order {
-		return this.order;
-	}
 }
 
 export class LimitOrderNode extends OrderNode {
@@ -99,18 +96,29 @@ export class MarketOrderNode extends OrderNode {
 	}
 }
 
+export class TriggerOrderNode extends OrderNode {
+	next?: TriggerOrderNode;
+	previous?: TriggerOrderNode;
+
+	getSortValue(order: Order): BN {
+		return order.triggerPrice;
+	}
+}
+
 export type DLOBNodeMap = {
 	limit: LimitOrderNode;
 	floatingLimit: FloatingLimitOrderNode;
 	market: MarketOrderNode;
+	trigger: TriggerOrderNode;
 };
 
 export type DLOBNodeType =
 	| 'limit'
 	| 'floatingLimit'
-	| ('market' & keyof DLOBNodeMap);
+	| 'market'
+	| ('trigger' & keyof DLOBNodeMap);
 
-export function createNode<T extends keyof DLOBNodeMap>(
+export function createNode<T extends DLOBNodeType>(
 	nodeType: T,
 	order: Order,
 	userAccount: PublicKey
@@ -122,6 +130,8 @@ export function createNode<T extends keyof DLOBNodeMap>(
 			return new LimitOrderNode(order, userAccount);
 		case 'market':
 			return new MarketOrderNode(order, userAccount);
+		case 'trigger':
+			return new TriggerOrderNode(order, userAccount);
 		default:
 			throw Error(`Unknown DLOBNode type ${nodeType}`);
 	}
