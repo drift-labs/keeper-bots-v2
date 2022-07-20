@@ -249,11 +249,15 @@ export class DLOB {
 	}
 
 	public getMarketBids(marketIndex: BN): Generator<DLOBNode> {
-		return this.orderLists[marketIndex.toNumber()].market.bid.getGenerator();
+		return this.orderLists
+			.get(marketIndex.toNumber())
+			.market.bid.getGenerator();
 	}
 
 	public getMarketAsks(marketIndex: BN): Generator<DLOBNode> {
-		return this.orderLists[marketIndex.toNumber()].market.ask.getGenerator();
+		return this.orderLists
+			.get(marketIndex.toNumber())
+			.market.ask.getGenerator();
 	}
 
 	*getAsks(
@@ -476,24 +480,28 @@ export class DLOB {
 		oraclePrice: BN
 	): NodeToTrigger[] {
 		const nodesToTrigger = [];
-		for (const triggerOrder of this.orderLists
+		for (const node of this.orderLists
 			.get(marketIndex.toNumber())
 			.trigger.above.getGenerator()) {
-			if (oraclePrice > triggerOrder.order.triggerPrice) {
-				if (isAuctionComplete(triggerOrder.order, slot)) {
-					nodesToTrigger.push(triggerOrder);
+			if (oraclePrice.gt(node.order.triggerPrice)) {
+				if (isAuctionComplete(node.order, slot)) {
+					nodesToTrigger.push({
+						node: node,
+					});
 				}
 			} else {
 				break;
 			}
 		}
 
-		for (const triggerOrder of this.orderLists
+		for (const node of this.orderLists
 			.get(marketIndex.toNumber())
 			.trigger.below.getGenerator()) {
-			if (oraclePrice < triggerOrder.order.triggerPrice) {
-				if (isAuctionComplete(triggerOrder.order, slot)) {
-					nodesToTrigger.push(triggerOrder);
+			if (oraclePrice.lt(node.order.triggerPrice)) {
+				if (isAuctionComplete(node.order, slot)) {
+					nodesToTrigger.push({
+						node: node,
+					});
 				}
 			} else {
 				break;
