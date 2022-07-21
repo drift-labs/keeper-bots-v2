@@ -361,6 +361,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 						console.log(
 							`Error filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
 						);
+						console.error(error);
 
 						// If we get an error that order does not exist, assume its been filled by somebody else and we
 						// have received the history record yet
