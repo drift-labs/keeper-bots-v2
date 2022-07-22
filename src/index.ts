@@ -187,6 +187,8 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	};
 
 	const handleOrderRecord = async (record: OrderRecord) => {
+		console.log(`Received an order record ${JSON.stringify(record)}`);
+
 		if (!record.taker.equals(PublicKey.default)) {
 			handleOrder(record.takerOrder, record.taker, record.action);
 		}
