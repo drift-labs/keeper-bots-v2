@@ -81,7 +81,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	console.log(
 		`ClearingHouse ProgramId: ${clearingHouse.program.programId.toBase58()}`
 	);
-	console.log(`wallet pubkey:           ${wallet.publicKey.toBase58()}`);
+	console.log(`wallet pubkey: ${wallet.publicKey.toBase58()}`);
 	console.log('SOL balance:', lamportsBalance / 10 ** 9);
 	await clearingHouse.subscribe();
 	clearingHouse.eventEmitter.on('error', (e) => {
