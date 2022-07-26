@@ -18,6 +18,8 @@ import {
 	UserAccount,
 	EventSubscriber,
 	SlotSubscriber,
+	convertToNumber,
+	QUOTE_PRECISION,
 } from '@drift-labs/sdk';
 
 import { logger } from './logger';
@@ -34,7 +36,7 @@ const driftEnv = process.env.ENV as DriftEnv;
 const sdkConfig = initialize({ env: process.env.ENV });
 
 program
-	.option('-d, --dry', 'Dry run, do not send transactions on chain')
+	// .option('-d, --dry', 'Dry run, do not send transactions on chain')
 	.option(
 		'--init-user',
 		'calls clearingHouse.initializeUserAccount if no user account exists'
@@ -126,7 +128,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	);
 	logger.info(`default pubkey: ${PublicKey.default}`);
 	logger.info(`wallet pubkey: ${wallet.publicKey.toBase58()}`);
-	logger.info('SOL balance:', lamportsBalance / 10 ** 9);
+	logger.info(`SOL balance: ${lamportsBalance / 10 ** 9}`);
 	const tokenAccount = await Token.getAssociatedTokenAddress(
 		ASSOCIATED_TOKEN_PROGRAM_ID,
 		TOKEN_PROGRAM_ID,
@@ -134,7 +136,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		wallet.publicKey
 	);
 	const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
-	logger.info('USDC balance:', usdcBalance.value.uiAmount);
+	logger.info(`USDC balance: ${usdcBalance.value.uiAmount}`);
 
 	await clearingHouse.subscribe();
 	clearingHouse.eventEmitter.on('error', (e) => {
@@ -156,47 +158,9 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			dlob.insert(order, userAccountPublicKey);
 		}
 	}
-	logger.info('initial number of orders', dlob.openOrders.size);
-
-	const printOrderLists = () => {
-		for (const marketAccount of clearingHouse.getMarketAccounts()) {
-			dlob.printTopOfOrderLists(
-				sdkConfig,
-				clearingHouse,
-				slotSubscriber,
-				marketAccount.marketIndex
-			);
-		}
-	};
-	printOrderLists();
 
 	const userMap = new UserMap(connection, clearingHouse);
 	await userMap.fetchAllUsers();
-
-	const handleOrderRecord = async (record: OrderRecord) => {
-		logger.info(`Received an order record ${JSON.stringify(record)}`);
-
-		dlob.applyOrderRecord(record);
-		await userMap.updateWithOrder(record);
-
-		dlob.printTopOfOrderLists(
-			sdkConfig,
-			clearingHouse,
-			slotSubscriber,
-			record.marketIndex
-		);
-
-		// trigger bot on new order
-		Promise.all(bots.map((bot) => bot.trigger()));
-	};
-
-	eventSubscriber.eventEmitter.on('newEvent', (event) => {
-		if (event.eventType === 'OrderRecord') {
-			handleOrderRecord(event as OrderRecord);
-		} else {
-			logger.info(`order record event type ${event.eventType}`);
-		}
-	});
 
 	if (!(await clearingHouse.getUser().exists())) {
 		logger.error(`ClearingHouseUser for ${wallet.publicKey} does not exist`);
@@ -212,31 +176,101 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	}
 
 	// subscribe will fail if there is no clearing house user
-	while (!clearingHouse.isSubscribed) {
+	const clearingHouseUser = clearingHouse.getUser();
+	while (!clearingHouse.isSubscribed || !clearingHouseUser.isSubscribed) {
 		logger.info('not subscribed yet');
 		await sleep(1000);
 		await clearingHouse.subscribe();
+		await clearingHouseUser.subscribe();
 	}
-	logger.info('clearing house subscribed!');
 
+	logger.info(
+		`User unsettled PnL:          ${convertToNumber(
+			clearingHouseUser.getUnsettledPNL(),
+			QUOTE_PRECISION
+		)}`
+	);
+	logger.info(
+		`User unrealized funding PnL: ${convertToNumber(
+			clearingHouseUser.getUnrealizedFundingPNL(),
+			QUOTE_PRECISION
+		)}`
+	);
+	logger.info(
+		`User unrealized PnL:         ${convertToNumber(
+			clearingHouseUser.getUnrealizedPNL(),
+			QUOTE_PRECISION
+		)}`
+	);
+
+	const printOrderLists = () => {
+		for (const marketAccount of clearingHouse.getMarketAccounts()) {
+			dlob.printTopOfOrderLists(
+				sdkConfig,
+				clearingHouse,
+				slotSubscriber,
+				marketAccount.marketIndex
+			);
+		}
+	};
+	logger.info('Current market snapshot:');
+	printOrderLists();
 	/*
 	 * Start bots depending on flags enabled
 	 */
 
 	if (opts.filler) {
 		bots.push(
-			new FillerBot('filler', clearingHouse, slotSubscriber, dlob, userMap)
+			new FillerBot(
+				'filler',
+				!!opts.dry,
+				clearingHouse,
+				slotSubscriber,
+				dlob,
+				userMap
+			)
 		);
 	}
 	if (opts.trigger) {
 		bots.push(
-			new TriggerBot('trigger', clearingHouse, slotSubscriber, dlob, userMap)
+			new TriggerBot(
+				'trigger',
+				!!opts.dry,
+				clearingHouse,
+				slotSubscriber,
+				dlob,
+				userMap
+			)
 		);
 	}
 
-	// for (let bot of bots) {
-	// 	bot.start();
-	// }
+	for (const bot of bots) {
+		bot.startIntervalLoop(500);
+	}
+
+	const handleOrderRecord = async (record: OrderRecord) => {
+		logger.info(`Received an order record ${JSON.stringify(record)}`);
+
+		dlob.applyOrderRecord(record);
+		await userMap.updateWithOrder(record);
+
+		dlob.printTopOfOrderLists(
+			sdkConfig,
+			clearingHouse,
+			slotSubscriber,
+			record.marketIndex
+		);
+
+		Promise.all(bots.map((bot) => bot.trigger()));
+	};
+
+	eventSubscriber.eventEmitter.on('newEvent', (event) => {
+		if (event.eventType === 'OrderRecord') {
+			handleOrderRecord(event as OrderRecord);
+		} else {
+			logger.info(`order record event type ${event.eventType}`);
+		}
+	});
 };
 
 async function recursiveTryCatch(f: () => void) {

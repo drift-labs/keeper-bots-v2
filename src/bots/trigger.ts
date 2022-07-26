@@ -7,6 +7,7 @@ import { Bot } from '../types';
 
 export class TriggerBot implements Bot {
 	public readonly name: string;
+	public readonly dryRun: boolean;
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
 	private dlob: DLOB;
@@ -16,12 +17,14 @@ export class TriggerBot implements Bot {
 
 	constructor(
 		name: string,
+		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
 		dlob: DLOB,
 		userMap: UserMap
 	) {
 		this.name = name;
+		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
 		this.dlob = dlob;
@@ -35,14 +38,15 @@ export class TriggerBot implements Bot {
 		this.intervalIds = [];
 	}
 
-	public start(): void {
+	public startIntervalLoop(intervalMs: number): void {
 		this.tryTrigger();
-		const intervalId = setInterval(this.tryTrigger.bind(this), 500);
+		const intervalId = setInterval(this.tryTrigger.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
+
+		logger.info(`${this.name} Bot started!`);
 	}
 
 	public async trigger(): Promise<void> {
-		logger.info('Triggering bot triggered');
 		this.tryTrigger();
 	}
 

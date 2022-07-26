@@ -6,6 +6,7 @@ export const constants = {
 
 export interface Bot {
 	readonly name: string;
+	readonly dryRun: boolean;
 
 	/**
 	 * Reset the bot. This is called to reset the bot to its init state.
@@ -15,7 +16,7 @@ export interface Bot {
 	/**
 	 * Start the bot loop. This is generally a polling loop.
 	 */
-	start: () => void;
+	startIntervalLoop: (intervalMs: number) => void;
 
 	/**
 	 * Trigger the bot to run a step, used instead of polling

@@ -31,6 +31,7 @@
 		"build": "yarn clean && tsc",
 		"clean": "rm -rf lib",
 		"start": "node lib/index.js",
+		"dev": "ts-node src/index.ts --init-user --filler --trigger",
 		"prettify": "prettier --check './src/**/*.ts'",
 		"prettify:fix": "prettier --write './src/**/*.ts'",
 		"lint": "eslint . --ext ts --quiet",

@@ -17,6 +17,7 @@ import { Bot } from '../types';
 
 export class FillerBot implements Bot {
 	public readonly name: string;
+	public readonly dryRun: boolean;
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
 	private dlob: DLOB;
@@ -26,12 +27,14 @@ export class FillerBot implements Bot {
 
 	constructor(
 		name: string,
+		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
 		dlob: DLOB,
 		userMap: UserMap
 	) {
 		this.name = name;
+		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
 		this.dlob = dlob;
@@ -45,14 +48,15 @@ export class FillerBot implements Bot {
 		this.intervalIds = [];
 	}
 
-	public start(): void {
+	public startIntervalLoop(intervalMs: number): void {
 		this.tryFill();
-		const intervalId = setInterval(this.tryFill.bind(this), 500);
+		const intervalId = setInterval(this.tryFill.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
+
+		logger.info(`${this.name} Bot started!`);
 	}
 
 	public async trigger(): Promise<void> {
-		logger.info('Filler bot triggered');
 		this.tryFill();
 	}
 
@@ -138,16 +142,15 @@ export class FillerBot implements Bot {
 					)
 					.then((txSig) => {
 						logger.info(
-							`Filled user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
+							`Filled user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, Tx: ${txSig}`
 						);
-						logger.info(`Tx: ${txSig}`);
 					})
 					.catch((error) => {
 						nodeToFill.node.haveFilled = false;
-						logger.info(
-							`Error filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
+						logger.error(
+							`Error filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`,
+							error
 						);
-						console.error(error);
 
 						// If we get an error that order does not exist, assume its been filled by somebody else and we
 						// have received the history record yet
@@ -158,7 +161,7 @@ export class FillerBot implements Bot {
 								nodeToFill.node.order,
 								nodeToFill.node.userAccount,
 								() => {
-									logger.info(
+									logger.error(
 										`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
 									);
 								}
