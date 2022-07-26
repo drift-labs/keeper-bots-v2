@@ -7,13 +7,14 @@
 	"dependencies": {
 		"@drift-labs/sdk": "0.2.0-master.7",
 		"@project-serum/anchor": "^0.19.1-beta.1",
-		"@solana/spl-token": "^0.1.8",
 		"@solana/web3.js": "^1.22.0",
 		"@types/bn.js": "^5.1.0",
 		"async": "^3.2.2",
 		"aws-sdk": "^2.1062.0",
+		"commander": "^9.4.0",
 		"dotenv": "^10.0.0",
-		"typescript": "4.5.4"
+		"typescript": "4.5.4",
+		"winston": "^3.8.1"
 	},
 	"devDependencies": {
 		"@typescript-eslint/eslint-plugin": "^4.28.0",
@@ -22,7 +23,8 @@
 		"eslint-config-prettier": "^8.3.0",
 		"eslint-plugin-prettier": "^3.4.0",
 		"husky": "^7.0.4",
-		"prettier": "^2.4.1"
+		"prettier": "^2.4.1",
+		"ts-node": "^10.9.1"
 	},
 	"scripts": {
 		"prepare": "husky install",

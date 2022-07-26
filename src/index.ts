@@ -1,44 +1,83 @@
+import fs from 'fs';
+import { program, Option } from 'commander';
+
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 
 import {
-	BN,
+	Token,
+	TOKEN_PROGRAM_ID,
+	ASSOCIATED_TOKEN_PROGRAM_ID,
+} from '@solana/spl-token';
+import {
 	BulkAccountLoader,
 	ClearingHouse,
 	initialize,
-	isVariant,
 	OrderRecord,
-	convertToNumber,
-	MARK_PRICE_PRECISION,
 	Wallet,
-	calculateBaseAssetAmountMarketCanExecute,
-	calculateAskPrice,
-	calculateBidPrice,
-	isOracleValid,
 	DriftEnv,
-	MarketAccount,
 	UserAccount,
 	EventSubscriber,
-	Order,
-	OrderAction,
 	SlotSubscriber,
-	ClearingHouseUser,
-	bulkPollingUserSubscribe,
 } from '@drift-labs/sdk';
 
-import { getErrorCode } from './error';
+import { logger } from './logger';
+import { constants } from './types';
 import { DLOB } from './dlob/DLOB';
-import { ProgramAccount } from '@project-serum/anchor';
+import { UserMap } from './userMap';
+import { FillerBot } from './bots/filler';
+import { TriggerBot } from './bots/trigger';
+import { Bot } from './types';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
 //@ts-ignore
 const sdkConfig = initialize({ env: process.env.ENV });
 
+program
+	.option('-d, --dry', 'Dry run, do not send transactions on chain')
+	.option(
+		'--init-user',
+		'calls clearingHouse.initializeUserAccount if no user account exists'
+	)
+	.option('--filler', 'Enable order filler')
+	.option('--trigger', 'Enable trigger order')
+	.option('--jit-maker', 'Enable JIT auction maker')
+	.addOption(
+		new Option(
+			'-p, --private-key <string>',
+			'private key, supports path to id.json, or list of comma separate numbers'
+		).env('FILLER_PRIVATE_KEY')
+	)
+	.parse();
+
+const opts = program.opts();
+
+logger.info(
+	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JITMakerBot enabled: ${!!opts.jitMaker}`
+);
+
 export function getWallet(): Wallet {
 	const privateKey = process.env.FILLER_PRIVATE_KEY;
-	const keypair = Keypair.fromSecretKey(
-		Uint8Array.from(privateKey.split(',').map((val) => Number(val)))
-	);
+	if (!privateKey) {
+		throw new Error(
+			'Must set environment variable FILLER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
+		);
+	}
+	// try to load privateKey as a filepath
+	let loadedKey: Uint8Array;
+	if (fs.existsSync(privateKey)) {
+		logger.info(`loading private key from ${privateKey}`);
+		loadedKey = new Uint8Array(
+			JSON.parse(fs.readFileSync(privateKey).toString())
+		);
+	} else {
+		logger.info(`loading private key as comma separated numbers`);
+		loadedKey = Uint8Array.from(
+			privateKey.split(',').map((val) => Number(val))
+		);
+	}
+
+	const keypair = Keypair.fromSecretKey(Uint8Array.from(loadedKey));
 	return new Wallet(keypair);
 }
 
@@ -75,18 +114,32 @@ const eventSubscriber = new EventSubscriber(connection, clearingHouse.program, {
 
 const slotSubscriber = new SlotSubscriber(connection, {});
 
-const intervalIds = [];
+function sleep(ms) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const bots: Bot[] = [];
 const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
-	console.log(
+	logger.info(
 		`ClearingHouse ProgramId: ${clearingHouse.program.programId.toBase58()}`
 	);
-	console.log(`wallet pubkey: ${wallet.publicKey.toBase58()}`);
-	console.log('SOL balance:', lamportsBalance / 10 ** 9);
+	logger.info(`default pubkey: ${PublicKey.default}`);
+	logger.info(`wallet pubkey: ${wallet.publicKey.toBase58()}`);
+	logger.info('SOL balance:', lamportsBalance / 10 ** 9);
+	const tokenAccount = await Token.getAssociatedTokenAddress(
+		ASSOCIATED_TOKEN_PROGRAM_ID,
+		TOKEN_PROGRAM_ID,
+		new PublicKey(constants.devnet.USDCMint),
+		wallet.publicKey
+	);
+	const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
+	logger.info('USDC balance:', usdcBalance.value.uiAmount);
+
 	await clearingHouse.subscribe();
 	clearingHouse.eventEmitter.on('error', (e) => {
-		console.log('clearing house error');
-		console.error(e);
+		logger.info('clearing house error');
+		logger.error(e);
 	});
 
 	eventSubscriber.subscribe();
@@ -103,387 +156,96 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			dlob.insert(order, userAccountPublicKey);
 		}
 	}
-	console.log('initial number of orders', dlob.openOrders.size);
-
-	const printTopOfOrderLists = (marketIndex: BN) => {
-		const market = clearingHouse.getMarketAccount(marketIndex);
-
-		const slot = slotSubscriber.getSlot();
-		const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
-		const vAsk = calculateAskPrice(market, oraclePriceData);
-		const vBid = calculateBidPrice(market, oraclePriceData);
-
-		const bestAsk = dlob.getBestAsk(marketIndex, vAsk, slot, oraclePriceData);
-		const bestBid = dlob.getBestBid(marketIndex, vBid, slot, oraclePriceData);
-		const mid = bestAsk.add(bestBid).div(new BN(2));
-
-		console.log(
-			`Market ${sdkConfig.MARKETS[marketIndex.toNumber()].symbol} Orders`
-		);
-		console.log(
-			`Ask`,
-			convertToNumber(bestAsk, MARK_PRICE_PRECISION).toFixed(3)
-		);
-		console.log(`Mid`, convertToNumber(mid, MARK_PRICE_PRECISION).toFixed(3));
-		console.log(
-			`Bid`,
-			convertToNumber(bestBid, MARK_PRICE_PRECISION).toFixed(3)
-		);
-	};
+	logger.info('initial number of orders', dlob.openOrders.size);
 
 	const printOrderLists = () => {
 		for (const marketAccount of clearingHouse.getMarketAccounts()) {
-			printTopOfOrderLists(marketAccount.marketIndex);
+			dlob.printTopOfOrderLists(
+				sdkConfig,
+				clearingHouse,
+				slotSubscriber,
+				marketAccount.marketIndex
+			);
 		}
 	};
 	printOrderLists();
 
-	const userAccountLoader = new BulkAccountLoader(
-		connection,
-		'processed',
-		5000
-	);
-
-	const userMap = new Map<string, ClearingHouseUser>();
-	const fetchAllUsers = async () => {
-		const programUserAccounts =
-			(await clearingHouse.program.account.user.all()) as ProgramAccount<UserAccount>[];
-		const userArray: ClearingHouseUser[] = [];
-		for (const programUserAccount of programUserAccounts) {
-			if (userMap.has(programUserAccount.publicKey.toString())) {
-				continue;
-			}
-
-			const user = new ClearingHouseUser({
-				clearingHouse,
-				userAccountPublicKey: programUserAccount.publicKey,
-				accountSubscription: {
-					type: 'polling',
-					accountLoader: userAccountLoader,
-				},
-			});
-			userArray.push(user);
-		}
-
-		await bulkPollingUserSubscribe(userArray, userAccountLoader);
-		for (const user of userArray) {
-			const userAccountPubkey = await user.getUserAccountPublicKey();
-			userMap.set(userAccountPubkey.toString(), user);
-		}
-	};
-	await fetchAllUsers();
-
-	const addToUserMap = async (userAccountPublicKey: PublicKey) => {
-		const user = new ClearingHouseUser({
-			clearingHouse,
-			userAccountPublicKey,
-			accountSubscription: {
-				type: 'polling',
-				accountLoader: userAccountLoader,
-			},
-		});
-		await user.subscribe();
-		userMap.set(userAccountPublicKey.toString(), user);
-	};
+	const userMap = new UserMap(connection, clearingHouse);
+	await userMap.fetchAllUsers();
 
 	const handleOrderRecord = async (record: OrderRecord) => {
-		console.log(`Received an order record ${JSON.stringify(record)}`);
+		logger.info(`Received an order record ${JSON.stringify(record)}`);
 
-		if (!record.taker.equals(PublicKey.default)) {
-			handleOrder(record.takerOrder, record.taker, record.action);
-		}
+		dlob.applyOrderRecord(record);
+		await userMap.updateWithOrder(record);
 
-		if (
-			!record.taker.equals(PublicKey.default) &&
-			!userMap.has(record.taker.toString())
-		) {
-			await addToUserMap(record.taker);
-		}
+		dlob.printTopOfOrderLists(
+			sdkConfig,
+			clearingHouse,
+			slotSubscriber,
+			record.marketIndex
+		);
 
-		if (!record.maker.equals(PublicKey.default)) {
-			handleOrder(record.makerOrder, record.maker, record.action);
-		}
-
-		if (
-			!record.maker.equals(PublicKey.default) &&
-			!userMap.has(record.maker.toString())
-		) {
-			await addToUserMap(record.maker);
-		}
-
-		printTopOfOrderLists(record.marketIndex);
-	};
-
-	const handleOrder = (
-		order: Order,
-		userAccount: PublicKey,
-		action: OrderAction
-	) => {
-		if (isVariant(action, 'place')) {
-			dlob.insert(order, userAccount, () => {
-				console.log(
-					`Order ${dlob.getOpenOrderId(
-						order,
-						userAccount
-					)} placed. Added to dlob`
-				);
-			});
-		} else if (isVariant(action, 'cancel')) {
-			dlob.remove(order, userAccount, () => {
-				console.log(
-					`Order ${dlob.getOpenOrderId(
-						order,
-						userAccount
-					)} canceled. Removed from dlob`
-				);
-			});
-		} else if (isVariant(action, 'trigger')) {
-			dlob.trigger(order, userAccount, () => {
-				console.log(
-					`Order ${dlob.getOpenOrderId(order, userAccount)} triggered`
-				);
-			});
-		} else if (isVariant(action, 'fill')) {
-			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
-				dlob.remove(order, userAccount, () => {
-					console.log(
-						`Order ${dlob.getOpenOrderId(
-							order,
-							userAccount
-						)} completely filled. Removed from dlob`
-					);
-				});
-			} else {
-				dlob.update(order, userAccount, () => {
-					console.log(
-						`Order ${dlob.getOpenOrderId(
-							order,
-							userAccount
-						)} partially filled. Updated dlob`
-					);
-				});
-			}
-		}
+		// trigger bot on new order
+		Promise.all(bots.map((bot) => bot.trigger()));
 	};
 
 	eventSubscriber.eventEmitter.on('newEvent', (event) => {
 		if (event.eventType === 'OrderRecord') {
 			handleOrderRecord(event as OrderRecord);
+		} else {
+			logger.info(`order record event type ${event.eventType}`);
 		}
 	});
 
-	const perMarketMutexFills: Array<number> = [];
-	const tryFillForMarket = async (market: MarketAccount) => {
-		const marketIndex = market.marketIndex;
-		if (perMarketMutexFills[marketIndex.toNumber()] === 1) {
-			return;
-		}
-		perMarketMutexFills[marketIndex.toNumber()] = 1;
-
-		try {
-			const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
-			const oracleIsValid = isOracleValid(
-				market.amm,
-				oraclePriceData,
-				clearingHouse.getStateAccount().oracleGuardRails,
-				slotSubscriber.getSlot()
+	if (!(await clearingHouse.getUser().exists())) {
+		logger.error(`ClearingHouseUser for ${wallet.publicKey} does not exist`);
+		if (opts.initUser) {
+			logger.info(`Creating ClearingHouseUser for ${wallet.publicKey}`);
+			const [txSig] = await clearingHouse.initializeUserAccount();
+			logger.info(`Initialized user account in transaction: ${txSig}`);
+		} else {
+			throw new Error(
+				"Run with '--init-user' flag to initialize a ClearingHouseUser"
 			);
-
-			const vAsk = calculateAskPrice(market, oraclePriceData);
-			const vBid = calculateBidPrice(market, oraclePriceData);
-
-			const nodesToFill = dlob.findNodesToFill(
-				marketIndex,
-				vBid,
-				vAsk,
-				slotSubscriber.getSlot(),
-				oracleIsValid ? oraclePriceData : undefined
-			);
-
-			for (const nodeToFill of nodesToFill) {
-				if (nodeToFill.node.haveFilled) {
-					continue;
-				}
-
-				if (
-					!nodeToFill.makerNode &&
-					(isVariant(nodeToFill.node.order.orderType, 'limit') ||
-						isVariant(nodeToFill.node.order.orderType, 'triggerLimit'))
-				) {
-					const baseAssetAmountMarketCanExecute =
-						calculateBaseAssetAmountMarketCanExecute(
-							market,
-							nodeToFill.node.order,
-							oraclePriceData
-						);
-
-					if (
-						baseAssetAmountMarketCanExecute.lt(
-							market.amm.baseAssetAmountStepSize
-						)
-					) {
-						continue;
-					}
-				}
-
-				nodeToFill.node.haveFilled = true;
-
-				console.log(
-					`trying to fill (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()}`
-				);
-
-				if (nodeToFill.makerNode) {
-					`including maker: ${nodeToFill.makerNode.userAccount.toString()}) with order ${nodeToFill.makerNode.order.orderId.toString()}`;
-				}
-
-				let makerInfo;
-				if (nodeToFill.makerNode) {
-					makerInfo = {
-						maker: nodeToFill.makerNode.userAccount,
-						order: nodeToFill.makerNode.order,
-					};
-				}
-
-				const user = userMap.get(nodeToFill.node.userAccount.toString());
-				clearingHouse
-					.fillOrder(
-						nodeToFill.node.userAccount,
-						user.getUserAccount(),
-						nodeToFill.node.order,
-						makerInfo
-					)
-					.then((txSig) => {
-						console.log(
-							`Filled user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
-						);
-						console.log(`Tx: ${txSig}`);
-					})
-					.catch((error) => {
-						nodeToFill.node.haveFilled = false;
-						console.log(
-							`Error filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
-						);
-						console.error(error);
-
-						// If we get an error that order does not exist, assume its been filled by somebody else and we
-						// have received the history record yet
-						// TODO this might not hold if events arrive out of order
-						const errorCode = getErrorCode(error);
-						if (errorCode === 6043) {
-							dlob.remove(
-								nodeToFill.node.order,
-								nodeToFill.node.userAccount,
-								() => {
-									console.log(
-										`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-									);
-								}
-							);
-							printTopOfOrderLists(nodeToFill.node.order.marketIndex);
-						}
-					});
-			}
-		} catch (e) {
-			console.log(
-				`Unexpected error for market ${marketIndex.toString()} during fills`
-			);
-			console.error(e);
-		} finally {
-			perMarketMutexFills[marketIndex.toNumber()] = 0;
 		}
-	};
+	}
 
-	const tryFill = () => {
-		for (const marketAccount of clearingHouse.getMarketAccounts()) {
-			tryFillForMarket(marketAccount);
-		}
-	};
+	// subscribe will fail if there is no clearing house user
+	while (!clearingHouse.isSubscribed) {
+		logger.info('not subscribed yet');
+		await sleep(1000);
+		await clearingHouse.subscribe();
+	}
+	logger.info('clearing house subscribed!');
 
-	tryFill();
-	const handleFillIntervalId = setInterval(tryFill, 500); // every half second
-	intervalIds.push(handleFillIntervalId);
+	/*
+	 * Start bots depending on flags enabled
+	 */
 
-	const perMarketMutexTriggers: Array<number> = [];
-	const tryTriggerForMarket = async (market: MarketAccount) => {
-		const marketIndex = market.marketIndex;
-		if (perMarketMutexTriggers[marketIndex.toNumber()] === 1) {
-			return;
-		}
-		perMarketMutexTriggers[marketIndex.toNumber()] = 1;
+	if (opts.filler) {
+		bots.push(
+			new FillerBot('filler', clearingHouse, slotSubscriber, dlob, userMap)
+		);
+	}
+	if (opts.trigger) {
+		bots.push(
+			new TriggerBot('trigger', clearingHouse, slotSubscriber, dlob, userMap)
+		);
+	}
 
-		try {
-			const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
-
-			const nodesToTrigger = dlob.findNodesToTrigger(
-				marketIndex,
-				slotSubscriber.getSlot(),
-				oraclePriceData.price
-			);
-
-			for (const nodeToTrigger of nodesToTrigger) {
-				if (nodeToTrigger.node.haveTrigger) {
-					continue;
-				}
-
-				nodeToTrigger.node.haveTrigger = true;
-
-				console.log(
-					`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) order ${nodeToTrigger.node.order.orderId.toString()}`
-				);
-
-				const user = userMap.get(nodeToTrigger.node.userAccount.toString());
-				clearingHouse
-					.triggerOrder(
-						nodeToTrigger.node.userAccount,
-						user.getUserAccount(),
-						nodeToTrigger.node.order
-					)
-					.then((txSig) => {
-						console.log(
-							`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-						);
-						console.log(`Tx: ${txSig}`);
-					})
-					.catch((error) => {
-						nodeToTrigger.node.haveTrigger = false;
-						console.log(
-							`Error triggering user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-						);
-						console.error(error);
-					});
-			}
-		} catch (e) {
-			console.log(
-				`Unexpected error for market ${marketIndex.toString()} during triggers`
-			);
-			console.error(e);
-		} finally {
-			perMarketMutexTriggers[marketIndex.toNumber()] = 0;
-		}
-	};
-
-	const tryTrigger = () => {
-		for (const marketAccount of clearingHouse.getMarketAccounts()) {
-			tryTriggerForMarket(marketAccount);
-		}
-	};
-
-	tryTrigger();
-	const handleTriggerIntervalId = setInterval(tryTrigger, 500); // every half second
-	intervalIds.push(handleTriggerIntervalId);
+	// for (let bot of bots) {
+	// 	bot.start();
+	// }
 };
 
 async function recursiveTryCatch(f: () => void) {
-	function sleep(ms) {
-		return new Promise((resolve) => setTimeout(resolve, ms));
-	}
-
 	try {
 		await f();
 	} catch (e) {
 		console.error(e);
-		for (const intervalId of intervalIds) {
-			clearInterval(intervalId);
+		for (const bot of bots) {
+			bot.reset();
 		}
 		await sleep(15000);
 		await recursiveTryCatch(f);

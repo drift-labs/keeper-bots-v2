@@ -1,16 +1,23 @@
 import { getOrderId, getVammNodeGenerator, NodeList } from './NodeList';
 import {
 	BN,
+	calculateAskPrice,
+	calculateBidPrice,
+	ClearingHouse,
+	convertToNumber,
 	isAuctionComplete,
 	isOneOfVariant,
 	isVariant,
 	MarketAccount,
 	OraclePriceData,
 	Order,
+	OrderRecord,
+	OrderAction,
 	ZERO,
 } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
 import { DLOBNode, DLOBNodeType, TriggerOrderNode } from './DLOBNode';
+import { logger } from '../logger';
 
 export type MarketNodeLists = {
 	limit: {
@@ -522,5 +529,111 @@ export class DLOB {
 		}
 
 		return nodesToTrigger;
+	}
+
+	public printTopOfOrderLists(
+		sdkConfig: any,
+		clearingHouse: ClearingHouse,
+		slotSubscriber: SlotSubscriber,
+		marketIndex: BN
+	) {
+		const market = clearingHouse.getMarketAccount(marketIndex);
+
+		const slot = slotSubscriber.getSlot();
+		const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
+		const vAsk = calculateAskPrice(market, oraclePriceData);
+		const vBid = calculateBidPrice(market, oraclePriceData);
+
+		const bestAsk = this.getBestAsk(marketIndex, vAsk, slot, oraclePriceData);
+		const bestBid = this.getBestBid(marketIndex, vBid, slot, oraclePriceData);
+		const mid = bestAsk.add(bestBid).div(new BN(2));
+
+		const bidSpread =
+			(convertToNumber(bestBid, MARK_PRICE_PRECISION) /
+				convertToNumber(oraclePriceData.price, MARK_PRICE_PRECISION) -
+				1) *
+			100.0;
+		const askSpread =
+			(convertToNumber(bestAsk, MARK_PRICE_PRECISION) /
+				convertToNumber(oraclePriceData.price, MARK_PRICE_PRECISION) -
+				1) *
+			100.0;
+
+		console.log(
+			`Market ${sdkConfig.MARKETS[marketIndex.toNumber()].symbol} Orders`
+		);
+		console.log(
+			`  Ask`,
+			convertToNumber(bestAsk, MARK_PRICE_PRECISION).toFixed(3),
+			`(${askSpread.toFixed(4)}%)`
+		);
+		console.log(`  Mid`, convertToNumber(mid, MARK_PRICE_PRECISION).toFixed(3));
+		console.log(
+			`  Bid`,
+			convertToNumber(bestBid, MARK_PRICE_PRECISION).toFixed(3),
+			`(${bidSpread.toFixed(4)}%)`
+		);
+	}
+
+	private updateWithOrder(
+		order: Order,
+		userAccount: PublicKey,
+		action: OrderAction
+	) {
+		if (isVariant(action, 'place')) {
+			this.insert(order, userAccount, () => {
+				logger.info(
+					`Order ${this.getOpenOrderId(
+						order,
+						userAccount
+					)} placed. Added to dlob`
+				);
+			});
+		} else if (isVariant(action, 'cancel')) {
+			this.remove(order, userAccount, () => {
+				logger.info(
+					`Order ${this.getOpenOrderId(
+						order,
+						userAccount
+					)} canceled. Removed from dlob`
+				);
+			});
+		} else if (isVariant(action, 'trigger')) {
+			this.trigger(order, userAccount, () => {
+				logger.info(
+					`Order ${this.getOpenOrderId(order, userAccount)} triggered`
+				);
+			});
+		} else if (isVariant(action, 'fill')) {
+			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
+				this.remove(order, userAccount, () => {
+					logger.info(
+						`Order ${this.getOpenOrderId(
+							order,
+							userAccount
+						)} completely filled. Removed from dlob`
+					);
+				});
+			} else {
+				this.update(order, userAccount, () => {
+					logger.info(
+						`Order ${this.getOpenOrderId(
+							order,
+							userAccount
+						)} partially filled. Updated dlob`
+					);
+				});
+			}
+		}
+	}
+
+	public applyOrderRecord(record: OrderRecord) {
+		if (!record.taker.equals(PublicKey.default)) {
+			this.updateWithOrder(record.takerOrder, record.taker, record.action);
+		}
+
+		if (!record.maker.equals(PublicKey.default)) {
+			this.updateWithOrder(record.makerOrder, record.maker, record.action);
+		}
 	}
 }
