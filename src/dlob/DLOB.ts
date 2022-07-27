@@ -14,6 +14,7 @@ import {
 	OrderRecord,
 	OrderAction,
 	ZERO,
+	MarketAccount,
 } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
 import { DLOBNode, DLOBNodeType, TriggerOrderNode } from './DLOBNode';
@@ -260,6 +261,30 @@ export class DLOB {
 
 		for (const marketAsk of this.getMarketAsks(marketIndex)) {
 			if (isAuctionComplete(marketAsk.order, slot)) {
+				nodesToFill.push({
+					node: marketAsk,
+				});
+			}
+		}
+		return nodesToFill;
+	}
+
+	public findJitAuctionNodesToFill(
+		marketIndex: BN,
+		slot: number
+	): NodeToFill[] {
+		const nodesToFill = new Array<NodeToFill>();
+		// Then see if there are orders still in JIT auction
+		for (const marketBid of this.getMarketBids(marketIndex)) {
+			if (!isAuctionComplete(marketBid.order, slot)) {
+				nodesToFill.push({
+					node: marketBid,
+				});
+			}
+		}
+
+		for (const marketAsk of this.getMarketAsks(marketIndex)) {
+			if (!isAuctionComplete(marketAsk.order, slot)) {
 				nodesToFill.push({
 					node: marketAsk,
 				});

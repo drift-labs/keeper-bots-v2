@@ -20,6 +20,8 @@ import {
 	SlotSubscriber,
 	convertToNumber,
 	QUOTE_PRECISION,
+	DevnetBanks,
+	BN,
 } from '@drift-labs/sdk';
 
 import { logger } from './logger';
@@ -28,6 +30,7 @@ import { DLOB } from './dlob/DLOB';
 import { UserMap } from './userMap';
 import { FillerBot } from './bots/filler';
 import { TriggerBot } from './bots/trigger';
+import { JitMakerBot } from './bots/jitMaker';
 import { Bot } from './types';
 
 require('dotenv').config();
@@ -44,6 +47,10 @@ program
 	.option('--filler', 'Enable order filler')
 	.option('--trigger', 'Enable trigger order')
 	.option('--jit-maker', 'Enable JIT auction maker')
+	.option(
+		'--deposit <number>',
+		'Allow deposit this amount of USDC to collateral account'
+	)
 	.addOption(
 		new Option(
 			'-p, --private-key <string>',
@@ -55,7 +62,7 @@ program
 const opts = program.opts();
 
 logger.info(
-	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JITMakerBot enabled: ${!!opts.jitMaker}`
+	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JitMakerBot enabled: ${!!opts.jitMaker}`
 );
 
 export function getWallet(): Wallet {
@@ -126,7 +133,6 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	logger.info(
 		`ClearingHouse ProgramId: ${clearingHouse.program.programId.toBase58()}`
 	);
-	logger.info(`default pubkey: ${PublicKey.default}`);
 	logger.info(`wallet pubkey: ${wallet.publicKey.toBase58()}`);
 	logger.info(`SOL balance: ${lamportsBalance / 10 ** 9}`);
 	const tokenAccount = await Token.getAssociatedTokenAddress(
@@ -183,21 +189,78 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		await clearingHouse.subscribe();
 		await clearingHouseUser.subscribe();
 	}
+	logger.info(
+		`ClearingHouseUser PublicKey: ${clearingHouseUser
+			.getUserAccountPublicKey()
+			.toBase58()}`
+	);
+
+	const totalCollateral = clearingHouseUser.getCollateralValue();
+	logger.info(
+		`User total collateral: $${convertToNumber(
+			totalCollateral,
+			QUOTE_PRECISION
+		)}:`
+	);
+	for (let i = 0; i < DevnetBanks.length; i += 1) {
+		const bank = DevnetBanks[i];
+		const collateral = clearingHouseUser.getCollateralValue(bank.bankIndex);
+		logger.info(
+			`  Bank Collateral (${bank.bankIndex}: ${bank.symbol}): ${convertToNumber(
+				collateral,
+				QUOTE_PRECISION
+			)}`
+		);
+	}
+
+	// check that user has collateral
+	if (totalCollateral.isZero() && opts.jitMaker) {
+		logger.info(
+			`No collateral in account, collateral is required to run JitMakerBot`
+		);
+		if (!opts.deposit) {
+			logger.error(`Run with '--deposit' flag to deposit collateral`);
+			throw new Error('Account has no collateral, and no deposit was provided');
+		}
+
+		if (opts.deposit < 0) {
+			logger.error(`Deposit amount must be greater than 0`);
+			throw new Error('Deposit amount must be greater than 0');
+		}
+
+		logger.info(
+			`Depositing collateral (${new BN(opts.deposit).toString()} USDC)`
+		);
+
+		const ata = await Token.getAssociatedTokenAddress(
+			ASSOCIATED_TOKEN_PROGRAM_ID,
+			TOKEN_PROGRAM_ID,
+			DevnetBanks[0].mint, // USDC
+			wallet.publicKey
+		);
+
+		const tx = await clearingHouse.deposit(
+			new BN(opts.deposit).mul(QUOTE_PRECISION),
+			new BN(0), // USDC bank
+			ata
+		);
+		logger.info(`Deposit transaction: ${tx}`);
+	}
 
 	logger.info(
-		`User unsettled PnL:          ${convertToNumber(
+		`CHUser unsettled PnL:          ${convertToNumber(
 			clearingHouseUser.getUnsettledPNL(),
 			QUOTE_PRECISION
 		)}`
 	);
 	logger.info(
-		`User unrealized funding PnL: ${convertToNumber(
+		`CHUser unrealized funding PnL: ${convertToNumber(
 			clearingHouseUser.getUnrealizedFundingPNL(),
 			QUOTE_PRECISION
 		)}`
 	);
 	logger.info(
-		`User unrealized PnL:         ${convertToNumber(
+		`CHUser unrealized PnL:         ${convertToNumber(
 			clearingHouseUser.getUnrealizedPNL(),
 			QUOTE_PRECISION
 		)}`
@@ -243,12 +306,28 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			)
 		);
 	}
+	if (opts.jitMaker) {
+		bots.push(
+			new JitMakerBot(
+				'JitMaker',
+				!!opts.dry,
+				clearingHouse,
+				slotSubscriber,
+				dlob,
+				userMap
+			)
+		);
+	}
 
 	for (const bot of bots) {
 		bot.startIntervalLoop(500);
 	}
 
 	const handleOrderRecord = async (record: OrderRecord) => {
+		/*
+		{"ts":"62e0abf7","slot":150777343,"taker":"3zztWnffdWvgsu9zTVWq1HP5xh29WexTv7tbyC6Uqy8V","maker":"11111111111111111111111111111111","takerOrder":{"status":{"open":{}},"orderType":{"market":{}},"ts":"62e0abf7","slot":"08fcadff","orderId":"0a","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"short":{}},"quoteAssetAmount":"00","baseAssetAmount":"5af3107a4000","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","fee":"00","direction":{"long":{}},"reduceOnly":true,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"4ef1cd29f0","auctionEndPrice":"53fe8975b8","auctionDuration":10,"padding":[0,0,0]},"makerOrder":{"status":{"init":{}},"orderType":{"limit":{}},"ts":"00","slot":"00","orderId":"00","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"long":{}},"quoteAssetAmount":"00","baseAssetAmount":"00","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","fee":"00","direction":{"long":{}},"reduceOnly":false,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"00","auctionEndPrice":"00","auctionDuration":0,"padding":[0,0,0]},"makerUnsettledPnl":"00","takerUnsettledPnl":"00","action":{"place":{}},"actionExplanation":{"none":{}},"filler":"11111111111111111111111111111111","fillRecordId":"00","marketIndex":"00","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","makerRebate":"00","takerFee":"00","fillerReward":"00","quoteAssetAmountSurplus":"00","oraclePrice":"53ed435b20","txSig":"3nA44VjeCC8swADRyxuiSRWhvfGu6HpUu2xnueaqNkSH9ii9c1nPorjmPzcmooMhyD3PMCirVdnMRAtiJ1zRb8YG","eventType":"OrderRecord"}
+		{"ts":"62e0abfc","slot":150777356,"taker":"3zztWnffdWvgsu9zTVWq1HP5xh29WexTv7tbyC6Uqy8V","maker":"11111111111111111111111111111111","takerOrder":{"status":{"filled":{}},"orderType":{"market":{}},"ts":"62e0abf7","slot":"08fcadff","orderId":"0a","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"short":{}},"quoteAssetAmount":"00","baseAssetAmount":"5af3107a4000","baseAssetAmountFilled":"5af3107a4000","quoteAssetAmountFilled":"157916f3","fee":"057f41","direction":{"long":{}},"reduceOnly":true,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"4ef1cd29f0","auctionEndPrice":"53fe8975b8","auctionDuration":10,"padding":[0,0,0]},"makerOrder":{"status":{"init":{}},"orderType":{"limit":{}},"ts":"00","slot":"00","orderId":"00","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"long":{}},"quoteAssetAmount":"00","baseAssetAmount":"00","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","fee":"00","direction":{"long":{}},"reduceOnly":false,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"00","auctionEndPrice":"00","auctionDuration":0,"padding":[0,0,0]},"makerUnsettledPnl":"00","takerUnsettledPnl":"02aa6efe","action":{"fill":{}},"actionExplanation":{"none":{}},"filler":"A8GgA3ZREa73hGV9pZQkEzHUy46dLWUkSC6Q1yPghYNQ","fillRecordId":"0268","marketIndex":"00","baseAssetAmountFilled":"5af3107a4000","quoteAssetAmountFilled":"157916f3","makerRebate":"00","takerFee":"057f41","fillerReward":"3a34","quoteAssetAmountSurplus":"030e3d","oraclePrice":"53cf7d9740","txSig":"4LrN1mMPEeoogDtN7dfTcY3gADK4rxWq45Gwegd4GeLtBRXv1E1xRsNGKQ1bc87jR7uhLi1m9TN77ysSXJdZRUjt","eventType":"OrderRecord"
+		*/
 		logger.info(`Received an order record ${JSON.stringify(record)}`);
 
 		dlob.applyOrderRecord(record);

@@ -148,8 +148,7 @@ export class FillerBot implements Bot {
 					.catch((error) => {
 						nodeToFill.node.haveFilled = false;
 						logger.error(
-							`Error filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`,
-							error
+							`Error filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
 						);
 
 						// If we get an error that order does not exist, assume its been filled by somebody else and we
@@ -168,6 +167,9 @@ export class FillerBot implements Bot {
 							);
 							// dlob.printTopOfOrderLists(this.clearingHouse, nodeToFill.node.order.marketIndex);
 						}
+						logger.error(`Error code: ${errorCode}`);
+						logger.error(error);
+						logger.error(error.logs);
 					});
 			}
 		} catch (e) {

@@ -98,7 +98,7 @@ export class TriggerBot implements Bot {
 						logger.error(
 							`Error triggering user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
-						console.error(error);
+						logger.error(error);
 					});
 			}
 		} catch (e) {
