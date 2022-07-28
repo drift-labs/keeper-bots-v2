@@ -4,6 +4,7 @@ import {
 	isAuctionComplete,
 	isOneOfVariant,
 	isVariant,
+	MarketAccount,
 	OraclePriceData,
 	Order,
 	ZERO,
@@ -51,25 +52,29 @@ type Side = 'ask' | 'bid';
 export class DLOB {
 	openOrders = new Set<string>();
 	orderLists = new Map<number, MarketNodeLists>();
+	marketIndexToAccount = new Map<number, MarketAccount>();
 
-	public constructor(marketIndexes: BN[]) {
-		for (const marketIndex of marketIndexes) {
+	public constructor(markets: MarketAccount[]) {
+		for (const market of markets) {
+			const marketIndex = market.marketIndex;
+			this.marketIndexToAccount.set(marketIndex.toNumber(), market);
+
 			this.orderLists.set(marketIndex.toNumber(), {
 				limit: {
-					ask: new NodeList('limit', marketIndex, 'asc'),
-					bid: new NodeList('limit', marketIndex, 'desc'),
+					ask: new NodeList('limit', 'asc'),
+					bid: new NodeList('limit', 'desc'),
 				},
 				floatingLimit: {
-					ask: new NodeList('floatingLimit', marketIndex, 'asc'),
-					bid: new NodeList('floatingLimit', marketIndex, 'desc'),
+					ask: new NodeList('floatingLimit', 'asc'),
+					bid: new NodeList('floatingLimit', 'desc'),
 				},
 				market: {
-					ask: new NodeList('market', marketIndex, 'asc'),
-					bid: new NodeList('market', marketIndex, 'asc'), // always sort ascending for market orders
+					ask: new NodeList('market', 'asc'),
+					bid: new NodeList('market', 'asc'), // always sort ascending for market orders
 				},
 				trigger: {
-					above: new NodeList('trigger', marketIndex, 'asc'),
-					below: new NodeList('trigger', marketIndex, 'desc'),
+					above: new NodeList('trigger', 'asc'),
+					below: new NodeList('trigger', 'desc'),
 				},
 			});
 		}
@@ -87,7 +92,11 @@ export class DLOB {
 		if (isVariant(order.status, 'open')) {
 			this.openOrders.add(this.getOpenOrderId(order, userAccount));
 		}
-		this.getListForOrder(order).insert(order, userAccount);
+		this.getListForOrder(order).insert(
+			order,
+			this.marketIndexToAccount.get(order.marketIndex.toNumber()),
+			userAccount
+		);
 
 		if (onInsert) {
 			onInsert();
@@ -127,7 +136,11 @@ export class DLOB {
 			.trigger[isVariant(order.triggerCondition, 'above') ? 'above' : 'below'];
 		triggerList.remove(order, userAccount);
 
-		this.getListForOrder(order).insert(order, userAccount);
+		this.getListForOrder(order).insert(
+			order,
+			this.marketIndexToAccount.get(order.marketIndex.toNumber()),
+			userAccount
+		);
 		if (onTrigger) {
 			onTrigger();
 		}

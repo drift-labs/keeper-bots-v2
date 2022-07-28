@@ -1,4 +1,4 @@
-import { BN, isVariant, Order } from '@drift-labs/sdk';
+import { BN, isVariant, Order, MarketAccount } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
 import { createNode, DLOBNode, DLOBNodeMap } from './DLOBNode';
 
@@ -21,16 +21,20 @@ export class NodeList<NodeType extends keyof DLOBNodeMap>
 
 	constructor(
 		private nodeType: NodeType,
-		public marketIndex: BN,
+		// public marketIndex: BN,
 		private sortDirection: SortDirection
 	) {}
 
-	public insert(order: Order, userAccount: PublicKey): void {
+	public insert(
+		order: Order,
+		market: MarketAccount,
+		userAccount: PublicKey
+	): void {
 		if (isVariant(order.status, 'init')) {
 			return;
 		}
 
-		const newNode = createNode(this.nodeType, order, userAccount);
+		const newNode = createNode(this.nodeType, order, market, userAccount);
 
 		const orderId = getOrderId(order, userAccount);
 		if (this.nodeMap.has(orderId)) {
@@ -156,6 +160,7 @@ export function* getVammNodeGenerator(price: BN): Generator<DLOBNode> {
 		getPrice: () => price,
 		isVammNode: () => true,
 		order: undefined,
+		market: undefined,
 		userAccount: undefined,
 		haveFilled: false,
 	};

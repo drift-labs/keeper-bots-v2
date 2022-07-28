@@ -30,13 +30,13 @@
   dependencies:
     regenerator-runtime "^0.13.4"
 
-"@drift-labs/sdk@0.2.0-temp.0":
-  version "0.2.0-temp.0"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.2.0-temp.0.tgz#cdb1b82523a0776638c9a0c9493e63792576ffa1"
-  integrity sha512-OzqZojDN1xcMMmRGT2vtJPtQ0OksQ9wA4cWWP9PswMsBfIKlu/54hCGXYE8V1tAt0uOExApolH8hwkjvI/Hj/g==
+"@drift-labs/sdk@0.2.0-master.5":
+  version "0.2.0-master.5"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.2.0-master.5.tgz#6b035aac7301149578ef74c018e5c1b0d19e1811"
+  integrity sha512-UlwbhrHIPTEvIdHvcQRuZHSA+S3uL24itCfvAY5ttV8gfEyZ2ivd4W6zVmK+hOVCILY/wR13Gzw0MYeC4WP01w==
   dependencies:
     "@project-serum/anchor" "0.24.2"
-    "@pythnetwork/client" "2.5.1"
+    "@pythnetwork/client" "2.5.3"
     "@solana/spl-token" "^0.1.6"
     "@solana/web3.js" "1.41.0"
     "@switchboard-xyz/switchboard-v2" "^0.0.67"
@@ -236,10 +236,10 @@
   resolved "https://registry.yarnpkg.com/@protobufjs/utf8/-/utf8-1.1.0.tgz#a777360b5b39a1a2e5106f8e858f2fd2d060c570"
   integrity sha512-Vvn3zZrhQZkkBE8LSuW3em98c0FwgO4nxzv6OdSxPKJIEKY2bGbHn+mhGIPerzI4twdxaP8/0+06HBpwf345Lw==
 
-"@pythnetwork/client@2.5.1":
-  version "2.5.1"
-  resolved "https://registry.yarnpkg.com/@pythnetwork/client/-/client-2.5.1.tgz#f15c1f2394157f4a97fa8725b93ad887d534e776"
-  integrity sha512-QXt31aWuVi02yvjmNEFDKurTkeTL/BEM4Ney4uixUbkxZDSrYRUuYNXPTrylRLdT3C3DlbF858/Jt7DwtLMR2w==
+"@pythnetwork/client@2.5.3":
+  version "2.5.3"
+  resolved "https://registry.yarnpkg.com/@pythnetwork/client/-/client-2.5.3.tgz#86c9f92d01d8f282fdd8b5b11039da654e263988"
+  integrity sha512-NBLxPnA6A3tZb/DYUooD4SO63UJ70s9DzzFPGXcQNBR9itcycp7aaV+UA5oUPloD/4UHL9soo2fRuDVur0gmhA==
   dependencies:
     "@solana/web3.js" "^1.30.2"
     assert "^2.0.0"

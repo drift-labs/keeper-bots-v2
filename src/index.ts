@@ -92,11 +92,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	eventSubscriber.subscribe();
 	await slotSubscriber.subscribe();
 
-	const dlob = new DLOB(
-		clearingHouse
-			.getMarketAccounts()
-			.map((marketAccount) => marketAccount.marketIndex)
-	);
+	const dlob = new DLOB(clearingHouse.getMarketAccounts());
 	const programAccounts = await clearingHouse.program.account.user.all();
 	for (const programAccount of programAccounts) {
 		// @ts-ignore

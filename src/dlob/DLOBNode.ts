@@ -4,6 +4,7 @@ import {
 	convertToNumber,
 	getLimitPrice,
 	isVariant,
+	MarketAccount,
 	MARK_PRICE_PRECISION,
 	OraclePriceData,
 	Order,
@@ -18,17 +19,20 @@ export interface DLOBNode {
 	order: Order | undefined;
 	haveFilled: boolean;
 	userAccount: PublicKey | undefined;
+	market: MarketAccount;
 }
 
 export abstract class OrderNode implements DLOBNode {
 	order: Order;
+	market: MarketAccount;
 	userAccount: PublicKey;
 	sortValue: BN;
 	haveFilled = false;
 	haveTrigger = false;
 
-	constructor(order: Order, userAccount: PublicKey) {
+	constructor(order: Order, market: MarketAccount, userAccount: PublicKey) {
 		this.order = order;
+		this.market = market;
 		this.userAccount = userAccount;
 		this.sortValue = this.getSortValue(order);
 	}
@@ -61,7 +65,7 @@ export abstract class OrderNode implements DLOBNode {
 	}
 
 	getPrice(oraclePriceData: OraclePriceData, slot: number): BN {
-		return getLimitPrice(this.order, oraclePriceData, slot);
+		return getLimitPrice(this.order, this.market, oraclePriceData, slot);
 	}
 
 	isVammNode(): boolean {
@@ -121,17 +125,18 @@ export type DLOBNodeType =
 export function createNode<T extends DLOBNodeType>(
 	nodeType: T,
 	order: Order,
+	market: MarketAccount,
 	userAccount: PublicKey
 ): DLOBNodeMap[T] {
 	switch (nodeType) {
 		case 'floatingLimit':
-			return new FloatingLimitOrderNode(order, userAccount);
+			return new FloatingLimitOrderNode(order, market, userAccount);
 		case 'limit':
-			return new LimitOrderNode(order, userAccount);
+			return new LimitOrderNode(order, market, userAccount);
 		case 'market':
-			return new MarketOrderNode(order, userAccount);
+			return new MarketOrderNode(order, market, userAccount);
 		case 'trigger':
-			return new TriggerOrderNode(order, userAccount);
+			return new TriggerOrderNode(order, market, userAccount);
 		default:
 			throw Error(`Unknown DLOBNode type ${nodeType}`);
 	}
