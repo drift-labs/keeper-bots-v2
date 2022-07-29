@@ -1,4 +1,11 @@
-import { ClearingHouse, MarketAccount, SlotSubscriber } from '@drift-labs/sdk';
+import {
+	ClearingHouse,
+	MarketAccount,
+	OrderRecord,
+	SlotSubscriber,
+} from '@drift-labs/sdk';
+
+import { Connection } from '@solana/web3.js';
 
 import { logger } from '../logger';
 import { DLOB } from '../dlob/DLOB';
@@ -14,21 +21,39 @@ export class TriggerBot implements Bot {
 	private perMarketMutexTriggers: Array<number> = []; // TODO: use real mutex
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
+	private connection: Connection;
 
 	constructor(
 		name: string,
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
-		dlob: DLOB,
-		userMap: UserMap
+		connection: Connection
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
-		this.dlob = dlob;
-		this.userMap = userMap;
+		this.connection = connection;
+	}
+
+	public async init() {
+		// initialize DLOB instance
+		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts());
+		const programAccounts = await this.clearingHouse.program.account.user.all();
+		for (const programAccount of programAccounts) {
+			// @ts-ignore
+			const userAccount: UserAccount = programAccount.account;
+			const userAccountPublicKey = programAccount.publicKey;
+
+			for (const order of userAccount.orders) {
+				this.dlob.insert(order, userAccountPublicKey);
+			}
+		}
+
+		// initialize userMap instance
+		this.userMap = new UserMap(this.connection, this.clearingHouse);
+		await this.userMap.fetchAllUsers();
 	}
 
 	public reset(): void {
@@ -46,8 +71,14 @@ export class TriggerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(): Promise<void> {
+	public async trigger(record: OrderRecord): Promise<void> {
+		this.dlob.applyOrderRecord(record);
+		await this.userMap.updateWithOrder(record);
 		this.tryTrigger();
+	}
+
+	public viewDlob(): DLOB {
+		return this.dlob;
 	}
 
 	private async tryTriggerForMarket(market: MarketAccount) {

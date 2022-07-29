@@ -16,7 +16,6 @@ import {
 	OrderRecord,
 	Wallet,
 	DriftEnv,
-	UserAccount,
 	EventSubscriber,
 	SlotSubscriber,
 	convertToNumber,
@@ -29,8 +28,6 @@ import {
 
 import { logger } from './logger';
 import { constants } from './types';
-import { DLOB } from './dlob/DLOB';
-import { UserMap } from './userMap';
 import { FillerBot } from './bots/filler';
 import { TriggerBot } from './bots/trigger';
 import { JitMakerBot } from './bots/jitMaker';
@@ -197,21 +194,6 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	eventSubscriber.subscribe();
 	await slotSubscriber.subscribe();
 
-	const dlob = new DLOB(clearingHouse.getMarketAccounts());
-	const programAccounts = await clearingHouse.program.account.user.all();
-	for (const programAccount of programAccounts) {
-		// @ts-ignore
-		const userAccount: UserAccount = programAccount.account;
-		const userAccountPublicKey = programAccount.publicKey;
-
-		for (const order of userAccount.orders) {
-			dlob.insert(order, userAccountPublicKey);
-		}
-	}
-
-	const userMap = new UserMap(connection, clearingHouse);
-	await userMap.fetchAllUsers();
-
 	if (!(await clearingHouse.getUser().exists())) {
 		logger.error(`ClearingHouseUser for ${wallet.publicKey} does not exist`);
 		if (opts.initUser) {
@@ -227,7 +209,11 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 	// subscribe will fail if there is no clearing house user
 	const clearingHouseUser = clearingHouse.getUser();
-	while (!clearingHouse.isSubscribed || !clearingHouseUser.isSubscribed) {
+	while (
+		!clearingHouse.isSubscribed ||
+		!clearingHouseUser.isSubscribed ||
+		!eventSubscriber.subscribe()
+	) {
 		logger.info('not subscribed yet');
 		await sleep(1000);
 		await clearingHouse.subscribe();
@@ -342,8 +328,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				dlob,
-				userMap
+				connection
 			)
 		);
 	}
@@ -354,8 +339,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				dlob,
-				userMap
+				connection
 			)
 		);
 	}
@@ -366,10 +350,13 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				dlob,
-				userMap
+				connection
 			)
 		);
+	}
+
+	for (const bot of bots) {
+		bot.init();
 	}
 
 	for (const bot of bots) {
@@ -384,10 +371,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		*/
 		logger.info(`Received an order record ${JSON.stringify(record)}`);
 
-		dlob.applyOrderRecord(record);
-		await userMap.updateWithOrder(record);
-
-		Promise.all(bots.map((bot) => bot.trigger()));
+		Promise.all(bots.map((bot) => bot.trigger(record)));
 	};
 
 	eventSubscriber.eventEmitter.on('newEvent', (event) => {
@@ -401,12 +385,14 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	if (opts.printInfo) {
 		setInterval(() => {
 			for (const m of DevnetMarkets) {
-				dlob.printTopOfOrderLists(
-					sdkConfig,
-					clearingHouse,
-					slotSubscriber,
-					m.marketIndex
-				);
+				bots[0]
+					.viewDlob()
+					.printTopOfOrderLists(
+						sdkConfig,
+						clearingHouse,
+						slotSubscriber,
+						m.marketIndex
+					);
 			}
 			printOpenPositions(clearingHouseUser);
 		}, 5000);
@@ -420,6 +406,7 @@ async function recursiveTryCatch(f: () => void) {
 		console.error(e);
 		for (const bot of bots) {
 			bot.reset();
+			bot.init();
 		}
 		await sleep(15000);
 		await recursiveTryCatch(f);

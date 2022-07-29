@@ -3,11 +3,14 @@ import {
 	isOracleValid,
 	ClearingHouse,
 	MarketAccount,
+	OrderRecord,
 	SlotSubscriber,
 	calculateAskPrice,
 	calculateBidPrice,
 	calculateBaseAssetAmountMarketCanExecute,
 } from '@drift-labs/sdk';
+
+import { Connection } from '@solana/web3.js';
 
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
@@ -24,21 +27,39 @@ export class FillerBot implements Bot {
 	private perMarketMutexFills: Array<number> = []; // TODO: use real mutex
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
+	private connection: Connection;
 
 	constructor(
 		name: string,
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
-		dlob: DLOB,
-		userMap: UserMap
+		connection: Connection
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
-		this.dlob = dlob;
-		this.userMap = userMap;
+		this.connection = connection;
+	}
+
+	public async init() {
+		// initialize DLOB instance
+		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts());
+		const programAccounts = await this.clearingHouse.program.account.user.all();
+		for (const programAccount of programAccounts) {
+			// @ts-ignore
+			const userAccount: UserAccount = programAccount.account;
+			const userAccountPublicKey = programAccount.publicKey;
+
+			for (const order of userAccount.orders) {
+				this.dlob.insert(order, userAccountPublicKey);
+			}
+		}
+
+		// initialize userMap instance
+		this.userMap = new UserMap(this.connection, this.clearingHouse);
+		await this.userMap.fetchAllUsers();
 	}
 
 	public reset(): void {
@@ -56,8 +77,14 @@ export class FillerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(): Promise<void> {
+	public async trigger(record: OrderRecord): Promise<void> {
+		this.dlob.applyOrderRecord(record);
+		await this.userMap.updateWithOrder(record);
 		this.tryFill();
+	}
+
+	public viewDlob(): DLOB {
+		return this.dlob;
 	}
 
 	private async tryFillForMarket(market: MarketAccount) {
@@ -117,11 +144,15 @@ export class FillerBot implements Bot {
 				nodeToFill.node.haveFilled = true;
 
 				logger.info(
-					`trying to fill (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()}`
+					`${
+						this.name
+					} trying to fill (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()}`
 				);
 
 				if (nodeToFill.makerNode) {
-					`including maker: ${nodeToFill.makerNode.userAccount.toString()}) with order ${nodeToFill.makerNode.order.orderId.toString()}`;
+					`${
+						this.name
+					} including maker: ${nodeToFill.makerNode.userAccount.toString()}) with order ${nodeToFill.makerNode.order.orderId.toString()}`;
 				}
 
 				let makerInfo;
@@ -142,7 +173,9 @@ export class FillerBot implements Bot {
 					)
 					.then((txSig) => {
 						logger.info(
-							`Filled user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, Tx: ${txSig}`
+							`${
+								this.name
+							} Filled user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, Tx: ${txSig}`
 						);
 					})
 					.catch((error) => {
@@ -173,7 +206,9 @@ export class FillerBot implements Bot {
 			}
 		} catch (e) {
 			logger.info(
-				`Unexpected error for market ${marketIndex.toString()} during fills`
+				`${
+					this.name
+				} Unexpected error for market ${marketIndex.toString()} during fills`
 			);
 			console.error(e);
 		} finally {

@@ -6,11 +6,14 @@ import {
 	SlotSubscriber,
 	PositionDirection,
 	OrderType,
+	OrderRecord,
 	BASE_PRECISION,
 	QUOTE_PRECISION,
 	convertToNumber,
 	MARGIN_PRECISION,
 } from '@drift-labs/sdk';
+
+import { Connection } from '@solana/web3.js';
 
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
@@ -27,21 +30,39 @@ export class JitMakerBot implements Bot {
 	private perMarketMutexFills: Array<number> = []; // TODO: use real mutex
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
+	private connection: Connection;
 
 	constructor(
 		name: string,
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
-		dlob: DLOB,
-		userMap: UserMap
+		connection: Connection
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
-		this.dlob = dlob;
-		this.userMap = userMap;
+		this.connection = connection;
+	}
+
+	public async init() {
+		// initialize DLOB instance
+		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts());
+		const programAccounts = await this.clearingHouse.program.account.user.all();
+		for (const programAccount of programAccounts) {
+			// @ts-ignore
+			const userAccount: UserAccount = programAccount.account;
+			const userAccountPublicKey = programAccount.publicKey;
+
+			for (const order of userAccount.orders) {
+				this.dlob.insert(order, userAccountPublicKey);
+			}
+		}
+
+		// initialize userMap instance
+		this.userMap = new UserMap(this.connection, this.clearingHouse);
+		await this.userMap.fetchAllUsers();
 	}
 
 	public reset(): void {
@@ -59,8 +80,14 @@ export class JitMakerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(): Promise<void> {
+	public async trigger(record: OrderRecord): Promise<void> {
+		this.dlob.applyOrderRecord(record);
+		await this.userMap.updateWithOrder(record);
 		this.tryMake();
+	}
+
+	public viewDlob(): DLOB {
+		return this.dlob;
 	}
 
 	private async tryMakeJitAuctionForMarket(market: MarketAccount) {
@@ -95,12 +122,16 @@ export class JitMakerBot implements Bot {
 				nodeToFill.node.haveFilled = true;
 
 				logger.info(
-					`JIT maker quoting order for node: ${nodeToFill.node.userAccount.toBase58()} - ${nodeToFill.node.order.orderId.toString()}`
+					`${
+						this.name
+					} quoting order for node: ${nodeToFill.node.userAccount.toBase58()} - ${nodeToFill.node.order.orderId.toString()}`
 				);
 
 				if (nodeToFill.makerNode) {
 					logger.info(
-						`JIT maker found a maker in the node: ${nodeToFill.makerNode.userAccount.toString()} - ${nodeToFill.makerNode.order.orderId.toString()}`
+						`${
+							this.name
+						} found a maker in the node: ${nodeToFill.makerNode.userAccount.toString()} - ${nodeToFill.makerNode.order.orderId.toString()}`
 					);
 				}
 
@@ -117,7 +148,7 @@ export class JitMakerBot implements Bot {
 				const aucDur = new BN(nodeToFill.node.order.auctionDuration);
 
 				logger.info(
-					`JIT maker filling ${JSON.stringify(
+					`${this.name} filling ${JSON.stringify(
 						jitMakerDirection
 					)}: ${convertToNumber(
 						jitMakerBaseAssetAmount,
@@ -135,7 +166,7 @@ export class JitMakerBot implements Bot {
 				const orderAucStart = nodeToFill.node.order.auctionStartPrice;
 				const orderAucEnd = nodeToFill.node.order.auctionEndPrice;
 				logger.info(
-					`original order aucStartPrice: ${convertToNumber(
+					`${this.name}: original order aucStartPrice: ${convertToNumber(
 						orderAucStart,
 						QUOTE_PRECISION
 					).toFixed(4)}, aucEndPrice: ${convertToNumber(
@@ -146,12 +177,18 @@ export class JitMakerBot implements Bot {
 
 				console.log('========');
 				const m = nodeToFill.node.market;
-				logger.info(`market base asset reserve:  ${m.amm.baseAssetReserve}`);
-				logger.info(`market base spread:         ${m.amm.baseSpread}`);
-				logger.info(`market quote asset reserve: ${m.amm.quoteAssetReserve}`);
-				logger.info(`amm max spread:   ${m.amm.maxSpread}`);
-				logger.info(`amm long spread:  ${m.amm.longSpread}`);
-				logger.info(`amm short spread: ${m.amm.shortSpread}`);
+				logger.info(
+					`${this.name}: market base asset reserve:  ${m.amm.baseAssetReserve}`
+				);
+				logger.info(
+					`${this.name}: market base spread:         ${m.amm.baseSpread}`
+				);
+				logger.info(
+					`${this.name}: market quote asset reserve: ${m.amm.quoteAssetReserve}`
+				);
+				logger.info(`${this.name}: amm max spread:   ${m.amm.maxSpread}`);
+				logger.info(`${this.name}: amm long spread:  ${m.amm.longSpread}`);
+				logger.info(`${this.name}: amm short spread: ${m.amm.shortSpread}`);
 				console.log('========');
 
 				await this.clearingHouse
@@ -172,7 +209,9 @@ export class JitMakerBot implements Bot {
 					)
 					.then((txSig) => {
 						logger.info(
-							`JIT auction filled (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
+							`${
+								this.name
+							}: JIT auction filled (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
 						);
 					})
 					.catch((error) => {
@@ -202,7 +241,9 @@ export class JitMakerBot implements Bot {
 			}
 		} catch (e) {
 			logger.info(
-				`Unexpected error for market ${marketIndex.toString()} during fills`
+				`${
+					this.name
+				} Unexpected error for market ${marketIndex.toString()} during fills`
 			);
 			console.error(e);
 		} finally {
