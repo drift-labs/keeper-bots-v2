@@ -364,7 +364,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	}
 
 	for (const bot of bots) {
-		bot.startIntervalLoop(1000);
+		bot.startIntervalLoop(200);
 	}
 
 	const handleOrderRecord = async (record: OrderRecord) => {

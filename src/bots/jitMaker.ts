@@ -8,9 +8,9 @@ import {
 	OrderType,
 	OrderRecord,
 	BASE_PRECISION,
-	QUOTE_PRECISION,
 	convertToNumber,
 	MARGIN_PRECISION,
+	MARK_PRICE_PRECISION,
 } from '@drift-labs/sdk';
 
 import { Connection } from '@solana/web3.js';
@@ -106,7 +106,7 @@ export class JitMakerBot implements Bot {
 			for await (const nodeToFill of nodesToFill) {
 				if (nodeToFill.node.haveFilled) {
 					logger.error(
-						`${nodeToFill.node.userAccount} - ${nodeToFill.node.order.orderId} Node already filled!`
+						`already made the JIT auction for ${nodeToFill.node.userAccount} - ${nodeToFill.node.order.orderId}`
 					);
 					continue;
 				}
@@ -140,9 +140,10 @@ export class JitMakerBot implements Bot {
 				const jitMakerDirection = isVariant(orderDirection, 'long')
 					? PositionDirection.SHORT
 					: PositionDirection.LONG;
-				const jitMakerBaseAssetAmount =
-					nodeToFill.node.order.baseAssetAmount.div(new BN(2));
-				const jitMakerPrice = nodeToFill.node.order.auctionStartPrice;
+				const jitMakerBaseAssetAmount = nodeToFill.node.order.baseAssetAmount
+					.sub(nodeToFill.node.order.baseAssetAmountFilled)
+					.div(new BN(2));
+				const jitMakerPrice = nodeToFill.node.order.auctionEndPrice;
 				const tsNow = new BN(new Date().getTime() / 1000);
 				const orderTs = new BN(nodeToFill.node.order.ts);
 				const aucDur = new BN(nodeToFill.node.order.auctionDuration);
@@ -168,10 +169,10 @@ export class JitMakerBot implements Bot {
 				logger.info(
 					`${this.name}: original order aucStartPrice: ${convertToNumber(
 						orderAucStart,
-						QUOTE_PRECISION
+						MARK_PRICE_PRECISION
 					).toFixed(4)}, aucEndPrice: ${convertToNumber(
 						orderAucEnd,
-						QUOTE_PRECISION
+						MARK_PRICE_PRECISION
 					).toFixed(4)}`
 				);
 
