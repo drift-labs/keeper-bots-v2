@@ -1,44 +1,94 @@
+import fs from 'fs';
+import { program, Option } from 'commander';
+
 import { Connection, Keypair, PublicKey } from '@solana/web3.js';
 
 import {
-	BN,
+	Token,
+	TOKEN_PROGRAM_ID,
+	ASSOCIATED_TOKEN_PROGRAM_ID,
+} from '@solana/spl-token';
+import {
 	BulkAccountLoader,
 	ClearingHouse,
-	initialize,
-	isVariant,
-	OrderRecord,
-	convertToNumber,
-	MARK_PRICE_PRECISION,
-	Wallet,
-	calculateBaseAssetAmountMarketCanExecute,
-	calculateAskPrice,
-	calculateBidPrice,
-	isOracleValid,
-	DriftEnv,
-	MarketAccount,
-	UserAccount,
-	EventSubscriber,
-	Order,
-	OrderAction,
-	SlotSubscriber,
 	ClearingHouseUser,
-	bulkPollingUserSubscribe,
+	initialize,
+	OrderRecord,
+	Wallet,
+	DriftEnv,
+	EventSubscriber,
+	SlotSubscriber,
+	convertToNumber,
+	QUOTE_PRECISION,
+	DevnetBanks,
+	BN,
+	DevnetMarkets,
+	BASE_PRECISION,
 } from '@drift-labs/sdk';
 
-import { getErrorCode } from './error';
-import { DLOB } from './dlob/DLOB';
-import { ProgramAccount } from '@project-serum/anchor';
+import { logger } from './logger';
+import { constants } from './types';
+import { FillerBot } from './bots/filler';
+import { TriggerBot } from './bots/trigger';
+import { JitMakerBot } from './bots/jitMaker';
+import { Bot } from './types';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
 //@ts-ignore
 const sdkConfig = initialize({ env: process.env.ENV });
 
+program
+	// .option('-d, --dry', 'Dry run, do not send transactions on chain')
+	.option(
+		'--init-user',
+		'calls clearingHouse.initializeUserAccount if no user account exists'
+	)
+	.option('--filler', 'Enable order filler')
+	.option('--trigger', 'Enable trigger order')
+	.option('--jit-maker', 'Enable JIT auction maker')
+	.option('--print-info', 'Periodically print market and position info')
+	.option('--cancel-open-orders', 'Cancel open orders on startup')
+	.option(
+		'--deposit <number>',
+		'Allow deposit this amount of USDC to collateral account'
+	)
+	.addOption(
+		new Option(
+			'-p, --private-key <string>',
+			'private key, supports path to id.json, or list of comma separate numbers'
+		).env('FILLER_PRIVATE_KEY')
+	)
+	.parse();
+
+const opts = program.opts();
+
+logger.info(
+	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JitMakerBot enabled: ${!!opts.jitMaker}`
+);
+
 export function getWallet(): Wallet {
 	const privateKey = process.env.FILLER_PRIVATE_KEY;
-	const keypair = Keypair.fromSecretKey(
-		Uint8Array.from(privateKey.split(',').map((val) => Number(val)))
-	);
+	if (!privateKey) {
+		throw new Error(
+			'Must set environment variable FILLER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
+		);
+	}
+	// try to load privateKey as a filepath
+	let loadedKey: Uint8Array;
+	if (fs.existsSync(privateKey)) {
+		logger.info(`loading private key from ${privateKey}`);
+		loadedKey = new Uint8Array(
+			JSON.parse(fs.readFileSync(privateKey).toString())
+		);
+	} else {
+		logger.info(`loading private key as comma separated numbers`);
+		loadedKey = Uint8Array.from(
+			privateKey.split(',').map((val) => Number(val))
+		);
+	}
+
+	const keypair = Keypair.fromSecretKey(Uint8Array.from(loadedKey));
 	return new Wallet(keypair);
 }
 
@@ -75,415 +125,293 @@ const eventSubscriber = new EventSubscriber(connection, clearingHouse.program, {
 
 const slotSubscriber = new SlotSubscriber(connection, {});
 
-const intervalIds = [];
+function sleep(ms) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
+	const totalCollateral = clearingHouseUser.getCollateralValue();
+	logger.info(
+		`User total collateral: $${convertToNumber(
+			totalCollateral,
+			QUOTE_PRECISION
+		)}:`
+	);
+	for (let i = 0; i < DevnetBanks.length; i += 1) {
+		const bank = DevnetBanks[i];
+		const collateral = clearingHouseUser.getCollateralValue(bank.bankIndex);
+		logger.info(
+			`  Bank Collateral (${bank.bankIndex}: ${bank.symbol}): ${convertToNumber(
+				collateral,
+				QUOTE_PRECISION
+			)}`
+		);
+	}
+
+	logger.info(
+		`CHUser unsettled PnL:          ${convertToNumber(
+			clearingHouseUser.getUnsettledPNL(),
+			QUOTE_PRECISION
+		)}`
+	);
+	logger.info(
+		`CHUser unrealized funding PnL: ${convertToNumber(
+			clearingHouseUser.getUnrealizedFundingPNL(),
+			QUOTE_PRECISION
+		)}`
+	);
+	logger.info(
+		`CHUser unrealized PnL:         ${convertToNumber(
+			clearingHouseUser.getUnrealizedPNL(),
+			QUOTE_PRECISION
+		)}`
+	);
+}
+
+function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
+	logger.info('Open Positions:');
+	for (const p of clearingHouseUser.getUserAccount().positions) {
+		if (p.baseAssetAmount.isZero()) {
+			continue;
+		}
+		const market = DevnetMarkets[p.marketIndex.toNumber()];
+		console.log(`[${market.symbol}]`);
+		console.log(
+			` . baseAssetAmount:  ${convertToNumber(
+				p.baseAssetAmount,
+				BASE_PRECISION
+			).toString()}`
+		);
+		console.log(
+			` . quoteAssetAmount: ${convertToNumber(
+				p.quoteAssetAmount,
+				QUOTE_PRECISION
+			).toString()}`
+		);
+		console.log(
+			` . quoteEntryAmount: ${convertToNumber(
+				p.quoteEntryAmount,
+				QUOTE_PRECISION
+			).toString()}`
+		);
+		console.log(
+			` . unsettledPnl:     ${convertToNumber(
+				p.unsettledPnl,
+				QUOTE_PRECISION
+			).toString()}`
+		);
+		console.log(` . lastCumulativeFundingRate: ${p.lastCumulativeFundingRate}`);
+		console.log(
+			` . openOrders: ${p.openOrders.toString()}, openBids: ${p.openBids.toString()}, openAsks: ${p.openAsks.toString()}`
+		);
+	}
+}
+
+const bots: Bot[] = [];
 const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
-	console.log(
+	logger.info(
 		`ClearingHouse ProgramId: ${clearingHouse.program.programId.toBase58()}`
 	);
-	console.log(`wallet pubkey: ${wallet.publicKey.toBase58()}`);
-	console.log('SOL balance:', lamportsBalance / 10 ** 9);
+	logger.info(`wallet pubkey: ${wallet.publicKey.toBase58()}`);
+	logger.info(`SOL balance: ${lamportsBalance / 10 ** 9}`);
+	const tokenAccount = await Token.getAssociatedTokenAddress(
+		ASSOCIATED_TOKEN_PROGRAM_ID,
+		TOKEN_PROGRAM_ID,
+		new PublicKey(constants.devnet.USDCMint),
+		wallet.publicKey
+	);
+	const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
+	logger.info(`USDC balance: ${usdcBalance.value.uiAmount}`);
+
 	await clearingHouse.subscribe();
 	clearingHouse.eventEmitter.on('error', (e) => {
-		console.log('clearing house error');
-		console.error(e);
+		logger.info('clearing house error');
+		logger.error(e);
 	});
 
 	eventSubscriber.subscribe();
 	await slotSubscriber.subscribe();
 
-	const dlob = new DLOB(clearingHouse.getMarketAccounts());
-	const programAccounts = await clearingHouse.program.account.user.all();
-	for (const programAccount of programAccounts) {
-		// @ts-ignore
-		const userAccount: UserAccount = programAccount.account;
-		const userAccountPublicKey = programAccount.publicKey;
-
-		for (const order of userAccount.orders) {
-			dlob.insert(order, userAccountPublicKey);
+	if (!(await clearingHouse.getUser().exists())) {
+		logger.error(`ClearingHouseUser for ${wallet.publicKey} does not exist`);
+		if (opts.initUser) {
+			logger.info(`Creating ClearingHouseUser for ${wallet.publicKey}`);
+			const [txSig] = await clearingHouse.initializeUserAccount();
+			logger.info(`Initialized user account in transaction: ${txSig}`);
+		} else {
+			throw new Error(
+				"Run with '--init-user' flag to initialize a ClearingHouseUser"
+			);
 		}
 	}
-	console.log('initial number of orders', dlob.openOrders.size);
 
-	const printTopOfOrderLists = (marketIndex: BN) => {
-		const market = clearingHouse.getMarketAccount(marketIndex);
-
-		const slot = slotSubscriber.getSlot();
-		const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
-		const vAsk = calculateAskPrice(market, oraclePriceData);
-		const vBid = calculateBidPrice(market, oraclePriceData);
-
-		const bestAsk = dlob.getBestAsk(marketIndex, vAsk, slot, oraclePriceData);
-		const bestBid = dlob.getBestBid(marketIndex, vBid, slot, oraclePriceData);
-		const mid = bestAsk.add(bestBid).div(new BN(2));
-
-		console.log(
-			`Market ${sdkConfig.MARKETS[marketIndex.toNumber()].symbol} Orders`
-		);
-		console.log(
-			`Ask`,
-			convertToNumber(bestAsk, MARK_PRICE_PRECISION).toFixed(3)
-		);
-		console.log(`Mid`, convertToNumber(mid, MARK_PRICE_PRECISION).toFixed(3));
-		console.log(
-			`Bid`,
-			convertToNumber(bestBid, MARK_PRICE_PRECISION).toFixed(3)
-		);
-	};
-
-	const printOrderLists = () => {
-		for (const marketAccount of clearingHouse.getMarketAccounts()) {
-			printTopOfOrderLists(marketAccount.marketIndex);
-		}
-	};
-	printOrderLists();
-
-	const userAccountLoader = new BulkAccountLoader(
-		connection,
-		'processed',
-		5000
+	// subscribe will fail if there is no clearing house user
+	const clearingHouseUser = clearingHouse.getUser();
+	while (
+		!clearingHouse.isSubscribed ||
+		!clearingHouseUser.isSubscribed ||
+		!eventSubscriber.subscribe()
+	) {
+		logger.info('not subscribed yet');
+		await sleep(1000);
+		await clearingHouse.subscribe();
+		await clearingHouseUser.subscribe();
+	}
+	logger.info(
+		`ClearingHouseUser PublicKey: ${clearingHouseUser
+			.getUserAccountPublicKey()
+			.toBase58()}`
 	);
 
-	const userMap = new Map<string, ClearingHouseUser>();
-	const fetchAllUsers = async () => {
-		const programUserAccounts =
-			(await clearingHouse.program.account.user.all()) as ProgramAccount<UserAccount>[];
-		const userArray: ClearingHouseUser[] = [];
-		for (const programUserAccount of programUserAccounts) {
-			if (userMap.has(programUserAccount.publicKey.toString())) {
-				continue;
-			}
+	printUserAccountStats(clearingHouseUser);
 
-			const user = new ClearingHouseUser({
+	// check that user has collateral
+	const totalCollateral = clearingHouseUser.getCollateralValue();
+	if (totalCollateral.isZero() && opts.jitMaker) {
+		logger.info(
+			`No collateral in account, collateral is required to run JitMakerBot`
+		);
+		if (!opts.deposit) {
+			logger.error(`Run with '--deposit' flag to deposit collateral`);
+			throw new Error('Account has no collateral, and no deposit was provided');
+		}
+
+		if (opts.deposit < 0) {
+			logger.error(`Deposit amount must be greater than 0`);
+			throw new Error('Deposit amount must be greater than 0');
+		}
+
+		logger.info(
+			`Depositing collateral (${new BN(opts.deposit).toString()} USDC)`
+		);
+
+		const ata = await Token.getAssociatedTokenAddress(
+			ASSOCIATED_TOKEN_PROGRAM_ID,
+			TOKEN_PROGRAM_ID,
+			DevnetBanks[0].mint, // USDC
+			wallet.publicKey
+		);
+
+		const tx = await clearingHouse.deposit(
+			new BN(opts.deposit).mul(QUOTE_PRECISION),
+			new BN(0), // USDC bank
+			ata
+		);
+		logger.info(`Deposit transaction: ${tx}`);
+	}
+
+	// print user orders
+	logger.info('');
+	logger.info('Open orders:');
+	const ordersToCancel: Array<BN> = [];
+	for (const order of clearingHouseUser.getUserAccount().orders) {
+		if (order.baseAssetAmount.isZero()) {
+			continue;
+		}
+		console.log(order);
+		ordersToCancel.push(order.orderId);
+	}
+	if (opts.cancelOpenOrders) {
+		for (const order of ordersToCancel) {
+			logger.info(`Cancelling open order ${order.toString()}`);
+			await clearingHouse.cancelOrder(order);
+		}
+	}
+
+	printOpenPositions(clearingHouseUser);
+
+	/*
+	 * Start bots depending on flags enabled
+	 */
+
+	if (opts.filler) {
+		bots.push(
+			new FillerBot(
+				'filler',
+				!!opts.dry,
 				clearingHouse,
-				userAccountPublicKey: programUserAccount.publicKey,
-				accountSubscription: {
-					type: 'polling',
-					accountLoader: userAccountLoader,
-				},
-			});
-			userArray.push(user);
-		}
+				slotSubscriber,
+				connection
+			)
+		);
+	}
+	if (opts.trigger) {
+		bots.push(
+			new TriggerBot(
+				'trigger',
+				!!opts.dry,
+				clearingHouse,
+				slotSubscriber,
+				connection
+			)
+		);
+	}
+	if (opts.jitMaker) {
+		bots.push(
+			new JitMakerBot(
+				'JitMaker',
+				!!opts.dry,
+				clearingHouse,
+				slotSubscriber,
+				connection
+			)
+		);
+	}
 
-		await bulkPollingUserSubscribe(userArray, userAccountLoader);
-		for (const user of userArray) {
-			const userAccountPubkey = await user.getUserAccountPublicKey();
-			userMap.set(userAccountPubkey.toString(), user);
-		}
-	};
-	await fetchAllUsers();
+	for (const bot of bots) {
+		bot.init();
+	}
 
-	const addToUserMap = async (userAccountPublicKey: PublicKey) => {
-		const user = new ClearingHouseUser({
-			clearingHouse,
-			userAccountPublicKey,
-			accountSubscription: {
-				type: 'polling',
-				accountLoader: userAccountLoader,
-			},
-		});
-		await user.subscribe();
-		userMap.set(userAccountPublicKey.toString(), user);
-	};
+	for (const bot of bots) {
+		bot.startIntervalLoop(1000);
+	}
 
 	const handleOrderRecord = async (record: OrderRecord) => {
-		console.log(`Received an order record ${JSON.stringify(record)}`);
+		/*
+		{"ts":"62e0abf7","slot":150777343,"taker":"3zztWnffdWvgsu9zTVWq1HP5xh29WexTv7tbyC6Uqy8V","maker":"11111111111111111111111111111111","takerOrder":{"status":{"open":{}},"orderType":{"market":{}},"ts":"62e0abf7","slot":"08fcadff","orderId":"0a","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"short":{}},"quoteAssetAmount":"00","baseAssetAmount":"5af3107a4000","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","fee":"00","direction":{"long":{}},"reduceOnly":true,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"4ef1cd29f0","auctionEndPrice":"53fe8975b8","auctionDuration":10,"padding":[0,0,0]},"makerOrder":{"status":{"init":{}},"orderType":{"limit":{}},"ts":"00","slot":"00","orderId":"00","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"long":{}},"quoteAssetAmount":"00","baseAssetAmount":"00","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","fee":"00","direction":{"long":{}},"reduceOnly":false,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"00","auctionEndPrice":"00","auctionDuration":0,"padding":[0,0,0]},"makerUnsettledPnl":"00","takerUnsettledPnl":"00","action":{"place":{}},"actionExplanation":{"none":{}},"filler":"11111111111111111111111111111111","fillRecordId":"00","marketIndex":"00","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","makerRebate":"00","takerFee":"00","fillerReward":"00","quoteAssetAmountSurplus":"00","oraclePrice":"53ed435b20","txSig":"3nA44VjeCC8swADRyxuiSRWhvfGu6HpUu2xnueaqNkSH9ii9c1nPorjmPzcmooMhyD3PMCirVdnMRAtiJ1zRb8YG","eventType":"OrderRecord"}
+		{"ts":"62e0abfc","slot":150777356,"taker":"3zztWnffdWvgsu9zTVWq1HP5xh29WexTv7tbyC6Uqy8V","maker":"11111111111111111111111111111111","takerOrder":{"status":{"filled":{}},"orderType":{"market":{}},"ts":"62e0abf7","slot":"08fcadff","orderId":"0a","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"short":{}},"quoteAssetAmount":"00","baseAssetAmount":"5af3107a4000","baseAssetAmountFilled":"5af3107a4000","quoteAssetAmountFilled":"157916f3","fee":"057f41","direction":{"long":{}},"reduceOnly":true,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"4ef1cd29f0","auctionEndPrice":"53fe8975b8","auctionDuration":10,"padding":[0,0,0]},"makerOrder":{"status":{"init":{}},"orderType":{"limit":{}},"ts":"00","slot":"00","orderId":"00","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"long":{}},"quoteAssetAmount":"00","baseAssetAmount":"00","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","fee":"00","direction":{"long":{}},"reduceOnly":false,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"00","auctionEndPrice":"00","auctionDuration":0,"padding":[0,0,0]},"makerUnsettledPnl":"00","takerUnsettledPnl":"02aa6efe","action":{"fill":{}},"actionExplanation":{"none":{}},"filler":"A8GgA3ZREa73hGV9pZQkEzHUy46dLWUkSC6Q1yPghYNQ","fillRecordId":"0268","marketIndex":"00","baseAssetAmountFilled":"5af3107a4000","quoteAssetAmountFilled":"157916f3","makerRebate":"00","takerFee":"057f41","fillerReward":"3a34","quoteAssetAmountSurplus":"030e3d","oraclePrice":"53cf7d9740","txSig":"4LrN1mMPEeoogDtN7dfTcY3gADK4rxWq45Gwegd4GeLtBRXv1E1xRsNGKQ1bc87jR7uhLi1m9TN77ysSXJdZRUjt","eventType":"OrderRecord"
+		{"ts":"62e3091b","slot":151185608,"taker":"tktkRu1DM5cioU8JMyBQvXud2ENayz2mbbU1idUqTmn","maker":"DJwD8T2TKev7asmcvPyU9BUhTsjH5yZYEwoKDoHHcicu","takerOrder":{"status":{"open":{}},"orderType":{"market":{}},"ts":"62e3091a","slot":"0902e8c5","orderId":"02","userOrderId":0,"marketIndex":"00","price":"65653a0c80","existingPositionDirection":{"long":{}},"baseAssetAmount":"0c8d10191000","baseAssetAmountFilled":"0646880c8800","quoteAssetAmountFilled":"01c0ae02","fee":"72dc","direction":{"long":{}},"reduceOnly":false,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"6338ccb08c","auctionEndPrice":"65653a0c80","auctionDuration":10,"padding":[0,0,0]},"makerOrder":{"status":{"filled":{}},"orderType":{"limit":{}},"ts":"62e3091b","slot":"0902e8c8","orderId":"05","userOrderId":0,"marketIndex":"00","price":"6338ccb08c","existingPositionDirection":{"short":{}},"baseAssetAmount":"0646880c8800","baseAssetAmountFilled":"0646880c8800","quoteAssetAmountFilled":"01c0ae02","fee":"-44ea","direction":{"short":{}},"reduceOnly":false,"postOnly":true,"immediateOrCancel":true,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"00","auctionEndPrice":"00","auctionDuration":10,"padding":[0,0,0]},"makerUnsettledPnl":"44ea","takerUnsettledPnl":"-72dc","action":{"fill":{}},"actionExplanation":{"none":{}},"filler":"DJwD8T2TKev7asmcvPyU9BUhTsjH5yZYEwoKDoHHcicu","fillRecordId":"08","marketIndex":"00","baseAssetAmountFilled":"0646880c8800","quoteAssetAmountFilled":"01c0ae02","makerRebate":"44ea","takerFee":"72dc","fillerReward":"00","quoteAssetAmountSurplus":"00","oraclePrice":"64d112cd80","txSig":"5QyEApbEuZsuZebciVMwVvCEkb4neLQHrqkQ97QKVL1f9cqW7Z28SxMzos8EQ19xsLqK4Nsxk4XhW2i8JR3DU6jY","eventType":"OrderRecord"}
+		*/
+		logger.info(`Received an order record ${JSON.stringify(record)}`);
 
-		if (!record.taker.equals(PublicKey.default)) {
-			handleOrder(record.takerOrder, record.taker, record.action);
-		}
-
-		if (
-			!record.taker.equals(PublicKey.default) &&
-			!userMap.has(record.taker.toString())
-		) {
-			await addToUserMap(record.taker);
-		}
-
-		if (!record.maker.equals(PublicKey.default)) {
-			handleOrder(record.makerOrder, record.maker, record.action);
-		}
-
-		if (
-			!record.maker.equals(PublicKey.default) &&
-			!userMap.has(record.maker.toString())
-		) {
-			await addToUserMap(record.maker);
-		}
-
-		printTopOfOrderLists(record.marketIndex);
-	};
-
-	const handleOrder = (
-		order: Order,
-		userAccount: PublicKey,
-		action: OrderAction
-	) => {
-		if (isVariant(action, 'place')) {
-			dlob.insert(order, userAccount, () => {
-				console.log(
-					`Order ${dlob.getOpenOrderId(
-						order,
-						userAccount
-					)} placed. Added to dlob`
-				);
-			});
-		} else if (isVariant(action, 'cancel')) {
-			dlob.remove(order, userAccount, () => {
-				console.log(
-					`Order ${dlob.getOpenOrderId(
-						order,
-						userAccount
-					)} canceled. Removed from dlob`
-				);
-			});
-		} else if (isVariant(action, 'trigger')) {
-			dlob.trigger(order, userAccount, () => {
-				console.log(
-					`Order ${dlob.getOpenOrderId(order, userAccount)} triggered`
-				);
-			});
-		} else if (isVariant(action, 'fill')) {
-			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
-				dlob.remove(order, userAccount, () => {
-					console.log(
-						`Order ${dlob.getOpenOrderId(
-							order,
-							userAccount
-						)} completely filled. Removed from dlob`
-					);
-				});
-			} else {
-				dlob.update(order, userAccount, () => {
-					console.log(
-						`Order ${dlob.getOpenOrderId(
-							order,
-							userAccount
-						)} partially filled. Updated dlob`
-					);
-				});
-			}
-		}
+		Promise.all(bots.map((bot) => bot.trigger(record)));
 	};
 
 	eventSubscriber.eventEmitter.on('newEvent', (event) => {
 		if (event.eventType === 'OrderRecord') {
 			handleOrderRecord(event as OrderRecord);
+		} else {
+			logger.info(`order record event type ${event.eventType}`);
 		}
 	});
 
-	const perMarketMutexFills: Array<number> = [];
-	const tryFillForMarket = async (market: MarketAccount) => {
-		const marketIndex = market.marketIndex;
-		if (perMarketMutexFills[marketIndex.toNumber()] === 1) {
-			return;
-		}
-		perMarketMutexFills[marketIndex.toNumber()] = 1;
-
-		try {
-			const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
-			const oracleIsValid = isOracleValid(
-				market.amm,
-				oraclePriceData,
-				clearingHouse.getStateAccount().oracleGuardRails,
-				slotSubscriber.getSlot()
-			);
-
-			const vAsk = calculateAskPrice(market, oraclePriceData);
-			const vBid = calculateBidPrice(market, oraclePriceData);
-
-			const nodesToFill = dlob.findNodesToFill(
-				marketIndex,
-				vBid,
-				vAsk,
-				slotSubscriber.getSlot(),
-				oracleIsValid ? oraclePriceData : undefined
-			);
-
-			for (const nodeToFill of nodesToFill) {
-				if (nodeToFill.node.haveFilled) {
-					continue;
-				}
-
-				if (
-					!nodeToFill.makerNode &&
-					(isVariant(nodeToFill.node.order.orderType, 'limit') ||
-						isVariant(nodeToFill.node.order.orderType, 'triggerLimit'))
-				) {
-					const baseAssetAmountMarketCanExecute =
-						calculateBaseAssetAmountMarketCanExecute(
-							market,
-							nodeToFill.node.order,
-							oraclePriceData
-						);
-
-					if (
-						baseAssetAmountMarketCanExecute.lt(
-							market.amm.baseAssetAmountStepSize
-						)
-					) {
-						continue;
-					}
-				}
-
-				nodeToFill.node.haveFilled = true;
-
-				console.log(
-					`trying to fill (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()}`
-				);
-
-				if (nodeToFill.makerNode) {
-					`including maker: ${nodeToFill.makerNode.userAccount.toString()}) with order ${nodeToFill.makerNode.order.orderId.toString()}`;
-				}
-
-				let makerInfo;
-				if (nodeToFill.makerNode) {
-					makerInfo = {
-						maker: nodeToFill.makerNode.userAccount,
-						order: nodeToFill.makerNode.order,
-					};
-				}
-
-				const user = userMap.get(nodeToFill.node.userAccount.toString());
-				clearingHouse
-					.fillOrder(
-						nodeToFill.node.userAccount,
-						user.getUserAccount(),
-						nodeToFill.node.order,
-						makerInfo
-					)
-					.then((txSig) => {
-						console.log(
-							`Filled user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
-						);
-						console.log(`Tx: ${txSig}`);
-					})
-					.catch((error) => {
-						nodeToFill.node.haveFilled = false;
-						console.log(
-							`Error filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
-						);
-						console.error(error);
-
-						// If we get an error that order does not exist, assume its been filled by somebody else and we
-						// have received the history record yet
-						// TODO this might not hold if events arrive out of order
-						const errorCode = getErrorCode(error);
-						if (errorCode === 6043) {
-							dlob.remove(
-								nodeToFill.node.order,
-								nodeToFill.node.userAccount,
-								() => {
-									console.log(
-										`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-									);
-								}
-							);
-							printTopOfOrderLists(nodeToFill.node.order.marketIndex);
-						}
-					});
+	if (opts.printInfo) {
+		setInterval(() => {
+			for (const m of DevnetMarkets) {
+				bots[0]
+					.viewDlob()
+					.printTopOfOrderLists(
+						sdkConfig,
+						clearingHouse,
+						slotSubscriber,
+						m.marketIndex
+					);
 			}
-		} catch (e) {
-			console.log(
-				`Unexpected error for market ${marketIndex.toString()} during fills`
-			);
-			console.error(e);
-		} finally {
-			perMarketMutexFills[marketIndex.toNumber()] = 0;
-		}
-	};
-
-	const tryFill = () => {
-		for (const marketAccount of clearingHouse.getMarketAccounts()) {
-			tryFillForMarket(marketAccount);
-		}
-	};
-
-	tryFill();
-	const handleFillIntervalId = setInterval(tryFill, 500); // every half second
-	intervalIds.push(handleFillIntervalId);
-
-	const perMarketMutexTriggers: Array<number> = [];
-	const tryTriggerForMarket = async (market: MarketAccount) => {
-		const marketIndex = market.marketIndex;
-		if (perMarketMutexTriggers[marketIndex.toNumber()] === 1) {
-			return;
-		}
-		perMarketMutexTriggers[marketIndex.toNumber()] = 1;
-
-		try {
-			const oraclePriceData = clearingHouse.getOracleDataForMarket(marketIndex);
-
-			const nodesToTrigger = dlob.findNodesToTrigger(
-				marketIndex,
-				slotSubscriber.getSlot(),
-				oraclePriceData.price
-			);
-
-			for (const nodeToTrigger of nodesToTrigger) {
-				if (nodeToTrigger.node.haveTrigger) {
-					continue;
-				}
-
-				nodeToTrigger.node.haveTrigger = true;
-
-				console.log(
-					`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) order ${nodeToTrigger.node.order.orderId.toString()}`
-				);
-
-				const user = userMap.get(nodeToTrigger.node.userAccount.toString());
-				clearingHouse
-					.triggerOrder(
-						nodeToTrigger.node.userAccount,
-						user.getUserAccount(),
-						nodeToTrigger.node.order
-					)
-					.then((txSig) => {
-						console.log(
-							`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-						);
-						console.log(`Tx: ${txSig}`);
-					})
-					.catch((error) => {
-						nodeToTrigger.node.haveTrigger = false;
-						console.log(
-							`Error triggering user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-						);
-						console.error(error);
-					});
-			}
-		} catch (e) {
-			console.log(
-				`Unexpected error for market ${marketIndex.toString()} during triggers`
-			);
-			console.error(e);
-		} finally {
-			perMarketMutexTriggers[marketIndex.toNumber()] = 0;
-		}
-	};
-
-	const tryTrigger = () => {
-		for (const marketAccount of clearingHouse.getMarketAccounts()) {
-			tryTriggerForMarket(marketAccount);
-		}
-	};
-
-	tryTrigger();
-	const handleTriggerIntervalId = setInterval(tryTrigger, 500); // every half second
-	intervalIds.push(handleTriggerIntervalId);
+			printUserAccountStats(clearingHouseUser);
+			printOpenPositions(clearingHouseUser);
+		}, 60000);
+	}
 };
 
 async function recursiveTryCatch(f: () => void) {
-	function sleep(ms) {
-		return new Promise((resolve) => setTimeout(resolve, ms));
-	}
-
 	try {
 		await f();
 	} catch (e) {
 		console.error(e);
-		for (const intervalId of intervalIds) {
-			clearInterval(intervalId);
+		for (const bot of bots) {
+			bot.reset();
+			bot.init();
 		}
 		await sleep(15000);
 		await recursiveTryCatch(f);

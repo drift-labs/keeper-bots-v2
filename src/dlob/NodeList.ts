@@ -21,7 +21,6 @@ export class NodeList<NodeType extends keyof DLOBNodeMap>
 
 	constructor(
 		private nodeType: NodeType,
-		// public marketIndex: BN,
 		private sortDirection: SortDirection
 	) {}
 

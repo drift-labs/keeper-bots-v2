@@ -27,6 +27,7 @@ export abstract class OrderNode implements DLOBNode {
 	market: MarketAccount;
 	userAccount: PublicKey;
 	sortValue: BN;
+	marketAccount: MarketAccount;
 	haveFilled = false;
 	haveTrigger = false;
 
