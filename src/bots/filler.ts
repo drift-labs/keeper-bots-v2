@@ -168,8 +168,7 @@ export class FillerBot implements Bot {
 							// dlob.printTopOfOrderLists(this.clearingHouse, nodeToFill.node.order.marketIndex);
 						}
 						logger.error(`Error code: ${errorCode}`);
-						logger.error(error);
-						logger.error(error.logs);
+						console.error(error);
 					});
 			}
 		} catch (e) {

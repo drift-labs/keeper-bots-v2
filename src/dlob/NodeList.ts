@@ -1,6 +1,6 @@
 import { BN, isVariant, Order, MarketAccount } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
-import { createNode, DLOBNode, DLOBNodeMap, MarketOrderNode } from './DLOBNode';
+import { createNode, DLOBNode, DLOBNodeMap } from './DLOBNode';
 
 export type SortDirection = 'asc' | 'desc';
 

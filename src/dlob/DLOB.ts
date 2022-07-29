@@ -8,13 +8,14 @@ import {
 	isAuctionComplete,
 	isOneOfVariant,
 	isVariant,
-	MarketAccount,
-	OraclePriceData,
 	Order,
 	OrderRecord,
 	OrderAction,
 	ZERO,
+	MARK_PRICE_PRECISION,
 	MarketAccount,
+	OraclePriceData,
+	SlotSubscriber,
 } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
 import { DLOBNode, DLOBNodeType, TriggerOrderNode } from './DLOBNode';

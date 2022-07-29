@@ -11,6 +11,7 @@ import {
 import {
 	BulkAccountLoader,
 	ClearingHouse,
+	ClearingHouseUser,
 	initialize,
 	OrderRecord,
 	Wallet,
@@ -22,6 +23,8 @@ import {
 	QUOTE_PRECISION,
 	DevnetBanks,
 	BN,
+	DevnetMarkets,
+	BASE_PRECISION,
 } from '@drift-labs/sdk';
 
 import { logger } from './logger';
@@ -47,6 +50,8 @@ program
 	.option('--filler', 'Enable order filler')
 	.option('--trigger', 'Enable trigger order')
 	.option('--jit-maker', 'Enable JIT auction maker')
+	.option('--print-info', 'Periodically print market and position info')
+	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option(
 		'--deposit <number>',
 		'Allow deposit this amount of USDC to collateral account'
@@ -127,6 +132,45 @@ function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
+	logger.info('Open Positions:');
+	for (const p of clearingHouseUser.getUserAccount().positions) {
+		if (p.baseAssetAmount.isZero()) {
+			continue;
+		}
+		const market = DevnetMarkets[p.marketIndex.toNumber()];
+		console.log(`[${market.symbol}]`);
+		console.log(
+			` . baseAssetAmount:  ${convertToNumber(
+				p.baseAssetAmount,
+				BASE_PRECISION
+			).toString()}`
+		);
+		console.log(
+			` . quoteAssetAmount: ${convertToNumber(
+				p.quoteAssetAmount,
+				QUOTE_PRECISION
+			).toString()}`
+		);
+		console.log(
+			` . quoteEntryAmount: ${convertToNumber(
+				p.quoteEntryAmount,
+				QUOTE_PRECISION
+			).toString()}`
+		);
+		console.log(
+			` . unsettledPnl:     ${convertToNumber(
+				p.unsettledPnl,
+				QUOTE_PRECISION
+			).toString()}`
+		);
+		console.log(` . lastCumulativeFundingRate: ${p.lastCumulativeFundingRate}`);
+		console.log(
+			` . openOrders: ${p.openOrders.toString()}, openBids: ${p.openBids.toString()}, openAsks: ${p.openAsks.toString()}`
+		);
+	}
+}
+
 const bots: Bot[] = [];
 const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
@@ -195,6 +239,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			.toBase58()}`
 	);
 
+	// print account collateral
 	const totalCollateral = clearingHouseUser.getCollateralValue();
 	logger.info(
 		`User total collateral: $${convertToNumber(
@@ -266,18 +311,26 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		)}`
 	);
 
-	const printOrderLists = () => {
-		for (const marketAccount of clearingHouse.getMarketAccounts()) {
-			dlob.printTopOfOrderLists(
-				sdkConfig,
-				clearingHouse,
-				slotSubscriber,
-				marketAccount.marketIndex
-			);
+	// print user orders
+	logger.info('');
+	logger.info('Open orders:');
+	const ordersToCancel: Array<BN> = [];
+	for (const order of clearingHouseUser.getUserAccount().orders) {
+		if (order.baseAssetAmount.isZero()) {
+			continue;
 		}
-	};
-	logger.info('Current market snapshot:');
-	printOrderLists();
+		console.log(order);
+		ordersToCancel.push(order.orderId);
+	}
+	if (opts.cancelOpenOrders) {
+		for (const order of ordersToCancel) {
+			logger.info(`Cancelling open order ${order.toString()}`);
+			await clearingHouse.cancelOrder(order);
+		}
+	}
+
+	printOpenPositions(clearingHouseUser);
+
 	/*
 	 * Start bots depending on flags enabled
 	 */
@@ -327,18 +380,12 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		/*
 		{"ts":"62e0abf7","slot":150777343,"taker":"3zztWnffdWvgsu9zTVWq1HP5xh29WexTv7tbyC6Uqy8V","maker":"11111111111111111111111111111111","takerOrder":{"status":{"open":{}},"orderType":{"market":{}},"ts":"62e0abf7","slot":"08fcadff","orderId":"0a","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"short":{}},"quoteAssetAmount":"00","baseAssetAmount":"5af3107a4000","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","fee":"00","direction":{"long":{}},"reduceOnly":true,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"4ef1cd29f0","auctionEndPrice":"53fe8975b8","auctionDuration":10,"padding":[0,0,0]},"makerOrder":{"status":{"init":{}},"orderType":{"limit":{}},"ts":"00","slot":"00","orderId":"00","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"long":{}},"quoteAssetAmount":"00","baseAssetAmount":"00","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","fee":"00","direction":{"long":{}},"reduceOnly":false,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"00","auctionEndPrice":"00","auctionDuration":0,"padding":[0,0,0]},"makerUnsettledPnl":"00","takerUnsettledPnl":"00","action":{"place":{}},"actionExplanation":{"none":{}},"filler":"11111111111111111111111111111111","fillRecordId":"00","marketIndex":"00","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","makerRebate":"00","takerFee":"00","fillerReward":"00","quoteAssetAmountSurplus":"00","oraclePrice":"53ed435b20","txSig":"3nA44VjeCC8swADRyxuiSRWhvfGu6HpUu2xnueaqNkSH9ii9c1nPorjmPzcmooMhyD3PMCirVdnMRAtiJ1zRb8YG","eventType":"OrderRecord"}
 		{"ts":"62e0abfc","slot":150777356,"taker":"3zztWnffdWvgsu9zTVWq1HP5xh29WexTv7tbyC6Uqy8V","maker":"11111111111111111111111111111111","takerOrder":{"status":{"filled":{}},"orderType":{"market":{}},"ts":"62e0abf7","slot":"08fcadff","orderId":"0a","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"short":{}},"quoteAssetAmount":"00","baseAssetAmount":"5af3107a4000","baseAssetAmountFilled":"5af3107a4000","quoteAssetAmountFilled":"157916f3","fee":"057f41","direction":{"long":{}},"reduceOnly":true,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"4ef1cd29f0","auctionEndPrice":"53fe8975b8","auctionDuration":10,"padding":[0,0,0]},"makerOrder":{"status":{"init":{}},"orderType":{"limit":{}},"ts":"00","slot":"00","orderId":"00","userOrderId":0,"marketIndex":"00","price":"00","existingPositionDirection":{"long":{}},"quoteAssetAmount":"00","baseAssetAmount":"00","baseAssetAmountFilled":"00","quoteAssetAmountFilled":"00","fee":"00","direction":{"long":{}},"reduceOnly":false,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"00","auctionEndPrice":"00","auctionDuration":0,"padding":[0,0,0]},"makerUnsettledPnl":"00","takerUnsettledPnl":"02aa6efe","action":{"fill":{}},"actionExplanation":{"none":{}},"filler":"A8GgA3ZREa73hGV9pZQkEzHUy46dLWUkSC6Q1yPghYNQ","fillRecordId":"0268","marketIndex":"00","baseAssetAmountFilled":"5af3107a4000","quoteAssetAmountFilled":"157916f3","makerRebate":"00","takerFee":"057f41","fillerReward":"3a34","quoteAssetAmountSurplus":"030e3d","oraclePrice":"53cf7d9740","txSig":"4LrN1mMPEeoogDtN7dfTcY3gADK4rxWq45Gwegd4GeLtBRXv1E1xRsNGKQ1bc87jR7uhLi1m9TN77ysSXJdZRUjt","eventType":"OrderRecord"
+		{"ts":"62e3091b","slot":151185608,"taker":"tktkRu1DM5cioU8JMyBQvXud2ENayz2mbbU1idUqTmn","maker":"DJwD8T2TKev7asmcvPyU9BUhTsjH5yZYEwoKDoHHcicu","takerOrder":{"status":{"open":{}},"orderType":{"market":{}},"ts":"62e3091a","slot":"0902e8c5","orderId":"02","userOrderId":0,"marketIndex":"00","price":"65653a0c80","existingPositionDirection":{"long":{}},"baseAssetAmount":"0c8d10191000","baseAssetAmountFilled":"0646880c8800","quoteAssetAmountFilled":"01c0ae02","fee":"72dc","direction":{"long":{}},"reduceOnly":false,"postOnly":false,"immediateOrCancel":false,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"6338ccb08c","auctionEndPrice":"65653a0c80","auctionDuration":10,"padding":[0,0,0]},"makerOrder":{"status":{"filled":{}},"orderType":{"limit":{}},"ts":"62e3091b","slot":"0902e8c8","orderId":"05","userOrderId":0,"marketIndex":"00","price":"6338ccb08c","existingPositionDirection":{"short":{}},"baseAssetAmount":"0646880c8800","baseAssetAmountFilled":"0646880c8800","quoteAssetAmountFilled":"01c0ae02","fee":"-44ea","direction":{"short":{}},"reduceOnly":false,"postOnly":true,"immediateOrCancel":true,"discountTier":{"none":{}},"triggerPrice":"00","triggerCondition":{"above":{}},"triggered":false,"referrer":"11111111111111111111111111111111","oraclePriceOffset":"00","auctionStartPrice":"00","auctionEndPrice":"00","auctionDuration":10,"padding":[0,0,0]},"makerUnsettledPnl":"44ea","takerUnsettledPnl":"-72dc","action":{"fill":{}},"actionExplanation":{"none":{}},"filler":"DJwD8T2TKev7asmcvPyU9BUhTsjH5yZYEwoKDoHHcicu","fillRecordId":"08","marketIndex":"00","baseAssetAmountFilled":"0646880c8800","quoteAssetAmountFilled":"01c0ae02","makerRebate":"44ea","takerFee":"72dc","fillerReward":"00","quoteAssetAmountSurplus":"00","oraclePrice":"64d112cd80","txSig":"5QyEApbEuZsuZebciVMwVvCEkb4neLQHrqkQ97QKVL1f9cqW7Z28SxMzos8EQ19xsLqK4Nsxk4XhW2i8JR3DU6jY","eventType":"OrderRecord"}
 		*/
 		logger.info(`Received an order record ${JSON.stringify(record)}`);
 
 		dlob.applyOrderRecord(record);
 		await userMap.updateWithOrder(record);
-
-		dlob.printTopOfOrderLists(
-			sdkConfig,
-			clearingHouse,
-			slotSubscriber,
-			record.marketIndex
-		);
 
 		Promise.all(bots.map((bot) => bot.trigger()));
 	};
@@ -350,6 +397,20 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			logger.info(`order record event type ${event.eventType}`);
 		}
 	});
+
+	if (opts.printInfo) {
+		setInterval(() => {
+			for (const m of DevnetMarkets) {
+				dlob.printTopOfOrderLists(
+					sdkConfig,
+					clearingHouse,
+					slotSubscriber,
+					m.marketIndex
+				);
+			}
+			printOpenPositions(clearingHouseUser);
+		}, 5000);
+	}
 };
 
 async function recursiveTryCatch(f: () => void) {

@@ -1,16 +1,15 @@
 import {
+	BN,
 	isVariant,
-	isOracleValid,
 	ClearingHouse,
 	MarketAccount,
 	SlotSubscriber,
-	calculateAskPrice,
-	calculateBidPrice,
-	calculateBaseAssetAmountMarketCanExecute,
 	PositionDirection,
 	OrderType,
 	BASE_PRECISION,
+	QUOTE_PRECISION,
 	convertToNumber,
+	MARGIN_PRECISION,
 } from '@drift-labs/sdk';
 
 import { getErrorCode } from '../error';
@@ -18,7 +17,6 @@ import { logger } from '../logger';
 import { DLOB } from '../dlob/DLOB';
 import { UserMap } from '../userMap';
 import { Bot } from '../types';
-import { BN } from 'bn.js';
 
 export class JitMakerBot implements Bot {
 	public readonly name: string;
@@ -73,26 +71,6 @@ export class JitMakerBot implements Bot {
 		this.perMarketMutexFills[marketIndex.toNumber()] = 1;
 
 		try {
-			// const oraclePriceData =
-			// 	this.clearingHouse.getOracleDataForMarket(marketIndex);
-			// const oracleIsValid = isOracleValid(
-			// 	market.amm,
-			// 	oraclePriceData,
-			// 	this.clearingHouse.getStateAccount().oracleGuardRails,
-			// 	this.slotSubscriber.getSlot()
-			// );
-
-			// const vAsk = calculateAskPrice(market, oraclePriceData);
-			// const vBid = calculateBidPrice(market, oraclePriceData);
-
-			// TODO: don't need crossing nodes? just jit auction nodes
-			// const nodesToFill = this.dlob.findNodesToFill(
-			// 	marketIndex,
-			// 	vBid,
-			// 	vAsk,
-			// 	this.slotSubscriber.getSlot(),
-			// 	oracleIsValid ? oraclePriceData : undefined
-			// );
 			const nodesToFill = this.dlob.findJitAuctionNodesToFill(
 				marketIndex,
 				this.slotSubscriber.getSlot()
@@ -114,32 +92,6 @@ export class JitMakerBot implements Bot {
 					continue;
 				}
 
-				// not maker and (limit order OR triggerLimit)
-				/*
-				if (
-					!nodeToFill.makerNode &&
-					(isVariant(nodeToFill.node.order.orderType, 'limit') ||
-						isVariant(nodeToFill.node.order.orderType, 'triggerLimit'))
-				) {
-					const baseAssetAmountMarketCanExecute =
-						calculateBaseAssetAmountMarketCanExecute(
-							market,
-							nodeToFill.node.order,
-							oraclePriceData
-						);
-
-					if (
-						baseAssetAmountMarketCanExecute.lt(
-							market.amm.baseAssetAmountStepSize
-						)
-					) {
-						continue;
-					}
-				}
-                */
-
-				// calc base amt to fill
-
 				nodeToFill.node.haveFilled = true;
 
 				logger.info(
@@ -152,30 +104,17 @@ export class JitMakerBot implements Bot {
 					);
 				}
 
-				// let makerInfo;
-				// if (nodeToFill.makerNode) {
-				// 	makerInfo = {
-				// 		maker: nodeToFill.makerNode.userAccount,
-				// 		order: nodeToFill.makerNode.order,
-				// 	};
-				// }
-
+				// calculate jit maker order params
 				const orderDirection = nodeToFill.node.order.direction;
 				const jitMakerDirection = isVariant(orderDirection, 'long')
 					? PositionDirection.SHORT
 					: PositionDirection.LONG;
-				let jitMakerBaseAssetAmount = nodeToFill.node.order.baseAssetAmount.div(
-					new BN(2)
-				);
-
-				// wtf?
-				// [2022-07-27T06:55:44.424Z] info: JIT maker oh the steps: 2500000000000 -> 2949303843810296357342915458947350528
-				// if (jitMakerBaseAssetAmount.lt(market.amm.baseAssetAmountStepSize)) {
-				//     logger.info(
-				//         `JIT maker oh the steps: ${jitMakerBaseAssetAmount.toString()} -> ${market.amm.baseAssetAmountStepSize}`
-				//     )
-				//     jitMakerBaseAssetAmount = market.amm.baseAssetAmountStepSize;
-				// }
+				const jitMakerBaseAssetAmount =
+					nodeToFill.node.order.baseAssetAmount.div(new BN(2));
+				const jitMakerPrice = nodeToFill.node.order.auctionStartPrice;
+				const tsNow = new BN(new Date().getTime() / 1000);
+				const orderTs = new BN(nodeToFill.node.order.ts);
+				const aucDur = new BN(nodeToFill.node.order.auctionDuration);
 
 				logger.info(
 					`JIT maker filling ${JSON.stringify(
@@ -183,21 +122,48 @@ export class JitMakerBot implements Bot {
 					)}: ${convertToNumber(
 						jitMakerBaseAssetAmount,
 						BASE_PRECISION
+					).toFixed(4)}, limit price: ${convertToNumber(
+						jitMakerPrice,
+						MARGIN_PRECISION
+					).toFixed(4)}, it has been ${tsNow
+						.sub(orderTs)
+						.toNumber()}s since order placed, auction ends in ${orderTs
+						.add(aucDur)
+						.sub(tsNow)
+						.toNumber()}s`
+				);
+				const orderAucStart = nodeToFill.node.order.auctionStartPrice;
+				const orderAucEnd = nodeToFill.node.order.auctionEndPrice;
+				logger.info(
+					`original order aucStartPrice: ${convertToNumber(
+						orderAucStart,
+						QUOTE_PRECISION
+					).toFixed(4)}, aucEndPrice: ${convertToNumber(
+						orderAucEnd,
+						QUOTE_PRECISION
 					).toFixed(4)}`
 				);
 
-				// const user = this.userMap.get(nodeToFill.node.userAccount.toString());
-				console.log('>>>>>');
-				console.log(`taker: ${nodeToFill.node.userAccount.toString()}`);
-				console.log(`order: ${JSON.stringify(nodeToFill.node.order)}`);
-				console.log('>>>>>');
+				console.log('========');
+				const m = nodeToFill.node.market;
+				logger.info(`market base asset reserve:  ${m.amm.baseAssetReserve}`);
+				logger.info(`market base spread:         ${m.amm.baseSpread}`);
+				logger.info(`market quote asset reserve: ${m.amm.quoteAssetReserve}`);
+				logger.info(`amm max spread:   ${m.amm.maxSpread}`);
+				logger.info(`amm long spread:  ${m.amm.longSpread}`);
+				logger.info(`amm short spread: ${m.amm.shortSpread}`);
+				console.log('========');
+
 				await this.clearingHouse
 					.placeAndMake(
 						{
-							orderType: OrderType.MARKET,
-							marketIndex: nodeToFill.node.marketAccount.marketIndex,
+							orderType: OrderType.LIMIT,
+							marketIndex: nodeToFill.node.order.marketIndex,
 							baseAssetAmount: jitMakerBaseAssetAmount,
 							direction: jitMakerDirection,
+							price: jitMakerPrice,
+							postOnly: true,
+							immediateOrCancel: true,
 						},
 						{
 							taker: nodeToFill.node.userAccount,
@@ -229,11 +195,9 @@ export class JitMakerBot implements Bot {
 									);
 								}
 							);
-							// dlob.printTopOfOrderLists(this.clearingHouse, nodeToFill.node.order.marketIndex);
 						}
 						logger.error(`Error code: ${errorCode}`);
-						logger.error(error.logs);
-						logger.error(error);
+						console.error(error);
 					});
 			}
 		} catch (e) {
