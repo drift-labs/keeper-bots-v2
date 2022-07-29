@@ -9,7 +9,6 @@ import {
 	OrderRecord,
 	BASE_PRECISION,
 	convertToNumber,
-	MARGIN_PRECISION,
 	MARK_PRICE_PRECISION,
 } from '@drift-labs/sdk';
 
@@ -143,7 +142,7 @@ export class JitMakerBot implements Bot {
 				const jitMakerBaseAssetAmount = nodeToFill.node.order.baseAssetAmount
 					.sub(nodeToFill.node.order.baseAssetAmountFilled)
 					.div(new BN(2));
-				const jitMakerPrice = nodeToFill.node.order.auctionEndPrice;
+				const jitMakerPrice = nodeToFill.node.order.auctionStartPrice;
 				const tsNow = new BN(new Date().getTime() / 1000);
 				const orderTs = new BN(nodeToFill.node.order.ts);
 				const aucDur = new BN(nodeToFill.node.order.auctionDuration);
@@ -156,7 +155,7 @@ export class JitMakerBot implements Bot {
 						BASE_PRECISION
 					).toFixed(4)}, limit price: ${convertToNumber(
 						jitMakerPrice,
-						MARGIN_PRECISION
+						MARK_PRICE_PRECISION
 					).toFixed(4)}, it has been ${tsNow
 						.sub(orderTs)
 						.toNumber()}s since order placed, auction ends in ${orderTs
