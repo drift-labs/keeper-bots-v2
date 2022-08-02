@@ -231,7 +231,8 @@ export class DLOB {
 				slot
 			);
 
-			if (crossingNodes) {
+			// Verify that each side is different user
+			if (crossingNodes && !crossingNodes.node.userAccount.equals(crossingNodes.makerNode.userAccount)) {
 				nodesToFill.push(crossingNodes);
 				if (nodesToFill.length === 10) {
 					break;
