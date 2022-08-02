@@ -94,7 +94,7 @@ export class DLOB {
 		userAccount: PublicKey,
 		onInsert?: OrderBookCallback
 	): void {
-		if (isVariant(order, 'init')) {
+		if (isVariant(order.status, 'init')) {
 			return;
 		}
 

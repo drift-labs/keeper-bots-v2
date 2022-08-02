@@ -15,7 +15,7 @@ export interface Bot {
 	/**
 	 * Initialize the bot
 	 */
-	init: () => void;
+	init: () => Promise<void>;
 
 	/**
 	 * Reset the bot. This is called to reset the bot to a fresh state (pre-init).

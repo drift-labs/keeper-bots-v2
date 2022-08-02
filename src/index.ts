@@ -360,7 +360,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	}
 
 	for (const bot of bots) {
-		bot.init();
+		await bot.init();
 	}
 
 	for (const bot of bots) {
@@ -411,7 +411,7 @@ async function recursiveTryCatch(f: () => void) {
 		console.error(e);
 		for (const bot of bots) {
 			bot.reset();
-			bot.init();
+			await bot.init();
 		}
 		await sleep(15000);
 		await recursiveTryCatch(f);
