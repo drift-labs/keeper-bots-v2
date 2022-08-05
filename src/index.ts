@@ -402,6 +402,14 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			printOpenPositions(clearingHouseUser);
 		}, 60000);
 	}
+
+	// reset the bots every 15 minutes, it looks like it holds onto stale DLOB orders :shrug:
+	setInterval(async () => {
+		for await (const bot of bots) {
+			bot.reset();
+			await bot.init();
+		}
+	}, 15 * 60 * 1000);
 };
 
 async function recursiveTryCatch(f: () => void) {

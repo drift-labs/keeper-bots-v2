@@ -67,6 +67,8 @@ export class FillerBot implements Bot {
 			clearInterval(intervalId);
 		}
 		this.intervalIds = [];
+		delete this.dlob;
+		delete this.userMap;
 	}
 
 	public startIntervalLoop(intervalMs: number): void {
