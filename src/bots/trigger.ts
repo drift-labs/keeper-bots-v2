@@ -31,13 +31,15 @@ export class TriggerBot implements Bot {
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
-		connection: Connection
+		connection: Connection,
+		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
 		this.connection = connection;
+		this.metrics = metrics;
 	}
 
 	public async init() {
@@ -131,7 +133,7 @@ export class TriggerBot implements Bot {
 					})
 					.catch((error) => {
 						const errorCode = getErrorCode(error);
-						this.metrics.recordErrorCode(
+						this?.metrics.recordErrorCode(
 							errorCode,
 							this.clearingHouse.provider.wallet.publicKey,
 							this.name

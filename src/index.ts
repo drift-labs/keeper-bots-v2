@@ -352,7 +352,8 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				connection
+				connection,
+				metrics
 			)
 		);
 	}
@@ -363,7 +364,8 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				connection
+				connection,
+				metrics
 			)
 		);
 	}
@@ -374,7 +376,8 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				connection
+				connection,
+				metrics
 			)
 		);
 	}

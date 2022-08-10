@@ -38,13 +38,15 @@ export class JitMakerBot implements Bot {
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
-		connection: Connection
+		connection: Connection,
+		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
 		this.connection = connection;
+		this.metrics = metrics;
 	}
 
 	public async init() {
@@ -228,7 +230,7 @@ export class JitMakerBot implements Bot {
 						// have received the history record yet
 						// TODO this might not hold if events arrive out of order
 						const errorCode = getErrorCode(error);
-						this.metrics.recordErrorCode(
+						this?.metrics.recordErrorCode(
 							errorCode,
 							this.clearingHouse.provider.wallet.publicKey,
 							this.name
