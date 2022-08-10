@@ -17,6 +17,7 @@ import { logger } from '../logger';
 import { DLOB } from '../dlob/DLOB';
 import { UserMap } from '../userMap';
 import { Bot } from '../types';
+import { Metrics } from '../metrics';
 
 export class FillerBot implements Bot {
 	public readonly name: string;
@@ -28,19 +29,22 @@ export class FillerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private connection: Connection;
+	private metrics: Metrics | undefined;
 
 	constructor(
 		name: string,
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
-		connection: Connection
+		connection: Connection,
+		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
 		this.connection = connection;
+		this.metrics = metrics;
 	}
 
 	public async init() {
@@ -190,6 +194,12 @@ export class FillerBot implements Bot {
 						// have received the history record yet
 						// TODO this might not hold if events arrive out of order
 						const errorCode = getErrorCode(error);
+						this.metrics.recordErrorCode(
+							errorCode,
+							this.clearingHouse.provider.wallet.publicKey,
+							this.name
+						);
+
 						if (errorCode === 6043) {
 							this.dlob.remove(
 								nodeToFill.node.order,

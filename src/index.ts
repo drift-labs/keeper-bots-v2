@@ -32,6 +32,7 @@ import { FillerBot } from './bots/filler';
 import { TriggerBot } from './bots/trigger';
 import { JitMakerBot } from './bots/jitMaker';
 import { Bot } from './types';
+import { Metrics } from './metrics';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
@@ -52,6 +53,10 @@ program
 	.option(
 		'--deposit <number>',
 		'Allow deposit this amount of USDC to collateral account'
+	)
+	.option(
+		'--metrics', // TODO: allow custom url and port
+		'Enable Prometheus metric scraper'
 	)
 	.addOption(
 		new Option(
@@ -200,7 +205,13 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 				QUOTE_PRECISION
 			).toString()}`
 		);
-		console.log(` . lastCumulativeFundingRate: ${p.lastCumulativeFundingRate}`);
+		// console.log(` . lastCumulativeFundingRate: ${p.lastCumulativeFundingRate}`);
+		console.log(
+			` . lastCumulativeFundingRate: ${convertToNumber(
+				p.lastCumulativeFundingRate,
+				new BN(10).pow(new BN(14))
+			)}`
+		);
 		console.log(
 			` . openOrders: ${p.openOrders.toString()}, openBids: ${p.openBids.toString()}, openAsks: ${p.openAsks.toString()}`
 		);
@@ -263,6 +274,15 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 			.getUserAccountPublicKey()
 			.toBase58()}`
 	);
+
+	let metrics: Metrics | undefined = undefined;
+	if (opts.metrics) {
+		metrics = new Metrics(clearingHouse);
+		await metrics.init();
+		metrics.trackObjectSize('clearingHouse', clearingHouse);
+		metrics.trackObjectSize('clearingHouseUser', clearingHouseUser);
+		metrics.trackObjectSize('eventSubscriber', eventSubscriber);
+	}
 
 	printUserAccountStats(clearingHouseUser);
 
@@ -389,14 +409,18 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	if (opts.printInfo) {
 		setInterval(() => {
 			for (const m of DevnetMarkets) {
-				bots[0]
-					.viewDlob()
-					.printTopOfOrderLists(
+				if (bots.length === 0) {
+					break;
+				}
+				const dlob = bots[0].viewDlob();
+				if (dlob) {
+					dlob.printTopOfOrderLists(
 						sdkConfig,
 						clearingHouse,
 						slotSubscriber,
 						m.marketIndex
 					);
+				}
 			}
 			printUserAccountStats(clearingHouseUser);
 			printOpenPositions(clearingHouseUser);

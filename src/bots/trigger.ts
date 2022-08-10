@@ -11,6 +11,8 @@ import { logger } from '../logger';
 import { DLOB } from '../dlob/DLOB';
 import { UserMap } from '../userMap';
 import { Bot } from '../types';
+import { getErrorCode } from '../error';
+import { Metrics } from '../metrics';
 
 export class TriggerBot implements Bot {
 	public readonly name: string;
@@ -22,6 +24,7 @@ export class TriggerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private connection: Connection;
+	private metrics: Metrics | undefined;
 
 	constructor(
 		name: string,
@@ -127,6 +130,13 @@ export class TriggerBot implements Bot {
 						logger.info(`Tx: ${txSig}`);
 					})
 					.catch((error) => {
+						const errorCode = getErrorCode(error);
+						this.metrics.recordErrorCode(
+							errorCode,
+							this.clearingHouse.provider.wallet.publicKey,
+							this.name
+						);
+
 						nodeToTrigger.node.haveTrigger = false;
 						logger.error(
 							`Error triggering user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
