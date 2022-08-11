@@ -198,13 +198,13 @@ export class FillerBot implements Bot {
 						// have received the history record yet
 						// TODO this might not hold if events arrive out of order
 						const errorCode = getErrorCode(error);
-						this?.metrics.recordErrorCode(
+						this.metrics?.recordErrorCode(
 							errorCode,
 							this.clearingHouse.provider.wallet.publicKey,
 							this.name
 						);
 
-						if (errorCode === 6043) {
+						if (errorCode === 6042) {
 							this.dlob.remove(
 								nodeToFill.node.order,
 								nodeToFill.node.userAccount,
