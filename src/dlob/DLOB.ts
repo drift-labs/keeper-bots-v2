@@ -211,8 +211,8 @@ export class DLOB {
 		vAsk: BN,
 		slot: number,
 		oraclePriceData?: OraclePriceData
-	): CrossedNodesToFill[] {
-		const nodesToFill = new Array<CrossedNodesToFill>();
+	): NodeToFill[] {
+		const nodesToFill = new Array<NodeToFill>();
 
 		const askGenerator = this.getAsks(marketIndex, vAsk, slot, oraclePriceData);
 		const bidGenerator = this.getBids(marketIndex, vBid, slot, oraclePriceData);
@@ -231,12 +231,13 @@ export class DLOB {
 				slot
 			);
 
+			const takerIsMaker = crossingNodes?.makerNode !== undefined && crossingNodes.node.userAccount.equals(
+				crossingNodes.makerNode.userAccount
+			);
+
 			// Verify that each side is different user
 			if (
-				crossingNodes &&
-				!crossingNodes.node.userAccount.equals(
-					crossingNodes.makerNode.userAccount
-				)
+				crossingNodes && !takerIsMaker
 			) {
 				nodesToFill.push(crossingNodes);
 				if (nodesToFill.length === 10) {
@@ -432,7 +433,7 @@ export class DLOB {
 		oraclePriceData: OraclePriceData,
 		slot: number
 	): {
-		crossingNodes?: CrossedNodesToFill;
+		crossingNodes?: NodeToFill;
 		crossingSide?: Side;
 	} {
 		const bidPrice = bidNode.getPrice(oraclePriceData, slot);
@@ -446,6 +447,9 @@ export class DLOB {
 		// Cant match orders
 		if (askNode.isVammNode()) {
 			return {
+				crossingNodes: {
+					node: bidNode,
+				},
 				crossingSide: 'bid',
 			};
 		}
@@ -454,6 +458,9 @@ export class DLOB {
 		// Cant match orders
 		if (bidNode.isVammNode()) {
 			return {
+				crossingNodes: {
+					node: askNode,
+				},
 				crossingSide: 'ask',
 			};
 		}
