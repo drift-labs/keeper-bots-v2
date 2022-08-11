@@ -118,7 +118,7 @@ const clearingHouse = new ClearingHouse({
 });
 
 const eventSubscriber = new EventSubscriber(connection, clearingHouse.program, {
-	maxTx: 8192,
+	maxTx: 4096,
 	maxEventsPerType: 4096,
 	orderBy: 'blockchain',
 	orderDir: 'desc',
