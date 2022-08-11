@@ -427,7 +427,6 @@ export class Metrics {
 					// iterate over all tracked objects, name and obj
 					// for (const [name, obj] of Object.entries(this.objectsToTrackSize)) {
 					for (const o of this.objectsToTrackSize) {
-						console.log(`n: ${o.name}, o: ${o.object}`);
 						observableResult.observe(sizeof(o.object), {
 							object: o.name,
 							userPubKey: this.authority.toBase58(),
@@ -518,7 +517,7 @@ export class Metrics {
 			for (let i = 0; i < DevnetMarkets.length; i++) {
 				let foundPositionInMarket = false;
 				chUser.getUserAccount().positions.forEach((p: UserPosition) => {
-					if (p.marketIndex.toNumber() === i) {
+					if (!foundPositionInMarket && p.marketIndex.toNumber() === i) {
 						foundPositionInMarket = true;
 						this.openPositionPerMarket[p.marketIndex.toNumber()] = p;
 					}
