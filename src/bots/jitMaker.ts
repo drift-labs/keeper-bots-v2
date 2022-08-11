@@ -214,6 +214,10 @@ export class JitMakerBot implements Bot {
 						}
 					)
 					.then((txSig) => {
+						this.metrics.recordFilledOrder(
+							this.clearingHouse.provider.wallet.publicKey,
+							this.name
+						);
 						logger.info(
 							`${
 								this.name

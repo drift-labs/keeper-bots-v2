@@ -88,6 +88,7 @@ export class Metrics {
 	private chUserMaintenanceMarginRequirementGauge: ObservableGauge;
 
 	private errorsCounter: Counter;
+	private filledOrdersCounter: Counter;
 
 	private clearingHouse: ClearingHouse;
 	private authority: PublicKey;
@@ -439,6 +440,10 @@ export class Metrics {
 		this.errorsCounter = this.meter.createCounter('errors', {
 			description: 'ClearingHouse error counter',
 		});
+
+		this.filledOrdersCounter = this.meter.createCounter('filled_orders', {
+			description: 'Count of orders successfully filled',
+		});
 	}
 
 	async init() {
@@ -455,9 +460,15 @@ export class Metrics {
 	}
 
 	recordErrorCode(errorCode: number, authority: PublicKey, bot: string) {
-		this.clearingHouse.getUserAccountPublicKey;
 		this.errorsCounter.add(1, {
 			errorCode: errorCode,
+			user: authority.toBase58(),
+			bot: bot,
+		});
+	}
+
+	recordFilledOrder(authority: PublicKey, bot: string) {
+		this.filledOrdersCounter.add(1, {
 			user: authority.toBase58(),
 			bot: bot,
 		});
