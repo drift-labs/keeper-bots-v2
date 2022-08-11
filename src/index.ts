@@ -124,7 +124,8 @@ const eventSubscriber = new EventSubscriber(connection, clearingHouse.program, {
 	orderDir: 'desc',
 	commitment: 'confirmed',
 	logProviderConfig: {
-		type: 'websocket',
+		type: 'polling',
+		frequency: 1000,
 	},
 });
 
