@@ -118,8 +118,8 @@ const clearingHouse = new ClearingHouse({
 });
 
 const eventSubscriber = new EventSubscriber(connection, clearingHouse.program, {
-	maxTx: 4096,
-	maxEventsPerType: 4096,
+	maxTx: 8192,
+	maxEventsPerType: 8192,
 	orderBy: 'blockchain',
 	orderDir: 'desc',
 	commitment: 'confirmed',
@@ -388,7 +388,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 	}
 
 	for (const bot of bots) {
-		bot.startIntervalLoop(200);
+		bot.startIntervalLoop(1000);
 	}
 
 	const handleOrderRecord = async (record: OrderRecord) => {
@@ -404,6 +404,7 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 	eventSubscriber.eventEmitter.on('newEvent', (event) => {
 		if (event.eventType === 'OrderRecord') {
+			console.log('yaws');
 			handleOrderRecord(event as OrderRecord);
 		} else {
 			logger.info(`order record event type ${event.eventType}`);
@@ -436,6 +437,9 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 		for await (const bot of bots) {
 			bot.reset();
 			await bot.init();
+		}
+		for (const bot of bots) {
+			bot.startIntervalLoop(1000);
 		}
 	}, 15 * 60 * 1000);
 };
