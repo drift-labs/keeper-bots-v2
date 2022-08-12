@@ -100,37 +100,6 @@ export function getWallet(): Wallet {
 const endpoint = process.env.ENDPOINT;
 const connection = new Connection(endpoint);
 
-const wallet = getWallet();
-const clearingHousePublicKey = new PublicKey(
-	sdkConfig.CLEARING_HOUSE_PROGRAM_ID
-);
-
-const bulkAccountLoader = new BulkAccountLoader(connection, 'confirmed', 500);
-const clearingHouse = new ClearingHouse({
-	connection,
-	wallet,
-	programID: clearingHousePublicKey,
-	accountSubscription: {
-		type: 'polling',
-		accountLoader: bulkAccountLoader,
-	},
-	env: driftEnv,
-});
-
-const eventSubscriber = new EventSubscriber(connection, clearingHouse.program, {
-	maxTx: 8192,
-	maxEventsPerType: 8192,
-	orderBy: 'blockchain',
-	orderDir: 'desc',
-	commitment: 'confirmed',
-	logProviderConfig: {
-		type: 'polling',
-		frequency: 1000,
-	},
-});
-
-const slotSubscriber = new SlotSubscriber(connection, {});
-
 function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -220,7 +189,42 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 }
 
 const bots: Bot[] = [];
-const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
+const runBot = async () => {
+	const wallet = getWallet();
+	const clearingHousePublicKey = new PublicKey(
+		sdkConfig.CLEARING_HOUSE_PROGRAM_ID
+	);
+
+	const bulkAccountLoader = new BulkAccountLoader(connection, 'confirmed', 500);
+	const clearingHouse = new ClearingHouse({
+		connection,
+		wallet,
+		programID: clearingHousePublicKey,
+		accountSubscription: {
+			type: 'polling',
+			accountLoader: bulkAccountLoader,
+		},
+		env: driftEnv,
+	});
+
+	const eventSubscriber = new EventSubscriber(
+		connection,
+		clearingHouse.program,
+		{
+			maxTx: 8192,
+			maxEventsPerType: 8192,
+			orderBy: 'blockchain',
+			orderDir: 'desc',
+			commitment: 'confirmed',
+			logProviderConfig: {
+				type: 'polling',
+				frequency: 1000,
+			},
+		}
+	);
+
+	const slotSubscriber = new SlotSubscriber(connection, {});
+
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	logger.info(
 		`ClearingHouse ProgramId: ${clearingHouse.program.programId.toBase58()}`
@@ -404,7 +408,6 @@ const runBot = async (wallet: Wallet, clearingHouse: ClearingHouse) => {
 
 	eventSubscriber.eventEmitter.on('newEvent', (event) => {
 		if (event.eventType === 'OrderRecord') {
-			console.log('yaws');
 			handleOrderRecord(event as OrderRecord);
 		} else {
 			logger.info(`order record event type ${event.eventType}`);
@@ -458,4 +461,4 @@ async function recursiveTryCatch(f: () => void) {
 	}
 }
 
-recursiveTryCatch(() => runBot(wallet, clearingHouse));
+recursiveTryCatch(() => runBot());

@@ -47,11 +47,6 @@ export type NodeToFill = {
 	makerNode?: DLOBNode;
 };
 
-// maker node must be there for crossed nodes
-type CrossedNodesToFill = NodeToFill & {
-	makerNode: DLOBNode;
-};
-
 export type NodeToTrigger = {
 	node: TriggerOrderNode;
 };
@@ -231,14 +226,14 @@ export class DLOB {
 				slot
 			);
 
-			const takerIsMaker = crossingNodes?.makerNode !== undefined && crossingNodes.node.userAccount.equals(
-				crossingNodes.makerNode.userAccount
-			);
+			const takerIsMaker =
+				crossingNodes?.makerNode !== undefined &&
+				crossingNodes.node.userAccount.equals(
+					crossingNodes.makerNode.userAccount
+				);
 
 			// Verify that each side is different user
-			if (
-				crossingNodes && !takerIsMaker
-			) {
+			if (crossingNodes && !takerIsMaker) {
 				nodesToFill.push(crossingNodes);
 				if (nodesToFill.length === 10) {
 					break;
