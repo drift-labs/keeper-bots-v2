@@ -181,22 +181,6 @@ export class JitMakerBot implements Bot {
 					).toFixed(4)}`
 				);
 
-				console.log('========');
-				const m = nodeToFill.node.market;
-				logger.info(
-					`${this.name}: market base asset reserve:  ${m.amm.baseAssetReserve}`
-				);
-				logger.info(
-					`${this.name}: market base spread:         ${m.amm.baseSpread}`
-				);
-				logger.info(
-					`${this.name}: market quote asset reserve: ${m.amm.quoteAssetReserve}`
-				);
-				logger.info(`${this.name}: amm max spread:   ${m.amm.maxSpread}`);
-				logger.info(`${this.name}: amm long spread:  ${m.amm.longSpread}`);
-				logger.info(`${this.name}: amm short spread: ${m.amm.shortSpread}`);
-				console.log('========');
-
 				await this.clearingHouse
 					.placeAndMake(
 						{
@@ -251,8 +235,8 @@ export class JitMakerBot implements Bot {
 								}
 							);
 						}
-						logger.error(`Error code: ${errorCode}`);
-						console.error(error);
+						logger.error(`Error code while JIT making order: ${errorCode}`);
+						// console.error(error);
 					});
 			}
 		} catch (e) {
@@ -261,7 +245,7 @@ export class JitMakerBot implements Bot {
 					this.name
 				} Unexpected error for market ${marketIndex.toString()} during fills`
 			);
-			console.error(e);
+			// console.error(e);
 		} finally {
 			this.perMarketMutexFills[marketIndex.toNumber()] = 0;
 		}

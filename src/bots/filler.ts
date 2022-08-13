@@ -216,17 +216,17 @@ export class FillerBot implements Bot {
 							);
 							// dlob.printTopOfOrderLists(this.clearingHouse, nodeToFill.node.order.marketIndex);
 						}
-						logger.error(`Error code: ${errorCode}`);
-						console.error(error);
+						logger.error(`Error code while filling order: ${errorCode}`);
+						// console.error(error);
 					});
 			}
 		} catch (e) {
-			logger.info(
+			logger.error(
 				`${
 					this.name
 				} Unexpected error for market ${marketIndex.toString()} during fills`
 			);
-			console.error(e);
+			// console.error(e);
 		} finally {
 			this.perMarketMutexFills[marketIndex.toNumber()] = 0;
 		}
