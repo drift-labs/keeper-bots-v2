@@ -40,7 +40,7 @@
 		"start:all": "node lib/index.js --filler --trigger --metrics",
 		"dev:init": "ts-node src/index.ts --init-user --jit-maker --deposit 100000",
 		"dev:filler": "ts-node src/index.ts --filler --trigger",
-		"dev:jitmaker": "ts-node src/index.ts --init-user --jit-maker",
+		"dev:jitmaker": "ts-node src/index.ts --init-user --jit-maker --close-open-positions",
 		"dev:all": "ts-node src/index.ts --jit-maker --filler --trigger --metrics",
 		"dev:metrics": "ts-node src/index.ts --print-info --metrics",
 		"prettify": "prettier --check './src/**/*.ts'",
