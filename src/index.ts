@@ -50,6 +50,7 @@ program
 	.option('--jit-maker', 'Enable JIT auction maker')
 	.option('--print-info', 'Periodically print market and position info')
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
+	.option('--close-open-positions', 'close all open positions')
 	.option(
 		'--deposit <number>',
 		'Allow deposit this amount of USDC to collateral account'
@@ -291,6 +292,17 @@ const runBot = async () => {
 	}
 
 	printUserAccountStats(clearingHouseUser);
+	if (opts.closeOpenPositions) {
+		logger.info(`Closing open positions`);
+		for await (const p of clearingHouseUser.getUserAccount().positions) {
+			if (p.baseAssetAmount.isZero()) {
+				logger.info(`no position on market: ${p.marketIndex.toNumber()}`);
+				continue;
+			}
+			logger.info(`closing position on ${p.marketIndex.toNumber()}`);
+			logger.info(` . ${await clearingHouse.closePosition(p.marketIndex)}`);
+		}
+	}
 
 	// check that user has collateral
 	const totalCollateral = clearingHouseUser.getCollateralValue();
@@ -407,9 +419,9 @@ const runBot = async () => {
 		Promise.all(bots.map((bot) => bot.trigger(record)));
 	};
 
-	eventSubscriber.eventEmitter.on('newEvent', (event) => {
+	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
 		if (event.eventType === 'OrderRecord') {
-			handleOrderRecord(event as OrderRecord);
+			await handleOrderRecord(event as OrderRecord);
 		} else {
 			logger.info(`order record event type ${event.eventType}`);
 		}
@@ -423,6 +435,7 @@ const runBot = async () => {
 				}
 				const dlob = bots[0].viewDlob();
 				if (dlob) {
+					metrics.trackObjectSize('dlob', dlob);
 					dlob.printTopOfOrderLists(
 						sdkConfig,
 						clearingHouse,
