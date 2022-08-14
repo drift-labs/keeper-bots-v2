@@ -98,7 +98,6 @@ export function getWallet(): Wallet {
 }
 
 const endpoint = process.env.ENDPOINT;
-const connection = new Connection(endpoint);
 
 function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -194,6 +193,8 @@ const runBot = async () => {
 	const clearingHousePublicKey = new PublicKey(
 		sdkConfig.CLEARING_HOUSE_PROGRAM_ID
 	);
+
+	const connection = new Connection(endpoint);
 
 	const bulkAccountLoader = new BulkAccountLoader(connection, 'confirmed', 500);
 	const clearingHouse = new ClearingHouse({
