@@ -197,7 +197,11 @@ const runBot = async () => {
 
 	const connection = new Connection(endpoint);
 
-	const bulkAccountLoader = new BulkAccountLoader(connection, 'confirmed', 500);
+	const bulkAccountLoader = new BulkAccountLoader(
+		connection,
+		'confirmed',
+		1000
+	);
 	const clearingHouse = new ClearingHouse({
 		connection,
 		wallet,
