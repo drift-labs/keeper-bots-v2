@@ -337,8 +337,21 @@ export class JitMakerBot implements Bot {
 			orderQuote = this.randomIntFromInterval(minOrderQuote, maxOrderQuote);
 		}
 
-		const jitAuctionBaseFillAmount = orderQuote / priceNumber;
-		return new BN(jitAuctionBaseFillAmount * BASE_PRECISION.toNumber());
+		const baseFillAmountNumber = orderQuote / priceNumber;
+		let baseFillAmountBN = new BN(
+			baseFillAmountNumber * BASE_PRECISION.toNumber()
+		);
+		logger.info(
+			`jitMaker want fill base amount: ${baseFillAmountBN.toString()}`
+		);
+		if (baseFillAmountBN.gt(orderBaseAmount)) {
+			baseFillAmountBN = orderBaseAmount;
+			logger.info(
+				`jitMaker will fill base amount: ${baseFillAmountBN.toString()}`
+			);
+		}
+
+		return baseFillAmountBN;
 	}
 
 	/**
