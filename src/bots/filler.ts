@@ -10,8 +10,6 @@ import {
 	calculateBaseAssetAmountMarketCanExecute,
 } from '@drift-labs/sdk';
 
-import { Connection } from '@solana/web3.js';
-
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { DLOB } from '../dlob/DLOB';
@@ -25,10 +23,9 @@ export class FillerBot implements Bot {
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
 	private dlob: DLOB;
-	private perMarketMutexFills: Array<number> = []; // TODO: use real mutex
+	private perMarketMutexFills = new Uint8Array(new SharedArrayBuffer(8));
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
-	private connection: Connection;
 	private metrics: Metrics | undefined;
 
 	constructor(
@@ -36,20 +33,18 @@ export class FillerBot implements Bot {
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
-		connection: Connection,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
-		this.connection = connection;
 		this.metrics = metrics;
 	}
 
 	public async init() {
 		// initialize DLOB instance
-		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts());
+		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
 		const programAccounts = await this.clearingHouse.program.account.user.all();
 		for (const programAccount of programAccounts) {
 			// @ts-ignore
@@ -62,7 +57,10 @@ export class FillerBot implements Bot {
 		}
 
 		// initialize userMap instance
-		this.userMap = new UserMap(this.connection, this.clearingHouse);
+		this.userMap = new UserMap(
+			this.clearingHouse.connection,
+			this.clearingHouse
+		);
 		await this.userMap.fetchAllUsers();
 	}
 
@@ -95,10 +93,17 @@ export class FillerBot implements Bot {
 
 	private async tryFillForMarket(market: MarketAccount) {
 		const marketIndex = market.marketIndex;
-		if (this.perMarketMutexFills[marketIndex.toNumber()] === 1) {
+
+		if (
+			Atomics.compareExchange(
+				this.perMarketMutexFills,
+				marketIndex.toNumber(),
+				0,
+				1
+			) === 1
+		) {
 			return;
 		}
-		this.perMarketMutexFills[marketIndex.toNumber()] = 1;
 
 		try {
 			const oraclePriceData =
@@ -190,9 +195,6 @@ export class FillerBot implements Bot {
 					})
 					.catch((error) => {
 						nodeToFill.node.haveFilled = false;
-						logger.error(
-							`Error filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
-						);
 
 						// If we get an error that order does not exist, assume its been filled by somebody else and we
 						// have received the history record yet
@@ -216,7 +218,9 @@ export class FillerBot implements Bot {
 							);
 							// dlob.printTopOfOrderLists(this.clearingHouse, nodeToFill.node.order.marketIndex);
 						}
-						logger.error(`Error code while filling order: ${errorCode}`);
+						logger.error(
+							`Error (${errorCode}) filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
+						);
 						// console.error(error);
 					});
 			}
@@ -228,7 +232,7 @@ export class FillerBot implements Bot {
 			);
 			// console.error(e);
 		} finally {
-			this.perMarketMutexFills[marketIndex.toNumber()] = 0;
+			Atomics.store(this.perMarketMutexFills, marketIndex.toNumber(), 0);
 		}
 	}
 

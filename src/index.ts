@@ -221,6 +221,7 @@ const runBot = async () => {
 			logProviderConfig: {
 				type: 'polling',
 				frequency: 1000,
+				// type: 'websocket',
 			},
 		}
 	);
@@ -370,7 +371,6 @@ const runBot = async () => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				connection,
 				metrics
 			)
 		);
@@ -382,7 +382,6 @@ const runBot = async () => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				connection,
 				metrics
 			)
 		);
@@ -394,7 +393,6 @@ const runBot = async () => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				connection,
 				metrics
 			)
 		);

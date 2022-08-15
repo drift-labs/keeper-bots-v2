@@ -57,8 +57,15 @@ export class DLOB {
 	openOrders = new Set<string>();
 	orderLists = new Map<number, MarketNodeLists>();
 	marketIndexToAccount = new Map<number, MarketAccount>();
+	silent = false;
 
-	public constructor(markets: MarketAccount[]) {
+	/**
+	 *
+	 * @param markets The markets to maintain a DLOB for
+	 * @param silent set to true to prevent logging on inserts and removals
+	 */
+	public constructor(markets: MarketAccount[], silent?: boolean) {
+		this.silent = silent;
 		for (const market of markets) {
 			const marketIndex = market.marketIndex;
 			this.marketIndexToAccount.set(marketIndex.toNumber(), market);
@@ -616,6 +623,9 @@ export class DLOB {
 	) {
 		if (isVariant(action, 'place')) {
 			this.insert(order, userAccount, () => {
+				if (this.silent) {
+					return;
+				}
 				logger.info(
 					`Order ${this.getOpenOrderId(
 						order,
@@ -625,6 +635,9 @@ export class DLOB {
 			});
 		} else if (isVariant(action, 'cancel')) {
 			this.remove(order, userAccount, () => {
+				if (this.silent) {
+					return;
+				}
 				logger.info(
 					`Order ${this.getOpenOrderId(
 						order,
@@ -634,6 +647,9 @@ export class DLOB {
 			});
 		} else if (isVariant(action, 'trigger')) {
 			this.trigger(order, userAccount, () => {
+				if (this.silent) {
+					return;
+				}
 				logger.info(
 					`Order ${this.getOpenOrderId(order, userAccount)} triggered`
 				);
@@ -641,6 +657,9 @@ export class DLOB {
 		} else if (isVariant(action, 'fill')) {
 			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
 				this.remove(order, userAccount, () => {
+					if (this.silent) {
+						return;
+					}
 					logger.info(
 						`Order ${this.getOpenOrderId(
 							order,
@@ -650,6 +669,9 @@ export class DLOB {
 				});
 			} else {
 				this.update(order, userAccount, () => {
+					if (this.silent) {
+						return;
+					}
 					logger.info(
 						`Order ${this.getOpenOrderId(
 							order,

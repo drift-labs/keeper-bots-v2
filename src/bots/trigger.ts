@@ -5,8 +5,6 @@ import {
 	SlotSubscriber,
 } from '@drift-labs/sdk';
 
-import { Connection } from '@solana/web3.js';
-
 import { logger } from '../logger';
 import { DLOB } from '../dlob/DLOB';
 import { UserMap } from '../userMap';
@@ -20,10 +18,9 @@ export class TriggerBot implements Bot {
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
 	private dlob: DLOB;
-	private perMarketMutexTriggers: Array<number> = []; // TODO: use real mutex
+	private perMarketMutexTriggers = new Uint8Array(new SharedArrayBuffer(8));
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
-	private connection: Connection;
 	private metrics: Metrics | undefined;
 
 	constructor(
@@ -31,20 +28,18 @@ export class TriggerBot implements Bot {
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
-		connection: Connection,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
-		this.connection = connection;
 		this.metrics = metrics;
 	}
 
 	public async init() {
 		// initialize DLOB instance
-		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts());
+		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
 		const programAccounts = await this.clearingHouse.program.account.user.all();
 		for (const programAccount of programAccounts) {
 			// @ts-ignore
@@ -57,7 +52,10 @@ export class TriggerBot implements Bot {
 		}
 
 		// initialize userMap instance
-		this.userMap = new UserMap(this.connection, this.clearingHouse);
+		this.userMap = new UserMap(
+			this.clearingHouse.connection,
+			this.clearingHouse
+		);
 		await this.userMap.fetchAllUsers();
 	}
 
@@ -90,10 +88,16 @@ export class TriggerBot implements Bot {
 
 	private async tryTriggerForMarket(market: MarketAccount) {
 		const marketIndex = market.marketIndex;
-		if (this.perMarketMutexTriggers[marketIndex.toNumber()] === 1) {
+		if (
+			Atomics.compareExchange(
+				this.perMarketMutexTriggers,
+				marketIndex.toNumber(),
+				0,
+				1
+			) === 1
+		) {
 			return;
 		}
-		this.perMarketMutexTriggers[marketIndex.toNumber()] = 1;
 
 		try {
 			const oraclePriceData =
@@ -141,7 +145,7 @@ export class TriggerBot implements Bot {
 
 						nodeToTrigger.node.haveTrigger = false;
 						logger.error(
-							`Error triggering user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+							`Error (${errorCode}) triggering user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.error(error);
 					});
@@ -152,7 +156,7 @@ export class TriggerBot implements Bot {
 			);
 			console.error(e);
 		} finally {
-			this.perMarketMutexTriggers[marketIndex.toNumber()] = 0;
+			Atomics.store(this.perMarketMutexTriggers, marketIndex.toNumber(), 0);
 		}
 	}
 
