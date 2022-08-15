@@ -63,7 +63,7 @@ program
 		new Option(
 			'-p, --private-key <string>',
 			'private key, supports path to id.json, or list of comma separate numbers'
-		).env('FILLER_PRIVATE_KEY')
+		).env('KEEPER_PRIVATE_KEY')
 	)
 	.parse();
 
@@ -74,10 +74,10 @@ logger.info(
 );
 
 export function getWallet(): Wallet {
-	const privateKey = process.env.FILLER_PRIVATE_KEY;
+	const privateKey = process.env.KEEPER_PRIVATE_KEY;
 	if (!privateKey) {
 		throw new Error(
-			'Must set environment variable FILLER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
+			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
 		);
 	}
 	// try to load privateKey as a filepath
@@ -277,14 +277,12 @@ const runBot = async () => {
 	// subscribe will fail if there is no clearing house user
 	const clearingHouseUser = clearingHouse.getUser();
 	while (
-		!clearingHouse.isSubscribed ||
-		!clearingHouseUser.isSubscribed ||
+		!(await clearingHouse.subscribe()) ||
+		!(await clearingHouseUser.subscribe()) ||
 		!eventSubscriber.subscribe()
 	) {
-		logger.info('not subscribed yet');
+		logger.info('waiting to subscribe to ClearingHouse and ClearingHouseUser');
 		await sleep(1000);
-		await clearingHouse.subscribe();
-		await clearingHouseUser.subscribe();
 	}
 	logger.info(
 		`ClearingHouseUser PublicKey: ${clearingHouseUser

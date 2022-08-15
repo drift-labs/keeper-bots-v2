@@ -5,7 +5,7 @@ cp .env.example .env
 
 Update values in `.env` accordingly
 
-Make sure the private key you choose for FILLER_PRIVATE_KEY as a user account initialized with drift clearing house
+Make sure the private key you choose for KEEPER_PRIVATE_KEY as a user account initialized with drift clearing house
 
 ### Build Node Server
 ```shell
