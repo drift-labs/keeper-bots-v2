@@ -105,13 +105,14 @@ function sleep(ms) {
 }
 
 function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
-	const totalCollateral = clearingHouseUser.getCollateralValue();
+	const freeCollateral = clearingHouseUser.getFreeCollateral();
 	logger.info(
-		`User total collateral: $${convertToNumber(
-			totalCollateral,
+		`User free collateral: $${convertToNumber(
+			freeCollateral,
 			QUOTE_PRECISION
 		)}:`
 	);
+	/*
 	for (let i = 0; i < DevnetBanks.length; i += 1) {
 		const bank = DevnetBanks[i];
 		const collateral = clearingHouseUser.getCollateralValue(bank.bankIndex);
@@ -122,13 +123,14 @@ function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
 			)}`
 		);
 	}
-
 	logger.info(
 		`CHUser unsettled PnL:          ${convertToNumber(
 			clearingHouseUser.getUnsettledPNL(),
 			QUOTE_PRECISION
 		)}`
 	);
+	*/
+
 	logger.info(
 		`CHUser unrealized funding PnL: ${convertToNumber(
 			clearingHouseUser.getUnrealizedFundingPNL(),
@@ -169,13 +171,16 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 				QUOTE_PRECISION
 			).toString()}`
 		);
+		/*
 		console.log(
 			` . unsettledPnl:     ${convertToNumber(
 				p.unsettledPnl,
 				QUOTE_PRECISION
 			).toString()}`
 		);
+		*/
 		// console.log(` . lastCumulativeFundingRate: ${p.lastCumulativeFundingRate}`);
+
 		console.log(
 			` . lastCumulativeFundingRate: ${convertToNumber(
 				p.lastCumulativeFundingRate,
@@ -310,8 +315,8 @@ const runBot = async () => {
 	}
 
 	// check that user has collateral
-	const totalCollateral = clearingHouseUser.getCollateralValue();
-	if (totalCollateral.isZero() && opts.jitMaker) {
+	const freeCollateral = clearingHouseUser.getFreeCollateral();
+	if (freeCollateral.isZero() && opts.jitMaker) {
 		logger.info(
 			`No collateral in account, collateral is required to run JitMakerBot`
 		);

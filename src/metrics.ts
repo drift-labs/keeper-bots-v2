@@ -17,7 +17,6 @@ import {
 	BASE_PRECISION,
 	QUOTE_PRECISION,
 	PublicKey,
-	DevnetBanks,
 	DevnetMarkets,
 	UserPosition,
 } from '@drift-labs/sdk';
@@ -40,9 +39,9 @@ export class Metrics {
 	private bootTimeMs: number;
 	private upTimeGauge: ObservableGauge;
 
-	private collateralValueLock = new Mutex();
-	private collateralValuePerBank: Array<number>;
-	private collateralValueGauge: ObservableGauge;
+	// private collateralValueLock = new Mutex();
+	// private collateralValuePerBank: Array<number>;
+	// private collateralValueGauge: ObservableGauge;
 
 	private solBalanceLock = new Mutex();
 	private solBalance: number;
@@ -75,9 +74,9 @@ export class Metrics {
 	private chUserUnrealizedFundingPNL: number;
 	private chUserUnrealizedFundingPNLGauge: ObservableGauge;
 
-	private chUserUnsettledPNLLock = new Mutex();
-	private chUserUnsettledPNL: number;
-	private chUserUnsettledPNLGauge: ObservableGauge;
+	// private chUserUnsettledPNLLock = new Mutex();
+	// private chUserUnsettledPNL: number;
+	// private chUserUnsettledPNLGauge: ObservableGauge;
 
 	private chUserInitialMarginRequirementLock = new Mutex();
 	private chUserInitialMarginRequirement: number;
@@ -123,27 +122,27 @@ export class Metrics {
 			observableResult.observe(Date.now() - this.bootTimeMs);
 		});
 
-		this.collateralValueGauge = this.meter.createObservableGauge(
-			'collateral_value',
-			{
-				description: 'Collateral value of the user per bank',
-				unit: 'USD',
-				valueType: ValueType.DOUBLE,
-			}
-		);
-		this.collateralValueGauge.addCallback(
-			async (observableResult: ObservableResult): Promise<void> => {
-				this.collateralValueLock.runExclusive(async () => {
-					for (let i = 0; i < this.collateralValuePerBank.length; i++) {
-						observableResult.observe(this.collateralValuePerBank[i], {
-							bankIndex: i,
-							bankSymbol: DevnetBanks[i].symbol,
-							userPubKey: this.authority.toBase58(),
-						});
-					}
-				});
-			}
-		);
+		// this.collateralValueGauge = this.meter.createObservableGauge(
+		// 	'collateral_value',
+		// 	{
+		// 		description: 'Collateral value of the user per bank',
+		// 		unit: 'USD',
+		// 		valueType: ValueType.DOUBLE,
+		// 	}
+		// );
+		// this.collateralValueGauge.addCallback(
+		// 	async (observableResult: ObservableResult): Promise<void> => {
+		// 		this.collateralValueLock.runExclusive(async () => {
+		// 			for (let i = 0; i < this.collateralValuePerBank.length; i++) {
+		// 				observableResult.observe(this.collateralValuePerBank[i], {
+		// 					bankIndex: i,
+		// 					bankSymbol: DevnetBanks[i].symbol,
+		// 					userPubKey: this.authority.toBase58(),
+		// 				});
+		// 			}
+		// 		});
+		// 	}
+		// );
 
 		this.solBalanceGauge = this.meter.createObservableGauge(
 			'lamports_balance',
@@ -278,15 +277,15 @@ export class Metrics {
 								userPubKey: this.authority.toBase58(),
 							}
 						);
-						observableResult.observe(
-							this.openPositionUnsettledPnLAmountGauge,
-							convertToNumber(p.unsettledPnl, QUOTE_PRECISION),
-							{
-								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
-								userPubKey: this.authority.toBase58(),
-							}
-						);
+						// observableResult.observe(
+						// 	this.openPositionUnsettledPnLAmountGauge,
+						// 	convertToNumber(p.unsettledPnl, QUOTE_PRECISION),
+						// 	{
+						// 		marketIndex: i,
+						// 		marketSymbol: DevnetMarkets[i].symbol,
+						// 		userPubKey: this.authority.toBase58(),
+						// 	}
+						// );
 						observableResult.observe(
 							this.openPositionOpenOrdersAmountGauge,
 							p.openOrders.toNumber(),
@@ -329,22 +328,22 @@ export class Metrics {
 			]
 		);
 
-		this.chUserUnsettledPNLGauge = this.meter.createObservableGauge(
-			'user_unsettled_pnl',
-			{
-				description: 'Unsettled PnL of the user',
-				valueType: ValueType.DOUBLE,
-			}
-		);
-		this.chUserUnsettledPNLGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.chUserUnsettledPNLLock.runExclusive(async () => {
-					observableResult.observe(this.chUserUnsettledPNL, {
-						userPubKey: this.authority.toBase58(),
-					});
-				});
-			}
-		);
+		// this.chUserUnsettledPNLGauge = this.meter.createObservableGauge(
+		// 	'user_unsettled_pnl',
+		// 	{
+		// 		description: 'Unsettled PnL of the user',
+		// 		valueType: ValueType.DOUBLE,
+		// 	}
+		// );
+		// this.chUserUnsettledPNLGauge.addCallback(
+		// 	(observableResult: ObservableResult): void => {
+		// 		this.chUserUnsettledPNLLock.runExclusive(async () => {
+		// 			observableResult.observe(this.chUserUnsettledPNL, {
+		// 				userPubKey: this.authority.toBase58(),
+		// 			});
+		// 		});
+		// 	}
+		// );
 
 		this.chUserUnrealizedPNLGauge = this.meter.createObservableGauge(
 			'ch_user_unrealized_pnl',
@@ -489,17 +488,17 @@ export class Metrics {
 	async runPeriodicTasks() {
 		const chUser = this.clearingHouse.getUser();
 
-		this.collateralValueLock.runExclusive(async () => {
-			this.collateralValuePerBank = [];
-			for (let i = 0; i < DevnetBanks.length; i++) {
-				const collateralValue = convertToNumber(
-					chUser.getCollateralValue(new BN(i)),
-					QUOTE_PRECISION
-				);
+		// this.collateralValueLock.runExclusive(async () => {
+		// 	this.collateralValuePerBank = [];
+		// 	for (let i = 0; i < DevnetBanks.length; i++) {
+		// 		const collateralValue = convertToNumber(
+		// 			chUser.(new BN(i)),
+		// 			QUOTE_PRECISION
+		// 		);
 
-				this.collateralValuePerBank.push(collateralValue);
-			}
-		});
+		// 		this.collateralValuePerBank.push(collateralValue);
+		// 	}
+		// });
 
 		this.solBalanceLock.runExclusive(async () => {
 			const lamportsBal = await this.clearingHouse.connection.getBalance(
@@ -553,12 +552,12 @@ export class Metrics {
 				QUOTE_PRECISION
 			);
 		});
-		this.chUserUnsettledPNLLock.runExclusive(async () => {
-			this.chUserUnsettledPNL = convertToNumber(
-				chUser.getUnsettledPNL(),
-				QUOTE_PRECISION
-			);
-		});
+		// this.chUserUnsettledPNLLock.runExclusive(async () => {
+		// 	this.chUserUnsettledPNL = convertToNumber(
+		// 		chUser.getUnsettledPNL(),
+		// 		QUOTE_PRECISION
+		// 	);
+		// });
 		this.chUserInitialMarginRequirementLock.runExclusive(async () => {
 			this.chUserInitialMarginRequirement = convertToNumber(
 				chUser.getInitialMarginRequirement(),
