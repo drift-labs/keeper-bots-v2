@@ -78,6 +78,11 @@ export class JitMakerBot implements Bot {
 	private agentState: State;
 
 	/**
+	 * Set true to enforce max position size
+	 */
+	private RESTRICT_POSITION_SIZE = false;
+
+	/**
 	 * if a position's notional value passes this percentage of account
 	 * collateral, the position enters a CLOSING_* state.
 	 */
@@ -320,13 +325,18 @@ export class JitMakerBot implements Bot {
 			.div(BASE_PRECISION.mul(MARK_PRICE_PRECISION))
 			.mul(QUOTE_PRECISION);
 
-		const minOrderQuote = 10;
+		const minOrderQuote = 20;
+		let orderQuote = minOrderQuote;
 		let maxOrderQuote = convertToNumber(worstCaseQuoteSpend, QUOTE_PRECISION);
+
 		if (maxOrderQuote > this.MAX_TRADE_SIZE_QUOTE) {
 			maxOrderQuote = this.MAX_TRADE_SIZE_QUOTE;
 		}
 
-		const orderQuote = this.randomIntFromInterval(minOrderQuote, maxOrderQuote);
+		if (maxOrderQuote >= minOrderQuote) {
+			orderQuote = this.randomIntFromInterval(minOrderQuote, maxOrderQuote);
+		}
+
 		const jitAuctionBaseFillAmount = orderQuote / priceNumber;
 		return new BN(jitAuctionBaseFillAmount * BASE_PRECISION.toNumber());
 	}
@@ -453,27 +463,29 @@ export class JitMakerBot implements Bot {
 			action.marketIndex.toNumber()
 		);
 
-		if (
-			currentState === StateType.CLOSING_LONG &&
-			action.direction === PositionDirection.LONG
-		) {
-			logger.info(
-				`${
-					this.name
-				}: Skipping long action on market ${action.marketIndex.toNumber()}, since currently CLOSING_LONG`
-			);
-			return;
-		}
-		if (
-			currentState === StateType.CLOSING_SHORT &&
-			action.direction === PositionDirection.SHORT
-		) {
-			logger.info(
-				`${
-					this.name
-				}: Skipping short action on market ${action.marketIndex.toNumber()}, since currently CLOSING_SHORT`
-			);
-			return;
+		if (this.RESTRICT_POSITION_SIZE) {
+			if (
+				currentState === StateType.CLOSING_LONG &&
+				action.direction === PositionDirection.LONG
+			) {
+				logger.info(
+					`${
+						this.name
+					}: Skipping long action on market ${action.marketIndex.toNumber()}, since currently CLOSING_LONG`
+				);
+				return;
+			}
+			if (
+				currentState === StateType.CLOSING_SHORT &&
+				action.direction === PositionDirection.SHORT
+			) {
+				logger.info(
+					`${
+						this.name
+					}: Skipping short action on market ${action.marketIndex.toNumber()}, since currently CLOSING_SHORT`
+				);
+				return;
+			}
 		}
 
 		return await this.clearingHouse.placeAndMake(
