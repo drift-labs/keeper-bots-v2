@@ -238,6 +238,9 @@ export class Metrics {
 				this.openPositionsLock.runExclusive(async () => {
 					for (let i = 0; i < this.openPositionPerMarket.length; i++) {
 						const p = this.openPositionPerMarket[i];
+						if (!p) {
+							continue;
+						}
 						observableResult.observe(
 							this.openPositionLastCumulativeFundingRateGauge,
 							convertToNumber(

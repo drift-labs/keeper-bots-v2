@@ -52,8 +52,8 @@ program
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option('--close-open-positions', 'close all open positions')
 	.option(
-		'--deposit <number>',
-		'Allow deposit this amount of USDC to collateral account'
+		'--force-deposit <number>',
+		'Force deposit this amount of USDC to collateral account, the program will end after the deposit transaction is sent'
 	)
 	.option(
 		'--metrics', // TODO: allow custom url and port
@@ -315,22 +315,21 @@ const runBot = async () => {
 	// check that user has collateral
 	const freeCollateral = clearingHouseUser.getFreeCollateral();
 	if (freeCollateral.isZero() && opts.jitMaker) {
-		logger.info(
-			`No collateral in account, collateral is required to run JitMakerBot`
+		throw new Error(
+			`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
 		);
-		if (!opts.deposit) {
-			logger.error(`Run with '--deposit' flag to deposit collateral`);
-			throw new Error('Account has no collateral, and no deposit was provided');
-		}
+	}
+	if (opts.forceDeposit) {
+		logger.info(
+			`Depositing (${new BN(
+				opts.forceDeposit
+			).toString()} USDC to collateral account)`
+		);
 
-		if (opts.deposit < 0) {
+		if (opts.forceDeposit < 0) {
 			logger.error(`Deposit amount must be greater than 0`);
 			throw new Error('Deposit amount must be greater than 0');
 		}
-
-		logger.info(
-			`Depositing collateral (${new BN(opts.deposit).toString()} USDC)`
-		);
 
 		const ata = await Token.getAssociatedTokenAddress(
 			ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -340,11 +339,13 @@ const runBot = async () => {
 		);
 
 		const tx = await clearingHouse.deposit(
-			new BN(opts.deposit).mul(QUOTE_PRECISION),
+			new BN(opts.forceDeposit).mul(QUOTE_PRECISION),
 			new BN(0), // USDC bank
 			ata
 		);
 		logger.info(`Deposit transaction: ${tx}`);
+		logger.info(`exiting...run again without --force-deposit flag`);
+		return;
 	}
 
 	// print user orders
