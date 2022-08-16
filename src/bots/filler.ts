@@ -176,7 +176,7 @@ export class FillerBot implements Bot {
 						makerInfo
 					)
 					.then((txSig) => {
-						this.metrics.recordFilledOrder(
+						this.metrics?.recordFilledOrder(
 							this.clearingHouse.provider.wallet.publicKey,
 							this.name
 						);

@@ -31,6 +31,7 @@ import { constants } from './types';
 import { FillerBot } from './bots/filler';
 import { TriggerBot } from './bots/trigger';
 import { JitMakerBot } from './bots/jitMaker';
+import { LiquidatorBot } from './bots/liquidator';
 import { Bot } from './types';
 import { Metrics } from './metrics';
 
@@ -45,9 +46,10 @@ program
 		'--init-user',
 		'calls clearingHouse.initializeUserAccount if no user account exists'
 	)
-	.option('--filler', 'Enable order filler')
-	.option('--trigger', 'Enable trigger order')
-	.option('--jit-maker', 'Enable JIT auction maker')
+	.option('--filler', 'Enable filler bot')
+	.option('--trigger', 'Enable trigger bot')
+	.option('--jit-maker', 'Enable JIT auction maker bot')
+	.option('--liquidator', 'Enable liquidator bot')
 	.option('--print-info', 'Periodically print market and position info')
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option('--close-open-positions', 'close all open positions')
@@ -405,6 +407,11 @@ const runBot = async () => {
 			)
 		);
 	}
+	if (opts.liquidator) {
+		bots.push(
+			new LiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
+		);
+	}
 
 	for (const bot of bots) {
 		await bot.init();
@@ -428,8 +435,8 @@ const runBot = async () => {
 	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
 		if (event.eventType === 'OrderRecord') {
 			await handleOrderRecord(event as OrderRecord);
-		} else {
-			logger.info(`order record event type ${event.eventType}`);
+		} else if (event.eventType === 'LiquidationRecord') {
+			logger.info(JSON.stringify(event));
 		}
 	});
 
@@ -462,7 +469,7 @@ const runBot = async () => {
 			await bot.init();
 		}
 		for (const bot of bots) {
-			bot.startIntervalLoop(1000);
+			bot.startIntervalLoop(bot.defaultIntervalMs);
 		}
 	}, 15 * 60 * 1000);
 };

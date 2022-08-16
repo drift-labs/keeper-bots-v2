@@ -88,6 +88,7 @@ export class Metrics {
 
 	private errorsCounter: Counter;
 	private filledOrdersCounter: Counter;
+	private perpLiquidationsCounter: Counter;
 
 	private clearingHouse: ClearingHouse;
 	private authority: PublicKey;
@@ -446,6 +447,13 @@ export class Metrics {
 		this.filledOrdersCounter = this.meter.createCounter('filled_orders', {
 			description: 'Count of orders successfully filled',
 		});
+
+		this.perpLiquidationsCounter = this.meter.createCounter(
+			'perp_liquidations',
+			{
+				description: 'Count of successful perp liquidations',
+			}
+		);
 	}
 
 	async init() {
@@ -472,6 +480,18 @@ export class Metrics {
 	recordFilledOrder(authority: PublicKey, bot: string) {
 		this.filledOrdersCounter.add(1, {
 			user: authority.toBase58(),
+			bot: bot,
+		});
+	}
+
+	recordPerpLiquidation(
+		liquidator: PublicKey,
+		liquidatee: PublicKey,
+		bot: string
+	) {
+		this.perpLiquidationsCounter.add(1, {
+			liquidator: liquidator.toBase58(),
+			liquidatee: liquidatee.toBase58(),
 			bot: bot,
 		});
 	}

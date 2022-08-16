@@ -14,14 +14,25 @@ export class UserMap {
 	private userMap = new Map<string, ClearingHouseUser>();
 	private clearingHouse: ClearingHouse;
 	private userAccountLoader: BulkAccountLoader;
+	private pollingIntervalMs: number;
 
-	constructor(connection: Connection, clearingHouse: ClearingHouse) {
+	constructor(
+		connection: Connection,
+		clearingHouse: ClearingHouse,
+		pollingIntervalMs?: number
+	) {
 		this.clearingHouse = clearingHouse;
+
+		if (pollingIntervalMs === undefined) {
+			this.pollingIntervalMs = 5000;
+		} else {
+			this.pollingIntervalMs = pollingIntervalMs;
+		}
 
 		this.userAccountLoader = new BulkAccountLoader(
 			connection,
 			'processed',
-			5000
+			this.pollingIntervalMs
 		);
 	}
 
@@ -87,5 +98,9 @@ export class UserMap {
 		) {
 			await this.addPubkey(record.maker);
 		}
+	}
+
+	public values(): IterableIterator<ClearingHouseUser> {
+		return this.userMap.values();
 	}
 }
