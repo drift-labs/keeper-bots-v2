@@ -20,6 +20,8 @@ import { Metrics } from '../metrics';
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
+	public readonly defaultIntervalMs: number = 1000;
+
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
 	private dlob: DLOB;
@@ -45,16 +47,7 @@ export class FillerBot implements Bot {
 	public async init() {
 		// initialize DLOB instance
 		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
-		const programAccounts = await this.clearingHouse.program.account.user.all();
-		for (const programAccount of programAccounts) {
-			// @ts-ignore
-			const userAccount: UserAccount = programAccount.account;
-			const userAccountPublicKey = programAccount.publicKey;
-
-			for (const order of userAccount.orders) {
-				this.dlob.insert(order, userAccountPublicKey);
-			}
-		}
+		await this.dlob.init(this.clearingHouse);
 
 		// initialize userMap instance
 		this.userMap = new UserMap(

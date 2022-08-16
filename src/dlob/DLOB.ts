@@ -58,6 +58,7 @@ export class DLOB {
 	orderLists = new Map<number, MarketNodeLists>();
 	marketIndexToAccount = new Map<number, MarketAccount>();
 	silent = false;
+	initialized = false;
 
 	/**
 	 *
@@ -89,6 +90,32 @@ export class DLOB {
 				},
 			});
 		}
+	}
+
+	/**
+	 * initializes a new DLOB instance
+	 *
+	 * @param clearingHouse The ClearingHouse instance to use for price data
+	 * @returns a promise that resolves when the DLOB is initialized
+	 */
+	public async init(clearingHouse: ClearingHouse): Promise<boolean> {
+		if (this.initialized) {
+			logger.error('DLOB already initialized');
+			return false;
+		}
+		const programAccounts = await clearingHouse.program.account.user.all();
+		for (const programAccount of programAccounts) {
+			// @ts-ignore
+			const userAccount: UserAccount = programAccount.account;
+			const userAccountPublicKey = programAccount.publicKey;
+
+			for (const order of userAccount.orders) {
+				this.insert(order, userAccountPublicKey);
+			}
+		}
+
+		this.initialized = true;
+		return true;
 	}
 
 	public insert(

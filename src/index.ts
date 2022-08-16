@@ -411,7 +411,7 @@ const runBot = async () => {
 	}
 
 	for (const bot of bots) {
-		bot.startIntervalLoop(1000);
+		bot.startIntervalLoop(bot.defaultIntervalMs);
 	}
 
 	const handleOrderRecord = async (record: OrderRecord) => {

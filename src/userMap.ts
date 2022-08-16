@@ -23,8 +23,6 @@ export class UserMap {
 			'processed',
 			5000
 		);
-
-		// await fetchAllUsers();
 	}
 
 	public async fetchAllUsers() {

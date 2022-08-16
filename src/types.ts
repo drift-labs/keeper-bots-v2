@@ -11,6 +11,7 @@ export const constants = {
 export interface Bot {
 	readonly name: string;
 	readonly dryRun: boolean;
+	readonly defaultIntervalMs: number;
 
 	/**
 	 * Initialize the bot
