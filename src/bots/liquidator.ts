@@ -22,7 +22,7 @@ import { Metrics } from '../metrics';
 export class LiquidatorBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 5000;
+	public readonly defaultIntervalMs: number = 10000;
 
 	private clearingHouse: ClearingHouse;
 	private intervalIds: Array<NodeJS.Timer> = [];
