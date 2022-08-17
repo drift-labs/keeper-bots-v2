@@ -101,6 +101,11 @@ export class LiquidatorBot implements Bot {
 							liquidateePosition.marketIndex
 						);
 
+						let currentPosBaseAmount = new BN(0);
+						if (liquidatorPosition !== undefined) {
+							currentPosBaseAmount = liquidatorPosition.baseAssetAmount;
+						}
+
 						const market = this.clearingHouse.getMarketAccount(
 							liquidateePosition.marketIndex
 						);
@@ -113,22 +118,28 @@ export class LiquidatorBot implements Bot {
 						);
 						logger.info(
 							`    liquidatorPosition0: ${convertToNumber(
-								liquidatorPosition.baseAssetAmount,
+								currentPosBaseAmount,
 								BASE_PRECISION
 							).toString()}`
 						);
 						const newPosition: UserPosition = {
-							baseAssetAmount: liquidatorPosition.baseAssetAmount.add(
+							baseAssetAmount: currentPosBaseAmount.add(
 								liquidateePosition.baseAssetAmount
 							),
 							lastCumulativeFundingRate:
-								liquidatorPosition.lastCumulativeFundingRate,
-							marketIndex: liquidatorPosition.marketIndex,
-							quoteAssetAmount: liquidatorPosition.quoteAssetAmount,
-							quoteEntryAmount: liquidatorPosition.quoteEntryAmount,
-							openOrders: liquidatorPosition.openOrders,
-							openBids: liquidatorPosition.openBids,
-							openAsks: liquidatorPosition.openAsks,
+								liquidatorPosition?.lastCumulativeFundingRate,
+							marketIndex: liquidatorPosition?.marketIndex,
+							quoteAssetAmount: liquidatorPosition?.quoteAssetAmount,
+							quoteEntryAmount: liquidatorPosition?.quoteEntryAmount,
+							openOrders: liquidatorPosition
+								? liquidatorPosition.openOrders
+								: new BN(0),
+							openBids: liquidatorPosition
+								? liquidatorPosition.openBids
+								: new BN(0),
+							openAsks: liquidatorPosition
+								? liquidatorPosition.openAsks
+								: new BN(0),
 						};
 						logger.info(
 							`    liquidatorPosition1: ${convertToNumber(
