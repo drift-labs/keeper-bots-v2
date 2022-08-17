@@ -5,6 +5,7 @@ import {
 	calculateWorstCaseBaseAssetAmount,
 	calculateMarketMarginRatio,
 	OrderRecord,
+	LiquidationRecord,
 	BASE_PRECISION,
 	AMM_TO_QUOTE_PRECISION_RATIO,
 	MARK_PRICE_PRECISION,
@@ -58,7 +59,7 @@ export class LiquidatorBot implements Bot {
 		delete this.userMap;
 	}
 
-	public startIntervalLoop(intervalMs: number): void {
+	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		this.tryLiquidate();
 		const intervalId = setInterval(this.tryLiquidate.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
@@ -66,8 +67,15 @@ export class LiquidatorBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(record: OrderRecord): Promise<void> {
-		await this.userMap.updateWithOrder(record);
+	public async trigger(record: any): Promise<void> {
+		if (record.eventType === 'OrderRecord') {
+			await this.userMap.updateWithOrder(record as OrderRecord);
+		} else if (record.eventType === 'LiquidationRecord') {
+			this.metrics?.recordLiquidationEvent(
+				record as LiquidationRecord,
+				this.name
+			);
+		}
 	}
 
 	public viewDlob(): undefined {

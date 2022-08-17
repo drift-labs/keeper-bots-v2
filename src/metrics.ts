@@ -19,6 +19,8 @@ import {
 	PublicKey,
 	DevnetMarkets,
 	UserPosition,
+	LiquidationRecord,
+	isVariant,
 } from '@drift-labs/sdk';
 
 import { Mutex } from 'async-mutex';
@@ -89,6 +91,7 @@ export class Metrics {
 	private errorsCounter: Counter;
 	private filledOrdersCounter: Counter;
 	private perpLiquidationsCounter: Counter;
+	private liquidationEventsCounter: Counter;
 
 	private clearingHouse: ClearingHouse;
 	private authority: PublicKey;
@@ -454,6 +457,13 @@ export class Metrics {
 				description: 'Count of successful perp liquidations',
 			}
 		);
+
+		this.liquidationEventsCounter = this.meter.createCounter(
+			'liquidation_events',
+			{
+				description: 'Count of liquidation events',
+			}
+		);
 	}
 
 	async init() {
@@ -492,6 +502,45 @@ export class Metrics {
 		this.perpLiquidationsCounter.add(1, {
 			liquidator: liquidator.toBase58(),
 			liquidatee: liquidatee.toBase58(),
+			bot: bot,
+		});
+	}
+
+	recordLiquidationEvent(event: LiquidationRecord, bot: string) {
+		let liquidationType: string;
+		let liquidatedMarketIndex: number | undefined;
+		let liquidatedAssetBankIndex: number | undefined;
+		let liquidatedLiabilityIndex: number | undefined;
+
+		if (isVariant(event.liquidationType, 'liquidatePerp')) {
+			liquidationType = 'liquidatePerp';
+			liquidatedMarketIndex = event.liquidatePerp.marketIndex.toNumber();
+		} else if (isVariant(event.liquidationType, 'liquidateBorrow')) {
+			liquidationType = 'liquidateBorrow';
+			liquidatedAssetBankIndex =
+				event.liquidateBorrow.assetBankIndex.toNumber();
+			liquidatedLiabilityIndex =
+				event.liquidateBorrow.liabilityBankIndex.toNumber();
+		} else if (isVariant(event.liquidationType, 'liquidateBorrowForPerpPnl')) {
+			liquidationType = 'liquidateBorrowForPerpPnl';
+			liquidatedMarketIndex =
+				event.liquidateBorrowForPerpPnl.marketIndex.toNumber();
+			liquidatedLiabilityIndex =
+				event.liquidateBorrowForPerpPnl.liabilityBankIndex.toNumber();
+		} else if (isVariant(event.liquidationType, 'liquidatePerpPnlForDeposit')) {
+			liquidationType = 'liquidatePerpPnlForDeposit';
+			liquidatedMarketIndex =
+				event.liquidatePerpPnlForDeposit.marketIndex.toNumber();
+			liquidatedAssetBankIndex =
+				event.liquidatePerpPnlForDeposit.assetBankIndex.toNumber();
+		}
+
+		this.liquidationEventsCounter.add(1, {
+			market: liquidatedMarketIndex,
+			type: liquidationType,
+			marketIndex: liquidatedMarketIndex,
+			assetBankIndex: liquidatedAssetBankIndex,
+			liabilityBankIndex: liquidatedLiabilityIndex,
 			bot: bot,
 		});
 	}

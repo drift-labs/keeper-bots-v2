@@ -66,7 +66,7 @@ export class FillerBot implements Bot {
 		delete this.userMap;
 	}
 
-	public startIntervalLoop(intervalMs: number): void {
+	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		this.tryFill();
 		const intervalId = setInterval(this.tryFill.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
@@ -74,10 +74,12 @@ export class FillerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(record: OrderRecord): Promise<void> {
-		this.dlob.applyOrderRecord(record);
-		await this.userMap.updateWithOrder(record);
-		this.tryFill();
+	public async trigger(record: any): Promise<void> {
+		if (record.eventType === 'OrderRecord') {
+			this.dlob.applyOrderRecord(record as OrderRecord);
+			await this.userMap.updateWithOrder(record as OrderRecord);
+			this.tryFill();
+		}
 	}
 
 	public viewDlob(): DLOB {

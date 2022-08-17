@@ -139,9 +139,11 @@ export class JitMakerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(record: OrderRecord): Promise<void> {
-		this.dlob.applyOrderRecord(record);
-		await this.tryMake();
+	public async trigger(record: any): Promise<void> {
+		if (record.eventType === 'OrderRecord') {
+			this.dlob.applyOrderRecord(record as OrderRecord);
+			await this.tryMake();
+		}
 	}
 
 	public viewDlob(): DLOB {
@@ -377,6 +379,7 @@ export class JitMakerBot implements Bot {
 			);
 
 			// calculate jit maker order params
+			const orderMarketIdx = nodeToFill.node.market.marketIndex.toNumber();
 			const orderDirection = nodeToFill.node.order.direction;
 			const jitMakerDirection = isVariant(orderDirection, 'long')
 				? PositionDirection.SHORT
@@ -396,7 +399,9 @@ export class JitMakerBot implements Bot {
 			const aucDur = new BN(nodeToFill.node.order.auctionDuration);
 
 			logger.info(
-				`${this.name} propose to fill jit auction: ${JSON.stringify(
+				`${
+					this.name
+				} propose to fill jit auction on market ${orderMarketIdx}: ${JSON.stringify(
 					jitMakerDirection
 				)}: ${convertToNumber(jitMakerBaseAssetAmount, BASE_PRECISION).toFixed(
 					4

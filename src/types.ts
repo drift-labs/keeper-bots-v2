@@ -1,5 +1,3 @@
-import { OrderRecord } from '@drift-labs/sdk';
-
 import { DLOB } from './dlob/DLOB';
 
 export const constants = {
@@ -26,12 +24,12 @@ export interface Bot {
 	/**
 	 * Start the bot loop. This is generally a polling loop.
 	 */
-	startIntervalLoop: (intervalMs: number) => void;
+	startIntervalLoop: (intervalMs: number) => Promise<void>;
 
 	/**
 	 * Trigger the bot to run a step, used instead of polling
 	 */
-	trigger: (record: OrderRecord) => Promise<void>;
+	trigger: (record: any) => Promise<void>;
 
 	/**
 	 * Returns the bot's DLOB

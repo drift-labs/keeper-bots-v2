@@ -61,7 +61,7 @@ export class TriggerBot implements Bot {
 		delete this.userMap;
 	}
 
-	public startIntervalLoop(intervalMs: number): void {
+	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		this.tryTrigger();
 		const intervalId = setInterval(this.tryTrigger.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
@@ -69,10 +69,12 @@ export class TriggerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(record: OrderRecord): Promise<void> {
-		this.dlob.applyOrderRecord(record);
-		await this.userMap.updateWithOrder(record);
-		this.tryTrigger();
+	public async trigger(record: any): Promise<void> {
+		if (record.eventType === 'OrderRecord') {
+			this.dlob.applyOrderRecord(record as OrderRecord);
+			await this.userMap.updateWithOrder(record as OrderRecord);
+			this.tryTrigger();
+		}
 	}
 
 	public viewDlob(): DLOB {
