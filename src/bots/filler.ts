@@ -223,9 +223,11 @@ export class FillerBot implements Bot {
 			logger.error(
 				`${
 					this.name
-				} Unexpected error for market ${marketIndex.toString()} during fills`
+				} Unexpected error for market ${marketIndex.toString()} during fills: ${JSON.stringify(
+					e
+				)}`
 			);
-			// console.error(e);
+			console.error(e);
 		} finally {
 			Atomics.store(this.perMarketMutexFills, marketIndex.toNumber(), 0);
 		}
