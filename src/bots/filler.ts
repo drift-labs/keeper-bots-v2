@@ -169,7 +169,9 @@ export class FillerBot implements Bot {
 					};
 				}
 
-				const user = this.userMap.get(nodeToFill.node.userAccount.toString());
+				const user = await this.userMap.mustGet(
+					nodeToFill.node.userAccount.toString()
+				);
 				this.clearingHouse
 					.fillOrder(
 						nodeToFill.node.userAccount,

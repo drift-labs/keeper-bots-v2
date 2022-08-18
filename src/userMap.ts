@@ -80,8 +80,27 @@ export class UserMap {
 		return this.userMap.has(key);
 	}
 
-	public get(key: string): ClearingHouseUser {
+	/**
+	 * gets the ClearingHouseUser for a particular userAccountPublicKey, if no ClearingHouseUser exists, undefined is returned
+	 * @param key userAccountPublicKey to get ClearngHouseUserFor
+	 * @returns user ClearingHouseUser | undefined
+	 */
+	public get(key: string): ClearingHouseUser | undefined {
 		return this.userMap.get(key);
+	}
+
+	/**
+	 * gets the ClearingHouseUser for a particular userAccountPublicKey, if no ClearingHouseUser exists, new one is created
+	 * @param key userAccountPublicKey to get ClearngHouseUserFor
+	 * @returns  ClearingHouseUser
+	 */
+	public async mustGet(key: string): Promise<ClearingHouseUser> {
+		if (!this.has(key)) {
+			await this.addPubkey(new PublicKey(key));
+		}
+		const user = this.userMap.get(key);
+		await user.fetchAccounts();
+		return user;
 	}
 
 	public async updateWithOrder(record: OrderRecord) {

@@ -40,7 +40,7 @@ const driftEnv = process.env.ENV as DriftEnv;
 const sdkConfig = initialize({ env: process.env.ENV });
 
 program
-	// .option('-d, --dry', 'Dry run, do not send transactions on chain')
+	.option('-d, --dry', 'Dry run, do not send transactions on chain')
 	.option(
 		'--init-user',
 		'calls clearingHouse.initializeUserAccount if no user account exists'

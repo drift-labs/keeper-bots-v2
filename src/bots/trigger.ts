@@ -115,7 +115,7 @@ export class TriggerBot implements Bot {
 					`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
-				const user = this.userMap.get(
+				const user = await this.userMap.mustGet(
 					nodeToTrigger.node.userAccount.toString()
 				);
 				this.clearingHouse
