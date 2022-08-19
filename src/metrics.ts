@@ -45,9 +45,9 @@ export class Metrics {
 	// private collateralValuePerBank: Array<number>;
 	// private collateralValueGauge: ObservableGauge;
 
-	private solBalanceLock = new Mutex();
-	private solBalance: number;
-	private solBalanceGauge: ObservableGauge;
+	// private solBalanceLock = new Mutex();
+	// private solBalance: number;
+	// private solBalanceGauge: ObservableGauge;
 
 	private openOrdersLock = new Mutex();
 	private openOrders: number;
@@ -148,23 +148,23 @@ export class Metrics {
 		// 	}
 		// );
 
-		this.solBalanceGauge = this.meter.createObservableGauge(
-			'lamports_balance',
-			{
-				description: 'Authority SOL balance',
-				unit: 'SOL',
-				valueType: ValueType.DOUBLE,
-			}
-		);
-		this.solBalanceGauge.addCallback(
-			async (observableResult: ObservableResult): Promise<void> => {
-				this.solBalanceLock.runExclusive(async () => {
-					observableResult.observe(this.solBalance, {
-						userPubKey: this.authority.toBase58(),
-					});
-				});
-			}
-		);
+		// this.solBalanceGauge = this.meter.createObservableGauge(
+		// 	'lamports_balance',
+		// 	{
+		// 		description: 'Authority SOL balance',
+		// 		unit: 'SOL',
+		// 		valueType: ValueType.DOUBLE,
+		// 	}
+		// );
+		// this.solBalanceGauge.addCallback(
+		// 	async (observableResult: ObservableResult): Promise<void> => {
+		// 		this.solBalanceLock.runExclusive(async () => {
+		// 			observableResult.observe(this.solBalance, {
+		// 				userPubKey: this.authority.toBase58(),
+		// 			});
+		// 		});
+		// 	}
+		// );
 
 		this.openOrdersGauge = this.meter.createObservableGauge('open_orders', {
 			description: 'Open orders',
@@ -572,12 +572,12 @@ export class Metrics {
 		// 	}
 		// });
 
-		this.solBalanceLock.runExclusive(async () => {
-			const lamportsBal = await this.clearingHouse.connection.getBalance(
-				await this.clearingHouse.getUserAccountPublicKey()
-			);
-			this.solBalance = lamportsBal / 10 ** 9;
-		});
+		// this.solBalanceLock.runExclusive(async () => {
+		// 	const lamportsBal = await this.clearingHouse.connection.getBalance(
+		// 		await this.clearingHouse.getUserAccountPublicKey()
+		// 	);
+		// 	this.solBalance = lamportsBal / 10 ** 9;
+		// });
 
 		this.openOrdersLock.runExclusive(async () => {
 			let openOrdersCount = 0;
