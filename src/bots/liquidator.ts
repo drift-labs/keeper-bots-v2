@@ -12,6 +12,7 @@ import {
 	MARGIN_PRECISION,
 	QUOTE_PRECISION,
 	UserPosition,
+	TEN_THOUSAND,
 } from '@drift-labs/sdk';
 
 import { getErrorCode } from '../error';
@@ -84,6 +85,16 @@ export class LiquidatorBot implements Bot {
 
 	private async tryLiquidate() {
 		try {
+			const [canLiquidateMe, marginRatioMe] = this.clearingHouse
+				.getUser()
+				.canBeLiquidated();
+			console.log(`can liquidate me? ${canLiquidateMe}`);
+			console.log(
+				`my margin ratio: ${convertToNumber(
+					marginRatioMe,
+					TEN_THOUSAND
+				).toString()}`
+			);
 			for (const user of this.userMap.values()) {
 				const auth = user.getUserAccount().authority.toBase58();
 				const userKey = user.userAccountPublicKey.toBase58();
@@ -148,6 +159,11 @@ export class LiquidatorBot implements Bot {
 							openAsks: liquidatorPosition
 								? liquidatorPosition.openAsks
 								: new BN(0),
+							realizedPnl: new BN(0),
+							lpShares: new BN(0),
+							lastFeePerLp: new BN(0),
+							lastNetBaseAssetAmountPerLp: new BN(0),
+							lastNetQuoteAssetAmountPerLp: new BN(0),
 						};
 						logger.info(
 							`    liquidatorPosition1: ${convertToNumber(
@@ -200,6 +216,9 @@ export class LiquidatorBot implements Bot {
 
 						if (marginAvailable.gte(marginRequired)) {
 							try {
+								if (this.dryRun) {
+									throw new Error('Dry run - not sending liquidate tx');
+								}
 								const tx = await this.clearingHouse.liquidatePerp(
 									user.userAccountPublicKey,
 									user.getUserAccount(),
