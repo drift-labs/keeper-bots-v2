@@ -231,9 +231,6 @@ export class JitMakerBot implements Bot {
 	 * @returns {Promise<void>}
 	 */
 	private async updateAgentState(): Promise<void> {
-		await this.clearingHouse.fetchAccounts();
-		await this.clearingHouse.getUser().fetchAccounts();
-
 		this.agentState.account = this.clearingHouse.getUserAccount()!;
 
 		for await (const p of this.clearingHouse.getUserAccount().positions) {
@@ -524,8 +521,11 @@ export class JitMakerBot implements Bot {
 			}
 		}
 
+		const takerAuthority = (
+			await this.userMap.mustGet(action.node.userAccount.toString())
+		).getUserAccount().authority;
 		const takerUserStats = (
-			await this.userStatsMap.mustGet(action.node.userAccount.toString())
+			await this.userStatsMap.mustGet(takerAuthority.toString())
 		).userStatsAccountPublicKey;
 
 		return await this.clearingHouse.placeAndMake(
@@ -547,6 +547,9 @@ export class JitMakerBot implements Bot {
 	}
 
 	private async tryMakeJitAuctionForMarket(market: MarketAccount) {
+		await this.clearingHouse.fetchAccounts();
+		await this.clearingHouse.getUser().fetchAccounts();
+
 		await this.updateAgentState();
 		await this.drawAndExecuteAction(market);
 	}

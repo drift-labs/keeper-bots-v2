@@ -179,10 +179,13 @@ export class FillerBot implements Bot {
 
 				let makerInfo: MakerInfo | undefined;
 				if (nodeToFill.makerNode) {
-					const makerUserStats = (
-						await this.userStatsMap.mustGet(
+					const makerAuthority = (
+						await this.userMap.mustGet(
 							nodeToFill.makerNode.userAccount.toString()
 						)
+					).getUserAccount().authority;
+					const makerUserStats = (
+						await this.userStatsMap.mustGet(makerAuthority.toString())
 					).userStatsAccountPublicKey;
 					makerInfo = {
 						maker: nodeToFill.makerNode.userAccount,
