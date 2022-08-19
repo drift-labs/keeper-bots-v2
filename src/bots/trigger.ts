@@ -46,8 +46,8 @@ export class TriggerBot implements Bot {
 
 		// initialize userMap instance
 		this.userMap = new UserMap(
-			this.clearingHouse.connection,
-			this.clearingHouse
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
 		);
 		await this.userMap.fetchAllUsers();
 	}

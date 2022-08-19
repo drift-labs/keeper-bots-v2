@@ -54,13 +54,16 @@ export class FillerBot implements Bot {
 		initPromises.push(this.dlob.init(this.clearingHouse));
 
 		this.userMap = new UserMap(
-			this.clearingHouse.connection,
-			this.clearingHouse
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userMap.fetchAllUsers());
 
-		this.userStatsMap = new UserStatsMap(this.clearingHouse);
-		initPromises.push(this.userStatsMap.fetchAllUsers());
+		this.userStatsMap = new UserStatsMap(
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
+		);
+		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		await Promise.all(initPromises);
 	}
@@ -87,7 +90,10 @@ export class FillerBot implements Bot {
 		if (record.eventType === 'OrderRecord') {
 			this.dlob.applyOrderRecord(record as OrderRecord);
 			await this.userMap.updateWithOrder(record as OrderRecord);
-			await this.userStatsMap.updateWithOrder(record as OrderRecord);
+			await this.userStatsMap.updateWithOrder(
+				record as OrderRecord,
+				this.userMap
+			);
 			this.tryFill();
 		}
 	}
@@ -173,9 +179,11 @@ export class FillerBot implements Bot {
 
 				let makerInfo: MakerInfo | undefined;
 				if (nodeToFill.makerNode) {
-					const makerUserStats = await this.userStatsMap.mustGet(
-						nodeToFill.makerNode.userAccount.toString()
-					);
+					const makerUserStats = (
+						await this.userStatsMap.mustGet(
+							nodeToFill.makerNode.userAccount.toString()
+						)
+					).userStatsAccountPublicKey;
 					makerInfo = {
 						maker: nodeToFill.makerNode.userAccount,
 						order: nodeToFill.makerNode.order,

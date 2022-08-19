@@ -1,117 +1,121 @@
 import {
 	ClearingHouse,
-	UserAccount,
 	getUserStatsAccountPublicKey,
 	OrderRecord,
+	UserStatsAccount,
+	ClearingHouseUserStats,
+	ClearingHouseUserStatsAccountSubscriptionConfig,
+	bulkPollingUserStatsSubscribe,
 } from '@drift-labs/sdk';
 import { ProgramAccount } from '@project-serum/anchor';
-
 import { PublicKey } from '@solana/web3.js';
+
+import { UserMap } from './userMap';
 
 export class UserStatsMap {
 	/**
-	 * map from UserAccount pubkey to ClearingHouseUserStats pubkey
-	 * note: multiple UserAccount may have the same ClearingHouseUserStats since ClearingHouseUserStats are unique
-	 * to the authority, we key by UserAccount to make lookup easier
+	 * map from authority pubkey to ClearingHouseUserStats
 	 */
-	private userStatsMap = new Map<string, PublicKey>();
+	private userStatsMap = new Map<string, ClearingHouseUserStats>();
 	private clearingHouse: ClearingHouse;
+	private accountSubscription: ClearingHouseUserStatsAccountSubscriptionConfig;
 
-	constructor(clearingHouse: ClearingHouse) {
+	constructor(
+		clearingHouse: ClearingHouse,
+		accountSubscription: ClearingHouseUserStatsAccountSubscriptionConfig
+	) {
 		this.clearingHouse = clearingHouse;
+		this.accountSubscription = accountSubscription;
 	}
 
-	public async fetchAllUsers() {
+	public async fetchAllUserStats() {
+		const userStatArray: ClearingHouseUserStats[] = [];
+
 		const programUserAccounts =
-			(await this.clearingHouse.program.account.user.all()) as ProgramAccount<UserAccount>[];
+			(await this.clearingHouse.program.account.userStats.all()) as ProgramAccount<UserStatsAccount>[];
 
 		for (const programUserAccount of programUserAccounts) {
-			const user: UserAccount = programUserAccount.account;
-
-			if (this.userStatsMap.has(programUserAccount.publicKey.toString())) {
+			const userStat: UserStatsAccount = programUserAccount.account;
+			if (this.userStatsMap.has(userStat.authority.toString())) {
 				continue;
 			}
 
-			this.addUser(programUserAccount.publicKey, user.authority);
+			const chUserStat = new ClearingHouseUserStats({
+				clearingHouse: this.clearingHouse,
+				userStatsAccountPublicKey: getUserStatsAccountPublicKey(
+					this.clearingHouse.program.programId,
+					userStat.authority
+				),
+				accountSubscription: this.accountSubscription,
+			});
+			userStatArray.push(chUserStat);
+		}
+
+		if (this.accountSubscription.type === 'polling') {
+			await bulkPollingUserStatsSubscribe(
+				userStatArray,
+				this.accountSubscription.accountLoader
+			);
+		}
+
+		for (const userStat of userStatArray) {
+			this.userStatsMap.set(
+				userStat.getAccount().authority.toString(),
+				userStat
+			);
 		}
 	}
 
-	private async getUserAccountFromPublicKey(
-		userAccountPublicKey: string
-	): Promise<ProgramAccount<UserAccount>> {
-		const programUserAccounts =
-			(await this.clearingHouse.program.account.user.all()) as ProgramAccount<UserAccount>[];
+	public async addUserStat(authority: PublicKey) {
+		const userStat = new ClearingHouseUserStats({
+			clearingHouse: this.clearingHouse,
+			userStatsAccountPublicKey: getUserStatsAccountPublicKey(
+				this.clearingHouse.program.programId,
+				authority
+			),
+			accountSubscription: this.accountSubscription,
+		});
+		await userStat.subscribe();
 
-		const userAccountKey = new PublicKey(userAccountPublicKey);
-		const programUserAccount = programUserAccounts.find((programUserAccount) =>
-			programUserAccount.publicKey.equals(userAccountKey)
-		);
-		if (!programUserAccount) {
-			throw new Error(`UserAccount not found: ${userAccountPublicKey}`);
-		}
-
-		return programUserAccount;
+		this.userStatsMap.set(authority.toString(), userStat);
 	}
 
-	public addUser(userAccount: PublicKey, userAuthority: PublicKey): PublicKey {
-		const userStatsAccountKey = getUserStatsAccountPublicKey(
-			this.clearingHouse.program.programId,
-			userAuthority
-		);
-		this.userStatsMap.set(userAccount.toString(), userStatsAccountKey);
-
-		return userStatsAccountKey;
-	}
-
-	public async updateWithOrder(record: OrderRecord) {
+	public async updateWithOrder(record: OrderRecord, userMap: UserMap) {
 		if (
 			!record.taker.equals(PublicKey.default) &&
 			!this.has(record.taker.toString())
 		) {
-			const takerUserAccount = await this.getUserAccountFromPublicKey(
-				record.taker.toString()
-			);
-			this.addUser(
-				takerUserAccount.publicKey,
-				takerUserAccount.account.authority
-			);
+			const takerUserAccount = await userMap.mustGet(record.taker.toString());
+			this.addUserStat(takerUserAccount.getUserAccount().authority);
 		}
 
 		if (
 			!record.maker.equals(PublicKey.default) &&
 			!this.has(record.maker.toString())
 		) {
-			const makerUserAccount = await this.getUserAccountFromPublicKey(
-				record.maker.toString()
-			);
-			this.addUser(
-				makerUserAccount.publicKey,
-				makerUserAccount.account.authority
-			);
+			const makerUserAccount = await userMap.mustGet(record.maker.toString());
+			this.addUserStat(makerUserAccount.getUserAccount().authority);
 		}
 	}
 
-	public has(userAccountPublicKey: string): boolean {
-		return this.userStatsMap.has(userAccountPublicKey);
+	public has(authorityPublicKey: string): boolean {
+		return this.userStatsMap.has(authorityPublicKey);
 	}
 
-	public get(userAccountPublicKey: string): PublicKey {
-		return new PublicKey(this.userStatsMap.get(userAccountPublicKey));
+	public get(authorityPublicKey: string): ClearingHouseUserStats {
+		return this.userStatsMap.get(authorityPublicKey);
 	}
 
-	public async mustGet(key: string): Promise<PublicKey> {
-		if (!this.has(key)) {
-			const programUserAccount = await this.getUserAccountFromPublicKey(key);
-
-			return this.addUser(
-				programUserAccount.publicKey,
-				programUserAccount.account.authority
-			);
+	public async mustGet(
+		authorityPublicKey: string
+	): Promise<ClearingHouseUserStats> {
+		if (!this.has(authorityPublicKey)) {
+			this.addUserStat(new PublicKey(authorityPublicKey));
 		}
-		return this.get(key);
+		return this.get(authorityPublicKey);
 	}
 
-	public values(): IterableIterator<PublicKey> {
+	public values(): IterableIterator<ClearingHouseUserStats> {
 		return this.userStatsMap.values();
 	}
 }
