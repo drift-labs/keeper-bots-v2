@@ -291,6 +291,8 @@ const runBot = async () => {
 			.getUserAccountPublicKey()
 			.toBase58()}`
 	);
+	await clearingHouse.fetchAccounts();
+	await clearingHouse.getUser().fetchAccounts();
 
 	let metrics: Metrics | undefined = undefined;
 	if (opts.metrics) {
