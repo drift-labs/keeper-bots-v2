@@ -8,12 +8,14 @@ import {
 	calculateAskPrice,
 	calculateBidPrice,
 	calculateBaseAssetAmountMarketCanExecute,
+	MakerInfo,
 } from '@drift-labs/sdk';
 
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { DLOB } from '../dlob/DLOB';
 import { UserMap } from '../userMap';
+import { UserStatsMap } from '../userStatsMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
@@ -28,6 +30,7 @@ export class FillerBot implements Bot {
 	private perMarketMutexFills = new Uint8Array(new SharedArrayBuffer(8));
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
+	private userStatsMap: UserStatsMap;
 	private metrics: Metrics | undefined;
 
 	constructor(
@@ -45,16 +48,24 @@ export class FillerBot implements Bot {
 	}
 
 	public async init() {
-		// initialize DLOB instance
-		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
-		await this.dlob.init(this.clearingHouse);
+		const initPromises: Array<Promise<any>> = [];
 
-		// initialize userMap instance
+		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+		initPromises.push(this.dlob.init(this.clearingHouse));
+
 		this.userMap = new UserMap(
-			this.clearingHouse.connection,
-			this.clearingHouse
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
 		);
-		await this.userMap.fetchAllUsers();
+		initPromises.push(this.userMap.fetchAllUsers());
+
+		this.userStatsMap = new UserStatsMap(
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
+		);
+		initPromises.push(this.userStatsMap.fetchAllUserStats());
+
+		await Promise.all(initPromises);
 	}
 
 	public reset(): void {
@@ -64,6 +75,7 @@ export class FillerBot implements Bot {
 		this.intervalIds = [];
 		delete this.dlob;
 		delete this.userMap;
+		delete this.userStatsMap;
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
@@ -78,6 +90,10 @@ export class FillerBot implements Bot {
 		if (record.eventType === 'OrderRecord') {
 			this.dlob.applyOrderRecord(record as OrderRecord);
 			await this.userMap.updateWithOrder(record as OrderRecord);
+			await this.userStatsMap.updateWithOrder(
+				record as OrderRecord,
+				this.userMap
+			);
 			this.tryFill();
 		}
 	}
@@ -161,11 +177,17 @@ export class FillerBot implements Bot {
 					} including maker: ${nodeToFill.makerNode.userAccount.toString()}) with order ${nodeToFill.makerNode.order.orderId.toString()}`;
 				}
 
-				let makerInfo;
+				let makerInfo: MakerInfo | undefined;
 				if (nodeToFill.makerNode) {
+					const makerUserStats = (
+						await this.userStatsMap.mustGet(
+							nodeToFill.makerNode.userAccount.toString()
+						)
+					).userStatsAccountPublicKey;
 					makerInfo = {
 						maker: nodeToFill.makerNode.userAccount,
 						order: nodeToFill.makerNode.order,
+						makerStats: makerUserStats,
 					};
 				}
 

@@ -45,8 +45,8 @@ export class LiquidatorBot implements Bot {
 	public async init() {
 		// initialize userMap instance
 		this.userMap = new UserMap(
-			this.clearingHouse.connection,
-			this.clearingHouse
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
 		);
 		await this.userMap.fetchAllUsers();
 	}
@@ -148,6 +148,11 @@ export class LiquidatorBot implements Bot {
 							openAsks: liquidatorPosition
 								? liquidatorPosition.openAsks
 								: new BN(0),
+							realizedPnl: new BN(0),
+							lpShares: new BN(0),
+							lastFeePerLp: new BN(0),
+							lastNetBaseAssetAmountPerLp: new BN(0),
+							lastNetQuoteAssetAmountPerLp: new BN(0),
 						};
 						logger.info(
 							`    liquidatorPosition1: ${convertToNumber(
@@ -200,6 +205,9 @@ export class LiquidatorBot implements Bot {
 
 						if (marginAvailable.gte(marginRequired)) {
 							try {
+								if (this.dryRun) {
+									throw new Error('Dry run - not sending liquidate tx');
+								}
 								const tx = await this.clearingHouse.liquidatePerp(
 									user.userAccountPublicKey,
 									user.getUserAccount(),

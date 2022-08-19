@@ -2,44 +2,32 @@ import {
 	ClearingHouseUser,
 	ClearingHouse,
 	UserAccount,
-	BulkAccountLoader,
 	bulkPollingUserSubscribe,
 	OrderRecord,
+	ClearingHouseUserAccountSubscriptionConfig,
 } from '@drift-labs/sdk';
 import { ProgramAccount } from '@project-serum/anchor';
 
-import { Connection, PublicKey } from '@solana/web3.js';
+import { PublicKey } from '@solana/web3.js';
 
 export class UserMap {
 	private userMap = new Map<string, ClearingHouseUser>();
 	private clearingHouse: ClearingHouse;
-	private userAccountLoader: BulkAccountLoader;
-	private pollingIntervalMs: number;
+	private accountSubscription: ClearingHouseUserAccountSubscriptionConfig;
 
 	constructor(
-		connection: Connection,
 		clearingHouse: ClearingHouse,
-		pollingIntervalMs?: number
+		accountSubscription: ClearingHouseUserAccountSubscriptionConfig
 	) {
 		this.clearingHouse = clearingHouse;
-
-		if (pollingIntervalMs === undefined) {
-			this.pollingIntervalMs = 5000;
-		} else {
-			this.pollingIntervalMs = pollingIntervalMs;
-		}
-
-		this.userAccountLoader = new BulkAccountLoader(
-			connection,
-			'processed',
-			this.pollingIntervalMs
-		);
+		this.accountSubscription = accountSubscription;
 	}
 
 	public async fetchAllUsers() {
+		const userArray: ClearingHouseUser[] = [];
+
 		const programUserAccounts =
 			(await this.clearingHouse.program.account.user.all()) as ProgramAccount<UserAccount>[];
-		const userArray: ClearingHouseUser[] = [];
 		for (const programUserAccount of programUserAccounts) {
 			if (this.userMap.has(programUserAccount.publicKey.toString())) {
 				continue;
@@ -48,18 +36,20 @@ export class UserMap {
 			const user = new ClearingHouseUser({
 				clearingHouse: this.clearingHouse,
 				userAccountPublicKey: programUserAccount.publicKey,
-				accountSubscription: {
-					type: 'polling',
-					accountLoader: this.userAccountLoader,
-				},
+				accountSubscription: this.accountSubscription,
 			});
 			userArray.push(user);
 		}
 
-		await bulkPollingUserSubscribe(userArray, this.userAccountLoader);
+		if (this.accountSubscription.type === 'polling') {
+			await bulkPollingUserSubscribe(
+				userArray,
+				this.accountSubscription.accountLoader
+			);
+		}
+
 		for (const user of userArray) {
-			const userAccountPubkey = await user.getUserAccountPublicKey();
-			this.userMap.set(userAccountPubkey.toString(), user);
+			this.userMap.set(user.getUserAccountPublicKey().toString(), user);
 		}
 	}
 
@@ -67,10 +57,7 @@ export class UserMap {
 		const user = new ClearingHouseUser({
 			clearingHouse: this.clearingHouse,
 			userAccountPublicKey,
-			accountSubscription: {
-				type: 'polling',
-				accountLoader: this.userAccountLoader,
-			},
+			accountSubscription: this.accountSubscription,
 		});
 		await user.subscribe();
 		this.userMap.set(userAccountPublicKey.toString(), user);

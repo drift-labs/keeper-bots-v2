@@ -21,6 +21,8 @@ import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { DLOB } from '../dlob/DLOB';
 import { DLOBNode } from '../dlob/DLOBNode';
+import { UserMap } from '../userMap';
+import { UserStatsMap } from '../userStatsMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
@@ -71,6 +73,8 @@ export class JitMakerBot implements Bot {
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
 	private dlob: DLOB;
+	private userMap: UserMap;
+	private userStatsMap: UserStatsMap;
 
 	private perMarketMutexFills = new Uint8Array(new SharedArrayBuffer(8));
 
@@ -110,17 +114,31 @@ export class JitMakerBot implements Bot {
 	}
 
 	public async init() {
-		// initialize DLOB instance
+		const initPromises: Array<Promise<any>> = [];
+
 		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
-		await this.dlob.init(this.clearingHouse);
+		initPromises.push(this.dlob.init(this.clearingHouse));
+
+		this.userMap = new UserMap(
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
+		);
+		initPromises.push(this.userMap.fetchAllUsers());
+
+		this.userStatsMap = new UserStatsMap(
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
+		);
+		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		this.agentState = {
 			stateType: new Map<number, StateType>(),
 			marketPosition: new Map<number, UserPosition>(),
 			account: undefined,
 		};
+		initPromises.push(this.updateAgentState());
 
-		await this.updateAgentState();
+		await Promise.all(initPromises);
 	}
 
 	public reset(): void {
@@ -129,6 +147,8 @@ export class JitMakerBot implements Bot {
 		}
 		this.intervalIds = [];
 		delete this.dlob;
+		delete this.userMap;
+		delete this.userStatsMap;
 	}
 
 	public async startIntervalLoop(intervalMs: number) {
@@ -142,6 +162,11 @@ export class JitMakerBot implements Bot {
 	public async trigger(record: any): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
 			this.dlob.applyOrderRecord(record as OrderRecord);
+			await this.userMap.updateWithOrder(record as OrderRecord);
+			await this.userStatsMap.updateWithOrder(
+				record as OrderRecord,
+				this.userMap
+			);
 			await this.tryMake();
 		}
 	}
@@ -499,6 +524,10 @@ export class JitMakerBot implements Bot {
 			}
 		}
 
+		const takerUserStats = (
+			await this.userStatsMap.mustGet(action.node.userAccount.toString())
+		).userStatsAccountPublicKey;
+
 		return await this.clearingHouse.placeAndMake(
 			{
 				orderType: OrderType.LIMIT,
@@ -512,6 +541,7 @@ export class JitMakerBot implements Bot {
 			{
 				taker: action.node.userAccount,
 				order: action.node.order,
+				takerStats: takerUserStats,
 			}
 		);
 	}

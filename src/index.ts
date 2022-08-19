@@ -217,6 +217,7 @@ const runBot = async () => {
 			accountLoader: bulkAccountLoader,
 		},
 		env: driftEnv,
+		userStats: true,
 	});
 
 	const eventSubscriber = new EventSubscriber(
