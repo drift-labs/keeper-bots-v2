@@ -33,6 +33,7 @@ import { JitMakerBot } from './bots/jitMaker';
 import { LiquidatorBot } from './bots/liquidator';
 import { Bot } from './types';
 import { Metrics } from './metrics';
+import { PnlSettlerBot } from './bots/pnlSettler';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
@@ -49,6 +50,7 @@ program
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
 	.option('--liquidator', 'Enable liquidator bot')
+	.option('--pnl-settler', 'Enable PnL settler bot')
 	.option('--print-info', 'Periodically print market and position info')
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option('--close-open-positions', 'close all open positions')
@@ -71,7 +73,7 @@ program
 const opts = program.opts();
 
 logger.info(
-	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JitMakerBot enabled: ${!!opts.jitMaker}`
+	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JitMakerBot enabled: ${!!opts.jitMaker} PnlSettler enabled: ${!!opts.pnlSettler}`
 );
 
 export function getWallet(): Wallet {
@@ -412,6 +414,19 @@ const runBot = async () => {
 	if (opts.liquidator) {
 		bots.push(
 			new LiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
+		);
+	}
+
+	if (opts.pnlSettler) {
+		bots.push(
+			new PnlSettlerBot(
+				'pnlSettler',
+				!!opts.dry,
+				clearingHouse,
+				// update to current env markets before deploy to mainnet
+				DevnetMarkets,
+				metrics
+			)
 		);
 	}
 
