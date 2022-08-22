@@ -149,6 +149,11 @@ export class PnlSettlerBot implements Bot {
 				logger.info(
 					`Trying to settle PNL for ${params.users.length} users on market ${marketStr}`
 				);
+
+				if (this.dryRun) {
+					throw new Error('Dry run - not sending settle pnl tx');
+				}
+
 				this.clearingHouse
 					.settlePNLs(params.users, params.marketIndex)
 					.then((txSig) => {
