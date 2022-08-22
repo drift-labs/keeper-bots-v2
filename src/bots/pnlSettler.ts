@@ -28,7 +28,7 @@ const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 export class PnlSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 60000;
+	public readonly defaultIntervalMs: number = 600000;
 
 	private clearingHouse: ClearingHouse;
 	private intervalIds: Array<NodeJS.Timer> = [];
