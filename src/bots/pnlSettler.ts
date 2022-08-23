@@ -107,9 +107,6 @@ export class PnlSettlerBot implements Bot {
 			for (const user of this.userMap.values()) {
 				const userAccount = user.getUserAccount();
 
-				this.clearingHouse.fetchAccounts();
-				this.clearingHouse.getUser().fetchAccounts();
-
 				for (const settleePosition of userAccount.positions) {
 					const marketIndexNum = settleePosition.marketIndex.toNumber();
 					const unsettledPnl = calculateUnsettledPnl(
@@ -154,26 +151,32 @@ export class PnlSettlerBot implements Bot {
 					throw new Error('Dry run - not sending settle pnl tx');
 				}
 
-				this.clearingHouse
-					.settlePNLs(params.users, params.marketIndex)
-					.then((txSig) => {
-						logger.info(
-							`PNL settled successfully on ${marketStr}. TxSig: ${txSig}`
-						);
-						params.users.forEach((settledUser) => {
+				for (let i = 0; i < params.users.length; i += 5) {
+					const usersChunk = params.users.slice(i, i + 5);
+					this.clearingHouse
+						.settlePNLs(usersChunk, params.marketIndex)
+						.then((txSig) => {
+							logger.info(
+								`PNL settled successfully on ${marketStr}. TxSig: ${txSig}`
+							);
 							this.metrics?.recordSettlePnl(
-								settledUser.settleeUserAccountPublicKey,
+								usersChunk.length,
+								params.marketIndex.toNumber(),
 								this.name
 							);
+						})
+						.catch((err) => {
+							const errorCode = getErrorCode(err);
+							this.metrics?.recordErrorCode(
+								errorCode,
+								this.clearingHouse.provider.wallet.publicKey,
+								this.name
+							);
+							logger.error(
+								`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
+							);
 						});
-					})
-					.catch((err) => {
-						logger.error(
-							`Error code ${getErrorCode(
-								err
-							)} while settling pnls for ${marketStr}: ${err.message}`
-						);
-					});
+				}
 			});
 		} catch (e) {
 			console.error(e);

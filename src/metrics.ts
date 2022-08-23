@@ -499,9 +499,9 @@ export class Metrics {
 		});
 	}
 
-	recordSettlePnl(pubKey: PublicKey, bot: string) {
-		this.settlePnlCounter.add(1, {
-			user: pubKey.toBase58(),
+	recordSettlePnl(numSettled: number, marketIndex: number, bot: string) {
+		this.settlePnlCounter.add(numSettled, {
+			market: marketIndex,
 			bot: bot,
 		});
 	}
