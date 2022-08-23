@@ -231,11 +231,6 @@ export class DLOB {
 		);
 		// Find all market nodes to fill
 		const marketNodesToFill = this.findMarketNodesToFill(marketIndex, slot);
-		logger.info(
-			`nodes to fill [mkt: ${marketIndex.toNumber()}]: crossing: ${
-				crossingNodesToFill.length
-			}, market: ${marketNodesToFill.length}`
-		);
 		return crossingNodesToFill.concat(marketNodesToFill);
 	}
 
