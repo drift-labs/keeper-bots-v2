@@ -92,6 +92,7 @@ export class Metrics {
 	private filledOrdersCounter: Counter;
 	private perpLiquidationsCounter: Counter;
 	private liquidationEventsCounter: Counter;
+	private settlePnlCounter: Counter;
 
 	private clearingHouse: ClearingHouse;
 	private authority: PublicKey;
@@ -464,6 +465,10 @@ export class Metrics {
 				description: 'Count of liquidation events',
 			}
 		);
+
+		this.settlePnlCounter = this.meter.createCounter('settle_pnls', {
+			description: 'Count of settle pnl txns',
+		});
 	}
 
 	async init() {
@@ -490,6 +495,13 @@ export class Metrics {
 	recordFilledOrder(authority: PublicKey, bot: string) {
 		this.filledOrdersCounter.add(1, {
 			user: authority.toBase58(),
+			bot: bot,
+		});
+	}
+
+	recordSettlePnl(numSettled: number, marketIndex: number, bot: string) {
+		this.settlePnlCounter.add(numSettled, {
+			market: marketIndex,
 			bot: bot,
 		});
 	}
