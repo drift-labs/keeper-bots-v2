@@ -472,9 +472,17 @@ export class DLOB {
 			return {};
 		}
 
+		const bidOrder = bidNode.order;
+		const askOrder = askNode.order;
+
 		// User bid crosses the vamm ask
 		// Cant match orders
 		if (askNode.isVammNode()) {
+			if (!isAuctionComplete(bidOrder, slot)) {
+				return {
+					crossingSide: 'bid',
+				};
+			}
 			return {
 				crossingNodes: {
 					node: bidNode,
@@ -486,6 +494,11 @@ export class DLOB {
 		// User ask crosses the vamm bid
 		// Cant match orders
 		if (bidNode.isVammNode()) {
+			if (!isAuctionComplete(askOrder, slot)) {
+				return {
+					crossingSide: 'ask',
+				};
+			}
 			return {
 				crossingNodes: {
 					node: askNode,
@@ -493,9 +506,6 @@ export class DLOB {
 				crossingSide: 'ask',
 			};
 		}
-
-		const bidOrder = bidNode.order;
-		const askOrder = askNode.order;
 
 		// Two maker orders cross
 		if (bidOrder.postOnly && askOrder.postOnly) {
