@@ -1,7 +1,7 @@
 import fs from 'fs';
 import { program, Option } from 'commander';
 
-import { Connection, Keypair, PublicKey } from '@solana/web3.js';
+import { Connection, Commitment, Keypair, PublicKey } from '@solana/web3.js';
 
 import {
 	Token,
@@ -39,6 +39,8 @@ require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
 //@ts-ignore
 const sdkConfig = initialize({ env: process.env.ENV });
+
+const stateCommitment: Commitment = 'confirmed';
 
 program
 	.option('-d, --dry', 'Dry run, do not send transactions on chain')
@@ -102,6 +104,7 @@ export function getWallet(): Wallet {
 }
 
 const endpoint = process.env.ENDPOINT;
+logger.info(`RPC endpoint: ${endpoint}`);
 
 function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -203,11 +206,11 @@ const runBot = async () => {
 		sdkConfig.CLEARING_HOUSE_PROGRAM_ID
 	);
 
-	const connection = new Connection(endpoint, 'finalized');
+	const connection = new Connection(endpoint, stateCommitment);
 
 	const bulkAccountLoader = new BulkAccountLoader(
 		connection,
-		'confirmed',
+		stateCommitment,
 		1000
 	);
 	const clearingHouse = new ClearingHouse({
@@ -230,7 +233,7 @@ const runBot = async () => {
 			maxEventsPerType: 8192,
 			orderBy: 'blockchain',
 			orderDir: 'desc',
-			commitment: 'confirmed',
+			commitment: stateCommitment,
 			logProviderConfig: {
 				type: 'polling',
 				frequency: 1000,
@@ -430,13 +433,13 @@ const runBot = async () => {
 		);
 	}
 
-	for (const bot of bots) {
-		await bot.init();
-	}
+	logger.info(`initializing bots`);
+	await Promise.all(bots.map((bot) => bot.init()));
 
-	for (const bot of bots) {
-		bot.startIntervalLoop(bot.defaultIntervalMs);
-	}
+	logger.info(`starting bots`);
+	await Promise.all(
+		bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
+	);
 
 	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
 		Promise.all(bots.map((bot) => bot.trigger(event)));
