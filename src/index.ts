@@ -271,7 +271,7 @@ const runBot = async () => {
 
 	let metrics: Metrics | undefined = undefined;
 	if (opts.metrics) {
-		metrics = new Metrics(clearingHouse);
+		metrics = new Metrics(clearingHouse, parseInt(opts?.metrics));
 		await metrics.init();
 		metrics.trackObjectSize('clearingHouse', clearingHouse);
 		metrics.trackObjectSize('clearingHouseUser', clearingHouseUser);
