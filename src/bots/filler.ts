@@ -143,12 +143,12 @@ export class FillerBot implements Bot {
 
 				if (
 					!nodeToFill.makerNode &&
-						!isFillableByVAMM(
-							nodeToFill.node.order,
-							market,
-							oraclePriceData,
-							this.slotSubscriber.getSlot()
-						)
+					!isFillableByVAMM(
+						nodeToFill.node.order,
+						market,
+						oraclePriceData,
+						this.slotSubscriber.getSlot()
+					)
 				) {
 					continue;
 				}
@@ -188,7 +188,11 @@ export class FillerBot implements Bot {
 					nodeToFill.node.userAccount.toString()
 				);
 
-				const referrerInfo = (await this.userStatsMap.mustGet(user.getUserAccount().authority.toString())).getReferrerInfo();
+				const referrerInfo = (
+					await this.userStatsMap.mustGet(
+						user.getUserAccount().authority.toString()
+					)
+				).getReferrerInfo();
 
 				this.clearingHouse
 					.fillOrder(

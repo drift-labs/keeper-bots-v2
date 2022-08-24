@@ -110,7 +110,7 @@ export class UserStatsMap {
 		authorityPublicKey: string
 	): Promise<ClearingHouseUserStats> {
 		if (!this.has(authorityPublicKey)) {
-			this.addUserStat(new PublicKey(authorityPublicKey));
+			await this.addUserStat(new PublicKey(authorityPublicKey));
 		}
 		return this.get(authorityPublicKey);
 	}
