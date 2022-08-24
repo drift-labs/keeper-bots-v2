@@ -3,14 +3,11 @@ import {
 	convertToNumber,
 	ClearingHouse,
 	ClearingHouseUser,
-	calculateWorstCaseBaseAssetAmount,
-	calculateMarketMarginRatio,
+	isVariant,
 	OrderRecord,
 	LiquidationRecord,
 	BASE_PRECISION,
-	AMM_TO_QUOTE_PRECISION_RATIO,
 	MARK_PRICE_PRECISION,
-	MARGIN_PRECISION,
 	QUOTE_PRECISION,
 	UserPosition,
 } from '@drift-labs/sdk';
@@ -37,7 +34,7 @@ export class LiquidatorBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private metrics: Metrics | undefined;
-	private deriskMutex = new Uint8Array(new SharedArrayBuffer(8));
+	private deriskMutex = new Uint8Array(new SharedArrayBuffer(1));
 
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
@@ -134,7 +131,7 @@ export class LiquidatorBot implements Bot {
 			// cancel open orders
 			let canceledOrders = 0;
 			for (const order of userAccount.orders) {
-				if (order.baseAssetAmount.isZero()) {
+				if (!isVariant(order.status, 'open')) {
 					continue;
 				}
 				const tx = await this.clearingHouse.cancelOrder(order.orderId);
@@ -175,104 +172,6 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
-	private checkLiquidatorMarginToLiquidate(
-		liquidatorUser: ClearingHouseUser,
-		liquidateePosition: UserPosition,
-		baseAmountToTake: BN
-	): boolean {
-		const liquidatorPosition = liquidatorUser.getUserPosition(
-			liquidateePosition.marketIndex
-		);
-
-		let currentPosBaseAmount = new BN(0);
-		if (liquidatorPosition !== undefined) {
-			currentPosBaseAmount = liquidatorPosition.baseAssetAmount;
-		}
-
-		const market = this.clearingHouse.getMarketAccount(
-			liquidateePosition.marketIndex
-		);
-
-		logger.info(
-			`  liquidating position in market ${liquidateePosition.marketIndex.toString()}, sizeToTake: ${convertToNumber(
-				baseAmountToTake,
-				BASE_PRECISION
-			)}/${convertToNumber(
-				liquidateePosition.baseAssetAmount,
-				BASE_PRECISION
-			).toString()}`
-		);
-		logger.info(
-			`    liquidatorPosition0: ${convertToNumber(
-				currentPosBaseAmount,
-				BASE_PRECISION
-			).toString()}`
-		);
-		const newPosition: UserPosition = {
-			baseAssetAmount: currentPosBaseAmount.add(baseAmountToTake),
-			lastCumulativeFundingRate: liquidatorPosition?.lastCumulativeFundingRate,
-			marketIndex: liquidatorPosition?.marketIndex,
-			quoteAssetAmount: liquidatorPosition?.quoteAssetAmount,
-			quoteEntryAmount: liquidatorPosition?.quoteEntryAmount,
-			openOrders: liquidatorPosition
-				? liquidatorPosition.openOrders
-				: new BN(0),
-			openBids: liquidatorPosition ? liquidatorPosition.openBids : new BN(0),
-			openAsks: liquidatorPosition ? liquidatorPosition.openAsks : new BN(0),
-			realizedPnl: new BN(0),
-			lpShares: new BN(0),
-			lastFeePerLp: new BN(0),
-			lastNetBaseAssetAmountPerLp: new BN(0),
-			lastNetQuoteAssetAmountPerLp: new BN(0),
-		};
-		logger.info(
-			`    liquidatorPosition1: ${convertToNumber(
-				newPosition.baseAssetAmount,
-				BASE_PRECISION
-			).toString()}`
-		);
-
-		// calculate margin required to take over position
-		const worstCaseBaseAssetAmount =
-			calculateWorstCaseBaseAssetAmount(newPosition);
-		const worstCaseAssetValue = worstCaseBaseAssetAmount
-			.abs()
-			.mul(
-				this.clearingHouse.getOracleDataForMarket(
-					liquidateePosition.marketIndex
-				).price
-			)
-			.div(AMM_TO_QUOTE_PRECISION_RATIO.mul(MARK_PRICE_PRECISION));
-
-		const marketMarginRatio = new BN(
-			calculateMarketMarginRatio(market, worstCaseBaseAssetAmount, 'Initial')
-		);
-		const marginRequired = worstCaseAssetValue
-			.mul(marketMarginRatio)
-			.div(MARGIN_PRECISION);
-
-		const marginAvailable = liquidatorUser.getFreeCollateral();
-		logger.info(
-			`    marginRequired: ${convertToNumber(
-				marginRequired,
-				QUOTE_PRECISION
-			).toString()}`
-		);
-		logger.info(
-			`    marginAvailable: ${convertToNumber(
-				marginAvailable,
-				QUOTE_PRECISION
-			).toString()}`
-		);
-		logger.info(
-			`      enough collateral to liquidate??: ${marginAvailable.gte(
-				marginRequired
-			)}`
-		);
-
-		return marginAvailable.gte(marginRequired);
-	}
-
 	private calculateBaseAmountToLiquidate(
 		liquidatorUser: ClearingHouseUser,
 		liquidateePosition: UserPosition
@@ -285,16 +184,18 @@ export class LiquidatorBot implements Bot {
 			.mul(MARK_PRICE_PRECISION)
 			.mul(this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL)
 			.mul(BASE_PRECISION);
-		const baseAmountToSpend = collateralToSpend.div(
+		const baseAssetAmountToLiquidate = collateralToSpend.div(
 			oraclePrice
 				.mul(QUOTE_PRECISION)
 				.mul(this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM)
 		);
 
-		if (baseAmountToSpend.gt(liquidateePosition.baseAssetAmount.abs())) {
+		if (
+			baseAssetAmountToLiquidate.gt(liquidateePosition.baseAssetAmount.abs())
+		) {
 			return liquidateePosition.baseAssetAmount.abs();
 		} else {
-			return baseAmountToSpend;
+			return baseAssetAmountToLiquidate;
 		}
 	}
 
@@ -311,8 +212,6 @@ export class LiquidatorBot implements Bot {
 
 				if (canBeLiquidated) {
 					logger.info(`liquidating ${auth}: ${userKey}...`);
-					this.clearingHouse.fetchAccounts();
-					this.clearingHouse.getUser().fetchAccounts();
 
 					const liquidatorUser = this.clearingHouse.getUser();
 
@@ -325,14 +224,8 @@ export class LiquidatorBot implements Bot {
 							liquidatorUser,
 							liquidateePosition
 						);
-						const sufficientMarginToLiquidate =
-							this.checkLiquidatorMarginToLiquidate(
-								liquidatorUser,
-								liquidateePosition,
-								baseAmountToLiquidate
-							);
 
-						if (sufficientMarginToLiquidate) {
+						if (baseAmountToLiquidate.gt(new BN(0))) {
 							try {
 								if (this.dryRun) {
 									logger.warn(
