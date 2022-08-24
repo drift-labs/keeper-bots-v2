@@ -60,10 +60,7 @@ program
 		'--force-deposit <number>',
 		'Force deposit this amount of USDC to collateral account, the program will end after the deposit transaction is sent'
 	)
-	.option(
-		'--metrics', // TODO: allow custom url and port
-		'Enable Prometheus metric scraper'
-	)
+	.option('--metrics <number>', 'Enable Prometheus metric scraper')
 	.addOption(
 		new Option(
 			'-p, --private-key <string>',
@@ -118,24 +115,6 @@ function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
 			QUOTE_PRECISION
 		)}:`
 	);
-	/*
-	for (let i = 0; i < DevnetBanks.length; i += 1) {
-		const bank = DevnetBanks[i];
-		const collateral = clearingHouseUser.getCollateralValue(bank.bankIndex);
-		logger.info(
-			`  Bank Collateral (${bank.bankIndex}: ${bank.symbol}): ${convertToNumber(
-				collateral,
-				QUOTE_PRECISION
-			)}`
-		);
-	}
-	logger.info(
-		`CHUser unsettled PnL:          ${convertToNumber(
-			clearingHouseUser.getUnsettledPNL(),
-			QUOTE_PRECISION
-		)}`
-	);
-	*/
 
 	logger.info(
 		`CHUser unrealized funding PnL: ${convertToNumber(
@@ -177,15 +156,6 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 				QUOTE_PRECISION
 			).toString()}`
 		);
-		/*
-		console.log(
-			` . unsettledPnl:     ${convertToNumber(
-				p.unsettledPnl,
-				QUOTE_PRECISION
-			).toString()}`
-		);
-		*/
-		// console.log(` . lastCumulativeFundingRate: ${p.lastCumulativeFundingRate}`);
 
 		console.log(
 			` . lastCumulativeFundingRate: ${convertToNumber(
