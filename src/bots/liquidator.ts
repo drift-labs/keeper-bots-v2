@@ -2,14 +2,12 @@ import {
 	BN,
 	convertToNumber,
 	ClearingHouse,
-	calculateWorstCaseBaseAssetAmount,
-	calculateMarketMarginRatio,
+	ClearingHouseUser,
+	isVariant,
 	OrderRecord,
 	LiquidationRecord,
 	BASE_PRECISION,
-	AMM_TO_QUOTE_PRECISION_RATIO,
 	MARK_PRICE_PRECISION,
-	MARGIN_PRECISION,
 	QUOTE_PRECISION,
 	UserPosition,
 } from '@drift-labs/sdk';
@@ -20,6 +18,13 @@ import { UserMap } from '../userMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
+/**
+ * LiquidatorBot implements a simple liquidation bot for the Drift V2 Protocol. Liquidations work by taking over
+ * a portion of the endangered account's position, so collateral is required in order to run this bot. The bot
+ * will spend at most MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL of its free collateral on any endangered account.
+ *
+ * The bot will immediately market sell any of its open positions if SELL_OPEN_POSITIONS is true.
+ */
 export class LiquidatorBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
@@ -29,6 +34,18 @@ export class LiquidatorBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private metrics: Metrics | undefined;
+	private deriskMutex = new Uint8Array(new SharedArrayBuffer(1));
+
+	/**
+	 * Max percentage of collateral to spend on liquidating a single position.
+	 */
+	private MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL = new BN(1);
+	private MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM = new BN(100);
+
+	/**
+	 * Immediately sell any open positions.
+	 */
+	private SELL_OPEN_POSITIONS = true;
 
 	constructor(
 		name: string,
@@ -64,7 +81,22 @@ export class LiquidatorBot implements Bot {
 		const intervalId = setInterval(this.tryLiquidate.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
 
+		const deRiskIntervalId = setInterval(this.derisk.bind(this), 10000);
+		this.intervalIds.push(deRiskIntervalId);
+
 		logger.info(`${this.name} Bot started!`);
+
+		const freeCollateral = this.clearingHouse.getUser().getFreeCollateral();
+		logger.info(
+			`${this.name} free collateral: $${convertToNumber(
+				freeCollateral,
+				QUOTE_PRECISION
+			)}, spending at most ${
+				(this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL.toNumber() /
+					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM.toNumber()) *
+				100.0
+			}% per liquidation`
+		);
 	}
 
 	public async trigger(record: any): Promise<void> {
@@ -82,22 +114,104 @@ export class LiquidatorBot implements Bot {
 		return undefined;
 	}
 
+	/**
+	 * attempts to close out any open positions on this account. It starts by cancelling any open orders
+	 */
+	private async derisk() {
+		if (Atomics.compareExchange(this.deriskMutex, 0, 0, 1) === 1) {
+			return;
+		}
+
+		if (!this.SELL_OPEN_POSITIONS) {
+			return;
+		}
+
+		try {
+			const userAccount = this.clearingHouse.getUserAccount();
+			// cancel open orders
+			let canceledOrders = 0;
+			for (const order of userAccount.orders) {
+				if (!isVariant(order.status, 'open')) {
+					continue;
+				}
+				const tx = await this.clearingHouse.cancelOrder(order.orderId);
+				logger.info(
+					`${this.name} canceling open order ${
+						order.orderId
+					} on market ${order.marketIndex.toString()}: ${tx}`
+				);
+				canceledOrders++;
+			}
+			if (canceledOrders > 0) {
+				logger.info(
+					`${this.name} canceled ${canceledOrders} open orders while derisking`
+				);
+			}
+
+			// close open orders
+			let closedPositions = 0;
+			for (const position of userAccount.positions) {
+				if (position.baseAssetAmount.isZero()) {
+					continue;
+				}
+				const tx = await this.clearingHouse.closePosition(position.marketIndex);
+				logger.info(
+					`${
+						this.name
+					} closing position on market ${position.marketIndex.toString()}: ${tx}`
+				);
+				closedPositions++;
+			}
+			if (closedPositions > 0) {
+				logger.info(
+					`${this.name} closed ${closedPositions} positions while derisking`
+				);
+			}
+		} finally {
+			Atomics.store(this.deriskMutex, 0, 0);
+		}
+	}
+
+	private calculateBaseAmountToLiquidate(
+		liquidatorUser: ClearingHouseUser,
+		liquidateePosition: UserPosition
+	): BN {
+		const oraclePrice = this.clearingHouse.getOracleDataForMarket(
+			liquidateePosition.marketIndex
+		).price;
+		const collateralToSpend = liquidatorUser
+			.getFreeCollateral()
+			.mul(MARK_PRICE_PRECISION)
+			.mul(this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL)
+			.mul(BASE_PRECISION);
+		const baseAssetAmountToLiquidate = collateralToSpend.div(
+			oraclePrice
+				.mul(QUOTE_PRECISION)
+				.mul(this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM)
+		);
+
+		if (
+			baseAssetAmountToLiquidate.gt(liquidateePosition.baseAssetAmount.abs())
+		) {
+			return liquidateePosition.baseAssetAmount.abs();
+		} else {
+			return baseAssetAmountToLiquidate;
+		}
+	}
+
+	/**
+	 * iterates over users in userMap and chekcs if they can be liquidated. If so, their positions are checked to find the
+	 * endangered position to liquidate.
+	 */
 	private async tryLiquidate() {
 		try {
 			for (const user of this.userMap.values()) {
 				const auth = user.getUserAccount().authority.toBase58();
 				const userKey = user.userAccountPublicKey.toBase58();
-				// console.log(`[${auth}: ${userKey}]`);
-				// console.log(`  leverage: ${convertToNumber(user.getLeverage(), TEN_THOUSAND).toString()}`);
 				const [canBeLiquidated, _marginRatio] = user.canBeLiquidated();
-				// console.log(`  canBeLiquidated: ${canBeLiquidated}, marginRatio: ${convertToNumber(marginRatio, TEN_THOUSAND).toString()}`);
-				// const bankLiabilityValue = user.getBankLiabilityValue();
-				// console.log(`  bankLiabilityValue: ${convertToNumber(bankLiabilityValue, QUOTE_PRECISION).toString()}`);
 
 				if (canBeLiquidated) {
 					logger.info(`liquidating ${auth}: ${userKey}...`);
-					this.clearingHouse.fetchAccounts();
-					this.clearingHouse.getUser().fetchAccounts();
 
 					const liquidatorUser = this.clearingHouse.getUser();
 
@@ -105,114 +219,24 @@ export class LiquidatorBot implements Bot {
 						if (liquidateePosition.baseAssetAmount.isZero()) {
 							continue;
 						}
-						const liquidatorPosition = liquidatorUser.getUserPosition(
-							liquidateePosition.marketIndex
+
+						const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
+							liquidatorUser,
+							liquidateePosition
 						);
 
-						let currentPosBaseAmount = new BN(0);
-						if (liquidatorPosition !== undefined) {
-							currentPosBaseAmount = liquidatorPosition.baseAssetAmount;
-						}
-
-						const market = this.clearingHouse.getMarketAccount(
-							liquidateePosition.marketIndex
-						);
-
-						logger.info(
-							`  liquidating position in market ${liquidateePosition.marketIndex.toString()}, size: ${convertToNumber(
-								liquidateePosition.baseAssetAmount,
-								BASE_PRECISION
-							).toString()}`
-						);
-						logger.info(
-							`    liquidatorPosition0: ${convertToNumber(
-								currentPosBaseAmount,
-								BASE_PRECISION
-							).toString()}`
-						);
-						const newPosition: UserPosition = {
-							baseAssetAmount: currentPosBaseAmount.add(
-								liquidateePosition.baseAssetAmount
-							),
-							lastCumulativeFundingRate:
-								liquidatorPosition?.lastCumulativeFundingRate,
-							marketIndex: liquidatorPosition?.marketIndex,
-							quoteAssetAmount: liquidatorPosition?.quoteAssetAmount,
-							quoteEntryAmount: liquidatorPosition?.quoteEntryAmount,
-							openOrders: liquidatorPosition
-								? liquidatorPosition.openOrders
-								: new BN(0),
-							openBids: liquidatorPosition
-								? liquidatorPosition.openBids
-								: new BN(0),
-							openAsks: liquidatorPosition
-								? liquidatorPosition.openAsks
-								: new BN(0),
-							realizedPnl: new BN(0),
-							lpShares: new BN(0),
-							lastFeePerLp: new BN(0),
-							lastNetBaseAssetAmountPerLp: new BN(0),
-							lastNetQuoteAssetAmountPerLp: new BN(0),
-						};
-						logger.info(
-							`    liquidatorPosition1: ${convertToNumber(
-								newPosition.baseAssetAmount,
-								BASE_PRECISION
-							).toString()}`
-						);
-
-						// calculate margin required to take over position
-						const worstCaseBaseAssetAmount =
-							calculateWorstCaseBaseAssetAmount(newPosition);
-						const worstCaseAssetValue = worstCaseBaseAssetAmount
-							.abs()
-							.mul(
-								this.clearingHouse.getOracleDataForMarket(
-									liquidateePosition.marketIndex
-								).price
-							)
-							.div(AMM_TO_QUOTE_PRECISION_RATIO.mul(MARK_PRICE_PRECISION));
-
-						const marketMarginRatio = new BN(
-							calculateMarketMarginRatio(
-								market,
-								worstCaseBaseAssetAmount,
-								'Initial'
-							)
-						);
-						const marginRequired = worstCaseAssetValue
-							.mul(marketMarginRatio)
-							.div(MARGIN_PRECISION);
-
-						const marginAvailable = liquidatorUser.getFreeCollateral();
-						logger.info(
-							`    marginRequired: ${convertToNumber(
-								marginRequired,
-								QUOTE_PRECISION
-							).toString()}`
-						);
-						logger.info(
-							`    marginAvailable: ${convertToNumber(
-								marginAvailable,
-								QUOTE_PRECISION
-							).toString()}`
-						);
-						logger.info(
-							`      enough collateral to liquidate??: ${marginAvailable.gte(
-								marginRequired
-							)}`
-						);
-
-						if (marginAvailable.gte(marginRequired)) {
+						if (baseAmountToLiquidate.gt(new BN(0))) {
 							try {
 								if (this.dryRun) {
-									throw new Error('Dry run - not sending liquidate tx');
+									logger.warn(
+										'--dry run flag enabled - not sending liquidate tx'
+									);
 								}
 								const tx = await this.clearingHouse.liquidatePerp(
 									user.userAccountPublicKey,
 									user.getUserAccount(),
 									liquidateePosition.marketIndex,
-									liquidateePosition.baseAssetAmount
+									baseAmountToLiquidate
 								);
 								logger.info(`liquidatePerp tx: ${tx}`);
 								this.metrics?.recordPerpLiquidation(
@@ -227,13 +251,21 @@ export class LiquidatorBot implements Bot {
 										`Liquidator has insufficient collateral to take over position.`
 									);
 								}
-								logger.error(`Error liquidating ${auth}: ${userKey}`);
-								console.error(txError);
+								this.metrics?.recordErrorCode(
+									errorCode,
+									this.clearingHouse.provider.wallet.publicKey,
+									this.name
+								);
+								logger.error(
+									`Error liquidating auth: ${auth}, user: ${userKey}`
+								);
+								// console.error(txError);
 							}
 						}
 					}
 				}
 			}
+			await this.derisk();
 		} catch (e) {
 			console.error(e);
 		}

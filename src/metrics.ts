@@ -26,8 +26,6 @@ import {
 import { Mutex } from 'async-mutex';
 import sizeof from 'object-sizeof';
 
-const { endpoint, port } = PrometheusExporter.DEFAULT_OPTIONS;
-
 declare type TrackedObject = {
 	name: string;
 	object: any;
@@ -97,15 +95,18 @@ export class Metrics {
 	private clearingHouse: ClearingHouse;
 	private authority: PublicKey;
 
-	constructor(clearingHouse: ClearingHouse) {
+	constructor(clearingHouse: ClearingHouse, metricsPort?: number) {
+		const { endpoint: defaultEndpoint, port: defaultPort } =
+			PrometheusExporter.DEFAULT_OPTIONS;
+		const port = metricsPort || defaultPort;
 		this.exporter = new PrometheusExporter(
 			{
 				port: port,
-				endpoint: endpoint,
+				endpoint: defaultEndpoint,
 			},
 			() => {
 				logger.info(
-					`prometheus scrape endpoint started: http://localhost:${port}${endpoint}`
+					`prometheus scrape endpoint started: http://localhost:${port}${defaultEndpoint}`
 				);
 			}
 		);
