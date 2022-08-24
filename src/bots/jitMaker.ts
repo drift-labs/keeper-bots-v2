@@ -524,9 +524,10 @@ export class JitMakerBot implements Bot {
 		const takerAuthority = (
 			await this.userMap.mustGet(action.node.userAccount.toString())
 		).getUserAccount().authority;
-		const takerUserStats = (
-			await this.userStatsMap.mustGet(takerAuthority.toString())
-		).userStatsAccountPublicKey;
+
+		const takerUserStats = await this.userStatsMap.mustGet(takerAuthority.toString());
+		const takerUserStatsPublicKey = takerUserStats.userStatsAccountPublicKey;
+		const referrerInfo = takerUserStats.getReferrerInfo();
 
 		return await this.clearingHouse.placeAndMake(
 			{
@@ -541,8 +542,9 @@ export class JitMakerBot implements Bot {
 			{
 				taker: action.node.userAccount,
 				order: action.node.order,
-				takerStats: takerUserStats,
-			}
+				takerStats: takerUserStatsPublicKey,
+			},
+			referrerInfo,
 		);
 	}
 

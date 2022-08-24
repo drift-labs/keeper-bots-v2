@@ -1,5 +1,4 @@
 import {
-	isVariant,
 	isOracleValid,
 	ClearingHouse,
 	MarketAccount,
@@ -7,8 +6,8 @@ import {
 	SlotSubscriber,
 	calculateAskPrice,
 	calculateBidPrice,
-	calculateBaseAssetAmountMarketCanExecute,
 	MakerInfo,
+	isFillableByVAMM,
 } from '@drift-labs/sdk';
 
 import { getErrorCode } from '../error';
@@ -144,23 +143,14 @@ export class FillerBot implements Bot {
 
 				if (
 					!nodeToFill.makerNode &&
-					(isVariant(nodeToFill.node.order.orderType, 'limit') ||
-						isVariant(nodeToFill.node.order.orderType, 'triggerLimit'))
-				) {
-					const baseAssetAmountMarketCanExecute =
-						calculateBaseAssetAmountMarketCanExecute(
-							market,
+						!isFillableByVAMM(
 							nodeToFill.node.order,
-							oraclePriceData
-						);
-
-					if (
-						baseAssetAmountMarketCanExecute.lt(
-							market.amm.baseAssetAmountStepSize
+							market,
+							oraclePriceData,
+							this.slotSubscriber.getSlot()
 						)
-					) {
-						continue;
-					}
+				) {
+					continue;
 				}
 
 				nodeToFill.node.haveFilled = true;
@@ -197,12 +187,16 @@ export class FillerBot implements Bot {
 				const user = await this.userMap.mustGet(
 					nodeToFill.node.userAccount.toString()
 				);
+
+				const referrerInfo = (await this.userStatsMap.mustGet(user.getUserAccount().authority.toString())).getReferrerInfo();
+
 				this.clearingHouse
 					.fillOrder(
 						nodeToFill.node.userAccount,
 						user.getUserAccount(),
 						nodeToFill.node.order,
-						makerInfo
+						makerInfo,
+						referrerInfo
 					)
 					.then((txSig) => {
 						this.metrics?.recordFilledOrder(
