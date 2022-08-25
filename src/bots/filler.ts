@@ -135,6 +135,10 @@ export class FillerBot implements Bot {
 				this.slotSubscriber.getSlot(),
 				oracleIsValid ? oraclePriceData : undefined
 			);
+			this.metrics?.recordFillableOrdersSeen(
+				marketIndex.toNumber(),
+				nodesToFill.length
+			);
 
 			for (const nodeToFill of nodesToFill) {
 				if (nodeToFill.node.haveFilled) {

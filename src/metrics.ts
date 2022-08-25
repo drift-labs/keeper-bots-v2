@@ -86,6 +86,10 @@ export class Metrics {
 	private chUserMaintenanceMarginRequirement: number;
 	private chUserMaintenanceMarginRequirementGauge: ObservableGauge;
 
+	private fillableOrdersSeenLock = new Mutex();
+	private fillableOrdersSeenByMarket = new Map<number, number>();
+	private fillableOrdersSeentGauge: ObservableGauge;
+
 	private errorsCounter: Counter;
 	private filledOrdersCounter: Counter;
 	private perpLiquidationsCounter: Counter;
@@ -470,6 +474,26 @@ export class Metrics {
 		this.settlePnlCounter = this.meter.createCounter('settle_pnls', {
 			description: 'Count of settle pnl txns',
 		});
+
+		this.fillableOrdersSeentGauge = this.meter.createObservableGauge(
+			'fillable_orders_seen',
+			{
+				description: 'Fillable orders seen by the order filler',
+				valueType: ValueType.INT,
+			}
+		);
+		this.fillableOrdersSeentGauge.addCallback(
+			(observableResult: ObservableResult): void => {
+				this.fillableOrdersSeenLock.runExclusive(async () => {
+					for (const [marketIndex, fillableOrders] of this
+						.fillableOrdersSeenByMarket) {
+						observableResult.observe(fillableOrders, {
+							market: marketIndex,
+						});
+					}
+				});
+			}
+		);
 	}
 
 	async init() {
@@ -555,6 +579,12 @@ export class Metrics {
 			assetBankIndex: liquidatedAssetBankIndex,
 			liabilityBankIndex: liquidatedLiabilityIndex,
 			bot: bot,
+		});
+	}
+
+	recordFillableOrdersSeen(marketIndex: number, fillableOrders: number) {
+		this.fillableOrdersSeenLock.runExclusive(async () => {
+			this.fillableOrdersSeenByMarket.set(marketIndex, fillableOrders);
 		});
 	}
 
