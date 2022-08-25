@@ -416,9 +416,10 @@ export class JitMakerBot implements Bot {
 				jitMakerPrice
 			);
 
-			const tsNow = new BN(new Date().getTime() / 1000);
-			const orderTs = new BN(nodeToFill.node.order.ts);
-			const aucDur = new BN(nodeToFill.node.order.auctionDuration);
+			const orderSlot = nodeToFill.node.order.slot.toNumber();
+			const currSlot = this.slotSubscriber.getSlot();
+			const aucDur = nodeToFill.node.order.auctionDuration;
+			const aucEnd = orderSlot + aucDur;
 
 			logger.info(
 				`${
@@ -430,12 +431,9 @@ export class JitMakerBot implements Bot {
 				)}, limit price: ${convertToNumber(
 					jitMakerPrice,
 					MARK_PRICE_PRECISION
-				).toFixed(4)}, it has been ${tsNow
-					.sub(orderTs)
-					.toNumber()}s since order placed, auction ends in ${orderTs
-					.add(aucDur)
-					.sub(tsNow)
-					.toNumber()}s`
+				).toFixed(4)}, it has been ${
+					currSlot - orderSlot
+				} slots since order, auction ends in ${aucEnd - currSlot} slots`
 			);
 
 			try {
@@ -551,14 +549,14 @@ export class JitMakerBot implements Bot {
 	}
 
 	private async tryMakeJitAuctionForMarket(market: MarketAccount) {
-		await this.clearingHouse.fetchAccounts();
-		await this.clearingHouse.getUser().fetchAccounts();
-
 		await this.updateAgentState();
 		await this.drawAndExecuteAction(market);
 	}
 
 	private async tryMake() {
+		await this.clearingHouse.fetchAccounts();
+		await this.clearingHouse.getUser().fetchAccounts();
+
 		for (const marketAccount of this.clearingHouse.getMarketAccounts()) {
 			const marketIndex = marketAccount.marketIndex;
 			if (

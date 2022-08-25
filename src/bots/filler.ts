@@ -194,6 +194,8 @@ export class FillerBot implements Bot {
 					)
 				).getReferrerInfo();
 
+				// logger.info(`filling user ${user.getUserAccount().authority} - ${nodeToFill.node.order.orderId.toNumber()}`);
+				// return;
 				this.clearingHouse
 					.fillOrder(
 						nodeToFill.node.userAccount,
