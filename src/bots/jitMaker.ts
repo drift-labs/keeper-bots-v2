@@ -519,9 +519,10 @@ export class JitMakerBot implements Bot {
 			}
 		}
 
-		const takerAuthority = (
+		const takerUserAccount = (
 			await this.userMap.mustGet(action.node.userAccount.toString())
-		).getUserAccount().authority;
+		).getUserAccount();
+		const takerAuthority = takerUserAccount.authority;
 
 		const takerUserStats = await this.userStatsMap.mustGet(
 			takerAuthority.toString()
@@ -543,6 +544,7 @@ export class JitMakerBot implements Bot {
 				taker: action.node.userAccount,
 				order: action.node.order,
 				takerStats: takerUserStatsPublicKey,
+				takerUserAccount: takerUserAccount,
 			},
 			referrerInfo
 		);

@@ -1,6 +1,4 @@
 import {
-	isVariant,
-	isAuctionComplete,
 	isOracleValid,
 	ClearingHouse,
 	MarketAccount,
@@ -150,26 +148,17 @@ export class FillerBot implements Bot {
 					continue;
 				}
 
-				const auctionComplete = isAuctionComplete(
-					nodeToFill.node.order,
-					this.slotSubscriber.getSlot()
-				);
-
 				if (
-					!isVariant(nodeToFill.node.order.orderType, 'market') &&
-					!auctionComplete
+					!nodeToFill.makerNode &&
+					!isFillableByVAMM(
+						nodeToFill.node.order,
+						market,
+						oraclePriceData,
+						this.slotSubscriber.getSlot(),
+						this.clearingHouse.getStateAccount().maxAuctionDuration
+					)
 				) {
-					if (
-						!nodeToFill.makerNode &&
-						!isFillableByVAMM(
-							nodeToFill.node.order,
-							market,
-							oraclePriceData,
-							this.slotSubscriber.getSlot()
-						)
-					) {
-						continue;
-					}
+					continue;
 				}
 
 				nodeToFill.node.haveFilled = true;
@@ -213,8 +202,11 @@ export class FillerBot implements Bot {
 					)
 				).getReferrerInfo();
 
-				// logger.info(`filling user ${user.getUserAccount().authority} - ${nodeToFill.node.order.orderId.toNumber()}`);
-				// return;
+				if (this.dryRun) {
+					logger.info(`${this.name} dry run, not filling`);
+					continue;
+				}
+
 				this.clearingHouse
 					.fillOrder(
 						nodeToFill.node.userAccount,
