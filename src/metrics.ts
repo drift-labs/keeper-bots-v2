@@ -26,11 +26,6 @@ import {
 import { Mutex } from 'async-mutex';
 import sizeof from 'object-sizeof';
 
-declare type TrackedObject = {
-	name: string;
-	object: any;
-};
-
 export class Metrics {
 	private exporter: PrometheusExporter;
 	private meter: Meter;
@@ -63,7 +58,7 @@ export class Metrics {
 	private openPositionOpenAsksAmountGauge: ObservableGauge;
 
 	private objectsToTrackSizeLock = new Mutex();
-	private objectsToTrackSize: Array<TrackedObject> = [];
+	private objectsToTrackSize = new Map<string, any>();
 	private objectsToTrackSizeGauge: ObservableGauge;
 
 	private chUserUnrealizedPNLLock = new Mutex();
@@ -438,10 +433,9 @@ export class Metrics {
 			(observableResult: ObservableResult): void => {
 				this.objectsToTrackSizeLock.runExclusive(async () => {
 					// iterate over all tracked objects, name and obj
-					// for (const [name, obj] of Object.entries(this.objectsToTrackSize)) {
-					for (const o of this.objectsToTrackSize) {
-						observableResult.observe(sizeof(o.object), {
-							object: o.name,
+					for (const [name, obj] of this.objectsToTrackSize) {
+						observableResult.observe(sizeof(obj), {
+							object: name,
 							userPubKey: this.authority.toBase58(),
 						});
 					}
@@ -590,7 +584,7 @@ export class Metrics {
 
 	trackObjectSize(name: string, object: any) {
 		this.objectsToTrackSizeLock.runExclusive(async () => {
-			this.objectsToTrackSize.push({ name, object });
+			this.objectsToTrackSize.set(name, object);
 		});
 	}
 

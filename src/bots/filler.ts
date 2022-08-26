@@ -1,4 +1,6 @@
 import {
+	isVariant,
+	isAuctionComplete,
 	isOracleValid,
 	ClearingHouse,
 	MarketAccount,
@@ -10,7 +12,9 @@ import {
 	isFillableByVAMM,
 } from '@drift-labs/sdk';
 
-import { getErrorCode } from '../error';
+import { SendTransactionError } from '@solana/web3.js';
+
+import { getErrorCode, getErrorMessage } from '../error';
 import { logger } from '../logger';
 import { DLOB } from '../dlob/DLOB';
 import { UserMap } from '../userMap';
@@ -50,6 +54,7 @@ export class FillerBot implements Bot {
 		const initPromises: Array<Promise<any>> = [];
 
 		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+		this.metrics?.trackObjectSize('filler-dlob', this.dlob);
 		initPromises.push(this.dlob.init(this.clearingHouse));
 
 		this.userMap = new UserMap(
@@ -145,16 +150,26 @@ export class FillerBot implements Bot {
 					continue;
 				}
 
+				const auctionComplete = isAuctionComplete(
+					nodeToFill.node.order,
+					this.slotSubscriber.getSlot()
+				);
+
 				if (
-					!nodeToFill.makerNode &&
-					!isFillableByVAMM(
-						nodeToFill.node.order,
-						market,
-						oraclePriceData,
-						this.slotSubscriber.getSlot()
-					)
+					!isVariant(nodeToFill.node.order.orderType, 'market') &&
+					!auctionComplete
 				) {
-					continue;
+					if (
+						!nodeToFill.makerNode &&
+						!isFillableByVAMM(
+							nodeToFill.node.order,
+							market,
+							oraclePriceData,
+							this.slotSubscriber.getSlot()
+						)
+					) {
+						continue;
+					}
 				}
 
 				nodeToFill.node.haveFilled = true;
@@ -232,7 +247,9 @@ export class FillerBot implements Bot {
 							this.name
 						);
 
-						if (errorCode === 6042) {
+						const errorMessage = getErrorMessage(error as SendTransactionError);
+
+						if (errorMessage === 'OrderDoesNotExist') {
 							this.dlob.remove(
 								nodeToFill.node.order,
 								nodeToFill.node.userAccount,
