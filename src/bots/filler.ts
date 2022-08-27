@@ -1,5 +1,4 @@
 import {
-	isVariant,
 	isOracleValid,
 	ClearingHouse,
 	MarketAccount,
@@ -7,13 +6,17 @@ import {
 	SlotSubscriber,
 	calculateAskPrice,
 	calculateBidPrice,
-	calculateBaseAssetAmountMarketCanExecute,
+	MakerInfo,
+	isFillableByVAMM,
 } from '@drift-labs/sdk';
 
-import { getErrorCode } from '../error';
+import { SendTransactionError } from '@solana/web3.js';
+
+import { getErrorCode, getErrorMessage } from '../error';
 import { logger } from '../logger';
 import { DLOB } from '../dlob/DLOB';
 import { UserMap } from '../userMap';
+import { UserStatsMap } from '../userStatsMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
@@ -28,6 +31,7 @@ export class FillerBot implements Bot {
 	private perMarketMutexFills = new Uint8Array(new SharedArrayBuffer(8));
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
+	private userStatsMap: UserStatsMap;
 	private metrics: Metrics | undefined;
 
 	constructor(
@@ -45,16 +49,25 @@ export class FillerBot implements Bot {
 	}
 
 	public async init() {
-		// initialize DLOB instance
-		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
-		await this.dlob.init(this.clearingHouse);
+		const initPromises: Array<Promise<any>> = [];
 
-		// initialize userMap instance
+		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+		this.metrics?.trackObjectSize('filler-dlob', this.dlob);
+		initPromises.push(this.dlob.init(this.clearingHouse));
+
 		this.userMap = new UserMap(
-			this.clearingHouse.connection,
-			this.clearingHouse
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
 		);
-		await this.userMap.fetchAllUsers();
+		initPromises.push(this.userMap.fetchAllUsers());
+
+		this.userStatsMap = new UserStatsMap(
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
+		);
+		initPromises.push(this.userStatsMap.fetchAllUserStats());
+
+		await Promise.all(initPromises);
 	}
 
 	public reset(): void {
@@ -64,6 +77,7 @@ export class FillerBot implements Bot {
 		this.intervalIds = [];
 		delete this.dlob;
 		delete this.userMap;
+		delete this.userStatsMap;
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
@@ -78,6 +92,10 @@ export class FillerBot implements Bot {
 		if (record.eventType === 'OrderRecord') {
 			this.dlob.applyOrderRecord(record as OrderRecord);
 			await this.userMap.updateWithOrder(record as OrderRecord);
+			await this.userStatsMap.updateWithOrder(
+				record as OrderRecord,
+				this.userMap
+			);
 			this.tryFill();
 		}
 	}
@@ -120,6 +138,10 @@ export class FillerBot implements Bot {
 				this.slotSubscriber.getSlot(),
 				oracleIsValid ? oraclePriceData : undefined
 			);
+			this.metrics?.recordFillableOrdersSeen(
+				marketIndex.toNumber(),
+				nodesToFill.length
+			);
 
 			for (const nodeToFill of nodesToFill) {
 				if (nodeToFill.node.haveFilled) {
@@ -128,23 +150,15 @@ export class FillerBot implements Bot {
 
 				if (
 					!nodeToFill.makerNode &&
-					(isVariant(nodeToFill.node.order.orderType, 'limit') ||
-						isVariant(nodeToFill.node.order.orderType, 'triggerLimit'))
+					!isFillableByVAMM(
+						nodeToFill.node.order,
+						market,
+						oraclePriceData,
+						this.slotSubscriber.getSlot(),
+						this.clearingHouse.getStateAccount().maxAuctionDuration
+					)
 				) {
-					const baseAssetAmountMarketCanExecute =
-						calculateBaseAssetAmountMarketCanExecute(
-							market,
-							nodeToFill.node.order,
-							oraclePriceData
-						);
-
-					if (
-						baseAssetAmountMarketCanExecute.lt(
-							market.amm.baseAssetAmountStepSize
-						)
-					) {
-						continue;
-					}
+					continue;
 				}
 
 				nodeToFill.node.haveFilled = true;
@@ -161,23 +175,45 @@ export class FillerBot implements Bot {
 					} including maker: ${nodeToFill.makerNode.userAccount.toString()}) with order ${nodeToFill.makerNode.order.orderId.toString()}`;
 				}
 
-				let makerInfo;
+				let makerInfo: MakerInfo | undefined;
 				if (nodeToFill.makerNode) {
+					const makerAuthority = (
+						await this.userMap.mustGet(
+							nodeToFill.makerNode.userAccount.toString()
+						)
+					).getUserAccount().authority;
+					const makerUserStats = (
+						await this.userStatsMap.mustGet(makerAuthority.toString())
+					).userStatsAccountPublicKey;
 					makerInfo = {
 						maker: nodeToFill.makerNode.userAccount,
 						order: nodeToFill.makerNode.order,
+						makerStats: makerUserStats,
 					};
 				}
 
 				const user = await this.userMap.mustGet(
 					nodeToFill.node.userAccount.toString()
 				);
+
+				const referrerInfo = (
+					await this.userStatsMap.mustGet(
+						user.getUserAccount().authority.toString()
+					)
+				).getReferrerInfo();
+
+				if (this.dryRun) {
+					logger.info(`${this.name} dry run, not filling`);
+					continue;
+				}
+
 				this.clearingHouse
 					.fillOrder(
 						nodeToFill.node.userAccount,
 						user.getUserAccount(),
 						nodeToFill.node.order,
-						makerInfo
+						makerInfo,
+						referrerInfo
 					)
 					.then((txSig) => {
 						this.metrics?.recordFilledOrder(
@@ -203,7 +239,9 @@ export class FillerBot implements Bot {
 							this.name
 						);
 
-						if (errorCode === 6042) {
+						const errorMessage = getErrorMessage(error as SendTransactionError);
+
+						if (errorMessage === 'OrderDoesNotExist') {
 							this.dlob.remove(
 								nodeToFill.node.order,
 								nodeToFill.node.userAccount,

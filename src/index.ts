@@ -33,6 +33,7 @@ import { JitMakerBot } from './bots/jitMaker';
 import { LiquidatorBot } from './bots/liquidator';
 import { Bot } from './types';
 import { Metrics } from './metrics';
+import { PnlSettlerBot } from './bots/pnlSettler';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
@@ -51,6 +52,7 @@ program
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
 	.option('--liquidator', 'Enable liquidator bot')
+	.option('--pnl-settler', 'Enable PnL settler bot')
 	.option('--print-info', 'Periodically print market and position info')
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option('--close-open-positions', 'close all open positions')
@@ -58,10 +60,7 @@ program
 		'--force-deposit <number>',
 		'Force deposit this amount of USDC to collateral account, the program will end after the deposit transaction is sent'
 	)
-	.option(
-		'--metrics', // TODO: allow custom url and port
-		'Enable Prometheus metric scraper'
-	)
+	.option('--metrics <number>', 'Enable Prometheus metric scraper')
 	.addOption(
 		new Option(
 			'-p, --private-key <string>',
@@ -73,7 +72,7 @@ program
 const opts = program.opts();
 
 logger.info(
-	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JitMakerBot enabled: ${!!opts.jitMaker}`
+	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JitMakerBot enabled: ${!!opts.jitMaker} PnlSettler enabled: ${!!opts.pnlSettler}`
 );
 
 export function getWallet(): Wallet {
@@ -116,24 +115,6 @@ function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
 			QUOTE_PRECISION
 		)}:`
 	);
-	/*
-	for (let i = 0; i < DevnetBanks.length; i += 1) {
-		const bank = DevnetBanks[i];
-		const collateral = clearingHouseUser.getCollateralValue(bank.bankIndex);
-		logger.info(
-			`  Bank Collateral (${bank.bankIndex}: ${bank.symbol}): ${convertToNumber(
-				collateral,
-				QUOTE_PRECISION
-			)}`
-		);
-	}
-	logger.info(
-		`CHUser unsettled PnL:          ${convertToNumber(
-			clearingHouseUser.getUnsettledPNL(),
-			QUOTE_PRECISION
-		)}`
-	);
-	*/
 
 	logger.info(
 		`CHUser unrealized funding PnL: ${convertToNumber(
@@ -175,15 +156,6 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 				QUOTE_PRECISION
 			).toString()}`
 		);
-		/*
-		console.log(
-			` . unsettledPnl:     ${convertToNumber(
-				p.unsettledPnl,
-				QUOTE_PRECISION
-			).toString()}`
-		);
-		*/
-		// console.log(` . lastCumulativeFundingRate: ${p.lastCumulativeFundingRate}`);
 
 		console.log(
 			` . lastCumulativeFundingRate: ${convertToNumber(
@@ -220,6 +192,7 @@ const runBot = async () => {
 			accountLoader: bulkAccountLoader,
 		},
 		env: driftEnv,
+		userStats: true,
 	});
 
 	const eventSubscriber = new EventSubscriber(
@@ -293,10 +266,12 @@ const runBot = async () => {
 			.getUserAccountPublicKey()
 			.toBase58()}`
 	);
+	await clearingHouse.fetchAccounts();
+	await clearingHouse.getUser().fetchAccounts();
 
 	let metrics: Metrics | undefined = undefined;
 	if (opts.metrics) {
-		metrics = new Metrics(clearingHouse);
+		metrics = new Metrics(clearingHouse, parseInt(opts?.metrics));
 		await metrics.init();
 		metrics.trackObjectSize('clearingHouse', clearingHouse);
 		metrics.trackObjectSize('clearingHouseUser', clearingHouseUser);
@@ -412,6 +387,18 @@ const runBot = async () => {
 	if (opts.liquidator) {
 		bots.push(
 			new LiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
+		);
+	}
+	if (opts.pnlSettler) {
+		bots.push(
+			new PnlSettlerBot(
+				'pnlSettler',
+				!!opts.dry,
+				clearingHouse,
+				// update to current env markets before deploy to mainnet
+				DevnetMarkets,
+				metrics
+			)
 		);
 	}
 

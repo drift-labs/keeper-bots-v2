@@ -26,13 +26,6 @@ import {
 import { Mutex } from 'async-mutex';
 import sizeof from 'object-sizeof';
 
-const { endpoint, port } = PrometheusExporter.DEFAULT_OPTIONS;
-
-declare type TrackedObject = {
-	name: string;
-	object: any;
-};
-
 export class Metrics {
 	private exporter: PrometheusExporter;
 	private meter: Meter;
@@ -65,7 +58,7 @@ export class Metrics {
 	private openPositionOpenAsksAmountGauge: ObservableGauge;
 
 	private objectsToTrackSizeLock = new Mutex();
-	private objectsToTrackSize: Array<TrackedObject> = [];
+	private objectsToTrackSize = new Map<string, any>();
 	private objectsToTrackSizeGauge: ObservableGauge;
 
 	private chUserUnrealizedPNLLock = new Mutex();
@@ -88,23 +81,31 @@ export class Metrics {
 	private chUserMaintenanceMarginRequirement: number;
 	private chUserMaintenanceMarginRequirementGauge: ObservableGauge;
 
+	private fillableOrdersSeenLock = new Mutex();
+	private fillableOrdersSeenByMarket = new Map<number, number>();
+	private fillableOrdersSeentGauge: ObservableGauge;
+
 	private errorsCounter: Counter;
 	private filledOrdersCounter: Counter;
 	private perpLiquidationsCounter: Counter;
 	private liquidationEventsCounter: Counter;
+	private settlePnlCounter: Counter;
 
 	private clearingHouse: ClearingHouse;
 	private authority: PublicKey;
 
-	constructor(clearingHouse: ClearingHouse) {
+	constructor(clearingHouse: ClearingHouse, metricsPort?: number) {
+		const { endpoint: defaultEndpoint, port: defaultPort } =
+			PrometheusExporter.DEFAULT_OPTIONS;
+		const port = metricsPort || defaultPort;
 		this.exporter = new PrometheusExporter(
 			{
 				port: port,
-				endpoint: endpoint,
+				endpoint: defaultEndpoint,
 			},
 			() => {
 				logger.info(
-					`prometheus scrape endpoint started: http://localhost:${port}${endpoint}`
+					`prometheus scrape endpoint started: http://localhost:${port}${defaultEndpoint}`
 				);
 			}
 		);
@@ -432,10 +433,9 @@ export class Metrics {
 			(observableResult: ObservableResult): void => {
 				this.objectsToTrackSizeLock.runExclusive(async () => {
 					// iterate over all tracked objects, name and obj
-					// for (const [name, obj] of Object.entries(this.objectsToTrackSize)) {
-					for (const o of this.objectsToTrackSize) {
-						observableResult.observe(sizeof(o.object), {
-							object: o.name,
+					for (const [name, obj] of this.objectsToTrackSize) {
+						observableResult.observe(sizeof(obj), {
+							object: name,
 							userPubKey: this.authority.toBase58(),
 						});
 					}
@@ -464,6 +464,30 @@ export class Metrics {
 				description: 'Count of liquidation events',
 			}
 		);
+
+		this.settlePnlCounter = this.meter.createCounter('settle_pnls', {
+			description: 'Count of settle pnl txns',
+		});
+
+		this.fillableOrdersSeentGauge = this.meter.createObservableGauge(
+			'fillable_orders_seen',
+			{
+				description: 'Fillable orders seen by the order filler',
+				valueType: ValueType.INT,
+			}
+		);
+		this.fillableOrdersSeentGauge.addCallback(
+			(observableResult: ObservableResult): void => {
+				this.fillableOrdersSeenLock.runExclusive(async () => {
+					for (const [marketIndex, fillableOrders] of this
+						.fillableOrdersSeenByMarket) {
+						observableResult.observe(fillableOrders, {
+							market: marketIndex,
+						});
+					}
+				});
+			}
+		);
 	}
 
 	async init() {
@@ -490,6 +514,13 @@ export class Metrics {
 	recordFilledOrder(authority: PublicKey, bot: string) {
 		this.filledOrdersCounter.add(1, {
 			user: authority.toBase58(),
+			bot: bot,
+		});
+	}
+
+	recordSettlePnl(numSettled: number, marketIndex: number, bot: string) {
+		this.settlePnlCounter.add(numSettled, {
+			market: marketIndex,
 			bot: bot,
 		});
 	}
@@ -545,9 +576,15 @@ export class Metrics {
 		});
 	}
 
+	recordFillableOrdersSeen(marketIndex: number, fillableOrders: number) {
+		this.fillableOrdersSeenLock.runExclusive(async () => {
+			this.fillableOrdersSeenByMarket.set(marketIndex, fillableOrders);
+		});
+	}
+
 	trackObjectSize(name: string, object: any) {
 		this.objectsToTrackSizeLock.runExclusive(async () => {
-			this.objectsToTrackSize.push({ name, object });
+			this.objectsToTrackSize.set(name, object);
 		});
 	}
 
