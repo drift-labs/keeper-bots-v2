@@ -147,6 +147,13 @@ export class FillerBot implements Bot {
 				if (nodeToFill.node.haveFilled) {
 					continue;
 				}
+				if (
+					nodeToFill.node.lastFillAttempt &&
+					nodeToFill.node.lastFillAttempt.getTime() + 10000 >
+						new Date().getTime()
+				) {
+					continue;
+				}
 
 				if (
 					!nodeToFill.makerNode &&
@@ -228,6 +235,7 @@ export class FillerBot implements Bot {
 					})
 					.catch((error) => {
 						nodeToFill.node.haveFilled = false;
+						nodeToFill.node.lastFillAttempt = new Date();
 
 						// If we get an error that order does not exist, assume its been filled by somebody else and we
 						// have received the history record yet
