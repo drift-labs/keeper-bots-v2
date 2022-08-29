@@ -96,6 +96,7 @@ export class Metrics {
 	private perpLiquidationsCounter: Counter;
 	private liquidationEventsCounter: Counter;
 	private settlePnlCounter: Counter;
+	private mutexBusyCounter: Counter;
 	private rpcRequestsCounter: Counter;
 	private rpcRequestsDurationHistogram: Histogram;
 
@@ -489,6 +490,10 @@ export class Metrics {
 			description: 'Count of settle pnl txns',
 		});
 
+		this.mutexBusyCounter = this.meter.createCounter('mutex_busy', {
+			description: 'Count of times the mutex was busy',
+		});
+
 		this.rpcRequestsCounter = this.meter.createCounter('rpc_requests', {
 			description: 'Count of rpc requests made',
 		});
@@ -553,6 +558,12 @@ export class Metrics {
 	recordSettlePnl(numSettled: number, marketIndex: number, bot: string) {
 		this.settlePnlCounter.add(numSettled, {
 			market: marketIndex,
+			bot: bot,
+		});
+	}
+
+	recordMutexBusy(bot: string) {
+		this.mutexBusyCounter.add(1, {
 			bot: bot,
 		});
 	}
