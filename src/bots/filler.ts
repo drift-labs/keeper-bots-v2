@@ -31,7 +31,7 @@ export class FillerBot implements Bot {
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
 	private dlob: DLOB;
-	private perMarketMutexFills = new Uint8Array(new SharedArrayBuffer(8));
+	private veryImportantMutex = new Int32Array(new SharedArrayBuffer(8)); // ??? name this, also check what it protects
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
@@ -51,7 +51,40 @@ export class FillerBot implements Bot {
 		this.metrics = metrics;
 	}
 
+	private takeLock(): boolean {
+		if (Atomics.compareExchange(this.veryImportantMutex, 0, 0, 1) === 0) {
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * block until lock is taken
+	 * @returns true, lock was taken
+	 */
+	private mustTakeLock(): boolean {
+		for (;;) {
+			if (!this.takeLock()) {
+				Atomics.wait(this.veryImportantMutex, 0, 1);
+			}
+			return true;
+		}
+	}
+
+	private releaseLock(): boolean {
+		if (Atomics.compareExchange(this.veryImportantMutex, 0, 1, 0) !== 1) {
+			return false;
+		}
+		// wake up one thread waiting for the lock
+		Atomics.notify(this.veryImportantMutex, 0, 1);
+		return true;
+	}
+
 	public async init() {
+		if (!this.mustTakeLock()) {
+			throw new Error('mustTakeLock failed');
+		}
+		logger.warn('initing');
 		const initPromises: Array<Promise<any>> = [];
 
 		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
@@ -71,9 +104,19 @@ export class FillerBot implements Bot {
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		await Promise.all(initPromises);
+
+		logger.warn('init done');
+		if (!this.releaseLock()) {
+			throw new Error('releaseLock failed');
+		}
 	}
 
 	public reset(): void {
+		if (!this.mustTakeLock()) {
+			throw new Error('mustTakeLock failed');
+		}
+		logger.warn('resetting');
+
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId);
 		}
@@ -81,10 +124,14 @@ export class FillerBot implements Bot {
 		delete this.dlob;
 		delete this.userMap;
 		delete this.userStatsMap;
+		logger.warn('reset done');
+		if (!this.releaseLock()) {
+			throw new Error('releaseLock failed');
+		}
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
-		await this.tryFill();
+		// await this.tryFill();
 		const intervalId = setInterval(await this.tryFill.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
 
@@ -282,7 +329,7 @@ export class FillerBot implements Bot {
 
 	private async tryFill() {
 		const startTime = Date.now();
-		if (Atomics.compareExchange(this.perMarketMutexFills, 0, 0, 1) === 1) {
+		if (!this.takeLock()) {
 			logger.info(`${this.name} tryFill is bizzy`);
 			return false;
 		}
@@ -313,7 +360,7 @@ export class FillerBot implements Bot {
 			10000
 		);
 
-		if (Atomics.compareExchange(this.perMarketMutexFills, 0, 1, 0) !== 1) {
+		if (!this.releaseLock()) {
 			logger.error(`${this.name} tryFill had incorrect mutex value`);
 			return;
 		}
