@@ -141,7 +141,7 @@ export class JitMakerBot implements Bot {
 		await Promise.all(initPromises);
 	}
 
-	public reset(): void {
+	public async reset() {
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId);
 		}

@@ -1,4 +1,6 @@
 import {
+	ClearingHouseUser,
+	ReferrerInfo,
 	isOracleValid,
 	ClearingHouse,
 	MarketAccount,
@@ -10,6 +12,7 @@ import {
 	isFillableByVAMM,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
+import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
 import { SendTransactionError } from '@solana/web3.js';
 
@@ -26,15 +29,33 @@ const FILL_ORDER_BACKOFF = 5000;
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 1000;
+	public readonly defaultIntervalMs: number = 500;
 
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
+
+	private dlobMutex = withTimeout(
+		new Mutex(),
+		10 * this.defaultIntervalMs,
+		new Error('dlobMutex timeout')
+	);
 	private dlob: DLOB;
-	private veryImportantMutex = new Int32Array(new SharedArrayBuffer(8)); // ??? name this, also check what it protects
-	private intervalIds: Array<NodeJS.Timer> = [];
+
+	private userMapMutex = withTimeout(
+		new Mutex(),
+		10 * this.defaultIntervalMs,
+		new Error('userMapMutex timeout')
+	);
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
+
+	private periodicTaskMutex = withTimeout(
+		new Mutex(),
+		5 * this.defaultIntervalMs,
+		new Error('periodicTaskMutex timeout')
+	);
+
+	private intervalIds: Array<NodeJS.Timer> = [];
 	private metrics: Metrics | undefined;
 
 	constructor(
@@ -51,110 +72,97 @@ export class FillerBot implements Bot {
 		this.metrics = metrics;
 	}
 
-	private takeLock(): boolean {
-		if (Atomics.compareExchange(this.veryImportantMutex, 0, 0, 1) === 0) {
-			return true;
-		}
-		return false;
-	}
-
-	/**
-	 * block until lock is taken
-	 * @returns true, lock was taken
-	 */
-	private mustTakeLock(): boolean {
-		for (;;) {
-			if (!this.takeLock()) {
-				Atomics.wait(this.veryImportantMutex, 0, 1);
-			}
-			return true;
-		}
-	}
-
-	private releaseLock(): boolean {
-		if (Atomics.compareExchange(this.veryImportantMutex, 0, 1, 0) !== 1) {
-			return false;
-		}
-		// wake up one thread waiting for the lock
-		Atomics.notify(this.veryImportantMutex, 0, 1);
-		return true;
-	}
-
 	public async init() {
-		if (!this.mustTakeLock()) {
-			throw new Error('mustTakeLock failed');
-		}
-		logger.warn('initing');
-		const initPromises: Array<Promise<any>> = [];
+		logger.warn('filler initing');
 
-		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
-		this.metrics?.trackObjectSize('filler-dlob', this.dlob);
-		initPromises.push(this.dlob.init(this.clearingHouse));
+		await Promise.all([
+			this.dlobMutex.runExclusive(async () => {
+				const initPromises: Array<Promise<any>> = [];
 
-		this.userMap = new UserMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
-		);
-		initPromises.push(this.userMap.fetchAllUsers());
+				this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+				this.metrics?.trackObjectSize('filler-dlob', this.dlob);
+				initPromises.push(this.dlob.init(this.clearingHouse));
 
-		this.userStatsMap = new UserStatsMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
-		);
-		initPromises.push(this.userStatsMap.fetchAllUserStats());
+				await Promise.all(initPromises);
+			}),
+			await this.userMapMutex.runExclusive(async () => {
+				const initPromises: Array<Promise<any>> = [];
 
-		await Promise.all(initPromises);
+				this.userMap = new UserMap(
+					this.clearingHouse,
+					this.clearingHouse.userAccountSubscriptionConfig
+				);
+				this.metrics?.trackObjectSize('filler-userMap', this.userMap);
+				initPromises.push(this.userMap.fetchAllUsers());
+
+				this.userStatsMap = new UserStatsMap(
+					this.clearingHouse,
+					this.clearingHouse.userAccountSubscriptionConfig
+				);
+				this.metrics?.trackObjectSize('filler-userStatsMap', this.userStatsMap);
+				initPromises.push(this.userStatsMap.fetchAllUserStats());
+
+				await Promise.all(initPromises);
+			}),
+		]);
 
 		logger.warn('init done');
-		if (!this.releaseLock()) {
-			throw new Error('releaseLock failed');
-		}
 	}
 
-	public reset(): void {
-		if (!this.mustTakeLock()) {
-			throw new Error('mustTakeLock failed');
-		}
-		logger.warn('resetting');
-
-		for (const intervalId of this.intervalIds) {
-			clearInterval(intervalId);
-		}
-		this.intervalIds = [];
-		delete this.dlob;
-		delete this.userMap;
-		delete this.userStatsMap;
+	public async reset() {
+		logger.warn('filler resetting');
+		await Promise.all([
+			await this.periodicTaskMutex.runExclusive(async () => {
+				for (const intervalId of this.intervalIds) {
+					clearInterval(intervalId);
+				}
+				this.intervalIds = [];
+			}),
+			await this.dlobMutex.runExclusive(async () => {
+				delete this.dlob;
+			}),
+			await this.userMapMutex.runExclusive(async () => {
+				delete this.userMap;
+				delete this.userStatsMap;
+			}),
+		]);
 		logger.warn('reset done');
-		if (!this.releaseLock()) {
-			throw new Error('releaseLock failed');
-		}
 	}
 
-	public async startIntervalLoop(intervalMs: number): Promise<void> {
+	public async startIntervalLoop(intervalMs: number) {
 		// await this.tryFill();
-		const intervalId = setInterval(await this.tryFill.bind(this), intervalMs);
+		const intervalId = setInterval(this.tryFill.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
 
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(record: any): Promise<void> {
-		if (record.eventType === 'OrderRecord') {
-			this.dlob.applyOrderRecord(record as OrderRecord);
-			await this.userMap.updateWithOrder(record as OrderRecord);
-			await this.userStatsMap.updateWithOrder(
-				record as OrderRecord,
-				this.userMap
-			);
-			// this.tryFill();
-		}
+	public async trigger(record: any) {
+		await Promise.all([
+			await this.dlobMutex.runExclusive(async () => {
+				if (record.eventType === 'OrderRecord') {
+					this.dlob.applyOrderRecord(record as OrderRecord);
+				}
+			}),
+			await this.userMapMutex.runExclusive(async () => {
+				if (record.eventType === 'OrderRecord') {
+					await this.userMap.updateWithOrder(record as OrderRecord);
+					await this.userStatsMap.updateWithOrder(
+						record as OrderRecord,
+						this.userMap
+					);
+				}
+			}),
+		]);
 	}
 
 	public viewDlob(): DLOB {
 		return this.dlob;
 	}
 
-	private getFillableNodesForMarket(market: MarketAccount): Array<NodeToFill> {
+	private async getFillableNodesForMarket(
+		market: MarketAccount
+	): Promise<Array<NodeToFill>> {
 		const marketIndex = market.marketIndex;
 		const oraclePriceData =
 			this.clearingHouse.getOracleDataForMarket(marketIndex);
@@ -168,13 +176,18 @@ export class FillerBot implements Bot {
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
 
-		return this.dlob.findNodesToFill(
-			marketIndex,
-			vBid,
-			vAsk,
-			this.slotSubscriber.getSlot(),
-			oracleIsValid ? oraclePriceData : undefined
-		);
+		let nodes: Array<NodeToFill> = [];
+		await this.dlobMutex.runExclusive(async () => {
+			nodes = this.dlob.findNodesToFill(
+				marketIndex,
+				vBid,
+				vAsk,
+				this.slotSubscriber.getSlot(),
+				oracleIsValid ? oraclePriceData : undefined
+			);
+		});
+
+		return nodes;
 	}
 
 	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
@@ -218,51 +231,19 @@ export class FillerBot implements Bot {
 		return true;
 	}
 
-	private async tryFillWithTimeout(nodeToFill: NodeToFill) {
-		// if (nodeToFill.node.haveFilled) {
-		// 	return;
-		// }
-		// if (
-		// 	nodeToFill.node.lastFillAttempt &&
-		// 	nodeToFill.node.lastFillAttempt.getTime() + FILL_ORDER_BACKOFF >
-		// 		new Date().getTime()
-		// ) {
-		// 	logger.error(
-		// 		`${
-		// 			this.name
-		// 		} backingoff for order (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${nodeToFill.node.market.marketIndex.toString()}`
-		// 	);
-		// 	return;
-		// }
+	private async tryFillNode(nodeToFill: NodeToFill) {
 		if (!nodeToFill) {
 			logger.error(`${this.name} nodeToFill is null`);
 			return;
 		}
 
 		const marketIndex = nodeToFill.node.market.marketIndex;
-		// const oraclePriceData =
-		// 	this.clearingHouse.getOracleDataForMarket(marketIndex);
 
-		// if (
-		// 	!nodeToFill.makerNode &&
-		// 	!isFillableByVAMM(
-		// 		nodeToFill.node.order,
-		// 		nodeToFill.node.market,
-		// 		oraclePriceData,
-		// 		this.slotSubscriber.getSlot(),
-		// 		this.clearingHouse.getStateAccount().maxAuctionDuration
-		// 	)
-		// ) {
-		// 	return;
-		// }
-
-		nodeToFill.node.haveFilled = true;
-
-		// logger.info(
-		// 	`${
-		// 		this.name
-		// 	} trying to fill (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${marketIndex.toString()}`
-		// );
+		logger.info(
+			`${
+				this.name
+			} trying to fill (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${marketIndex.toString()}`
+		);
 
 		if (nodeToFill.makerNode) {
 			`${
@@ -272,28 +253,34 @@ export class FillerBot implements Bot {
 
 		let makerInfo: MakerInfo | undefined;
 		if (nodeToFill.makerNode) {
-			const makerAuthority = (
-				await this.userMap.mustGet(nodeToFill.makerNode.userAccount.toString())
-			).getUserAccount().authority;
-			const makerUserStats = (
-				await this.userStatsMap.mustGet(makerAuthority.toString())
-			).userStatsAccountPublicKey;
-			makerInfo = {
-				maker: nodeToFill.makerNode.userAccount,
-				order: nodeToFill.makerNode.order,
-				makerStats: makerUserStats,
-			};
+			await this.userMapMutex.runExclusive(async () => {
+				const makerAuthority = (
+					await this.userMap.mustGet(
+						nodeToFill.makerNode.userAccount.toString()
+					)
+				).getUserAccount().authority;
+				const makerUserStats = (
+					await this.userStatsMap.mustGet(makerAuthority.toString())
+				).userStatsAccountPublicKey;
+				makerInfo = {
+					maker: nodeToFill.makerNode.userAccount,
+					order: nodeToFill.makerNode.order,
+					makerStats: makerUserStats,
+				};
+			});
 		}
 
-		const user = await this.userMap.mustGet(
-			nodeToFill.node.userAccount.toString()
-		);
+		let user: ClearingHouseUser;
+		let referrerInfo: ReferrerInfo;
+		await this.userMapMutex.runExclusive(async () => {
+			user = await this.userMap.mustGet(nodeToFill.node.userAccount.toString());
 
-		const referrerInfo = (
-			await this.userStatsMap.mustGet(
-				user.getUserAccount().authority.toString()
-			)
-		).getReferrerInfo();
+			referrerInfo = (
+				await this.userStatsMap.mustGet(
+					user.getUserAccount().authority.toString()
+				)
+			).getReferrerInfo();
+		});
 
 		if (this.dryRun) {
 			logger.info(`${this.name} dry run, not filling`);
@@ -301,31 +288,39 @@ export class FillerBot implements Bot {
 		}
 
 		const reqStart = Date.now();
-		this.metrics?.recordRpcRequests('fillOrder', this.name);
-		const txSig: any | null = await promiseTimeout(
-			this.clearingHouse.fillOrder(
+		try {
+			this.metrics?.recordRpcRequests('fillOrder', this.name);
+			const txSig = await this.clearingHouse.fillOrder(
 				nodeToFill.node.userAccount,
 				user.getUserAccount(),
 				nodeToFill.node.order,
 				makerInfo,
 				referrerInfo
-			),
-			10 * 1000
-		)
-			.catch((error) => {
-				nodeToFill.node.haveFilled = false;
-				nodeToFill.node.lastFillAttempt = new Date();
-
-				const errorCode = getErrorCode(error);
-				this.metrics?.recordErrorCode(
-					errorCode,
-					this.clearingHouse.provider.wallet.publicKey,
+			);
+			this.metrics?.recordFilledOrder(
+				this.clearingHouse.provider.wallet.publicKey,
+				this.name
+			);
+			logger.info(
+				`${
 					this.name
-				);
+				} Filled user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, Tx: ${txSig}`
+			);
+		} catch (error) {
+			nodeToFill.node.haveFilled = false;
+			nodeToFill.node.lastFillAttempt = new Date();
 
-				const errorMessage = getErrorMessage(error as SendTransactionError);
+			const errorCode = getErrorCode(error);
+			this.metrics?.recordErrorCode(
+				errorCode,
+				this.clearingHouse.provider.wallet.publicKey,
+				this.name
+			);
 
-				if (errorMessage === 'OrderDoesNotExist') {
+			const errorMessage = getErrorMessage(error as SendTransactionError);
+
+			if (errorMessage === 'OrderDoesNotExist') {
+				await this.dlobMutex.runExclusive(async () => {
 					this.dlob.remove(
 						nodeToFill.node.order,
 						nodeToFill.node.userAccount,
@@ -335,39 +330,19 @@ export class FillerBot implements Bot {
 							);
 						}
 					);
-				}
-				logger.error(
-					`Error (${errorCode}) filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, mktIdx: ${marketIndex.toNumber()}`
-				);
-			})
-			.finally(() => {
-				const duration = Date.now() - reqStart;
-				this.metrics?.recordRpcDuration(
-					this.clearingHouse.connection.rpcEndpoint,
-					'fillOrder',
-					duration,
-					false,
-					this.name
-				);
-			});
-
-		if (txSig === null) {
+				});
+			}
 			logger.error(
-				`Timeout filling order mktIdx: ${marketIndex.toNumber()} (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}`
+				`Error (${errorCode}) filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, mktIdx: ${marketIndex.toNumber()}`
 			);
-			return;
-		} else if (txSig === undefined) {
-			// this is the case when it hits the catch block above
-			return;
-		} else {
-			this.metrics?.recordFilledOrder(
-				this.clearingHouse.provider.wallet.publicKey,
+		} finally {
+			const duration = Date.now() - reqStart;
+			this.metrics?.recordRpcDuration(
+				this.clearingHouse.connection.rpcEndpoint,
+				'fillOrder',
+				duration,
+				false,
 				this.name
-			);
-			logger.info(
-				`${
-					this.name
-				} Filled user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, Tx: ${txSig}`
 			);
 		}
 	}
@@ -378,54 +353,42 @@ export class FillerBot implements Bot {
 	}
 
 	private async tryFill() {
-		const startTime = Date.now();
-		if (!this.takeLock()) {
-			logger.info(`${this.name} tryFill is bizzy`);
-			return false;
-		}
+		try {
+			const startTime = Date.now();
+			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
+				// 1) get all fillable nodes
+				const markets = this.clearingHouse.getMarketAccounts();
+				const fillableNodes: Array<NodeToFill> = [];
+				for (const market of markets) {
+					fillableNodes.push(...(await this.getFillableNodesForMarket(market)));
+				}
 
-		// 1) get all fillable nodes
-		const markets = this.clearingHouse.getMarketAccounts();
-		const fillableNodes: Array<NodeToFill> = [];
-		for (const market of markets) {
-			fillableNodes.push(...this.getFillableNodesForMarket(market));
-		}
+				logger.info(`Fillable nodes: ${fillableNodes.length}`);
+				const filteredNodes = fillableNodes.filter((node) =>
+					this.filterFillableNodes(node)
+				);
+				logger.info(`Filtered nodes: ${filteredNodes.length}`);
 
-		// 2) fill each node
-		logger.info(`Fillable nodes: ${fillableNodes.length}`);
-		const filteredNodes = fillableNodes.filter((node) =>
-			this.filterFillableNodes(node)
-		);
-		logger.info(`Filtered nodes: ${filteredNodes.length}`);
+				// 2) fill a random node - respect rpc rate limit via this.defaultIntervalMs
+				const fillResult = await promiseTimeout(
+					this.tryFillNode(this.randomIndex(filteredNodes)),
+					10000
+				);
 
-		const fillResult = await promiseTimeout(
-			this.tryFillWithTimeout(this.randomIndex(filteredNodes)),
-			10000
-		);
-
-		// const fillResult = await promiseTimeout(
-		// 	Promise.all(
-		// 		fillableNodes.map((nodeToFill) => {
-		// 			logger.info(
-		// 				`fillable node (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${nodeToFill.node.market.marketIndex.toString()}`
-		// 			);
-
-		// 			this.tryFillWithTimeout(nodeToFill);
-		// 		})
-		// 	),
-		// 	10000
-		// );
-
-		if (fillResult === null) {
-			logger.error(`Timeout tryFill, took ${Date.now() - startTime}ms`);
-		} else {
-			logger.info(
-				`${this.name} finished tryFill market took ${Date.now() - startTime}ms`
-			);
-		}
-		if (!this.releaseLock()) {
-			logger.error(`${this.name} tryFill had incorrect mutex value`);
-			return;
+				if (fillResult === null) {
+					logger.error(`Timeout tryFill, took ${Date.now() - startTime}ms`);
+				} else {
+					logger.info(
+						`${this.name} finished tryFill market took ${
+							Date.now() - startTime
+						}ms`
+					);
+				}
+			});
+		} catch (e) {
+			if (e === E_ALREADY_LOCKED) {
+				logger.info(`${this.name} tryFill is bizzy`);
+			}
 		}
 	}
 }

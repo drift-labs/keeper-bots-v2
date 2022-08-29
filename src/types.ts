@@ -19,7 +19,7 @@ export interface Bot {
 	/**
 	 * Reset the bot. This is called to reset the bot to a fresh state (pre-init).
 	 */
-	reset: () => void;
+	reset: () => Promise<void>;
 
 	/**
 	 * Start the bot loop. This is generally a polling loop.
