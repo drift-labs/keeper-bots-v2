@@ -1,12 +1,18 @@
 import {
 	Counter,
+	Histogram,
 	Meter,
 	ObservableGauge,
 	ValueType,
 	ObservableResult,
 	BatchObservableResult,
 } from '@opentelemetry/api-metrics';
-import { MeterProvider } from '@opentelemetry/sdk-metrics-base';
+import {
+	MeterProvider,
+	View,
+	InstrumentType,
+	ExplicitBucketHistogramAggregation,
+} from '@opentelemetry/sdk-metrics-base';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { logger } from './logger';
 
@@ -90,6 +96,8 @@ export class Metrics {
 	private perpLiquidationsCounter: Counter;
 	private liquidationEventsCounter: Counter;
 	private settlePnlCounter: Counter;
+	private rpcRequestsCounter: Counter;
+	private rpcRequestsDurationHistogram: Histogram;
 
 	private clearingHouse: ClearingHouse;
 	private authority: PublicKey;
@@ -110,9 +118,21 @@ export class Metrics {
 			}
 		);
 
-		const meterProvider = new MeterProvider();
+		const meterName = 'internal-keeper-bot';
+		const meterProvider = new MeterProvider({
+			views: [
+				new View({
+					instrumentName: 'rpc_requests_duration',
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: meterName,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(20), (_, i) => 500 + i * 500)
+					),
+				}),
+			],
+		});
 		meterProvider.addMetricReader(this.exporter);
-		this.meter = meterProvider.getMeter('internal-keeper-bot');
+		this.meter = meterProvider.getMeter(meterName);
 
 		this.clearingHouse = clearingHouse;
 		this.authority = this.clearingHouse.provider.wallet.publicKey;
@@ -469,6 +489,18 @@ export class Metrics {
 			description: 'Count of settle pnl txns',
 		});
 
+		this.rpcRequestsCounter = this.meter.createCounter('rpc_requests', {
+			description: 'Count of rpc requests made',
+		});
+
+		this.rpcRequestsDurationHistogram = this.meter.createHistogram(
+			'rpc_requests_duration',
+			{
+				description: 'Duration of rpc requests',
+				unit: 'ms',
+			}
+		);
+
 		this.fillableOrdersSeentGauge = this.meter.createObservableGauge(
 			'fillable_orders_seen',
 			{
@@ -521,6 +553,28 @@ export class Metrics {
 	recordSettlePnl(numSettled: number, marketIndex: number, bot: string) {
 		this.settlePnlCounter.add(numSettled, {
 			market: marketIndex,
+			bot: bot,
+		});
+	}
+
+	recordRpcRequests(method: string, bot: string) {
+		this.rpcRequestsCounter.add(1, {
+			method: method,
+			bot: bot,
+		});
+	}
+
+	recordRpcDuration(
+		endpoint: string,
+		method: string,
+		duration: number,
+		timeout: boolean,
+		bot: string
+	) {
+		this.rpcRequestsDurationHistogram.record(duration, {
+			endpoint: endpoint,
+			method: method,
+			timeout: timeout,
 			bot: bot,
 		});
 	}
@@ -578,6 +632,9 @@ export class Metrics {
 
 	recordFillableOrdersSeen(marketIndex: number, fillableOrders: number) {
 		this.fillableOrdersSeenLock.runExclusive(async () => {
+			logger.info(
+				`record fillable order: mktIdx: ${marketIndex}, fillables: ${fillableOrders}`
+			);
 			this.fillableOrdersSeenByMarket.set(marketIndex, fillableOrders);
 		});
 	}
