@@ -144,14 +144,20 @@ export class FillerBot implements Bot {
 		if (record.eventType === 'OrderRecord') {
 			await Promise.all([
 				this.dlobMutex.runExclusive(async () => {
-					this.dlob.applyOrderRecord(record as OrderRecord);
+					if (this.dlob) {
+						this.dlob.applyOrderRecord(record as OrderRecord);
+					}
 				}),
 				this.userMapMutex.runExclusive(async () => {
-					await this.userMap.updateWithOrder(record as OrderRecord);
-					await this.userStatsMap.updateWithOrder(
-						record as OrderRecord,
-						this.userMap
-					);
+					if (this.userMap) {
+						await this.userMap.updateWithOrder(record as OrderRecord);
+					}
+					if (this.userStatsMap) {
+						await this.userStatsMap.updateWithOrder(
+							record as OrderRecord,
+							this.userMap
+						);
+					}
 				}),
 			]);
 		}
