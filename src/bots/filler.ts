@@ -26,7 +26,7 @@ const FILL_ORDER_BACKOFF = 5000;
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 5000;
+	public readonly defaultIntervalMs: number = 1000;
 
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
@@ -177,21 +177,25 @@ export class FillerBot implements Bot {
 		);
 	}
 
-	private async tryFillWithTimeout(nodeToFill: NodeToFill) {
+	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
 		if (nodeToFill.node.haveFilled) {
-			return;
+			return false;
 		}
 		if (
 			nodeToFill.node.lastFillAttempt &&
 			nodeToFill.node.lastFillAttempt.getTime() + FILL_ORDER_BACKOFF >
 				new Date().getTime()
 		) {
-			logger.error(
-				`${
-					this.name
-				} backingoff for order (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${nodeToFill.node.market.marketIndex.toString()}`
-			);
-			return;
+			// logger.error(
+			// 	`${
+			// 		this.name
+			// 	} backingoff for order (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${nodeToFill.node.market.marketIndex.toString()}`
+			// );
+			return false;
+		}
+
+		if (nodeToFill.node.isVammNode()) {
+			return false;
 		}
 
 		const marketIndex = nodeToFill.node.market.marketIndex;
@@ -208,8 +212,49 @@ export class FillerBot implements Bot {
 				this.clearingHouse.getStateAccount().maxAuctionDuration
 			)
 		) {
+			return false;
+		}
+
+		return true;
+	}
+
+	private async tryFillWithTimeout(nodeToFill: NodeToFill) {
+		// if (nodeToFill.node.haveFilled) {
+		// 	return;
+		// }
+		// if (
+		// 	nodeToFill.node.lastFillAttempt &&
+		// 	nodeToFill.node.lastFillAttempt.getTime() + FILL_ORDER_BACKOFF >
+		// 		new Date().getTime()
+		// ) {
+		// 	logger.error(
+		// 		`${
+		// 			this.name
+		// 		} backingoff for order (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${nodeToFill.node.market.marketIndex.toString()}`
+		// 	);
+		// 	return;
+		// }
+		if (!nodeToFill) {
+			logger.error(`${this.name} nodeToFill is null`);
 			return;
 		}
+
+		const marketIndex = nodeToFill.node.market.marketIndex;
+		// const oraclePriceData =
+		// 	this.clearingHouse.getOracleDataForMarket(marketIndex);
+
+		// if (
+		// 	!nodeToFill.makerNode &&
+		// 	!isFillableByVAMM(
+		// 		nodeToFill.node.order,
+		// 		nodeToFill.node.market,
+		// 		oraclePriceData,
+		// 		this.slotSubscriber.getSlot(),
+		// 		this.clearingHouse.getStateAccount().maxAuctionDuration
+		// 	)
+		// ) {
+		// 	return;
+		// }
 
 		nodeToFill.node.haveFilled = true;
 
@@ -327,6 +372,11 @@ export class FillerBot implements Bot {
 		}
 	}
 
+	private randomIndex(distribution: Array<any>): any {
+		const index = Math.floor(distribution.length * Math.random()); // random index
+		return distribution[index];
+	}
+
 	private async tryFill() {
 		const startTime = Date.now();
 		if (!this.takeLock()) {
@@ -343,33 +393,39 @@ export class FillerBot implements Bot {
 
 		// 2) fill each node
 		logger.info(`Fillable nodes: ${fillableNodes.length}`);
-		const fillResult = await promiseTimeout(
-			Promise.all(
-				fillableNodes.map((nodeToFill) => {
-					if (nodeToFill.node.isVammNode()) {
-						logger.info('vamm node');
-						return Promise.resolve();
-					}
-					logger.info(
-						`fillable node (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${nodeToFill.node.market.marketIndex.toString()}`
-					);
+		const filteredNodes = fillableNodes.filter((node) =>
+			this.filterFillableNodes(node)
+		);
+		logger.info(`Filtered nodes: ${filteredNodes.length}`);
 
-					this.tryFillWithTimeout(nodeToFill);
-				})
-			),
+		const fillResult = await promiseTimeout(
+			this.tryFillWithTimeout(this.randomIndex(filteredNodes)),
 			10000
 		);
 
-		if (!this.releaseLock()) {
-			logger.error(`${this.name} tryFill had incorrect mutex value`);
-			return;
-		}
+		// const fillResult = await promiseTimeout(
+		// 	Promise.all(
+		// 		fillableNodes.map((nodeToFill) => {
+		// 			logger.info(
+		// 				`fillable node (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${nodeToFill.node.market.marketIndex.toString()}`
+		// 			);
+
+		// 			this.tryFillWithTimeout(nodeToFill);
+		// 		})
+		// 	),
+		// 	10000
+		// );
+
 		if (fillResult === null) {
 			logger.error(`Timeout tryFill, took ${Date.now() - startTime}ms`);
 		} else {
 			logger.info(
 				`${this.name} finished tryFill market took ${Date.now() - startTime}ms`
 			);
+		}
+		if (!this.releaseLock()) {
+			logger.error(`${this.name} tryFill had incorrect mutex value`);
+			return;
 		}
 	}
 }
