@@ -440,11 +440,11 @@ const runBot = async () => {
 	// reset the bots every 15 minutes, it looks like it holds onto stale DLOB orders :shrug:
 	setInterval(async () => {
 		for await (const bot of bots) {
-			bot.reset();
+			await bot.reset();
 			await bot.init();
 		}
 		for (const bot of bots) {
-			bot.startIntervalLoop(bot.defaultIntervalMs);
+			await bot.startIntervalLoop(bot.defaultIntervalMs);
 		}
 	}, 15 * 60 * 1000);
 };

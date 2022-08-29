@@ -68,7 +68,7 @@ export class LiquidatorBot implements Bot {
 		await this.userMap.fetchAllUsers();
 	}
 
-	public reset(): void {
+	public async reset() {
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId);
 		}
