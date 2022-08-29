@@ -254,7 +254,7 @@ export class FillerBot implements Bot {
 					this.clearingHouse.connection.rpcEndpoint,
 					'fillOrder',
 					duration,
-					txSig === null,
+					false,
 					this.name
 				);
 			});
