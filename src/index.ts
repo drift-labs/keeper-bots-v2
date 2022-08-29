@@ -445,7 +445,7 @@ const runBot = async () => {
 		for (const bot of bots) {
 			await bot.startIntervalLoop(bot.defaultIntervalMs);
 		}
-	}, 15 * 60 * 1000);
+	}, 5 * 60 * 1000);
 };
 
 async function recursiveTryCatch(f: () => void) {

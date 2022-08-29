@@ -25,6 +25,9 @@ import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
 const FILL_ORDER_BACKOFF = 5000;
+const dlobMutexError = new Error('dlobMutex timeout');
+const userMapMutexError = new Error('userMapMutex timeout');
+const periodicTaskMutexError = new Error('periodicTaskMutex timeout');
 
 export class FillerBot implements Bot {
 	public readonly name: string;
@@ -37,14 +40,14 @@ export class FillerBot implements Bot {
 	private dlobMutex = withTimeout(
 		new Mutex(),
 		10 * this.defaultIntervalMs,
-		new Error('dlobMutex timeout')
+		dlobMutexError
 	);
 	private dlob: DLOB;
 
 	private userMapMutex = withTimeout(
 		new Mutex(),
 		10 * this.defaultIntervalMs,
-		new Error('userMapMutex timeout')
+		userMapMutexError
 	);
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
@@ -52,7 +55,7 @@ export class FillerBot implements Bot {
 	private periodicTaskMutex = withTimeout(
 		new Mutex(),
 		5 * this.defaultIntervalMs,
-		new Error('periodicTaskMutex timeout')
+		periodicTaskMutexError
 	);
 
 	private intervalIds: Array<NodeJS.Timer> = [];
@@ -85,7 +88,7 @@ export class FillerBot implements Bot {
 
 				await Promise.all(initPromises);
 			}),
-			await this.userMapMutex.runExclusive(async () => {
+			this.userMapMutex.runExclusive(async () => {
 				const initPromises: Array<Promise<any>> = [];
 
 				this.userMap = new UserMap(
@@ -112,16 +115,16 @@ export class FillerBot implements Bot {
 	public async reset() {
 		logger.warn('filler resetting');
 		await Promise.all([
-			await this.periodicTaskMutex.runExclusive(async () => {
+			this.periodicTaskMutex.runExclusive(async () => {
 				for (const intervalId of this.intervalIds) {
 					clearInterval(intervalId);
 				}
 				this.intervalIds = [];
 			}),
-			await this.dlobMutex.runExclusive(async () => {
+			this.dlobMutex.runExclusive(async () => {
 				delete this.dlob;
 			}),
-			await this.userMapMutex.runExclusive(async () => {
+			this.userMapMutex.runExclusive(async () => {
 				delete this.userMap;
 				delete this.userStatsMap;
 			}),
@@ -138,22 +141,26 @@ export class FillerBot implements Bot {
 	}
 
 	public async trigger(record: any) {
-		await Promise.all([
-			await this.dlobMutex.runExclusive(async () => {
-				if (record.eventType === 'OrderRecord') {
-					this.dlob.applyOrderRecord(record as OrderRecord);
-				}
-			}),
-			await this.userMapMutex.runExclusive(async () => {
-				if (record.eventType === 'OrderRecord') {
-					await this.userMap.updateWithOrder(record as OrderRecord);
-					await this.userStatsMap.updateWithOrder(
-						record as OrderRecord,
-						this.userMap
-					);
-				}
-			}),
-		]);
+		if (record.eventType === 'OrderRecord') {
+			await Promise.all([
+				this.dlobMutex.runExclusive(async () => {
+					if (this.dlob) {
+						this.dlob.applyOrderRecord(record as OrderRecord);
+					}
+				}),
+				this.userMapMutex.runExclusive(async () => {
+					if (this.userMap) {
+						await this.userMap.updateWithOrder(record as OrderRecord);
+					}
+					if (this.userStatsMap) {
+						await this.userStatsMap.updateWithOrder(
+							record as OrderRecord,
+							this.userMap
+						);
+					}
+				}),
+			]);
+		}
 	}
 
 	public viewDlob(): DLOB {
@@ -191,23 +198,19 @@ export class FillerBot implements Bot {
 	}
 
 	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
+		if (nodeToFill.node.isVammNode()) {
+			return false;
+		}
+
 		if (nodeToFill.node.haveFilled) {
 			return false;
 		}
+
 		if (
 			nodeToFill.node.lastFillAttempt &&
 			nodeToFill.node.lastFillAttempt.getTime() + FILL_ORDER_BACKOFF >
 				new Date().getTime()
 		) {
-			// logger.error(
-			// 	`${
-			// 		this.name
-			// 	} backingoff for order (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${nodeToFill.node.market.marketIndex.toString()}`
-			// );
-			return false;
-		}
-
-		if (nodeToFill.node.isVammNode()) {
 			return false;
 		}
 
@@ -387,7 +390,13 @@ export class FillerBot implements Bot {
 			});
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
-				logger.info(`${this.name} tryFill is bizzy`);
+				this.metrics?.recordMutexBusy(this.name);
+			} else if (e === dlobMutexError) {
+				logger.error(`${this.name} dlobMutexError timeout`);
+			} else if (e === userMapMutexError) {
+				logger.error(`${this.name} userMapMutexError timeout`);
+			} else if (e === periodicTaskMutexError) {
+				logger.error(`${this.name} periodicTaskMutexError timeout`);
 			}
 		}
 	}
