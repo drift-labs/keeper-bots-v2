@@ -533,7 +533,6 @@ export class FillerBot implements Bot {
 					);
 				} else if (log.length > 50) {
 					// probably rawe event data...?
-					continue;
 				} else {
 					logger.info(` how parse log?: ${log}`);
 				}
