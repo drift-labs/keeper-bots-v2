@@ -162,6 +162,5 @@ export function* getVammNodeGenerator(price: BN): Generator<DLOBNode> {
 		market: undefined,
 		userAccount: undefined,
 		haveFilled: false,
-		lastFillAttempt: undefined,
 	};
 }

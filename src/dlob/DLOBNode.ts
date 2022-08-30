@@ -20,7 +20,6 @@ export interface DLOBNode {
 	haveFilled: boolean;
 	userAccount: PublicKey | undefined;
 	market: MarketAccount;
-	lastFillAttempt: Date | undefined;
 }
 
 export abstract class OrderNode implements DLOBNode {
@@ -31,7 +30,6 @@ export abstract class OrderNode implements DLOBNode {
 	marketAccount: MarketAccount;
 	haveFilled = false;
 	haveTrigger = false;
-	lastFillAttempt = undefined;
 
 	constructor(order: Order, market: MarketAccount, userAccount: PublicKey) {
 		this.order = order;

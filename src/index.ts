@@ -412,6 +412,10 @@ const runBot = async () => {
 	);
 
 	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
+		const slot = slotSubscriber.getSlot();
+		if (event.slot < slot) {
+			return;
+		}
 		Promise.all(bots.map((bot) => bot.trigger(event)));
 	});
 
