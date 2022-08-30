@@ -18,6 +18,7 @@ import {
 	SlotSubscriber,
 } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
+import { UserMap } from '../userMap';
 import { DLOBNode, DLOBNodeType, TriggerOrderNode } from './DLOBNode';
 import { logger } from '../logger';
 
@@ -98,19 +99,34 @@ export class DLOB {
 	 * @param clearingHouse The ClearingHouse instance to use for price data
 	 * @returns a promise that resolves when the DLOB is initialized
 	 */
-	public async init(clearingHouse: ClearingHouse): Promise<boolean> {
+	public async init(
+		clearingHouse: ClearingHouse,
+		userMap?: UserMap
+	): Promise<boolean> {
 		if (this.initialized) {
 			logger.error('DLOB already initialized');
 			return false;
 		}
-		const programAccounts = await clearingHouse.program.account.user.all();
-		for (const programAccount of programAccounts) {
-			// @ts-ignore
-			const userAccount: UserAccount = programAccount.account;
-			const userAccountPublicKey = programAccount.publicKey;
+		if (userMap) {
+			// initialize the dlob with the user map (prevents hitting getProgramAccounts)
+			for (const user of userMap.values()) {
+				const userAccount = user.getUserAccount();
+				const userAccountPubkey = user.getUserAccountPublicKey();
 
-			for (const order of userAccount.orders) {
-				this.insert(order, userAccountPublicKey);
+				for (const order of userAccount.orders) {
+					this.insert(order, userAccountPubkey);
+				}
+			}
+		} else {
+			const programAccounts = await clearingHouse.program.account.user.all();
+			for (const programAccount of programAccounts) {
+				// @ts-ignore
+				const userAccount: UserAccount = programAccount.account;
+				const userAccountPublicKey = programAccount.publicKey;
+
+				for (const order of userAccount.orders) {
+					this.insert(order, userAccountPublicKey);
+				}
 			}
 		}
 
@@ -229,9 +245,13 @@ export class DLOB {
 			slot,
 			oraclePriceData
 		);
+
+		// TODO: verify that crossing nodes indeed include all market nodes?
 		// Find all market nodes to fill
-		const marketNodesToFill = this.findMarketNodesToFill(marketIndex, slot);
-		return crossingNodesToFill.concat(marketNodesToFill);
+		// const marketNodesToFill = this.findMarketNodesToFill(marketIndex, slot);
+		// return crossingNodesToFill.concat(marketNodesToFill);
+
+		return crossingNodesToFill;
 	}
 
 	public findCrossingNodesToFill(

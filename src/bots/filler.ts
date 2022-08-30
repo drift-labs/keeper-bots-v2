@@ -30,15 +30,14 @@ import { UserStatsMap } from '../userStatsMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
-const FILL_ORDER_BACKOFF = 15000;
+const FILL_ORDER_BACKOFF = 5000;
 const dlobMutexError = new Error('dlobMutex timeout');
-const userMapMutexError = new Error('userMapMutex timeout');
 const periodicTaskMutexError = new Error('periodicTaskMutex timeout');
 
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 10000;
+	public readonly defaultIntervalMs: number = 1000;
 
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
@@ -50,19 +49,10 @@ export class FillerBot implements Bot {
 	);
 	private dlob: DLOB;
 
-	private userMapMutex = withTimeout(
-		new Mutex(),
-		10 * this.defaultIntervalMs,
-		userMapMutexError
-	);
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
 
-	private periodicTaskMutex = withTimeout(
-		new Mutex(),
-		5 * this.defaultIntervalMs,
-		periodicTaskMutexError
-	);
+	private periodicTaskMutex = new Mutex();
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private metrics: Metrics | undefined;
@@ -85,83 +75,28 @@ export class FillerBot implements Bot {
 	public async init() {
 		logger.warn('filler initing');
 
-		/*
-		try {
-			await Promise.all([
-				this.dlobMutex.runExclusive(async () => {
-					const initPromises: Array<Promise<any>> = [];
+		const initPromises: Array<Promise<any>> = [];
 
-					this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
-					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
-					initPromises.push(this.dlob.init(this.clearingHouse));
+		this.userMap = new UserMap(
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
+		);
+		this.metrics?.trackObjectSize('filler-userMap', this.userMap);
+		initPromises.push(this.userMap.fetchAllUsers());
 
-					await Promise.all(initPromises);
-				}),
-				this.userMapMutex.runExclusive(async () => {
-					const initPromises: Array<Promise<any>> = [];
+		this.userStatsMap = new UserStatsMap(
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
+		);
+		this.metrics?.trackObjectSize('filler-userStatsMap', this.userStatsMap);
+		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
-					this.userMap = new UserMap(
-						this.clearingHouse,
-						this.clearingHouse.userAccountSubscriptionConfig
-					);
-					this.metrics?.trackObjectSize('filler-userMap', this.userMap);
-					initPromises.push(this.userMap.fetchAllUsers());
-
-					this.userStatsMap = new UserStatsMap(
-						this.clearingHouse,
-						this.clearingHouse.userAccountSubscriptionConfig
-					);
-					this.metrics?.trackObjectSize(
-						'filler-userStatsMap',
-						this.userStatsMap
-					);
-					initPromises.push(this.userStatsMap.fetchAllUserStats());
-
-					await Promise.all(initPromises);
-				}),
-			]);
-		} catch (e) {
-			logger.error(`${this.name} init error: ${e}`);
-			return;
-		}
-		*/
+		await Promise.all(initPromises);
 
 		logger.warn('init done');
 	}
 
-	public async reset() {
-		logger.warn('filler resetting');
-
-		this.periodicTaskMutex.runExclusive(async () => {
-			for (const intervalId of this.intervalIds) {
-				clearInterval(intervalId);
-			}
-			this.intervalIds = [];
-		}),
-			/*
-		try {
-			await Promise.all([
-				this.periodicTaskMutex.runExclusive(async () => {
-					for (const intervalId of this.intervalIds) {
-						clearInterval(intervalId);
-					}
-					this.intervalIds = [];
-				}),
-				this.dlobMutex.runExclusive(async () => {
-					delete this.dlob;
-				}),
-				this.userMapMutex.runExclusive(async () => {
-					delete this.userMap;
-					delete this.userStatsMap;
-				}),
-			]);
-		} catch (e) {
-			logger.error(`${this.name} reset error: ${e}`);
-			return;
-		}
-		*/
-			logger.warn('reset done');
-	}
+	public async reset() {}
 
 	public async startIntervalLoop(intervalMs: number) {
 		// await this.tryFill();
@@ -171,35 +106,7 @@ export class FillerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(_record: any) {
-		/*
-		if (record.eventType === 'OrderRecord') {
-			try {
-				await Promise.all([
-					this.dlobMutex.runExclusive(async () => {
-						if (this.dlob) {
-							this.dlob.applyOrderRecord(record as OrderRecord);
-						}
-					}),
-					this.userMapMutex.runExclusive(async () => {
-						if (this.userMap) {
-							await this.userMap.updateWithOrder(record as OrderRecord);
-						}
-						if (this.userStatsMap) {
-							await this.userStatsMap.updateWithOrder(
-								record as OrderRecord,
-								this.userMap
-							);
-						}
-					}),
-				]);
-			} catch (e) {
-				logger.error(`${this.name} trigger error: ${e}`);
-				return;
-			}
-		}
-		*/
-	}
+	public async trigger(_record: any) {}
 
 	public viewDlob(): DLOB {
 		return this.dlob;
@@ -289,36 +196,27 @@ export class FillerBot implements Bot {
 	}> {
 		let makerInfo: MakerInfo | undefined;
 		if (nodeToFill.makerNode) {
-			await this.userMapMutex.runExclusive(async () => {
-				const makerAuthority = (
-					await this.userMap.mustGet(
-						nodeToFill.makerNode.userAccount.toString()
-					)
-				).getUserAccount().authority;
-				const makerUserStats = (
-					await this.userStatsMap.mustGet(makerAuthority.toString())
-				).userStatsAccountPublicKey;
-				makerInfo = {
-					maker: nodeToFill.makerNode.userAccount,
-					order: nodeToFill.makerNode.order,
-					makerStats: makerUserStats,
-				};
-			});
+			const makerAuthority = (
+				await this.userMap.mustGet(nodeToFill.makerNode.userAccount.toString())
+			).getUserAccount().authority;
+			const makerUserStats = (
+				await this.userStatsMap.mustGet(makerAuthority.toString())
+			).userStatsAccountPublicKey;
+			makerInfo = {
+				maker: nodeToFill.makerNode.userAccount,
+				order: nodeToFill.makerNode.order,
+				makerStats: makerUserStats,
+			};
 		}
 
-		let chUser: ClearingHouseUser;
-		let referrerInfo: ReferrerInfo;
-		await this.userMapMutex.runExclusive(async () => {
-			chUser = await this.userMap.mustGet(
-				nodeToFill.node.userAccount.toString()
-			);
-
-			referrerInfo = (
-				await this.userStatsMap.mustGet(
-					chUser.getUserAccount().authority.toString()
-				)
-			).getReferrerInfo();
-		});
+		const chUser = await this.userMap.mustGet(
+			nodeToFill.node.userAccount.toString()
+		);
+		const referrerInfo = (
+			await this.userStatsMap.mustGet(
+				chUser.getUserAccount().authority.toString()
+			)
+		).getReferrerInfo();
 		return Promise.resolve({
 			makerInfo,
 			chUser,
@@ -460,7 +358,6 @@ export class FillerBot implements Bot {
 		);
 	}
 
-	// sleep
 	private async sleep(ms: number) {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
@@ -488,24 +385,6 @@ export class FillerBot implements Bot {
 			logger.error(`tx ${txSig} not found`);
 			return;
 		}
-
-		// can do something with the parsed events, call trigger?
-		// @ts-ignore
-		// this.clearingHouse.program._events._eventParser.parseLogs(tx.meta.logMessages, (event) => {
-		// 	console.log(`event name: ${event.name}`);
-		// 	if (event.name === "OrderRecord") {
-		// 		const e = event.data as OrderRecord;
-		// 		console.log(` OrderId: ${e.takerOrder.orderId.toString()}`);
-		// 		console.log(` action: ${JSON.stringify(e.action)}`);
-		// 		console.log(` actionExplanation: ${JSON.stringify(e.actionExplanation)}`);
-		// 		console.log(` taker: ${e.taker}`);
-		// 		console.log(` maker: ${e.maker}`);
-		// 		console.log(` filler: ${e.filler}`);
-		// 		console.log(` baseAssetAmountFilled: ${e.baseAssetAmountFilled.toString()}`);
-		// 		console.log(` order.baseAssetAmount:       ${e.takerOrder.baseAssetAmount.toString()}`);
-		// 		console.log(` order.baseAssetAmountFilled: ${e.takerOrder.baseAssetAmountFilled.toString()}`);
-		// 	}
-		// });
 
 		let nextIsFillRecord = false;
 		let ixIdx = -1; // skip ComputeBudgetProgram
@@ -638,12 +517,18 @@ export class FillerBot implements Bot {
 			}
 
 			// add to tx
+			logger.info(
+				`including tx ${chUser
+					.getUserAccountPublicKey()
+					.toString()}-${nodeToFill.node.order.orderId.toString()}`
+			);
 			tx.add(ix);
 			runningTxSize += newIxCost + additionalAccountsCost;
 			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
 			idxUsed++;
 			nodesSent.push(nodeToFill);
 		}
+		logger.info(`txPacker took ${Date.now() - txPackerStart}ms`);
 
 		if (nodesSent.length === 0) {
 			logger.info('no ix');
@@ -658,14 +543,14 @@ export class FillerBot implements Bot {
 			}ms`
 		);
 
-		const start = Date.now();
+		const txStart = Date.now();
 		try {
 			const { txSig } = await this.clearingHouse.txSender.send(
 				tx,
 				[],
 				this.clearingHouse.opts
 			);
-			const duration = Date.now() - start;
+			const duration = Date.now() - txStart;
 			logger.info(`sent tx: ${txSig}, took: ${duration}ms`);
 			this.metrics?.recordRpcDuration(
 				this.clearingHouse.connection.rpcEndpoint,
@@ -675,7 +560,17 @@ export class FillerBot implements Bot {
 				this.name
 			);
 
+			const parseLogsStart = Date.now();
 			await this.processBulkFillTxLogs(nodesSent, txSig);
+			const processBulkFillLogsDuration = Date.now() - parseLogsStart;
+			logger.info(`parse logs took ${processBulkFillLogsDuration}ms`);
+			this.metrics?.recordRpcDuration(
+				this.clearingHouse.connection.rpcEndpoint,
+				'processLogs',
+				processBulkFillLogsDuration,
+				false,
+				this.name
+			);
 
 			this.metrics?.recordFilledOrder(
 				this.clearingHouse.provider.wallet.publicKey,
@@ -685,8 +580,8 @@ export class FillerBot implements Bot {
 
 			return txSig;
 		} catch (e) {
-			console.error(e);
 			logger.error(`failed to send packed tx:`);
+			console.error(e);
 			const simError = e as SendTransactionError;
 			for (const log of simError.logs) {
 				logger.error(`${log}`);
@@ -694,81 +589,65 @@ export class FillerBot implements Bot {
 		}
 	}
 
-	private randomIndex(distribution: Array<any>): any {
-		const index = Math.floor(distribution.length * Math.random()); // random index
-		return distribution[index];
-	}
-
 	private async tryFill() {
-		///
-		const initStart = Date.now();
-		delete this.dlob;
-		delete this.userMap;
-		delete this.userStatsMap;
-
-		const initPromises: Array<Promise<any>> = [];
-
-		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
-		this.metrics?.trackObjectSize('filler-dlob', this.dlob);
-		initPromises.push(this.dlob.init(this.clearingHouse));
-
-		this.userMap = new UserMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
-		);
-		this.metrics?.trackObjectSize('filler-userMap', this.userMap);
-		initPromises.push(this.userMap.fetchAllUsers());
-
-		this.userStatsMap = new UserStatsMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
-		);
-		this.metrics?.trackObjectSize('filler-userStatsMap', this.userStatsMap);
-		initPromises.push(this.userStatsMap.fetchAllUserStats());
-
-		await Promise.all(initPromises);
-		logger.info(`tryfill init start took ${Date.now() - initStart}ms`);
-		///
+		const startTime = Date.now();
+		let ran = false;
 		try {
-			const startTime = Date.now();
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
+				await this.dlobMutex.runExclusive(async () => {
+					delete this.dlob;
+					this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
+					await this.dlob.init(this.clearingHouse, this.userMap);
+				});
+
 				// 1) get all fillable nodes
-				const markets = this.clearingHouse.getMarketAccounts();
-				const fillableNodes: Array<NodeToFill> = [];
-				for (const market of markets) {
-					fillableNodes.push(...(await this.getFillableNodesForMarket(market)));
+				let fillableNodes: Array<NodeToFill> = [];
+				for (const market of this.clearingHouse.getMarketAccounts()) {
+					fillableNodes = fillableNodes.concat(
+						await this.getFillableNodesForMarket(market)
+					);
 				}
 
 				const filteredNodes = fillableNodes.filter((node) =>
 					this.filterFillableNodes(node)
 				);
 
+				this.metrics?.recordFillableOrdersSeen(-1, filteredNodes.length);
 				// fill the nodes
 				const fillResult = await promiseTimeout(
 					// this.tryFillNode(this.randomIndex(filteredNodes)),
 					this.tryBulkFillNodes(filteredNodes),
-					30000
+					15000
 				);
 
 				if (fillResult === null) {
 					logger.error(`Timeout tryFill, took ${Date.now() - startTime}ms`);
-				} else {
-					logger.info(
-						`${this.name} finished tryFill market took ${
-							Date.now() - startTime
-						}ms, tx: ${fillResult}`
-					);
 				}
+
+				ran = true;
 			});
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
 				this.metrics?.recordMutexBusy(this.name);
 			} else if (e === dlobMutexError) {
 				logger.error(`${this.name} dlobMutexError timeout`);
-			} else if (e === userMapMutexError) {
-				logger.error(`${this.name} userMapMutexError timeout`);
 			} else if (e === periodicTaskMutexError) {
 				logger.error(`${this.name} periodicTaskMutexError timeout`);
+			} else {
+				throw e;
+			}
+		} finally {
+			if (ran) {
+				const duration = Date.now() - startTime;
+				this.metrics?.recordRpcDuration(
+					this.clearingHouse.connection.rpcEndpoint,
+					'tryFill',
+					duration,
+					false,
+					this.name
+				);
+				logger.info(`tryFill done, took ${duration}ms`);
 			}
 		}
 	}
