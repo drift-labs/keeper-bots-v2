@@ -4,7 +4,6 @@ import {
 	isOracleValid,
 	ClearingHouse,
 	MarketAccount,
-	OrderRecord,
 	SlotSubscriber,
 	calculateAskPrice,
 	calculateBidPrice,
@@ -86,6 +85,7 @@ export class FillerBot implements Bot {
 	public async init() {
 		logger.warn('filler initing');
 
+		/*
 		try {
 			await Promise.all([
 				this.dlobMutex.runExclusive(async () => {
@@ -124,12 +124,21 @@ export class FillerBot implements Bot {
 			logger.error(`${this.name} init error: ${e}`);
 			return;
 		}
+		*/
 
 		logger.warn('init done');
 	}
 
 	public async reset() {
 		logger.warn('filler resetting');
+
+		this.periodicTaskMutex.runExclusive(async () => {
+			for (const intervalId of this.intervalIds) {
+				clearInterval(intervalId);
+			}
+			this.intervalIds = [];
+		}),
+			/*
 		try {
 			await Promise.all([
 				this.periodicTaskMutex.runExclusive(async () => {
@@ -150,7 +159,8 @@ export class FillerBot implements Bot {
 			logger.error(`${this.name} reset error: ${e}`);
 			return;
 		}
-		logger.warn('reset done');
+		*/
+			logger.warn('reset done');
 	}
 
 	public async startIntervalLoop(intervalMs: number) {
@@ -161,7 +171,8 @@ export class FillerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(record: any) {
+	public async trigger(_record: any) {
+		/*
 		if (record.eventType === 'OrderRecord') {
 			try {
 				await Promise.all([
@@ -187,6 +198,7 @@ export class FillerBot implements Bot {
 				return;
 			}
 		}
+		*/
 	}
 
 	public viewDlob(): DLOB {
@@ -549,7 +561,8 @@ export class FillerBot implements Bot {
 		nodesToFill: Array<NodeToFill>
 	): Promise<TransactionSignature> {
 		const tx = new Transaction();
-		const maxTxSize = 1232;
+		// const maxTxSize = 1232;
+		const maxTxSize = 1000;
 
 		/**
 		 * At all times, the running Tx size is:
@@ -569,7 +582,7 @@ export class FillerBot implements Bot {
 
 		// first ix is compute budget
 		const computeBudgetIx = ComputeBudgetProgram.requestUnits({
-			units: 2_000_000,
+			units: 4_000_000,
 			additionalFee: 0,
 		});
 		computeBudgetIx.keys.forEach((key) =>
@@ -632,6 +645,11 @@ export class FillerBot implements Bot {
 			nodesSent.push(nodeToFill);
 		}
 
+		if (nodesSent.length === 0) {
+			logger.info('no ix');
+			return '';
+		}
+
 		logger.info(
 			`sending tx, ${
 				uniqueAccounts.size
@@ -682,6 +700,35 @@ export class FillerBot implements Bot {
 	}
 
 	private async tryFill() {
+		///
+		const initStart = Date.now();
+		delete this.dlob;
+		delete this.userMap;
+		delete this.userStatsMap;
+
+		const initPromises: Array<Promise<any>> = [];
+
+		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+		this.metrics?.trackObjectSize('filler-dlob', this.dlob);
+		initPromises.push(this.dlob.init(this.clearingHouse));
+
+		this.userMap = new UserMap(
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
+		);
+		this.metrics?.trackObjectSize('filler-userMap', this.userMap);
+		initPromises.push(this.userMap.fetchAllUsers());
+
+		this.userStatsMap = new UserStatsMap(
+			this.clearingHouse,
+			this.clearingHouse.userAccountSubscriptionConfig
+		);
+		this.metrics?.trackObjectSize('filler-userStatsMap', this.userStatsMap);
+		initPromises.push(this.userStatsMap.fetchAllUserStats());
+
+		await Promise.all(initPromises);
+		logger.info(`tryfill init start took ${Date.now() - initStart}ms`);
+		///
 		try {
 			const startTime = Date.now();
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {

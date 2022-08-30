@@ -442,15 +442,15 @@ const runBot = async () => {
 	}
 
 	// reset the bots every 15 minutes, it looks like it holds onto stale DLOB orders :shrug:
-	setInterval(async () => {
-		for await (const bot of bots) {
-			await bot.reset();
-			await bot.init();
-		}
-		for (const bot of bots) {
-			await bot.startIntervalLoop(bot.defaultIntervalMs);
-		}
-	}, 5 * 60 * 1000);
+	// setInterval(async () => {
+	// 	for await (const bot of bots) {
+	// 		await bot.reset();
+	// 		await bot.init();
+	// 	}
+	// 	for (const bot of bots) {
+	// 		await bot.startIntervalLoop(bot.defaultIntervalMs);
+	// 	}
+	// }, 5 * 60 * 1000);
 };
 
 async function recursiveTryCatch(f: () => void) {
