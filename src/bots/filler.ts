@@ -387,6 +387,7 @@ export class FillerBot implements Bot {
 
 		let nextIsFillRecord = false;
 		let ixIdx = -1; // skip ComputeBudgetProgram
+		let successCount = 0;
 		for (const log of tx.meta.logMessages) {
 			if (log === null) {
 				logger.error(`null log message on tx: ${txSig}`);
@@ -423,6 +424,7 @@ export class FillerBot implements Bot {
 					);
 				} else if (log.length > 50) {
 					// probably rawe event data...?
+					successCount++;
 				} else {
 					logger.info(` how parse log?: ${log}`);
 				}
@@ -433,6 +435,12 @@ export class FillerBot implements Bot {
 				ixIdx++;
 			}
 		}
+
+		this.metrics?.recordFilledOrder(
+			this.clearingHouse.provider.wallet.publicKey,
+			this.name,
+			successCount
+		);
 	}
 
 	private async tryBulkFillNodes(
