@@ -287,9 +287,6 @@ export class DLOB {
 			// Verify that each side is different user
 			if (crossingNodes && !takerIsMaker) {
 				nodesToFill.push(crossingNodes);
-				if (nodesToFill.length === 10) {
-					break;
-				}
 			}
 
 			if (crossingSide === 'bid') {
@@ -556,8 +553,7 @@ export class DLOB {
 
 		// Both are takers
 		// older order is maker
-		const newerNode = bidOrder.ts.lt(askOrder.ts) ? askNode : bidNode;
-		const olderNode = askOrder.ts.lt(bidOrder.ts) ? bidNode : askNode;
+		const [olderNode, newerNode] = askOrder.ts.lt(bidOrder.ts) ? [askNode, bidNode] : [bidNode, askNode];
 		const crossingSide = askOrder.ts.lt(bidOrder.ts) ? 'bid' : 'ask';
 		return {
 			crossingNodes: {
