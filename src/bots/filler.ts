@@ -30,9 +30,8 @@ import { UserStatsMap } from '../userStatsMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
-const FILL_ORDER_BACKOFF = 5000;
+const FILL_ORDER_BACKOFF = 0; //5000;
 const dlobMutexError = new Error('dlobMutex timeout');
-const periodicTaskMutexError = new Error('periodicTaskMutex timeout');
 
 export class FillerBot implements Bot {
 	public readonly name: string;
@@ -632,8 +631,6 @@ export class FillerBot implements Bot {
 				this.metrics?.recordMutexBusy(this.name);
 			} else if (e === dlobMutexError) {
 				logger.error(`${this.name} dlobMutexError timeout`);
-			} else if (e === periodicTaskMutexError) {
-				logger.error(`${this.name} periodicTaskMutexError timeout`);
 			} else {
 				throw e;
 			}
