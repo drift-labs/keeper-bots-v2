@@ -553,7 +553,9 @@ export class DLOB {
 
 		// Both are takers
 		// older order is maker
-		const [olderNode, newerNode] = askOrder.ts.lt(bidOrder.ts) ? [askNode, bidNode] : [bidNode, askNode];
+		const [olderNode, newerNode] = askOrder.ts.lt(bidOrder.ts)
+			? [askNode, bidNode]
+			: [bidNode, askNode];
 		const crossingSide = askOrder.ts.lt(bidOrder.ts) ? 'bid' : 'ask';
 		return {
 			crossingNodes: {
