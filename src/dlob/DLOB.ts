@@ -18,6 +18,7 @@ import {
 	SlotSubscriber,
 } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
+import { UserMap } from '../userMap';
 import { DLOBNode, DLOBNodeType, TriggerOrderNode } from './DLOBNode';
 import { logger } from '../logger';
 
@@ -98,19 +99,34 @@ export class DLOB {
 	 * @param clearingHouse The ClearingHouse instance to use for price data
 	 * @returns a promise that resolves when the DLOB is initialized
 	 */
-	public async init(clearingHouse: ClearingHouse): Promise<boolean> {
+	public async init(
+		clearingHouse: ClearingHouse,
+		userMap?: UserMap
+	): Promise<boolean> {
 		if (this.initialized) {
 			logger.error('DLOB already initialized');
 			return false;
 		}
-		const programAccounts = await clearingHouse.program.account.user.all();
-		for (const programAccount of programAccounts) {
-			// @ts-ignore
-			const userAccount: UserAccount = programAccount.account;
-			const userAccountPublicKey = programAccount.publicKey;
+		if (userMap) {
+			// initialize the dlob with the user map (prevents hitting getProgramAccounts)
+			for (const user of userMap.values()) {
+				const userAccount = user.getUserAccount();
+				const userAccountPubkey = user.getUserAccountPublicKey();
 
-			for (const order of userAccount.orders) {
-				this.insert(order, userAccountPublicKey);
+				for (const order of userAccount.orders) {
+					this.insert(order, userAccountPubkey);
+				}
+			}
+		} else {
+			const programAccounts = await clearingHouse.program.account.user.all();
+			for (const programAccount of programAccounts) {
+				// @ts-ignore
+				const userAccount: UserAccount = programAccount.account;
+				const userAccountPublicKey = programAccount.publicKey;
+
+				for (const order of userAccount.orders) {
+					this.insert(order, userAccountPublicKey);
+				}
 			}
 		}
 
@@ -229,6 +245,8 @@ export class DLOB {
 			slot,
 			oraclePriceData
 		);
+
+		// TODO: verify that crossing nodes indeed include all market nodes? ok it's not, orders will be in one but not thet other zzz
 		// Find all market nodes to fill
 		const marketNodesToFill = this.findMarketNodesToFill(marketIndex, slot);
 		return crossingNodesToFill.concat(marketNodesToFill);
@@ -269,9 +287,6 @@ export class DLOB {
 			// Verify that each side is different user
 			if (crossingNodes && !takerIsMaker) {
 				nodesToFill.push(crossingNodes);
-				if (nodesToFill.length === 10) {
-					break;
-				}
 			}
 
 			if (crossingSide === 'bid') {
@@ -538,8 +553,9 @@ export class DLOB {
 
 		// Both are takers
 		// older order is maker
-		const newerNode = bidOrder.ts.lt(askOrder.ts) ? askNode : bidNode;
-		const olderNode = askOrder.ts.lt(bidOrder.ts) ? bidNode : askNode;
+		const [olderNode, newerNode] = askOrder.ts.lt(bidOrder.ts)
+			? [askNode, bidNode]
+			: [bidNode, askNode];
 		const crossingSide = askOrder.ts.lt(bidOrder.ts) ? 'bid' : 'ask';
 		return {
 			crossingNodes: {

@@ -40,14 +40,6 @@ export class Metrics {
 	private bootTimeMs: number;
 	private upTimeGauge: ObservableGauge;
 
-	// private collateralValueLock = new Mutex();
-	// private collateralValuePerBank: Array<number>;
-	// private collateralValueGauge: ObservableGauge;
-
-	// private solBalanceLock = new Mutex();
-	// private solBalance: number;
-	// private solBalanceGauge: ObservableGauge;
-
 	private openOrdersLock = new Mutex();
 	private openOrders: number;
 	private openOrdersGauge: ObservableGauge;
@@ -74,10 +66,6 @@ export class Metrics {
 	private chUserUnrealizedFundingPNLLock = new Mutex();
 	private chUserUnrealizedFundingPNL: number;
 	private chUserUnrealizedFundingPNLGauge: ObservableGauge;
-
-	// private chUserUnsettledPNLLock = new Mutex();
-	// private chUserUnsettledPNL: number;
-	// private chUserUnsettledPNLGauge: ObservableGauge;
 
 	private chUserInitialMarginRequirementLock = new Mutex();
 	private chUserInitialMarginRequirement: number;
@@ -548,8 +536,8 @@ export class Metrics {
 		});
 	}
 
-	recordFilledOrder(authority: PublicKey, bot: string) {
-		this.filledOrdersCounter.add(1, {
+	recordFilledOrder(authority: PublicKey, bot: string, count = 1) {
+		this.filledOrdersCounter.add(count, {
 			user: authority.toBase58(),
 			bot: bot,
 		});
