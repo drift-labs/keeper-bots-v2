@@ -246,12 +246,10 @@ export class DLOB {
 			oraclePriceData
 		);
 
-		// TODO: verify that crossing nodes indeed include all market nodes?
+		// TODO: verify that crossing nodes indeed include all market nodes? ok it's not, orders will be in one but not thet other zzz
 		// Find all market nodes to fill
-		// const marketNodesToFill = this.findMarketNodesToFill(marketIndex, slot);
-		// return crossingNodesToFill.concat(marketNodesToFill);
-
-		return crossingNodesToFill;
+		const marketNodesToFill = this.findMarketNodesToFill(marketIndex, slot);
+		return crossingNodesToFill.concat(marketNodesToFill);
 	}
 
 	public findCrossingNodesToFill(
