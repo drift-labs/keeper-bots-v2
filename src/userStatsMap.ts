@@ -80,21 +80,10 @@ export class UserStatsMap {
 		this.userStatsMap.set(authority.toString(), userStat);
 	}
 
-	public async updateWithOrder(record: OrderRecord, userMap: UserMap) {
-		if (
-			!record.taker.equals(PublicKey.default) &&
-			!this.has(record.taker.toString())
-		) {
-			const takerUserAccount = await userMap.mustGet(record.taker.toString());
+	public async updateWithOrderRecord(record: OrderRecord, userMap: UserMap) {
+		if (!this.has(record.user.toString())) {
+			const takerUserAccount = await userMap.mustGet(record.user.toString());
 			this.addUserStat(takerUserAccount.getUserAccount().authority);
-		}
-
-		if (
-			!record.maker.equals(PublicKey.default) &&
-			!this.has(record.maker.toString())
-		) {
-			const makerUserAccount = await userMap.mustGet(record.maker.toString());
-			this.addUserStat(makerUserAccount.getUserAccount().authority);
 		}
 	}
 

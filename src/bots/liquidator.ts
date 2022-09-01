@@ -101,7 +101,7 @@ export class LiquidatorBot implements Bot {
 
 	public async trigger(record: any): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
-			await this.userMap.updateWithOrder(record as OrderRecord);
+			await this.userMap.updateWithOrderRecord(record as OrderRecord);
 		} else if (record.eventType === 'LiquidationRecord') {
 			this.metrics?.recordLiquidationEvent(
 				record as LiquidationRecord,
@@ -246,11 +246,6 @@ export class LiquidatorBot implements Bot {
 								);
 							} catch (txError) {
 								const errorCode = getErrorCode(txError);
-								if (errorCode === 6003) {
-									logger.error(
-										`Liquidator has insufficient collateral to take over position.`
-									);
-								}
 								this.metrics?.recordErrorCode(
 									errorCode,
 									this.clearingHouse.provider.wallet.publicKey,
@@ -259,7 +254,7 @@ export class LiquidatorBot implements Bot {
 								logger.error(
 									`Error liquidating auth: ${auth}, user: ${userKey}`
 								);
-								// console.error(txError);
+								console.error(txError);
 							}
 						}
 					}

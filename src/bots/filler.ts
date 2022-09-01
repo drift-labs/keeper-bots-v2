@@ -30,6 +30,7 @@ import { UserStatsMap } from '../userStatsMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
+const MAX_TX_PACK_SIZE = 900; //1232;
 const FILL_ORDER_BACKOFF = 0; //5000;
 const dlobMutexError = new Error('dlobMutex timeout');
 
@@ -285,17 +286,17 @@ export class FillerBot implements Bot {
 			const errorMessage = getErrorMessage(error as SendTransactionError);
 
 			if (errorMessage === 'OrderDoesNotExist') {
-				await this.dlobMutex.runExclusive(async () => {
-					this.dlob.remove(
-						nodeToFill.node.order,
-						nodeToFill.node.userAccount,
-						() => {
-							logger.error(
-								`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-							);
-						}
-					);
-				});
+				// await this.dlobMutex.runExclusive(async () => {
+				// 	this.dlob.remove(
+				// 		nodeToFill.node.order,
+				// 		nodeToFill.node.userAccount,
+				// 		() => {
+				// 			logger.error(
+				// 				`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
+				// 			);
+				// 		}
+				// 	);
+				// });
 			}
 			logger.error(
 				`Error (${errorCode}) filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, mktIdx: ${marketIndex.toNumber()}`
@@ -401,17 +402,17 @@ export class FillerBot implements Bot {
 					logger.error(
 						`   assoc order: ${filledNode.node.userAccount.toString()}, ${filledNode.node.order.orderId.toNumber()}`
 					);
-					await this.dlobMutex.runExclusive(async () => {
-						this.dlob.remove(
-							filledNode.node.order,
-							filledNode.node.userAccount,
-							() => {
-								logger.error(
-									`Order ${filledNode.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-								);
-							}
-						);
-					});
+					// await this.dlobMutex.runExclusive(async () => {
+					// 	this.dlob.remove(
+					// 		filledNode.node.order,
+					// 		filledNode.node.userAccount,
+					// 		() => {
+					// 			logger.error(
+					// 				`Order ${filledNode.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
+					// 			);
+					// 		}
+					// 	);
+					// });
 				} else if (log.includes('Amm cant fulfill order')) {
 					const filledNode = nodesFilled[ixIdx];
 					logger.error(` ${log}, ix: ${ixIdx}`);
@@ -447,9 +448,6 @@ export class FillerBot implements Bot {
 		nodesToFill: Array<NodeToFill>
 	): Promise<TransactionSignature> {
 		const tx = new Transaction();
-		// const maxTxSize = 1232;
-		const maxTxSize = 1000;
-
 		/**
 		 * At all times, the running Tx size is:
 		 * - signatures (compact-u16 array, 64 bytes per elem)
@@ -468,7 +466,7 @@ export class FillerBot implements Bot {
 
 		// first ix is compute budget
 		const computeBudgetIx = ComputeBudgetProgram.requestUnits({
-			units: 4_000_000,
+			units: 10_000_000,
 			additionalFee: 0,
 		});
 		computeBudgetIx.keys.forEach((key) =>
@@ -519,7 +517,10 @@ export class FillerBot implements Bot {
 					: 0;
 
 			// check it; appears we cannot send exactly maxTxSize.
-			if (runningTxSize + newIxCost + additionalAccountsCost >= maxTxSize) {
+			if (
+				runningTxSize + newIxCost + additionalAccountsCost >=
+				MAX_TX_PACK_SIZE
+			) {
 				break;
 			}
 
@@ -535,10 +536,10 @@ export class FillerBot implements Bot {
 			idxUsed++;
 			nodesSent.push(nodeToFill);
 		}
-		logger.info(`txPacker took ${Date.now() - txPackerStart}ms`);
+		logger.debug(`txPacker took ${Date.now() - txPackerStart}ms`);
 
 		if (nodesSent.length === 0) {
-			logger.info('no ix');
+			logger.debug('no ix');
 			return '';
 		}
 
@@ -616,9 +617,15 @@ export class FillerBot implements Bot {
 					);
 				}
 
-				const filteredNodes = fillableNodes.filter((node) =>
-					this.filterFillableNodes(node)
-				);
+				const seenNodes = new Set<string>();
+				const filteredNodes = fillableNodes.filter((node) => {
+					const sig = this.getNodeToFillSignature(node);
+					if (seenNodes.has(sig)) {
+						return false;
+					}
+					seenNodes.add(sig);
+					return this.filterFillableNodes(node);
+				});
 
 				this.metrics?.recordFillableOrdersSeen(-1, filteredNodes.length);
 				// fill the nodes
@@ -652,7 +659,7 @@ export class FillerBot implements Bot {
 					false,
 					this.name
 				);
-				logger.info(`tryFill done, took ${duration}ms`);
+				logger.debug(`tryFill done, took ${duration}ms`);
 			}
 		}
 	}

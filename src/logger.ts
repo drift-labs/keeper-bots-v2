@@ -10,3 +10,7 @@ export const logger = createLogger({
 		})
 	),
 });
+
+export const setLogLevel = (logLevel: string) => {
+	logger.level = logLevel;
+};

@@ -25,7 +25,7 @@ import {
 	BASE_PRECISION,
 } from '@drift-labs/sdk';
 
-import { logger } from './logger';
+import { logger, setLogLevel } from './logger';
 import { constants } from './types';
 import { FillerBot } from './bots/filler';
 import { TriggerBot } from './bots/trigger';
@@ -67,9 +67,11 @@ program
 			'private key, supports path to id.json, or list of comma separate numbers'
 		).env('KEEPER_PRIVATE_KEY')
 	)
+	.option('--debug', 'Enable debug logging')
 	.parse();
 
 const opts = program.opts();
+setLogLevel(opts.debug ? 'debug' : 'info');
 
 logger.info(
 	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JitMakerBot enabled: ${!!opts.jitMaker} PnlSettler enabled: ${!!opts.pnlSettler}`
@@ -293,7 +295,7 @@ const runBot = async () => {
 
 	// check that user has collateral
 	const freeCollateral = clearingHouseUser.getFreeCollateral();
-	if (freeCollateral.isZero() && opts.jitMaker) {
+	if (freeCollateral.isZero() && opts.jitMaker && !opts.forceDeposit) {
 		throw new Error(
 			`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
 		);

@@ -1,4 +1,4 @@
-import { getOrderId, getVammNodeGenerator, NodeList } from './NodeList';
+import { getOrderSignature, getVammNodeGenerator, NodeList } from './NodeList';
 import {
 	BN,
 	calculateAskPrice,
@@ -9,8 +9,6 @@ import {
 	isOneOfVariant,
 	isVariant,
 	Order,
-	OrderRecord,
-	OrderAction,
 	ZERO,
 	MARK_PRICE_PRECISION,
 	MarketAccount,
@@ -114,7 +112,7 @@ export class DLOB {
 				const userAccountPubkey = user.getUserAccountPublicKey();
 
 				for (const order of userAccount.orders) {
-					this.insert(order, userAccountPubkey);
+					this.insertOrder(order, userAccountPubkey);
 				}
 			}
 		} else {
@@ -125,7 +123,7 @@ export class DLOB {
 				const userAccountPublicKey = programAccount.publicKey;
 
 				for (const order of userAccount.orders) {
-					this.insert(order, userAccountPublicKey);
+					this.insertOrder(order, userAccountPublicKey);
 				}
 			}
 		}
@@ -134,7 +132,7 @@ export class DLOB {
 		return true;
 	}
 
-	public insert(
+	private insertOrder(
 		order: Order,
 		userAccount: PublicKey,
 		onInsert?: OrderBookCallback
@@ -144,7 +142,7 @@ export class DLOB {
 		}
 
 		if (isVariant(order.status, 'open')) {
-			this.openOrders.add(this.getOpenOrderId(order, userAccount));
+			this.openOrders.add(getOrderSignature(order.orderId, userAccount));
 		}
 		this.getListForOrder(order).insert(
 			order,
@@ -154,30 +152,6 @@ export class DLOB {
 
 		if (onInsert) {
 			onInsert();
-		}
-	}
-
-	public remove(
-		order: Order,
-		userAccount: PublicKey,
-		onRemove?: OrderBookCallback
-	): void {
-		this.openOrders.delete(this.getOpenOrderId(order, userAccount));
-		this.getListForOrder(order).remove(order, userAccount);
-
-		if (onRemove) {
-			onRemove();
-		}
-	}
-
-	public update(
-		order: Order,
-		userAccount: PublicKey,
-		onUpdate?: OrderBookCallback
-	): void {
-		this.getListForOrder(order).update(order, userAccount);
-		if (onUpdate) {
-			onUpdate();
 		}
 	}
 
@@ -224,10 +198,6 @@ export class DLOB {
 		}
 
 		return this.orderLists.get(order.marketIndex.toNumber())[type][subType];
-	}
-
-	public getOpenOrderId(order: Order, userAccount: PublicKey): string {
-		return getOrderId(order, userAccount);
 	}
 
 	public findNodesToFill(
@@ -667,82 +637,5 @@ export class DLOB {
 			convertToNumber(bestBid, MARK_PRICE_PRECISION).toFixed(3),
 			`(${bidSpread.toFixed(4)}%)`
 		);
-	}
-
-	private updateWithOrder(
-		order: Order,
-		userAccount: PublicKey,
-		action: OrderAction
-	) {
-		if (isVariant(action, 'place')) {
-			this.insert(order, userAccount, () => {
-				if (this.silent) {
-					return;
-				}
-				logger.info(
-					`Order ${this.getOpenOrderId(
-						order,
-						userAccount
-					)} placed. Added to dlob`
-				);
-			});
-		} else if (isVariant(action, 'cancel')) {
-			this.remove(order, userAccount, () => {
-				if (this.silent) {
-					return;
-				}
-				logger.info(
-					`Order ${this.getOpenOrderId(
-						order,
-						userAccount
-					)} canceled. Removed from dlob`
-				);
-			});
-		} else if (isVariant(action, 'trigger')) {
-			this.trigger(order, userAccount, () => {
-				if (this.silent) {
-					return;
-				}
-				logger.info(
-					`Order ${this.getOpenOrderId(order, userAccount)} triggered`
-				);
-			});
-		} else if (isVariant(action, 'fill')) {
-			if (order.baseAssetAmount.eq(order.baseAssetAmountFilled)) {
-				this.remove(order, userAccount, () => {
-					if (this.silent) {
-						return;
-					}
-					logger.info(
-						`Order ${this.getOpenOrderId(
-							order,
-							userAccount
-						)} completely filled. Removed from dlob`
-					);
-				});
-			} else {
-				this.update(order, userAccount, () => {
-					if (this.silent) {
-						return;
-					}
-					logger.info(
-						`Order ${this.getOpenOrderId(
-							order,
-							userAccount
-						)} partially filled. Updated dlob`
-					);
-				});
-			}
-		}
-	}
-
-	public applyOrderRecord(record: OrderRecord) {
-		if (!record.taker.equals(PublicKey.default)) {
-			this.updateWithOrder(record.takerOrder, record.taker, record.action);
-		}
-
-		if (!record.maker.equals(PublicKey.default)) {
-			this.updateWithOrder(record.makerOrder, record.maker, record.action);
-		}
 	}
 }

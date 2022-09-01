@@ -4,8 +4,8 @@ import { createNode, DLOBNode, DLOBNodeMap } from './DLOBNode';
 
 export type SortDirection = 'asc' | 'desc';
 
-export function getOrderId(order: Order, userAccount: PublicKey): string {
-	return `${userAccount.toString()}-${order.orderId.toString()}`;
+export function getOrderSignature(orderId: BN, userAccount: PublicKey): string {
+	return `${userAccount.toString()}-${orderId.toString()}`;
 }
 
 export interface DLOBNodeGenerator {
@@ -35,7 +35,7 @@ export class NodeList<NodeType extends keyof DLOBNodeMap>
 
 		const newNode = createNode(this.nodeType, order, market, userAccount);
 
-		const orderId = getOrderId(order, userAccount);
+		const orderId = getOrderSignature(order.orderId, userAccount);
 		if (this.nodeMap.has(orderId)) {
 			return;
 		}
@@ -93,7 +93,7 @@ export class NodeList<NodeType extends keyof DLOBNodeMap>
 	}
 
 	public update(order: Order, userAccount: PublicKey): void {
-		const orderId = getOrderId(order, userAccount);
+		const orderId = getOrderSignature(order.orderId, userAccount);
 		if (this.nodeMap.has(orderId)) {
 			const node = this.nodeMap.get(orderId);
 			Object.assign(node.order, order);
@@ -102,7 +102,7 @@ export class NodeList<NodeType extends keyof DLOBNodeMap>
 	}
 
 	public remove(order: Order, userAccount: PublicKey): void {
-		const orderId = getOrderId(order, userAccount);
+		const orderId = getOrderSignature(order.orderId, userAccount);
 		if (this.nodeMap.has(orderId)) {
 			const node = this.nodeMap.get(orderId);
 			if (node.next) {
@@ -134,7 +134,7 @@ export class NodeList<NodeType extends keyof DLOBNodeMap>
 	}
 
 	public has(order: Order, userAccount: PublicKey): boolean {
-		return this.nodeMap.has(getOrderId(order, userAccount));
+		return this.nodeMap.has(getOrderSignature(order.orderId, userAccount));
 	}
 
 	public print(): void {
