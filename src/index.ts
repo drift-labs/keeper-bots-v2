@@ -427,7 +427,6 @@ const runBot = async () => {
 	);
 
 	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
-		console.log(`got event: ${event.eventType}`);
 		Promise.all(bots.map((bot) => bot.trigger(event)));
 	});
 

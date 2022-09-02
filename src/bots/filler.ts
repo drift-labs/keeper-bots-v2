@@ -110,8 +110,8 @@ export class FillerBot implements Bot {
 
 	public async trigger(record: any) {
 		if (record.eventType === 'OrderRecord') {
-			await this.userMap.updateWithOrder(record as OrderRecord);
-			await this.userStatsMap.updateWithOrder(
+			await this.userMap.updateWithOrderRecord(record as OrderRecord);
+			await this.userStatsMap.updateWithOrderRecord(
 				record as OrderRecord,
 				this.userMap
 			);
