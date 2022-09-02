@@ -31,6 +31,7 @@ import { FillerBot } from './bots/filler';
 import { TriggerBot } from './bots/trigger';
 import { JitMakerBot } from './bots/jitMaker';
 import { LiquidatorBot } from './bots/liquidator';
+import { FloatingMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { Metrics } from './metrics';
 import { PnlSettlerBot } from './bots/pnlSettler';
@@ -51,6 +52,7 @@ program
 	.option('--filler', 'Enable filler bot')
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
+	.option('--floating-maker', 'Enable floating maker bot')
 	.option('--liquidator', 'Enable liquidator bot')
 	.option('--pnl-settler', 'Enable PnL settler bot')
 	.option('--print-info', 'Periodically print market and position info')
@@ -389,6 +391,17 @@ const runBot = async () => {
 	if (opts.liquidator) {
 		bots.push(
 			new LiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
+		);
+	}
+	if (opts.floatingMaker) {
+		bots.push(
+			new FloatingMakerBot(
+				'floatingMaker',
+				!!opts.dry,
+				clearingHouse,
+				slotSubscriber,
+				metrics
+			)
 		);
 	}
 

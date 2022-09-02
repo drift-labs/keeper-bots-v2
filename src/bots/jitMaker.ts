@@ -11,7 +11,6 @@ import {
 	QUOTE_PRECISION,
 	convertToNumber,
 	MARK_PRICE_PRECISION,
-	UserAccount,
 	UserPosition,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -57,7 +56,6 @@ enum StateType {
 type State = {
 	stateType: Map<number, StateType>;
 	marketPosition: Map<number, UserPosition>;
-	account: UserAccount;
 };
 
 const dlobMutexError = new Error('dlobMutex timeout');
@@ -143,7 +141,6 @@ export class JitMakerBot implements Bot {
 		this.agentState = {
 			stateType: new Map<number, StateType>(),
 			marketPosition: new Map<number, UserPosition>(),
-			account: undefined,
 		};
 		initPromises.push(this.updateAgentState());
 
@@ -238,8 +235,6 @@ export class JitMakerBot implements Bot {
 	 * @returns {Promise<void>}
 	 */
 	private async updateAgentState(): Promise<void> {
-		this.agentState.account = this.clearingHouse.getUserAccount()!;
-
 		for await (const p of this.clearingHouse.getUserAccount().positions) {
 			if (p.baseAssetAmount.isZero()) {
 				continue;
