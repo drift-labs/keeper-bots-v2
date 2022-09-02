@@ -7,6 +7,7 @@ import {
 	PositionDirection,
 	OrderType,
 	OrderRecord,
+	NewUserRecord,
 	BASE_PRECISION,
 	QUOTE_PRECISION,
 	convertToNumber,
@@ -168,6 +169,13 @@ export class JitMakerBot implements Bot {
 				this.userMap
 			);
 			await this.tryMake();
+		} else if (record.eventType === 'NewUserRecord') {
+			await this.userMap.mustGet(
+				(record as NewUserRecord).userAuthority.toString()
+			);
+			await this.userStatsMap.mustGet(
+				(record as NewUserRecord).userAuthority.toString()
+			);
 		}
 	}
 

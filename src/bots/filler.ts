@@ -1,4 +1,6 @@
 import {
+	NewUserRecord,
+	OrderRecord,
 	ClearingHouseUser,
 	ReferrerInfo,
 	isOracleValid,
@@ -105,7 +107,23 @@ export class FillerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
-	public async trigger(_record: any) {}
+	public async trigger(record: any) {
+		if (record.eventType === 'OrderRecord') {
+			await this.userMap.updateWithOrder(record as OrderRecord);
+			await this.userStatsMap.updateWithOrder(
+				record as OrderRecord,
+				this.userMap
+			);
+			await this.tryFill();
+		} else if (record.eventType === 'NewUserRecord') {
+			await this.userMap.mustGet(
+				(record as NewUserRecord).userAuthority.toString()
+			);
+			await this.userStatsMap.mustGet(
+				(record as NewUserRecord).userAuthority.toString()
+			);
+		}
+	}
 
 	public viewDlob(): DLOB {
 		return this.dlob;
