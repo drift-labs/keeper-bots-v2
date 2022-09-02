@@ -43,7 +43,7 @@ const sdkConfig = initialize({ env: process.env.ENV });
 const stateCommitment: Commitment = 'confirmed';
 
 program
-	.option('-d, --dry', 'Dry run, do not send transactions on chain')
+	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
 	.option(
 		'--init-user',
 		'calls clearingHouse.initializeUserAccount if no user account exists'

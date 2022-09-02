@@ -170,11 +170,9 @@ export class JitMakerBot implements Bot {
 			);
 			await this.tryMake();
 		} else if (record.eventType === 'NewUserRecord') {
-			await this.userMap.mustGet(
-				(record as NewUserRecord).userAuthority.toString()
-			);
+			await this.userMap.mustGet((record as NewUserRecord).user.toString());
 			await this.userStatsMap.mustGet(
-				(record as NewUserRecord).userAuthority.toString()
+				(record as NewUserRecord).user.toString()
 			);
 		}
 	}
