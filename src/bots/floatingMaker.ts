@@ -1,4 +1,6 @@
 import {
+	calculateAskPrice,
+	calculateBidPrice,
 	BN,
 	isVariant,
 	ClearingHouse,
@@ -24,7 +26,7 @@ type State = {
 	openOrders: Map<number, Array<Order>>;
 };
 
-const MARKET_UPDATE_COOLDOWN_SLOTS = 15; // update markets once at most every 15 slots
+const MARKET_UPDATE_COOLDOWN_SLOTS = 30; // wait slots before updating market position
 
 /**
  *
@@ -155,82 +157,100 @@ export class FloatingMakerBot implements Bot {
 			MARKET_UPDATE_COOLDOWN_SLOTS;
 
 		if (nextUpdateSlot > currSlot) {
-			logger.info(
-				`${this.name} market ${marketIndex} update on cooldown, currSlot: ${currSlot}, nextUpdateSlot: ${nextUpdateSlot}`
-			);
 			return;
 		}
 
-		// todo: working on mkt 0
-		if (marketIndex.isZero()) {
-			const openOrders = this.agentState.openOrders.get(marketIndex.toNumber());
-			const oracle = this.clearingHouse.getOracleDataForMarket(marketIndex);
+		const openOrders = this.agentState.openOrders.get(marketIndex.toNumber());
+		const oracle = this.clearingHouse.getOracleDataForMarket(marketIndex);
+		const vAsk = calculateAskPrice(marketAccount, oracle);
+		const vBid = calculateBidPrice(marketAccount, oracle);
 
-			console.log(`mkt: ${marketAccount.marketIndex} open orders:`);
-			for (const [idx, o] of openOrders.entries()) {
-				console.log(
-					`[${idx}]: baa: ${convertToNumber(
-						o.baseAssetAmountFilled,
-						BASE_PRECISION
-					)}/${convertToNumber(o.baseAssetAmount, BASE_PRECISION)}`
-				);
-				console.log(` .        qaa: ${o.quoteAssetAmount}`);
-				console.log(
-					` .        price:       ${convertToNumber(
-						o.price,
-						MARK_PRICE_PRECISION
-					)}`
-				);
-				console.log(
-					` .        priceOffset: ${convertToNumber(
-						o.oraclePriceOffset,
-						MARK_PRICE_PRECISION
-					)}`
-				);
-				console.log(
-					` .        oraclePrice: ${convertToNumber(
-						oracle.price,
-						MARK_PRICE_PRECISION
-					)}`
-				);
-				console.log(` .        oracleSlot:  ${oracle.slot.toString()}`);
-				console.log(` .        oracleConf:  ${oracle.confidence.toString()}`);
-			}
-
-			// update orders if none, or update based on exposure
-			if (openOrders.length === 0) {
-				const tx0 = await this.clearingHouse.placeOrder({
-					marketIndex: marketIndex,
-					orderType: OrderType.LIMIT,
-					direction: PositionDirection.LONG,
-					baseAssetAmount: BASE_PRECISION.mul(new BN(100)),
-					oraclePriceOffset: new BN(MARK_PRICE_PRECISION),
-				});
-				console.log(`${this.name} placing long: ${tx0}`);
-
-				const tx1 = await this.clearingHouse.placeOrder({
-					marketIndex: marketIndex,
-					orderType: OrderType.LIMIT,
-					direction: PositionDirection.SHORT,
-					baseAssetAmount: BASE_PRECISION.mul(new BN(100)),
-					oraclePriceOffset: new BN(MARK_PRICE_PRECISION),
-				});
-				console.log(`${this.name} placing short: ${tx1}`);
-			} else {
-				// cancel orders
-				for (const o of openOrders) {
-					const tx = await this.clearingHouse.cancelOrder(o.orderId);
-					console.log(
-						`${this.name} cancelling order ${this.clearingHouse
-							.getUserAccount()
-							.authority.toBase58()}-${o.orderId}: ${tx}`
-					);
-				}
-			}
-
-			// enforce cooldown on market
-			this.lastSlotMarketUpdated.set(marketIndex.toNumber(), currSlot);
+		console.log(`mkt: ${marketAccount.marketIndex} open orders:`);
+		for (const [idx, o] of openOrders.entries()) {
+			console.log(
+				`${Object.keys(o.orderType)[0]} ${Object.keys(o.direction)[0]}`
+			);
+			console.log(
+				`[${idx}]: baa: ${convertToNumber(
+					o.baseAssetAmountFilled,
+					BASE_PRECISION
+				)}/${convertToNumber(o.baseAssetAmount, BASE_PRECISION)}`
+			);
+			console.log(` .        qaa: ${o.quoteAssetAmount}`);
+			console.log(
+				` .        price:       ${convertToNumber(
+					o.price,
+					MARK_PRICE_PRECISION
+				)}`
+			);
+			console.log(
+				` .        priceOffset: ${convertToNumber(
+					o.oraclePriceOffset,
+					MARK_PRICE_PRECISION
+				)}`
+			);
+			console.log(
+				` .        vBid: ${convertToNumber(vBid, MARK_PRICE_PRECISION)}`
+			);
+			console.log(
+				` .        vAsk: ${convertToNumber(vAsk, MARK_PRICE_PRECISION)}`
+			);
+			console.log(
+				` .        oraclePrice: ${convertToNumber(
+					oracle.price,
+					MARK_PRICE_PRECISION
+				)}`
+			);
+			console.log(` .        oracleSlot:  ${oracle.slot.toString()}`);
+			console.log(` .        oracleConf:  ${oracle.confidence.toString()}`);
 		}
+
+		// cancel orders if not quoting both sides of the market
+		let placeNewOrders = openOrders.length === 0;
+
+		if (
+			(openOrders.length > 0 && openOrders.length != 2) ||
+			marketIndex.eq(new BN(0))
+		) {
+			// cancel orders
+			for (const o of openOrders) {
+				const tx = await this.clearingHouse.cancelOrder(o.orderId);
+				console.log(
+					`${this.name} cancelling order ${this.clearingHouse
+						.getUserAccount()
+						.authority.toBase58()}-${o.orderId}: ${tx}`
+				);
+			}
+			placeNewOrders = true;
+		}
+
+		if (placeNewOrders) {
+			const biasNum = new BN(90);
+			const biasDenom = new BN(100);
+
+			const oracleBidSpread = oracle.price.sub(vBid);
+			const tx0 = await this.clearingHouse.placeOrder({
+				marketIndex: marketIndex,
+				orderType: OrderType.LIMIT,
+				direction: PositionDirection.LONG,
+				baseAssetAmount: BASE_PRECISION.mul(new BN(100)),
+				oraclePriceOffset: oracleBidSpread.mul(biasNum).div(biasDenom).neg(), // limit bid below oracle
+			});
+			console.log(`${this.name} placing long: ${tx0}`);
+
+			const oracleAskSpread = vAsk.sub(oracle.price);
+			const tx1 = await this.clearingHouse.placeOrder({
+				marketIndex: marketIndex,
+				orderType: OrderType.LIMIT,
+				direction: PositionDirection.SHORT,
+				baseAssetAmount: BASE_PRECISION.mul(new BN(100)),
+				oraclePriceOffset: oracleAskSpread.mul(biasNum).div(biasDenom), // limit ask above oracle
+			});
+			console.log(`${this.name} placing short: ${tx1}`);
+		}
+
+		// enforce cooldown on market
+		this.lastSlotMarketUpdated.set(marketIndex.toNumber(), currSlot);
 	}
 
 	private async updateOpenOrders() {
