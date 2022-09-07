@@ -554,10 +554,10 @@ export class FillerBot implements Bot {
 			nodesSent.push(nodeToFill);
 			lastIdxFilled = idx;
 		}
-		logger.info(`txPacker took ${Date.now() - txPackerStart}ms`);
+		logger.debug(`txPacker took ${Date.now() - txPackerStart}ms`);
 
 		if (nodesSent.length === 0) {
-			logger.info('no ix');
+			logger.debug('no ix');
 			return ['', -1];
 		}
 
