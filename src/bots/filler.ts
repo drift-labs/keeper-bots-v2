@@ -464,7 +464,7 @@ export class FillerBot implements Bot {
 		nodesToFill: Array<NodeToFill>
 	): Promise<[TransactionSignature, number]> {
 		const tx = new Transaction();
-		const txSig = '';
+		let txSig = '';
 		let lastIdxFilled = 0;
 
 		/**
@@ -559,7 +559,7 @@ export class FillerBot implements Bot {
 		logger.debug(`txPacker took ${Date.now() - txPackerStart}ms`);
 
 		if (nodesSent.length === 0) {
-			return ['', -1];
+			return [txSig, -1];
 		}
 
 		logger.info(
@@ -572,11 +572,12 @@ export class FillerBot implements Bot {
 
 		const txStart = Date.now();
 		try {
-			const { txSig } = await this.clearingHouse.txSender.send(
+			const resp = await this.clearingHouse.txSender.send(
 				tx,
 				[],
 				this.clearingHouse.opts
 			);
+			txSig = resp.txSig;
 			const duration = Date.now() - txStart;
 			logger.info(`sent tx: ${txSig}, took: ${duration}ms`);
 			this.metrics?.recordRpcDuration(
@@ -648,7 +649,7 @@ export class FillerBot implements Bot {
 				this.metrics?.recordFillableOrdersSeen(-1, filteredNodes.length);
 				// fill the nodes
 				let filledNodeCount = 0;
-				while (filledNodeCount <= filteredNodes.length) {
+				while (filledNodeCount < filteredNodes.length) {
 					const resp = await promiseTimeout(
 						// this.tryFillNode(this.randomIndex(filteredNodes)),
 						this.tryBulkFillNodes(filteredNodes.slice(filledNodeCount)),
