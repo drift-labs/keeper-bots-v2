@@ -38,7 +38,7 @@ const dlobMutexError = new Error('dlobMutex timeout');
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 1000;
+	public readonly defaultIntervalMs: number = 3000;
 
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
@@ -641,7 +641,7 @@ export class FillerBot implements Bot {
 				this.metrics?.recordFillableOrdersSeen(-1, filteredNodes.length);
 				// fill the nodes
 				let filledNodeCount = 0;
-				while (filledNodeCount <= filteredNodes.length) {
+				while (filledNodeCount < filteredNodes.length) {
 					const resp = await promiseTimeout(
 						// this.tryFillNode(this.randomIndex(filteredNodes)),
 						this.tryBulkFillNodes(filteredNodes.slice(filledNodeCount)),
