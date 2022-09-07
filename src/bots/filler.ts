@@ -462,8 +462,11 @@ export class FillerBot implements Bot {
 
 	private async tryBulkFillNodes(
 		nodesToFill: Array<NodeToFill>
-	): Promise<TransactionSignature> {
+	): Promise<[TransactionSignature, number]> {
 		const tx = new Transaction();
+		const txSig = '';
+		let lastIdxFilled = 0;
+
 		/**
 		 * At all times, the running Tx size is:
 		 * - signatures (compact-u16 array, 64 bytes per elem)
@@ -508,7 +511,7 @@ export class FillerBot implements Bot {
 		const txPackerStart = Date.now();
 		const nodesSent: Array<NodeToFill> = [];
 		let idxUsed = 0;
-		for (const nodeToFill of nodesToFill) {
+		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			const { makerInfo, chUser, referrerInfo } = await this.getNodeFillInfo(
 				nodeToFill
 			);
@@ -551,12 +554,12 @@ export class FillerBot implements Bot {
 			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
 			idxUsed++;
 			nodesSent.push(nodeToFill);
+			lastIdxFilled = idx;
 		}
 		logger.debug(`txPacker took ${Date.now() - txPackerStart}ms`);
 
 		if (nodesSent.length === 0) {
-			logger.debug('no ix');
-			return '';
+			return ['', -1];
 		}
 
 		logger.info(
@@ -601,8 +604,6 @@ export class FillerBot implements Bot {
 				this.name,
 				nodesSent.length
 			);
-
-			return txSig;
 		} catch (e) {
 			logger.error(`failed to send packed tx:`);
 			console.error(e);
@@ -611,6 +612,7 @@ export class FillerBot implements Bot {
 				logger.error(`${log}`);
 			}
 		}
+		return [txSig, lastIdxFilled];
 	}
 
 	private async tryFill() {
@@ -645,14 +647,19 @@ export class FillerBot implements Bot {
 
 				this.metrics?.recordFillableOrdersSeen(-1, filteredNodes.length);
 				// fill the nodes
-				const fillResult = await promiseTimeout(
-					// this.tryFillNode(this.randomIndex(filteredNodes)),
-					this.tryBulkFillNodes(filteredNodes),
-					15000
-				);
+				let filledNodeCount = 0;
+				while (filledNodeCount <= filteredNodes.length) {
+					const resp = await promiseTimeout(
+						// this.tryFillNode(this.randomIndex(filteredNodes)),
+						this.tryBulkFillNodes(filteredNodes.slice(filledNodeCount)),
+						30000
+					);
 
-				if (fillResult === null) {
-					logger.error(`Timeout tryFill, took ${Date.now() - startTime}ms`);
+					if (resp === null) {
+						logger.error(`Timeout tryFill, took ${Date.now() - startTime}ms`);
+					} else {
+						filledNodeCount += resp[1] + 1;
+					}
 				}
 
 				ran = true;
