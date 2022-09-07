@@ -51,10 +51,10 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/sdk@0.2.0-master.24":
-  version "0.2.0-master.24"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.2.0-master.24.tgz#b8f7e73e3413c998d79a43c80d241908127b1b84"
-  integrity sha512-GUdYzcYnubrv77V2behWIrkxmpmJW8zv0HE3TtdWygiN+/LEcT1KX1n3kuB9MDHxToszhS0Mh60ns/eYePgLRw==
+"@drift-labs/sdk@0.2.0-master.25":
+  version "0.2.0-master.25"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.2.0-master.25.tgz#a81cc18b3ea4091b4ebaa596c62ba76f47d94819"
+  integrity sha512-EnJWEvpr4L60V51pPYUZ6+u3VZnzMJmoP8hWMkJFXOSYq+srFEnLQ//j6d0ZWQeJ5GlyQkoekTubQhk6b6XrLg==
   dependencies:
     "@project-serum/anchor" "0.24.2"
     "@pythnetwork/client" "2.5.3"
