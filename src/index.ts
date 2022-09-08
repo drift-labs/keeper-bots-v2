@@ -222,8 +222,8 @@ const runBot = async () => {
 	logger.info(
 		`ClearingHouse ProgramId: ${clearingHouse.program.programId.toBase58()}`
 	);
-	logger.info(`wallet pubkey: ${wallet.publicKey.toBase58()}`);
-	logger.info(`SOL balance: ${lamportsBalance / 10 ** 9}`);
+	logger.info(`Wallet pubkey: ${wallet.publicKey.toBase58()}`);
+	logger.info(` . SOL balance: ${lamportsBalance / 10 ** 9}`);
 	const tokenAccount = await Token.getAssociatedTokenAddress(
 		ASSOCIATED_TOKEN_PROGRAM_ID,
 		TOKEN_PROGRAM_ID,
@@ -231,7 +231,7 @@ const runBot = async () => {
 		wallet.publicKey
 	);
 	const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
-	logger.info(`USDC balance: ${usdcBalance.value.uiAmount}`);
+	logger.info(` . USDC balance: ${usdcBalance.value.uiAmount}`);
 
 	await clearingHouse.subscribe();
 	clearingHouse.eventEmitter.on('error', (e) => {
