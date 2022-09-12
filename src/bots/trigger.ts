@@ -33,6 +33,9 @@ export class TriggerBot implements Bot {
 	private userMap: UserMap;
 	private metrics: Metrics | undefined;
 
+	private watchdogTimerMutex = new Mutex();
+	private watchdogTimerLastPatTime = Date.now();
+
 	constructor(
 		name: string,
 		dryRun: boolean,
@@ -48,6 +51,7 @@ export class TriggerBot implements Bot {
 	}
 
 	public async init() {
+		logger.info(`${this.name} initing`);
 		// initialize userMap instance
 		this.userMap = new UserMap(
 			this.clearingHouse,
@@ -64,6 +68,15 @@ export class TriggerBot implements Bot {
 		this.intervalIds.push(intervalId);
 
 		logger.info(`${this.name} Bot started!`);
+	}
+
+	public async healthCheck(): Promise<boolean> {
+		let healthy = false;
+		await this.watchdogTimerMutex.runExclusive(async () => {
+			healthy =
+				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+		});
+		return healthy;
 	}
 
 	public async trigger(record: any): Promise<void> {
@@ -179,6 +192,9 @@ export class TriggerBot implements Bot {
 					this.name
 				);
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
 			}
 		}
 	}

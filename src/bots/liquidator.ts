@@ -11,6 +11,7 @@ import {
 	QUOTE_PRECISION,
 	UserPosition,
 } from '@drift-labs/sdk';
+import { Mutex } from 'async-mutex';
 
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
@@ -47,6 +48,9 @@ export class LiquidatorBot implements Bot {
 	 */
 	private SELL_OPEN_POSITIONS = true;
 
+	private watchdogTimerMutex = new Mutex();
+	private watchdogTimerLastPatTime = Date.now();
+
 	constructor(
 		name: string,
 		dryRun: boolean,
@@ -60,6 +64,7 @@ export class LiquidatorBot implements Bot {
 	}
 
 	public async init() {
+		logger.info(`${this.name} initing`);
 		// initialize userMap instance
 		this.userMap = new UserMap(
 			this.clearingHouse,
@@ -97,6 +102,15 @@ export class LiquidatorBot implements Bot {
 				100.0
 			}% per liquidation`
 		);
+	}
+
+	public async healthCheck(): Promise<boolean> {
+		let healthy = false;
+		await this.watchdogTimerMutex.runExclusive(async () => {
+			healthy =
+				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+		});
+		return healthy;
 	}
 
 	public async trigger(record: any): Promise<void> {
@@ -263,6 +277,10 @@ export class LiquidatorBot implements Bot {
 			await this.derisk();
 		} catch (e) {
 			console.error(e);
+		} finally {
+			await this.watchdogTimerMutex.runExclusive(async () => {
+				this.watchdogTimerLastPatTime = Date.now();
+			});
 		}
 	}
 }

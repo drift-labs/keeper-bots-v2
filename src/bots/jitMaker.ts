@@ -91,6 +91,9 @@ export class JitMakerBot implements Bot {
 
 	private agentState: State;
 
+	private watchdogTimerMutex = new Mutex();
+	private watchdogTimerLastPatTime = Date.now();
+
 	/**
 	 * Set true to enforce max position size
 	 */
@@ -122,6 +125,7 @@ export class JitMakerBot implements Bot {
 	}
 
 	public async init() {
+		logger.info(`${this.name} initing`);
 		const initPromises: Array<Promise<any>> = [];
 
 		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
@@ -164,6 +168,15 @@ export class JitMakerBot implements Bot {
 		this.intervalIds.push(intervalId);
 
 		logger.info(`${this.name} Bot started!`);
+	}
+
+	public async healthCheck(): Promise<boolean> {
+		let healthy = false;
+		await this.watchdogTimerMutex.runExclusive(async () => {
+			healthy =
+				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+		});
+		return healthy;
 	}
 
 	public async trigger(record: any): Promise<void> {
@@ -635,6 +648,9 @@ export class JitMakerBot implements Bot {
 					this.name
 				);
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
 			}
 		}
 	}

@@ -66,6 +66,9 @@ export class FloatingMakerBot implements Bot {
 	 */
 	private MAX_TRADE_SIZE_QUOTE = 1000;
 
+	private watchdogTimerMutex = new Mutex();
+	private watchdogTimerLastPatTime = Date.now();
+
 	constructor(
 		name: string,
 		dryRun: boolean,
@@ -81,6 +84,7 @@ export class FloatingMakerBot implements Bot {
 	}
 
 	public async init() {
+		logger.info(`${this.name} initing`);
 		this.agentState = {
 			marketPosition: new Map<number, UserPosition>(),
 			openOrders: new Map<number, Array<Order>>(),
@@ -104,6 +108,15 @@ export class FloatingMakerBot implements Bot {
 		this.intervalIds.push(intervalId);
 
 		logger.info(`${this.name} Bot started!`);
+	}
+
+	public async healthCheck(): Promise<boolean> {
+		let healthy = false;
+		await this.watchdogTimerMutex.runExclusive(async () => {
+			healthy =
+				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+		});
+		return healthy;
 	}
 
 	public async trigger(_record: any): Promise<void> {}
@@ -287,6 +300,10 @@ export class FloatingMakerBot implements Bot {
 					this.name
 				);
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
+
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
 			}
 		}
 	}

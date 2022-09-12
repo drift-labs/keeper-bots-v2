@@ -56,6 +56,9 @@ export class FillerBot implements Bot {
 
 	private periodicTaskMutex = new Mutex();
 
+	private watchdogTimerMutex = new Mutex();
+	private watchdogTimerLastPatTime = Date.now();
+
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private metrics: Metrics | undefined;
 	private throttledNodes = new Map<string, number>();
@@ -75,7 +78,7 @@ export class FillerBot implements Bot {
 	}
 
 	public async init() {
-		logger.warn('filler initing');
+		logger.info(`${this.name} initing`);
 
 		const initPromises: Array<Promise<any>> = [];
 
@@ -94,8 +97,6 @@ export class FillerBot implements Bot {
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		await Promise.all(initPromises);
-
-		logger.warn('init done');
 	}
 
 	public async reset() {}
@@ -106,6 +107,15 @@ export class FillerBot implements Bot {
 		this.intervalIds.push(intervalId);
 
 		logger.info(`${this.name} Bot started!`);
+	}
+
+	public async healthCheck(): Promise<boolean> {
+		let healthy = false;
+		await this.watchdogTimerMutex.runExclusive(async () => {
+			healthy =
+				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+		});
+		return healthy;
 	}
 
 	public async trigger(record: any) {
@@ -684,6 +694,10 @@ export class FillerBot implements Bot {
 					this.name
 				);
 				logger.debug(`tryFill done, took ${duration}ms`);
+
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
 			}
 		}
 	}
