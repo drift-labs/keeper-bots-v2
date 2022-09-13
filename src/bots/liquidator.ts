@@ -9,6 +9,7 @@ import {
 	BASE_PRECISION,
 	MARK_PRICE_PRECISION,
 	QUOTE_PRECISION,
+	NewUserRecord,
 	UserPosition,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
@@ -116,6 +117,8 @@ export class LiquidatorBot implements Bot {
 	public async trigger(record: any): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
 			await this.userMap.updateWithOrderRecord(record as OrderRecord);
+		} else if (record.eventType === 'NewUserRecord') {
+			await this.userMap.mustGet((record as NewUserRecord).user.toString());
 		} else if (record.eventType === 'LiquidationRecord') {
 			this.metrics?.recordLiquidationEvent(
 				record as LiquidationRecord,

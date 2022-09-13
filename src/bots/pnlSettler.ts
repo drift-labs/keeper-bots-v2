@@ -8,6 +8,8 @@ import {
 	OraclePriceData,
 	calculateUnsettledPnl,
 	QUOTE_PRECISION,
+	NewUserRecord,
+	OrderRecord,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -89,8 +91,12 @@ export class PnlSettlerBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(_record: any): Promise<void> {
-		return undefined;
+	public async trigger(record: any): Promise<void> {
+		if (record.eventType === 'OrderRecord') {
+			await this.userMap.updateWithOrderRecord(record as OrderRecord);
+		} else if (record.eventType === 'NewUserRecord') {
+			await this.userMap.mustGet((record as NewUserRecord).user.toString());
+		}
 	}
 
 	public viewDlob(): undefined {
