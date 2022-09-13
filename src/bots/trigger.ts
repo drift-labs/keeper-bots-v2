@@ -3,6 +3,7 @@ import {
 	MarketAccount,
 	OrderRecord,
 	SlotSubscriber,
+	NewUserRecord,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -83,6 +84,8 @@ export class TriggerBot implements Bot {
 		if (record.eventType === 'OrderRecord') {
 			await this.userMap.updateWithOrderRecord(record as OrderRecord);
 			this.tryTrigger();
+		} else if (record.eventType === 'NewUserRecord') {
+			await this.userMap.mustGet((record as NewUserRecord).user.toString());
 		}
 	}
 
