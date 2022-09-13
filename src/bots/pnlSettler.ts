@@ -9,6 +9,8 @@ import {
 	calculateUnsettledPnl,
 	QUOTE_PRECISION,
 } from '@drift-labs/sdk';
+import { Mutex } from 'async-mutex';
+
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { UserMap } from '../userMap';
@@ -36,6 +38,9 @@ export class PnlSettlerBot implements Bot {
 	private markets: MarketConfig[];
 	private metrics: Metrics | undefined;
 
+	private watchdogTimerMutex = new Mutex();
+	private watchdogTimerLastPatTime = Date.now();
+
 	constructor(
 		name: string,
 		dryRun: boolean,
@@ -51,6 +56,7 @@ export class PnlSettlerBot implements Bot {
 	}
 
 	public async init() {
+		logger.info(`${this.name} initing`);
 		// initialize userMap instance
 		this.userMap = new UserMap(
 			this.clearingHouse,
@@ -72,6 +78,15 @@ export class PnlSettlerBot implements Bot {
 		this.trySettlePnl();
 		const intervalId = setInterval(this.trySettlePnl.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
+	}
+
+	public async healthCheck(): Promise<boolean> {
+		let healthy = false;
+		await this.watchdogTimerMutex.runExclusive(async () => {
+			healthy =
+				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+		});
+		return healthy;
 	}
 
 	public async trigger(_record: any): Promise<void> {
@@ -182,6 +197,9 @@ export class PnlSettlerBot implements Bot {
 			console.error(e);
 		} finally {
 			logger.info('Settle PNLs finished');
+			await this.watchdogTimerMutex.runExclusive(async () => {
+				this.watchdogTimerLastPatTime = Date.now();
+			});
 		}
 	}
 }

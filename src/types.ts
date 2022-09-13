@@ -35,4 +35,9 @@ export interface Bot {
 	 * Returns the bot's DLOB
 	 */
 	viewDlob: () => DLOB;
+
+	/**
+	 * Returns true if bot is healthy, else false. Typically used for monitoring liveness.
+	 */
+	healthCheck: () => Promise<boolean>;
 }

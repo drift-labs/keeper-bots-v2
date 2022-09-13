@@ -631,9 +631,6 @@ export class Metrics {
 
 	recordFillableOrdersSeen(marketIndex: number, fillableOrders: number) {
 		this.fillableOrdersSeenLock.runExclusive(async () => {
-			logger.info(
-				`record fillable order: mktIdx: ${marketIndex}, fillables: ${fillableOrders}`
-			);
 			this.fillableOrdersSeenByMarket.set(marketIndex, fillableOrders);
 		});
 	}

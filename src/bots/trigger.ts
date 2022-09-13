@@ -4,13 +4,16 @@ import {
 	OrderRecord,
 	SlotSubscriber,
 } from '@drift-labs/sdk';
+import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
 import { logger } from '../logger';
-import { DLOB } from '../dlob/DLOB';
+import { DLOB, NodeToTrigger } from '../dlob/DLOB';
 import { UserMap } from '../userMap';
 import { Bot } from '../types';
 import { getErrorCode } from '../error';
 import { Metrics } from '../metrics';
+
+const dlobMutexError = new Error('dlobMutex timeout');
 
 export class TriggerBot implements Bot {
 	public readonly name: string;
@@ -19,11 +22,19 @@ export class TriggerBot implements Bot {
 
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
+	private dlobMutex = withTimeout(
+		new Mutex(),
+		10 * this.defaultIntervalMs,
+		dlobMutexError
+	);
 	private dlob: DLOB;
-	private perMarketMutexTriggers = new Uint8Array(new SharedArrayBuffer(8));
+	private periodicTaskMutex = new Mutex();
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private metrics: Metrics | undefined;
+
+	private watchdogTimerMutex = new Mutex();
+	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
 		name: string,
@@ -40,10 +51,7 @@ export class TriggerBot implements Bot {
 	}
 
 	public async init() {
-		// initialize DLOB instance
-		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
-		await this.dlob.init(this.clearingHouse);
-
+		logger.info(`${this.name} initing`);
 		// initialize userMap instance
 		this.userMap = new UserMap(
 			this.clearingHouse,
@@ -52,14 +60,7 @@ export class TriggerBot implements Bot {
 		await this.userMap.fetchAllUsers();
 	}
 
-	public async reset() {
-		for (const intervalId of this.intervalIds) {
-			clearInterval(intervalId);
-		}
-		this.intervalIds = [];
-		delete this.dlob;
-		delete this.userMap;
-	}
+	public async reset() {}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		this.tryTrigger();
@@ -69,10 +70,18 @@ export class TriggerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
+	public async healthCheck(): Promise<boolean> {
+		let healthy = false;
+		await this.watchdogTimerMutex.runExclusive(async () => {
+			healthy =
+				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+		});
+		return healthy;
+	}
+
 	public async trigger(record: any): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
-			this.dlob.applyOrderRecord(record as OrderRecord);
-			await this.userMap.updateWithOrder(record as OrderRecord);
+			await this.userMap.updateWithOrderRecord(record as OrderRecord);
 			this.tryTrigger();
 		}
 	}
@@ -83,26 +92,19 @@ export class TriggerBot implements Bot {
 
 	private async tryTriggerForMarket(market: MarketAccount) {
 		const marketIndex = market.marketIndex;
-		if (
-			Atomics.compareExchange(
-				this.perMarketMutexTriggers,
-				marketIndex.toNumber(),
-				0,
-				1
-			) === 1
-		) {
-			return;
-		}
 
 		try {
 			const oraclePriceData =
 				this.clearingHouse.getOracleDataForMarket(marketIndex);
 
-			const nodesToTrigger = this.dlob.findNodesToTrigger(
-				marketIndex,
-				this.slotSubscriber.getSlot(),
-				oraclePriceData.price
-			);
+			let nodesToTrigger: Array<NodeToTrigger> = [];
+			this.dlobMutex.runExclusive(async () => {
+				nodesToTrigger = this.dlob.findNodesToTrigger(
+					marketIndex,
+					this.slotSubscriber.getSlot(),
+					oraclePriceData.price
+				);
+			});
 
 			for (const nodeToTrigger of nodesToTrigger) {
 				if (nodeToTrigger.node.haveTrigger) {
@@ -150,14 +152,50 @@ export class TriggerBot implements Bot {
 				`Unexpected error for market ${marketIndex.toString()} during triggers`
 			);
 			console.error(e);
-		} finally {
-			Atomics.store(this.perMarketMutexTriggers, marketIndex.toNumber(), 0);
 		}
 	}
 
-	private tryTrigger() {
-		for (const marketAccount of this.clearingHouse.getMarketAccounts()) {
-			this.tryTriggerForMarket(marketAccount);
+	private async tryTrigger() {
+		const start = Date.now();
+		let ran = false;
+		try {
+			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
+				await this.dlobMutex.runExclusive(async () => {
+					this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
+					await this.dlob.init(this.clearingHouse, this.userMap);
+				});
+
+				await Promise.all(
+					this.clearingHouse.getMarketAccounts().map((marketAccount) => {
+						this.tryTriggerForMarket(marketAccount);
+					})
+				);
+				ran = true;
+			});
+		} catch (e) {
+			if (e === E_ALREADY_LOCKED) {
+				this.metrics?.recordMutexBusy(this.name);
+			} else if (e === dlobMutexError) {
+				logger.error(`${this.name} dlobMutexError timeout`);
+			} else {
+				throw e;
+			}
+		} finally {
+			if (ran) {
+				const duration = Date.now() - start;
+				this.metrics?.recordRpcDuration(
+					this.clearingHouse.connection.rpcEndpoint,
+					'tryTrigger',
+					duration,
+					false,
+					this.name
+				);
+				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
+			}
 		}
 	}
 }

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import { program, Option } from 'commander';
+import * as http from 'http';
 
 import { Connection, Commitment, Keypair, PublicKey } from '@solana/web3.js';
 
@@ -24,13 +25,16 @@ import {
 	DevnetMarkets,
 	BASE_PRECISION,
 } from '@drift-labs/sdk';
+import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
+import { Mutex } from 'async-mutex';
 
-import { logger } from './logger';
+import { logger, setLogLevel } from './logger';
 import { constants } from './types';
 import { FillerBot } from './bots/filler';
 import { TriggerBot } from './bots/trigger';
 import { JitMakerBot } from './bots/jitMaker';
 import { LiquidatorBot } from './bots/liquidator';
+import { FloatingMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { Metrics } from './metrics';
 import { PnlSettlerBot } from './bots/pnlSettler';
@@ -41,6 +45,7 @@ const driftEnv = process.env.ENV as DriftEnv;
 const sdkConfig = initialize({ env: process.env.ENV });
 
 const stateCommitment: Commitment = 'confirmed';
+const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
 
 program
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
@@ -51,11 +56,12 @@ program
 	.option('--filler', 'Enable filler bot')
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
+	.option('--floating-maker', 'Enable floating maker bot')
 	.option('--liquidator', 'Enable liquidator bot')
 	.option('--pnl-settler', 'Enable PnL settler bot')
-	.option('--print-info', 'Periodically print market and position info')
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option('--close-open-positions', 'close all open positions')
+	.option('--test-liveness', 'Purposefully fail liveness test after 1 minute')
 	.option(
 		'--force-deposit <number>',
 		'Force deposit this amount of USDC to collateral account, the program will end after the deposit transaction is sent'
@@ -67,9 +73,11 @@ program
 			'private key, supports path to id.json, or list of comma separate numbers'
 		).env('KEEPER_PRIVATE_KEY')
 	)
+	.option('--debug', 'Enable debug logging')
 	.parse();
 
 const opts = program.opts();
+setLogLevel(opts.debug ? 'debug' : 'info');
 
 logger.info(
 	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JitMakerBot enabled: ${!!opts.jitMaker} PnlSettler enabled: ${!!opts.pnlSettler}`
@@ -213,13 +221,17 @@ const runBot = async () => {
 	);
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
+	const lastSlotReceivedMutex = new Mutex();
+	let lastSlotReceived: number;
+	let lastHealthCheckSlot = -1;
+	const startupTime = Date.now();
 
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	logger.info(
 		`ClearingHouse ProgramId: ${clearingHouse.program.programId.toBase58()}`
 	);
-	logger.info(`wallet pubkey: ${wallet.publicKey.toBase58()}`);
-	logger.info(`SOL balance: ${lamportsBalance / 10 ** 9}`);
+	logger.info(`Wallet pubkey: ${wallet.publicKey.toBase58()}`);
+	logger.info(` . SOL balance: ${lamportsBalance / 10 ** 9}`);
 	const tokenAccount = await Token.getAssociatedTokenAddress(
 		ASSOCIATED_TOKEN_PROGRAM_ID,
 		TOKEN_PROGRAM_ID,
@@ -227,7 +239,7 @@ const runBot = async () => {
 		wallet.publicKey
 	);
 	const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
-	logger.info(`USDC balance: ${usdcBalance.value.uiAmount}`);
+	logger.info(` . USDC balance: ${usdcBalance.value.uiAmount}`);
 
 	await clearingHouse.subscribe();
 	clearingHouse.eventEmitter.on('error', (e) => {
@@ -237,6 +249,12 @@ const runBot = async () => {
 
 	eventSubscriber.subscribe();
 	await slotSubscriber.subscribe();
+
+	slotSubscriber.eventEmitter.on('newSlot', async (slot: number) => {
+		await lastSlotReceivedMutex.runExclusive(async () => {
+			lastSlotReceived = slot;
+		});
+	});
 
 	if (!(await clearingHouse.getUser().exists())) {
 		logger.error(`ClearingHouseUser for ${wallet.publicKey} does not exist`);
@@ -293,7 +311,7 @@ const runBot = async () => {
 
 	// check that user has collateral
 	const freeCollateral = clearingHouseUser.getFreeCollateral();
-	if (freeCollateral.isZero() && opts.jitMaker) {
+	if (freeCollateral.isZero() && opts.jitMaker && !opts.forceDeposit) {
 		throw new Error(
 			`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
 		);
@@ -389,6 +407,18 @@ const runBot = async () => {
 			new LiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
 		);
 	}
+	if (opts.floatingMaker) {
+		bots.push(
+			new FloatingMakerBot(
+				'floatingMaker',
+				!!opts.dry,
+				clearingHouse,
+				slotSubscriber,
+				metrics
+			)
+		);
+	}
+
 	if (opts.pnlSettler) {
 		bots.push(
 			new PnlSettlerBot(
@@ -414,38 +444,55 @@ const runBot = async () => {
 		Promise.all(bots.map((bot) => bot.trigger(event)));
 	});
 
-	if (opts.printInfo) {
-		setInterval(() => {
-			for (const m of DevnetMarkets) {
-				if (bots.length === 0) {
-					break;
+	// start http server listening to /health endpoint using http package
+	http
+		.createServer(async (req, res) => {
+			if (req.url === '/health') {
+				if (opts.testLiveness) {
+					if (Date.now() > startupTime + 60 * 1000) {
+						res.writeHead(500);
+						res.end('Testing liveness test fail');
+						return;
+					}
 				}
-				const dlob = bots[0].viewDlob();
-				if (dlob) {
-					metrics.trackObjectSize('dlob', dlob);
-					dlob.printTopOfOrderLists(
-						sdkConfig,
-						clearingHouse,
-						slotSubscriber,
-						m.marketIndex
+				// check if a slot was received recently
+				let healthySlot = false;
+				await lastSlotReceivedMutex.runExclusive(async () => {
+					healthySlot = lastSlotReceived > lastHealthCheckSlot;
+					logger.info(
+						`Health check: lastSlotReceived: ${lastSlotReceived}, lastHealthCheckSlot: ${lastHealthCheckSlot}, healthySlot: ${healthySlot}`
 					);
+					if (healthySlot) {
+						lastHealthCheckSlot = lastSlotReceived;
+					}
+				});
+				if (!healthySlot) {
+					res.writeHead(500);
+					res.end(`SlotSubscriber is not healthy`);
+					return;
 				}
-			}
-			printUserAccountStats(clearingHouseUser);
-			printOpenPositions(clearingHouseUser);
-		}, 60000);
-	}
 
-	// reset the bots every 15 minutes, it looks like it holds onto stale DLOB orders :shrug:
-	// setInterval(async () => {
-	// 	for await (const bot of bots) {
-	// 		await bot.reset();
-	// 		await bot.init();
-	// 	}
-	// 	for (const bot of bots) {
-	// 		await bot.startIntervalLoop(bot.defaultIntervalMs);
-	// 	}
-	// }, 5 * 60 * 1000);
+				// check all bots if they're live
+				for (const bot of bots) {
+					const healthCheck = await promiseTimeout(bot.healthCheck(), 1000);
+					if (!healthCheck) {
+						logger.error(`Health check failed for bot ${bot.name}`);
+						res.writeHead(500);
+						res.end(`Bot ${bot.name} is not healthy`);
+						return;
+					}
+				}
+
+				// liveness check passed
+				res.writeHead(200);
+				res.end('OK');
+			} else {
+				res.writeHead(404);
+				res.end('Not found');
+			}
+		})
+		.listen(healthCheckPort);
+	logger.info(`Health check server listening on port ${healthCheckPort}`);
 };
 
 async function recursiveTryCatch(f: () => void) {

@@ -32,6 +32,7 @@ import { UserStatsMap } from '../userStatsMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
+const MAX_TX_PACK_SIZE = 900; //1232;
 const FILL_ORDER_BACKOFF = 0; //5000;
 const dlobMutexError = new Error('dlobMutex timeout');
 
@@ -55,6 +56,9 @@ export class FillerBot implements Bot {
 
 	private periodicTaskMutex = new Mutex();
 
+	private watchdogTimerMutex = new Mutex();
+	private watchdogTimerLastPatTime = Date.now();
+
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private metrics: Metrics | undefined;
 	private throttledNodes = new Map<string, number>();
@@ -74,7 +78,7 @@ export class FillerBot implements Bot {
 	}
 
 	public async init() {
-		logger.warn('filler initing');
+		logger.info(`${this.name} initing`);
 
 		const initPromises: Array<Promise<any>> = [];
 
@@ -93,8 +97,6 @@ export class FillerBot implements Bot {
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		await Promise.all(initPromises);
-
-		logger.warn('init done');
 	}
 
 	public async reset() {}
@@ -107,10 +109,19 @@ export class FillerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
+	public async healthCheck(): Promise<boolean> {
+		let healthy = false;
+		await this.watchdogTimerMutex.runExclusive(async () => {
+			healthy =
+				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+		});
+		return healthy;
+	}
+
 	public async trigger(record: any) {
 		if (record.eventType === 'OrderRecord') {
-			await this.userMap.updateWithOrder(record as OrderRecord);
-			await this.userStatsMap.updateWithOrder(
+			await this.userMap.updateWithOrderRecord(record as OrderRecord);
+			await this.userStatsMap.updateWithOrderRecord(
 				record as OrderRecord,
 				this.userMap
 			);
@@ -301,17 +312,17 @@ export class FillerBot implements Bot {
 			const errorMessage = getErrorMessage(error as SendTransactionError);
 
 			if (errorMessage === 'OrderDoesNotExist') {
-				await this.dlobMutex.runExclusive(async () => {
-					this.dlob.remove(
-						nodeToFill.node.order,
-						nodeToFill.node.userAccount,
-						() => {
-							logger.error(
-								`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-							);
-						}
-					);
-				});
+				// await this.dlobMutex.runExclusive(async () => {
+				// 	this.dlob.remove(
+				// 		nodeToFill.node.order,
+				// 		nodeToFill.node.userAccount,
+				// 		() => {
+				// 			logger.error(
+				// 				`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
+				// 			);
+				// 		}
+				// 	);
+				// });
 			}
 			logger.error(
 				`Error (${errorCode}) filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, mktIdx: ${marketIndex.toNumber()}`
@@ -417,17 +428,17 @@ export class FillerBot implements Bot {
 					logger.error(
 						`   assoc order: ${filledNode.node.userAccount.toString()}, ${filledNode.node.order.orderId.toNumber()}`
 					);
-					await this.dlobMutex.runExclusive(async () => {
-						this.dlob.remove(
-							filledNode.node.order,
-							filledNode.node.userAccount,
-							() => {
-								logger.error(
-									`Order ${filledNode.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-								);
-							}
-						);
-					});
+					// await this.dlobMutex.runExclusive(async () => {
+					// 	this.dlob.remove(
+					// 		filledNode.node.order,
+					// 		filledNode.node.userAccount,
+					// 		() => {
+					// 			logger.error(
+					// 				`Order ${filledNode.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
+					// 			);
+					// 		}
+					// 	);
+					// });
 				} else if (log.includes('Amm cant fulfill order')) {
 					const filledNode = nodesFilled[ixIdx];
 					logger.error(` ${log}, ix: ${ixIdx}`);
@@ -463,9 +474,7 @@ export class FillerBot implements Bot {
 		nodesToFill: Array<NodeToFill>
 	): Promise<[TransactionSignature, number]> {
 		const tx = new Transaction();
-		// const maxTxSize = 1232;
-		const maxTxSize = 1000;
-		const txSig = '';
+		let txSig = '';
 		let lastIdxFilled = 0;
 
 		/**
@@ -486,7 +495,7 @@ export class FillerBot implements Bot {
 
 		// first ix is compute budget
 		const computeBudgetIx = ComputeBudgetProgram.requestUnits({
-			units: 4_000_000,
+			units: 10_000_000,
 			additionalFee: 0,
 		});
 		computeBudgetIx.keys.forEach((key) =>
@@ -537,7 +546,10 @@ export class FillerBot implements Bot {
 					: 0;
 
 			// check it; appears we cannot send exactly maxTxSize.
-			if (runningTxSize + newIxCost + additionalAccountsCost >= maxTxSize) {
+			if (
+				runningTxSize + newIxCost + additionalAccountsCost >=
+				MAX_TX_PACK_SIZE
+			) {
 				break;
 			}
 
@@ -557,8 +569,7 @@ export class FillerBot implements Bot {
 		logger.debug(`txPacker took ${Date.now() - txPackerStart}ms`);
 
 		if (nodesSent.length === 0) {
-			logger.debug('no ix');
-			return ['', -1];
+			return [txSig, -1];
 		}
 
 		logger.info(
@@ -571,11 +582,12 @@ export class FillerBot implements Bot {
 
 		const txStart = Date.now();
 		try {
-			const { txSig } = await this.clearingHouse.txSender.send(
+			const resp = await this.clearingHouse.txSender.send(
 				tx,
 				[],
 				this.clearingHouse.opts
 			);
+			txSig = resp.txSig;
 			const duration = Date.now() - txStart;
 			logger.info(`sent tx: ${txSig}, took: ${duration}ms`);
 			this.metrics?.recordRpcDuration(
@@ -634,9 +646,15 @@ export class FillerBot implements Bot {
 					);
 				}
 
-				const filteredNodes = fillableNodes.filter((node) =>
-					this.filterFillableNodes(node)
-				);
+				const seenNodes = new Set<string>();
+				const filteredNodes = fillableNodes.filter((node) => {
+					const sig = this.getNodeToFillSignature(node);
+					if (seenNodes.has(sig)) {
+						return false;
+					}
+					seenNodes.add(sig);
+					return this.filterFillableNodes(node);
+				});
 
 				this.metrics?.recordFillableOrdersSeen(-1, filteredNodes.length);
 				// fill the nodes
@@ -675,7 +693,11 @@ export class FillerBot implements Bot {
 					false,
 					this.name
 				);
-				logger.info(`tryFill done, took ${duration}ms`);
+				logger.debug(`tryFill done, took ${duration}ms`);
+
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
 			}
 		}
 	}

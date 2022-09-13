@@ -12,9 +12,9 @@ import {
 	QUOTE_PRECISION,
 	convertToNumber,
 	MARK_PRICE_PRECISION,
-	UserAccount,
 	UserPosition,
 } from '@drift-labs/sdk';
+import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
 import { TransactionSignature, PublicKey } from '@solana/web3.js';
 
@@ -26,6 +26,7 @@ import { UserMap } from '../userMap';
 import { UserStatsMap } from '../userStatsMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
+import { getOrderSignature } from '../dlob/NodeList';
 
 type Action = {
 	baseAssetAmount: BN;
@@ -56,8 +57,9 @@ enum StateType {
 type State = {
 	stateType: Map<number, StateType>;
 	marketPosition: Map<number, UserPosition>;
-	account: UserAccount;
 };
+
+const dlobMutexError = new Error('dlobMutex timeout');
 
 /**
  *
@@ -73,16 +75,24 @@ export class JitMakerBot implements Bot {
 
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
+	private dlobMutex = withTimeout(
+		new Mutex(),
+		10 * this.defaultIntervalMs,
+		dlobMutexError
+	);
 	private dlob: DLOB;
+	private periodicTaskMutex = new Mutex();
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
-
-	private perMarketMutexFills = new Uint8Array(new SharedArrayBuffer(8));
+	private orderLastSeenBaseAmount: Map<string, BN> = new Map(); // need some way to trim this down over time
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private metrics: Metrics | undefined;
 
 	private agentState: State;
+
+	private watchdogTimerMutex = new Mutex();
+	private watchdogTimerLastPatTime = Date.now();
 
 	/**
 	 * Set true to enforce max position size
@@ -115,6 +125,7 @@ export class JitMakerBot implements Bot {
 	}
 
 	public async init() {
+		logger.info(`${this.name} initing`);
 		const initPromises: Array<Promise<any>> = [];
 
 		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
@@ -135,7 +146,6 @@ export class JitMakerBot implements Bot {
 		this.agentState = {
 			stateType: new Map<number, StateType>(),
 			marketPosition: new Map<number, UserPosition>(),
-			account: undefined,
 		};
 		initPromises.push(this.updateAgentState());
 
@@ -160,11 +170,19 @@ export class JitMakerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
+	public async healthCheck(): Promise<boolean> {
+		let healthy = false;
+		await this.watchdogTimerMutex.runExclusive(async () => {
+			healthy =
+				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+		});
+		return healthy;
+	}
+
 	public async trigger(record: any): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
-			this.dlob.applyOrderRecord(record as OrderRecord);
-			await this.userMap.updateWithOrder(record as OrderRecord);
-			await this.userStatsMap.updateWithOrder(
+			await this.userMap.updateWithOrderRecord(record as OrderRecord);
+			await this.userStatsMap.updateWithOrderRecord(
 				record as OrderRecord,
 				this.userMap
 			);
@@ -237,8 +255,6 @@ export class JitMakerBot implements Bot {
 	 * @returns {Promise<void>}
 	 */
 	private async updateAgentState(): Promise<void> {
-		this.agentState.account = this.clearingHouse.getUserAccount()!;
-
 		for await (const p of this.clearingHouse.getUserAccount().positions) {
 			if (p.baseAssetAmount.isZero()) {
 				continue;
@@ -328,7 +344,18 @@ export class JitMakerBot implements Bot {
 			return false;
 		}
 
+		// jitter can't fill its own orders
 		if (node.userAccount.equals(userAccountPublicKey)) {
+			return false;
+		}
+
+		const orderSignature = getOrderSignature(
+			node.order.orderId,
+			node.userAccount
+		);
+		const lastBaseAmountFilledSeen =
+			this.orderLastSeenBaseAmount.get(orderSignature);
+		if (lastBaseAmountFilledSeen?.eq(node.order.baseAssetAmountFilled)) {
 			return false;
 		}
 
@@ -339,11 +366,11 @@ export class JitMakerBot implements Bot {
 	 *
 	 */
 	private determineJitAuctionBaseFillAmount(
-		orderBaseAmount: BN,
+		orderBaseAmountAvailable: BN,
 		orderPrice: BN
 	): BN {
 		const priceNumber = convertToNumber(orderPrice, MARK_PRICE_PRECISION);
-		const worstCaseQuoteSpend = orderBaseAmount
+		const worstCaseQuoteSpend = orderBaseAmountAvailable
 			.mul(orderPrice)
 			.div(BASE_PRECISION.mul(MARK_PRICE_PRECISION))
 			.mul(QUOTE_PRECISION);
@@ -364,15 +391,18 @@ export class JitMakerBot implements Bot {
 		let baseFillAmountBN = new BN(
 			baseFillAmountNumber * BASE_PRECISION.toNumber()
 		);
-		logger.info(
-			`jitMaker want fill base amount: ${baseFillAmountBN.toString()}`
-		);
-		if (baseFillAmountBN.gt(orderBaseAmount)) {
-			baseFillAmountBN = orderBaseAmount;
-			logger.info(
-				`jitMaker will fill base amount: ${baseFillAmountBN.toString()}`
-			);
+		if (baseFillAmountBN.gt(orderBaseAmountAvailable)) {
+			baseFillAmountBN = orderBaseAmountAvailable;
 		}
+		logger.info(
+			`jitMaker will fill base amount: ${convertToNumber(
+				baseFillAmountBN,
+				BASE_PRECISION
+			).toString()} of remaining order ${convertToNumber(
+				orderBaseAmountAvailable,
+				BASE_PRECISION
+			)}.`
+		);
 
 		return baseFillAmountBN;
 	}
@@ -398,12 +428,29 @@ export class JitMakerBot implements Bot {
 				continue;
 			}
 
-			nodeToFill.node.haveFilled = true;
+			logger.info(
+				`node slot: ${
+					nodeToFill.node.order.slot
+				}, cur slot: ${this.slotSubscriber.getSlot()}`
+			);
+			this.orderLastSeenBaseAmount.set(
+				getOrderSignature(
+					nodeToFill.node.order.orderId,
+					nodeToFill.node.userAccount
+				),
+				nodeToFill.node.order.baseAssetAmountFilled
+			);
 
 			logger.info(
 				`${
 					this.name
-				} quoting order for node: ${nodeToFill.node.userAccount.toBase58()} - ${nodeToFill.node.order.orderId.toString()}`
+				} quoting order for node: ${nodeToFill.node.userAccount.toBase58()} - ${nodeToFill.node.order.orderId.toString()}, orderBaseFilled: ${convertToNumber(
+					nodeToFill.node.order.baseAssetAmountFilled,
+					BASE_PRECISION
+				)}/${convertToNumber(
+					nodeToFill.node.order.baseAssetAmount,
+					BASE_PRECISION
+				)}`
 			);
 
 			// calculate jit maker order params
@@ -478,6 +525,7 @@ export class JitMakerBot implements Bot {
 					`Error (${errorCode}) filling JIT auction (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()})`
 				);
 
+				/* todo remove this, fix error handling
 				if (errorCode === 6042) {
 					this.dlob.remove(
 						nodeToFill.node.order,
@@ -489,6 +537,7 @@ export class JitMakerBot implements Bot {
 						}
 					);
 				}
+				*/
 
 				// console.error(error);
 			}
@@ -562,25 +611,47 @@ export class JitMakerBot implements Bot {
 	}
 
 	private async tryMake() {
-		await this.clearingHouse.fetchAccounts();
-		await this.clearingHouse.getUser().fetchAccounts();
+		const start = Date.now();
+		let ran = false;
+		try {
+			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
+				await this.dlobMutex.runExclusive(async () => {
+					this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
+					await this.dlob.init(this.clearingHouse, this.userMap);
+				});
 
-		for (const marketAccount of this.clearingHouse.getMarketAccounts()) {
-			const marketIndex = marketAccount.marketIndex;
-			if (
-				Atomics.compareExchange(
-					this.perMarketMutexFills,
-					marketIndex.toNumber(),
-					0,
-					1
-				) === 1
-			) {
-				continue;
+				await Promise.all(
+					this.clearingHouse.getMarketAccounts().map((marketAccount) => {
+						this.tryMakeJitAuctionForMarket(marketAccount);
+					})
+				);
+
+				ran = true;
+			});
+		} catch (e) {
+			if (e === E_ALREADY_LOCKED) {
+				this.metrics?.recordMutexBusy(this.name);
+			} else if (e === dlobMutexError) {
+				logger.error(`${this.name} dlobMutexError timeout`);
+			} else {
+				throw e;
 			}
-
-			this.tryMakeJitAuctionForMarket(marketAccount);
-
-			Atomics.store(this.perMarketMutexFills, marketIndex.toNumber(), 0);
+		} finally {
+			if (ran) {
+				const duration = Date.now() - start;
+				this.metrics?.recordRpcDuration(
+					this.clearingHouse.connection.rpcEndpoint,
+					'tryMake',
+					duration,
+					false,
+					this.name
+				);
+				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
+			}
 		}
 	}
 }

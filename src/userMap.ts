@@ -90,20 +90,8 @@ export class UserMap {
 		return user;
 	}
 
-	public async updateWithOrder(record: OrderRecord) {
-		if (
-			!record.taker.equals(PublicKey.default) &&
-			!this.has(record.taker.toString())
-		) {
-			await this.addPubkey(record.taker);
-		}
-
-		if (
-			!record.maker.equals(PublicKey.default) &&
-			!this.has(record.maker.toString())
-		) {
-			await this.addPubkey(record.maker);
-		}
+	public async updateWithOrderRecord(record: OrderRecord) {
+		await this.addPubkey(record.user);
 	}
 
 	public values(): IterableIterator<ClearingHouseUser> {

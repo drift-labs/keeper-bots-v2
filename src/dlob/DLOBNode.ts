@@ -11,7 +11,7 @@ import {
 	ZERO,
 } from '@drift-labs/sdk';
 import { PublicKey } from '@solana/web3.js';
-import { getOrderId } from './NodeList';
+import { getOrderSignature } from './NodeList';
 
 export interface DLOBNode {
 	getPrice(oraclePriceData: OraclePriceData, slot: number): BN;
@@ -41,7 +41,10 @@ export abstract class OrderNode implements DLOBNode {
 	abstract getSortValue(order: Order): BN;
 
 	public getLabel(): string {
-		let msg = `Order ${getOrderId(this.order, this.userAccount)}`;
+		let msg = `Order ${getOrderSignature(
+			this.order.orderId,
+			this.userAccount
+		)}`;
 		msg += ` ${isVariant(this.order.direction, 'long') ? 'LONG' : 'SHORT'} `;
 		msg += `${convertToNumber(
 			this.order.baseAssetAmount,
