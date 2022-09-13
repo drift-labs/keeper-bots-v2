@@ -249,7 +249,6 @@ const runBot = async () => {
 
 	eventSubscriber.subscribe();
 	await slotSubscriber.subscribe();
-
 	slotSubscriber.eventEmitter.on('newSlot', async (slot: number) => {
 		await lastSlotReceivedMutex.runExclusive(async () => {
 			lastSlotReceived = slot;
@@ -459,7 +458,7 @@ const runBot = async () => {
 				let healthySlot = false;
 				await lastSlotReceivedMutex.runExclusive(async () => {
 					healthySlot = lastSlotReceived > lastHealthCheckSlot;
-					logger.info(
+					logger.debug(
 						`Health check: lastSlotReceived: ${lastSlotReceived}, lastHealthCheckSlot: ${lastHealthCheckSlot}, healthySlot: ${healthySlot}`
 					);
 					if (healthySlot) {
