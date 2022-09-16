@@ -2,7 +2,7 @@ import {
 	BN,
 	isVariant,
 	ClearingHouse,
-	MarketAccount,
+	PerpMarketAccount,
 	SlotSubscriber,
 	PositionDirection,
 	OrderType,
@@ -12,7 +12,13 @@ import {
 	QUOTE_PRECISION,
 	convertToNumber,
 	MARK_PRICE_PRECISION,
-	UserPosition,
+	PerpPosition,
+	SpotPosition,
+	DLOB,
+	DLOBNode,
+	UserMap,
+	UserStatsMap,
+	getOrderSignature,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -20,13 +26,8 @@ import { TransactionSignature, PublicKey } from '@solana/web3.js';
 
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
-import { DLOB } from '../dlob/DLOB';
-import { DLOBNode } from '../dlob/DLOBNode';
-import { UserMap } from '../userMap';
-import { UserStatsMap } from '../userStatsMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
-import { getOrderSignature } from '../dlob/NodeList';
 
 type Action = {
 	baseAssetAmount: BN;
@@ -56,7 +57,8 @@ enum StateType {
 
 type State = {
 	stateType: Map<number, StateType>;
-	marketPosition: Map<number, UserPosition>;
+	spotMarketPosition: Map<number, SpotPosition>;
+	perpMarketPosition: Map<number, PerpPosition>;
 };
 
 const dlobMutexError = new Error('dlobMutex timeout');
@@ -128,7 +130,11 @@ export class JitMakerBot implements Bot {
 		logger.info(`${this.name} initing`);
 		const initPromises: Array<Promise<any>> = [];
 
-		this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+		this.dlob = new DLOB(
+			this.clearingHouse.getPerpMarketAccounts(),
+			this.clearingHouse.getSpotMarketAccounts(),
+			true
+		);
 		initPromises.push(this.dlob.init(this.clearingHouse));
 
 		this.userMap = new UserMap(
@@ -145,7 +151,8 @@ export class JitMakerBot implements Bot {
 
 		this.agentState = {
 			stateType: new Map<number, StateType>(),
-			marketPosition: new Map<number, UserPosition>(),
+			spotMarketPosition: new Map<number, SpotPosition>(),
+			perpMarketPosition: new Map<number, PerpPosition>(),
 		};
 		initPromises.push(this.updateAgentState());
 
@@ -255,13 +262,14 @@ export class JitMakerBot implements Bot {
 	 * @returns {Promise<void>}
 	 */
 	private async updateAgentState(): Promise<void> {
-		for await (const p of this.clearingHouse.getUserAccount().positions) {
+		// TODO: SPOT
+		for await (const p of this.clearingHouse.getUserAccount().perpPositions) {
 			if (p.baseAssetAmount.isZero()) {
 				continue;
 			}
 
 			// update current position based on market position
-			this.agentState.marketPosition.set(p.marketIndex.toNumber(), p);
+			this.agentState.perpMarketPosition.set(p.marketIndex.toNumber(), p);
 
 			// update state
 			let currentState = this.agentState.stateType.get(
@@ -411,11 +419,12 @@ export class JitMakerBot implements Bot {
 	 * Draws an action based on the current state of the bot.
 	 *
 	 */
-	private async drawAndExecuteAction(market: MarketAccount) {
+	private async drawAndExecuteAction(market: PerpMarketAccount) {
 		// get nodes available to fill in the jit auction
 		const nodesToFill = this.dlob.findJitAuctionNodesToFill(
 			market.marketIndex,
-			this.slotSubscriber.getSlot()
+			this.slotSubscriber.getSlot(),
+			MarketType.PERP
 		);
 
 		for (const nodeToFill of nodesToFill) {
@@ -605,7 +614,7 @@ export class JitMakerBot implements Bot {
 		);
 	}
 
-	private async tryMakeJitAuctionForMarket(market: MarketAccount) {
+	private async tryMakeJitAuctionForMarket(market: PerpMarketAccount) {
 		await this.updateAgentState();
 		await this.drawAndExecuteAction(market);
 	}
@@ -616,13 +625,18 @@ export class JitMakerBot implements Bot {
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
-					this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+					this.dlob = new DLOB(
+						this.clearingHouse.getPerpMarketAccounts(),
+						this.clearingHouse.getSpotMarketAccounts(),
+						true
+					);
 					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
 					await this.dlob.init(this.clearingHouse, this.userMap);
 				});
 
 				await Promise.all(
-					this.clearingHouse.getMarketAccounts().map((marketAccount) => {
+					// TODO: spot
+					this.clearingHouse.getPerpMarketAccounts().map((marketAccount) => {
 						this.tryMakeJitAuctionForMarket(marketAccount);
 					})
 				);

@@ -23,14 +23,16 @@ import {
 	BASE_PRECISION,
 	QUOTE_PRECISION,
 	PublicKey,
-	DevnetMarkets,
-	UserPosition,
+	PerpMarkets,
+	PerpPosition,
 	LiquidationRecord,
 	isVariant,
 } from '@drift-labs/sdk';
 
 import { Mutex } from 'async-mutex';
 import sizeof from 'object-sizeof';
+
+const driftEnv = process.env.DRIFT_ENV || 'devnet';
 
 export class Metrics {
 	private exporter: PrometheusExporter;
@@ -45,7 +47,7 @@ export class Metrics {
 	private openOrdersGauge: ObservableGauge;
 
 	private openPositionsLock = new Mutex();
-	private openPositionPerMarket: Array<UserPosition> = [];
+	private openPositionPerMarket: Array<PerpPosition> = [];
 	private openPositionLastCumulativeFundingRateGauge: ObservableGauge;
 	private openPositionBaseAssetAmountGauge: ObservableGauge;
 	private openPositionQuoteAssetAmountGauge: ObservableGauge;
@@ -263,7 +265,7 @@ export class Metrics {
 							),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -272,7 +274,7 @@ export class Metrics {
 							convertToNumber(p.baseAssetAmount, BASE_PRECISION),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -281,7 +283,7 @@ export class Metrics {
 							convertToNumber(p.quoteAssetAmount, QUOTE_PRECISION),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -290,7 +292,7 @@ export class Metrics {
 							convertToNumber(p.quoteEntryAmount, QUOTE_PRECISION),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -299,7 +301,7 @@ export class Metrics {
 						// 	convertToNumber(p.unsettledPnl, QUOTE_PRECISION),
 						// 	{
 						// 		marketIndex: i,
-						// 		marketSymbol: DevnetMarkets[i].symbol,
+						// 		marketSymbol: PerpMarkets[driftEnv][i].symbol,
 						// 		userPubKey: this.authority.toBase58(),
 						// 	}
 						// );
@@ -308,7 +310,7 @@ export class Metrics {
 							p.openOrders.toNumber(),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -317,7 +319,7 @@ export class Metrics {
 							convertToNumber(p.openBids, BASE_PRECISION),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -326,7 +328,7 @@ export class Metrics {
 							convertToNumber(p.openAsks, BASE_PRECISION),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -602,21 +604,21 @@ export class Metrics {
 		} else if (isVariant(event.liquidationType, 'liquidateBorrow')) {
 			liquidationType = 'liquidateBorrow';
 			liquidatedAssetBankIndex =
-				event.liquidateBorrow.assetBankIndex.toNumber();
+				event.liquidateBorrow.assetMarketIndex.toNumber();
 			liquidatedLiabilityIndex =
-				event.liquidateBorrow.liabilityBankIndex.toNumber();
+				event.liquidateBorrow.liabilityMarketIndex.toNumber();
 		} else if (isVariant(event.liquidationType, 'liquidateBorrowForPerpPnl')) {
 			liquidationType = 'liquidateBorrowForPerpPnl';
 			liquidatedMarketIndex =
-				event.liquidateBorrowForPerpPnl.marketIndex.toNumber();
+				event.liquidateBorrowForPerpPnl.perpMarketIndex.toNumber();
 			liquidatedLiabilityIndex =
-				event.liquidateBorrowForPerpPnl.liabilityBankIndex.toNumber();
+				event.liquidateBorrowForPerpPnl.liabilityMarketIndex.toNumber();
 		} else if (isVariant(event.liquidationType, 'liquidatePerpPnlForDeposit')) {
 			liquidationType = 'liquidatePerpPnlForDeposit';
 			liquidatedMarketIndex =
-				event.liquidatePerpPnlForDeposit.marketIndex.toNumber();
+				event.liquidatePerpPnlForDeposit.perpMarketIndex.toNumber();
 			liquidatedAssetBankIndex =
-				event.liquidatePerpPnlForDeposit.assetBankIndex.toNumber();
+				event.liquidatePerpPnlForDeposit.assetMarketIndex.toNumber();
 		}
 
 		this.liquidationEventsCounter.add(1, {
@@ -681,14 +683,14 @@ export class Metrics {
 		});
 
 		this.openPositionsLock.runExclusive(async () => {
-			if (this.openPositionPerMarket.length != DevnetMarkets.length) {
-				this.openPositionPerMarket = Array<UserPosition>(
-					DevnetMarkets.length
+			if (this.openPositionPerMarket.length != PerpMarkets[driftEnv].length) {
+				this.openPositionPerMarket = Array<PerpPosition>(
+					PerpMarkets[driftEnv].length
 				).fill(undefined);
 			}
-			for (let i = 0; i < DevnetMarkets.length; i++) {
+			for (let i = 0; i < PerpMarkets[driftEnv].length; i++) {
 				let foundPositionInMarket = false;
-				chUser.getUserAccount().positions.forEach((p: UserPosition) => {
+				chUser.getUserAccount().perpPositions.forEach((p: PerpPosition) => {
 					if (!foundPositionInMarket && p.marketIndex.toNumber() === i) {
 						foundPositionInMarket = true;
 						this.openPositionPerMarket[p.marketIndex.toNumber()] = p;

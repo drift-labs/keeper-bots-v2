@@ -3,19 +3,19 @@ import {
 	ClearingHouse,
 	UserAccount,
 	PublicKey,
-	MarketConfig,
-	MarketAccount,
+	PerpMarketConfig,
+	PerpMarketAccount,
 	OraclePriceData,
 	calculateUnsettledPnl,
 	QUOTE_PRECISION,
 	NewUserRecord,
 	OrderRecord,
+	UserMap,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
-import { UserMap } from '../userMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
@@ -37,7 +37,7 @@ export class PnlSettlerBot implements Bot {
 	private clearingHouse: ClearingHouse;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
-	private markets: MarketConfig[];
+	private markets: PerpMarketConfig[];
 	private metrics: Metrics | undefined;
 
 	private watchdogTimerMutex = new Mutex();
@@ -47,7 +47,7 @@ export class PnlSettlerBot implements Bot {
 		name: string,
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
-		markets: MarketConfig[],
+		markets: PerpMarketConfig[],
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
@@ -107,14 +107,14 @@ export class PnlSettlerBot implements Bot {
 		try {
 			const marketAndOracleData: {
 				[marketIndex: number]: {
-					marketAccount: MarketAccount;
+					marketAccount: PerpMarketAccount;
 					oraclePriceData: OraclePriceData;
 				};
 			} = {};
 
 			this.markets.forEach((market) => {
 				marketAndOracleData[market.marketIndex.toNumber()] = {
-					marketAccount: this.clearingHouse.getMarketAccount(
+					marketAccount: this.clearingHouse.getPerpMarketAccount(
 						market.marketIndex
 					),
 					oraclePriceData: this.clearingHouse.getOracleDataForMarket(
@@ -128,7 +128,7 @@ export class PnlSettlerBot implements Bot {
 			for (const user of this.userMap.values()) {
 				const userAccount = user.getUserAccount();
 
-				for (const settleePosition of userAccount.positions) {
+				for (const settleePosition of userAccount.perpPositions) {
 					const marketIndexNum = settleePosition.marketIndex.toNumber();
 					const unsettledPnl = calculateUnsettledPnl(
 						marketAndOracleData[marketIndexNum].marketAccount,

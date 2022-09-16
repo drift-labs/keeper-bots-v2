@@ -4,7 +4,7 @@ import {
 	BN,
 	isVariant,
 	ClearingHouse,
-	MarketAccount,
+	PerpMarketAccount,
 	SlotSubscriber,
 	PositionDirection,
 	OrderType,
@@ -12,8 +12,8 @@ import {
 	convertToNumber,
 	MARK_PRICE_PRECISION,
 	Order,
-	UserPosition,
-	Markets,
+	PerpPosition,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -22,11 +22,12 @@ import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
 type State = {
-	marketPosition: Map<number, UserPosition>;
+	marketPosition: Map<number, PerpPosition>;
 	openOrders: Map<number, Array<Order>>;
 };
 
 const MARKET_UPDATE_COOLDOWN_SLOTS = 30; // wait slots before updating market position
+const driftEnv = process.env.DRIFT_ENV || 'devnet';
 
 /**
  *
@@ -35,7 +36,7 @@ const MARKET_UPDATE_COOLDOWN_SLOTS = 30; // wait slots before updating market po
  * oracle price, making order updating automatic.
  *
  */
-export class FloatingMakerBot implements Bot {
+export class FloatingPerpMakerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 5000;
@@ -86,7 +87,7 @@ export class FloatingMakerBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 		this.agentState = {
-			marketPosition: new Map<number, UserPosition>(),
+			marketPosition: new Map<number, PerpPosition>(),
 			openOrders: new Map<number, Array<Order>>(),
 		};
 		this.updateAgentState();
@@ -138,7 +139,7 @@ export class FloatingMakerBot implements Bot {
 	 * @returns {Promise<void>}
 	 */
 	private updateAgentState(): void {
-		this.clearingHouse.getUserAccount().positions.map((p) => {
+		this.clearingHouse.getUserAccount().perpPositions.map((p) => {
 			if (p.baseAssetAmount.isZero()) {
 				return;
 			}
@@ -146,7 +147,7 @@ export class FloatingMakerBot implements Bot {
 		});
 
 		// zeor out the open orders
-		for (const market of Markets['devnet']) {
+		for (const market of PerpMarkets[driftEnv]) {
 			this.agentState.openOrders.set(market.marketIndex.toNumber(), []);
 		}
 
@@ -162,7 +163,7 @@ export class FloatingMakerBot implements Bot {
 		});
 	}
 
-	private async updateOpenOrdersForMarket(marketAccount: MarketAccount) {
+	private async updateOpenOrdersForMarket(marketAccount: PerpMarketAccount) {
 		const currSlot = this.slotSubscriber.currentSlot;
 		const marketIndex = marketAccount.marketIndex;
 		const nextUpdateSlot =
@@ -273,7 +274,7 @@ export class FloatingMakerBot implements Bot {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				this.updateAgentState();
 				await Promise.all(
-					this.clearingHouse.getMarketAccounts().map((marketAccount) => {
+					this.clearingHouse.getPerpMarketAccounts().map((marketAccount) => {
 						console.log(
 							`${this.name} updating open orders for market ${marketAccount.marketIndex}`
 						);

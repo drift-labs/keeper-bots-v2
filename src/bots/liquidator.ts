@@ -10,13 +10,13 @@ import {
 	MARK_PRICE_PRECISION,
 	QUOTE_PRECISION,
 	NewUserRecord,
-	UserPosition,
+	PerpPosition,
+	UserMap,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
-import { UserMap } from '../userMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
@@ -27,7 +27,7 @@ import { Metrics } from '../metrics';
  *
  * The bot will immediately market sell any of its open positions if SELL_OPEN_POSITIONS is true.
  */
-export class LiquidatorBot implements Bot {
+export class PerpLiquidatorBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 10000;
@@ -167,7 +167,7 @@ export class LiquidatorBot implements Bot {
 
 			// close open orders
 			let closedPositions = 0;
-			for (const position of userAccount.positions) {
+			for (const position of userAccount.perpPositions) {
 				if (position.baseAssetAmount.isZero()) {
 					continue;
 				}
@@ -191,7 +191,7 @@ export class LiquidatorBot implements Bot {
 
 	private calculateBaseAmountToLiquidate(
 		liquidatorUser: ClearingHouseUser,
-		liquidateePosition: UserPosition
+		liquidateePosition: PerpPosition
 	): BN {
 		const oraclePrice = this.clearingHouse.getOracleDataForMarket(
 			liquidateePosition.marketIndex
@@ -225,14 +225,15 @@ export class LiquidatorBot implements Bot {
 			for (const user of this.userMap.values()) {
 				const auth = user.getUserAccount().authority.toBase58();
 				const userKey = user.userAccountPublicKey.toBase58();
-				const [canBeLiquidated, _marginRatio] = user.canBeLiquidated();
+				const canBeLiquidated = user.canBeLiquidated();
 
 				if (canBeLiquidated) {
 					logger.info(`liquidating ${auth}: ${userKey}...`);
 
 					const liquidatorUser = this.clearingHouse.getUser();
 
-					for (const liquidateePosition of user.getUserAccount().positions) {
+					for (const liquidateePosition of user.getUserAccount()
+						.perpPositions) {
 						if (liquidateePosition.baseAssetAmount.isZero()) {
 							continue;
 						}

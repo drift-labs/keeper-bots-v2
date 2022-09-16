@@ -1,4 +1,4 @@
-import { DLOB } from './dlob/DLOB';
+import { DLOB } from '@drift-labs/sdk';
 
 export const constants = {
 	devnet: {
