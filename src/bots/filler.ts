@@ -153,6 +153,10 @@ export class FillerBot implements Bot {
 			this.clearingHouse.getStateAccount().oracleGuardRails,
 			this.slotSubscriber.getSlot()
 		);
+		if (!oracleIsValid) {
+			console.error(`Oracle is not valid for market ${marketIndex}`);
+			return [];
+		}
 
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
@@ -165,7 +169,7 @@ export class FillerBot implements Bot {
 				vAsk,
 				this.slotSubscriber.getSlot(),
 				MarketType.PERP,
-				oracleIsValid ? oraclePriceData : undefined
+				oraclePriceData
 			);
 		});
 
@@ -176,6 +180,13 @@ export class FillerBot implements Bot {
 		market: SpotMarketAccount
 	): Promise<Array<NodeToFill>> {
 		let nodes: Array<NodeToFill> = [];
+
+		const oraclePriceData = this.clearingHouse.getOracleDataForSpotMarket(
+			market.marketIndex
+		);
+
+		// TODO: check oracle validity when ready
+
 		await this.dlobMutex.runExclusive(async () => {
 			nodes = this.dlob.findNodesToFill(
 				market.marketIndex,
@@ -183,7 +194,7 @@ export class FillerBot implements Bot {
 				undefined,
 				this.slotSubscriber.getSlot(),
 				MarketType.SPOT,
-				undefined
+				oraclePriceData
 			);
 		});
 
@@ -228,8 +239,7 @@ export class FillerBot implements Bot {
 				nodeToFill.node.order,
 				nodeToFill.node.market as PerpMarketAccount,
 				oraclePriceData,
-				this.slotSubscriber.getSlot(),
-				this.clearingHouse.getStateAccount().maxAuctionDuration
+				this.slotSubscriber.getSlot()
 			)
 		) {
 			return false;

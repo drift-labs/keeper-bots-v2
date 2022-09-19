@@ -19,6 +19,7 @@ import {
 	UserMap,
 	UserStatsMap,
 	getOrderSignature,
+	MarketType,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 

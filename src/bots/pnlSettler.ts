@@ -4,9 +4,11 @@ import {
 	UserAccount,
 	PublicKey,
 	PerpMarketConfig,
+	SpotMarketConfig,
 	PerpMarketAccount,
+	SpotMarketAccount,
 	OraclePriceData,
-	calculateUnsettledPnl,
+	calculateClaimablePnl,
 	QUOTE_PRECISION,
 	NewUserRecord,
 	OrderRecord,
@@ -37,7 +39,8 @@ export class PnlSettlerBot implements Bot {
 	private clearingHouse: ClearingHouse;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
-	private markets: PerpMarketConfig[];
+	private perpMarkets: PerpMarketConfig[];
+	private spotMarkets: SpotMarketConfig[];
 	private metrics: Metrics | undefined;
 
 	private watchdogTimerMutex = new Mutex();
@@ -47,13 +50,15 @@ export class PnlSettlerBot implements Bot {
 		name: string,
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
-		markets: PerpMarketConfig[],
+		perpMarkets: PerpMarketConfig[],
+		spotMarkets: SpotMarketConfig[],
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
-		this.markets = markets;
+		this.perpMarkets = perpMarkets;
+		this.spotMarkets = spotMarkets;
 		this.metrics = metrics;
 	}
 
@@ -105,19 +110,35 @@ export class PnlSettlerBot implements Bot {
 
 	private async trySettlePnl() {
 		try {
-			const marketAndOracleData: {
+			const perpMarketAndOracleData: {
 				[marketIndex: number]: {
 					marketAccount: PerpMarketAccount;
 					oraclePriceData: OraclePriceData;
 				};
 			} = {};
+			const spotMarketAndOracleData: {
+				[marketIndex: number]: {
+					marketAccount: SpotMarketAccount;
+					oraclePriceData: OraclePriceData;
+				};
+			} = {};
 
-			this.markets.forEach((market) => {
-				marketAndOracleData[market.marketIndex.toNumber()] = {
+			this.perpMarkets.forEach((market) => {
+				perpMarketAndOracleData[market.marketIndex.toNumber()] = {
 					marketAccount: this.clearingHouse.getPerpMarketAccount(
 						market.marketIndex
 					),
 					oraclePriceData: this.clearingHouse.getOracleDataForMarket(
+						market.marketIndex
+					),
+				};
+			});
+			this.spotMarkets.forEach((market) => {
+				spotMarketAndOracleData[market.marketIndex.toNumber()] = {
+					marketAccount: this.clearingHouse.getSpotMarketAccount(
+						market.marketIndex
+					),
+					oraclePriceData: this.clearingHouse.getOracleDataForSpotMarket(
 						market.marketIndex
 					),
 				};
@@ -130,10 +151,11 @@ export class PnlSettlerBot implements Bot {
 
 				for (const settleePosition of userAccount.perpPositions) {
 					const marketIndexNum = settleePosition.marketIndex.toNumber();
-					const unsettledPnl = calculateUnsettledPnl(
-						marketAndOracleData[marketIndexNum].marketAccount,
+					const unsettledPnl = calculateClaimablePnl(
+						perpMarketAndOracleData[marketIndexNum].marketAccount,
+						spotMarketAndOracleData[marketIndexNum].marketAccount,
 						settleePosition,
-						marketAndOracleData[marketIndexNum].oraclePriceData
+						perpMarketAndOracleData[marketIndexNum].oraclePriceData
 					);
 					// only settle for $10 or more negative pnl
 					if (unsettledPnl.lte(MIN_PNL_TO_SETTLE)) {
@@ -160,7 +182,7 @@ export class PnlSettlerBot implements Bot {
 			}
 
 			usersToSettle.forEach((params) => {
-				const marketStr = this.markets.find((mkt) =>
+				const marketStr = this.perpMarkets.find((mkt) =>
 					mkt.marketIndex.eq(params.marketIndex)
 				).symbol;
 

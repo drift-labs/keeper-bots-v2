@@ -466,6 +466,7 @@ const runBot = async () => {
 				!!opts.dry,
 				clearingHouse,
 				PerpMarkets[driftEnv],
+				SpotMarkets[driftEnv],
 				metrics
 			)
 		);
