@@ -104,7 +104,7 @@ export class TriggerBot implements Bot {
 				this.clearingHouse.getOracleDataForMarket(marketIndex);
 
 			let nodesToTrigger: Array<NodeToTrigger> = [];
-			this.dlobMutex.runExclusive(async () => {
+			await this.dlobMutex.runExclusive(async () => {
 				nodesToTrigger = this.dlob.findNodesToTrigger(
 					marketIndex,
 					this.slotSubscriber.getSlot(),
@@ -113,6 +113,7 @@ export class TriggerBot implements Bot {
 				);
 			});
 
+			console.log(`nodes to trig: ${nodesToTrigger.length}`);
 			for (const nodeToTrigger of nodesToTrigger) {
 				if (nodeToTrigger.node.haveTrigger) {
 					continue;
@@ -170,7 +171,7 @@ export class TriggerBot implements Bot {
 				this.clearingHouse.getOracleDataForMarket(marketIndex);
 
 			let nodesToTrigger: Array<NodeToTrigger> = [];
-			this.dlobMutex.runExclusive(async () => {
+			await this.dlobMutex.runExclusive(async () => {
 				nodesToTrigger = this.dlob.findNodesToTrigger(
 					marketIndex,
 					this.slotSubscriber.getSlot(),

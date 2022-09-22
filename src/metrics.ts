@@ -184,7 +184,7 @@ export class Metrics {
 		});
 		this.openOrdersGauge.addCallback(
 			async (observableResult: ObservableResult): Promise<void> => {
-				this.openOrdersLock.runExclusive(async () => {
+				await this.openOrdersLock.runExclusive(async () => {
 					observableResult.observe(this.openOrders, {
 						userPubKey: this.authority.toBase58(),
 					});
@@ -250,8 +250,8 @@ export class Metrics {
 			}
 		);
 		this.meter.addBatchObservableCallback(
-			(observableResult: BatchObservableResult): void => {
-				this.openPositionsLock.runExclusive(async () => {
+			async (observableResult: BatchObservableResult) => {
+				await this.openPositionsLock.runExclusive(async () => {
 					for (let i = 0; i < this.openPositionPerMarket.length; i++) {
 						const p = this.openPositionPerMarket[i];
 						if (!p) {
@@ -372,8 +372,8 @@ export class Metrics {
 			}
 		);
 		this.chUserUnrealizedPNLGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.chUserUnrealizedPNLLock.runExclusive(async () => {
+			async (observableResult: ObservableResult) => {
+				await this.chUserUnrealizedPNLLock.runExclusive(async () => {
 					observableResult.observe(this.chUserUnrealizedPNL, {
 						userPubKey: this.authority.toBase58(),
 					});
@@ -389,8 +389,8 @@ export class Metrics {
 			}
 		);
 		this.chUserUnrealizedFundingPNLGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.chUserUnrealizedFundingPNLLock.runExclusive(async () => {
+			async (observableResult: ObservableResult) => {
+				await this.chUserUnrealizedFundingPNLLock.runExclusive(async () => {
 					observableResult.observe(this.chUserUnrealizedFundingPNL, {
 						userPubKey: this.authority.toBase58(),
 					});
@@ -406,8 +406,8 @@ export class Metrics {
 			}
 		);
 		this.chUserInitialMarginRequirementGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.chUserInitialMarginRequirementLock.runExclusive(async () => {
+			async (observableResult: ObservableResult) => {
+				await this.chUserInitialMarginRequirementLock.runExclusive(async () => {
 					observableResult.observe(this.chUserInitialMarginRequirement, {
 						userPubKey: this.authority.toBase58(),
 					});
@@ -424,12 +424,14 @@ export class Metrics {
 				}
 			);
 		this.chUserMaintenanceMarginRequirementGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.chUserMaintenanceMarginRequirementLock.runExclusive(async () => {
-					observableResult.observe(this.chUserMaintenanceMarginRequirement, {
-						userPubKey: this.authority.toBase58(),
-					});
-				});
+			async (observableResult: ObservableResult) => {
+				await this.chUserMaintenanceMarginRequirementLock.runExclusive(
+					async () => {
+						observableResult.observe(this.chUserMaintenanceMarginRequirement, {
+							userPubKey: this.authority.toBase58(),
+						});
+					}
+				);
 			}
 		);
 
@@ -441,8 +443,8 @@ export class Metrics {
 			}
 		);
 		this.objectsToTrackSizeGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.objectsToTrackSizeLock.runExclusive(async () => {
+			async (observableResult: ObservableResult) => {
+				await this.objectsToTrackSizeLock.runExclusive(async () => {
 					// iterate over all tracked objects, name and obj
 					for (const [name, obj] of this.objectsToTrackSize) {
 						observableResult.observe(sizeof(obj), {
@@ -504,8 +506,8 @@ export class Metrics {
 			}
 		);
 		this.fillableOrdersSeentGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.fillableOrdersSeenLock.runExclusive(async () => {
+			async (observableResult: ObservableResult) => {
+				await this.fillableOrdersSeenLock.runExclusive(async () => {
 					for (const [marketIndex, fillableOrders] of this
 						.fillableOrdersSeenByMarket) {
 						observableResult.observe(fillableOrders, {
@@ -631,14 +633,14 @@ export class Metrics {
 		});
 	}
 
-	recordFillableOrdersSeen(marketIndex: number, fillableOrders: number) {
-		this.fillableOrdersSeenLock.runExclusive(async () => {
+	async recordFillableOrdersSeen(marketIndex: number, fillableOrders: number) {
+		await this.fillableOrdersSeenLock.runExclusive(async () => {
 			this.fillableOrdersSeenByMarket.set(marketIndex, fillableOrders);
 		});
 	}
 
-	trackObjectSize(name: string, object: any) {
-		this.objectsToTrackSizeLock.runExclusive(async () => {
+	async trackObjectSize(name: string, object: any) {
+		await this.objectsToTrackSizeLock.runExclusive(async () => {
 			this.objectsToTrackSize.set(name, object);
 		});
 	}
@@ -671,7 +673,7 @@ export class Metrics {
 		// 	this.solBalance = lamportsBal / 10 ** 9;
 		// });
 
-		this.openOrdersLock.runExclusive(async () => {
+		await this.openOrdersLock.runExclusive(async () => {
 			let openOrdersCount = 0;
 			for (let i = 0; i < chUser.getUserAccount().orders.length; i++) {
 				const o = chUser.getUserAccount().orders[i];
@@ -682,7 +684,7 @@ export class Metrics {
 			this.openOrders = openOrdersCount;
 		});
 
-		this.openPositionsLock.runExclusive(async () => {
+		await this.openPositionsLock.runExclusive(async () => {
 			if (this.openPositionPerMarket.length != PerpMarkets[driftEnv].length) {
 				this.openPositionPerMarket = Array<PerpPosition>(
 					PerpMarkets[driftEnv].length
@@ -703,14 +705,14 @@ export class Metrics {
 			}
 		});
 
-		this.chUserUnrealizedPNLLock.runExclusive(async () => {
+		await this.chUserUnrealizedPNLLock.runExclusive(async () => {
 			this.chUserUnrealizedPNL = convertToNumber(
 				chUser.getUnrealizedPNL(),
 				QUOTE_PRECISION
 			);
 		});
 
-		this.chUserUnrealizedFundingPNLLock.runExclusive(async () => {
+		await this.chUserUnrealizedFundingPNLLock.runExclusive(async () => {
 			this.chUserUnrealizedFundingPNL = convertToNumber(
 				chUser.getUnrealizedFundingPNL(),
 				QUOTE_PRECISION
@@ -722,13 +724,13 @@ export class Metrics {
 		// 		QUOTE_PRECISION
 		// 	);
 		// });
-		this.chUserInitialMarginRequirementLock.runExclusive(async () => {
+		await this.chUserInitialMarginRequirementLock.runExclusive(async () => {
 			this.chUserInitialMarginRequirement = convertToNumber(
 				chUser.getInitialMarginRequirement(),
 				QUOTE_PRECISION
 			);
 		});
-		this.chUserMaintenanceMarginRequirementLock.runExclusive(async () => {
+		await this.chUserMaintenanceMarginRequirementLock.runExclusive(async () => {
 			this.chUserMaintenanceMarginRequirement = convertToNumber(
 				chUser.getMaintenanceMarginRequirement(),
 				QUOTE_PRECISION
