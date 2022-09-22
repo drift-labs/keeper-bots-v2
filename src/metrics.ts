@@ -23,14 +23,16 @@ import {
 	BASE_PRECISION,
 	QUOTE_PRECISION,
 	PublicKey,
-	DevnetMarkets,
-	UserPosition,
+	PerpMarkets,
+	PerpPosition,
 	LiquidationRecord,
 	isVariant,
 } from '@drift-labs/sdk';
 
 import { Mutex } from 'async-mutex';
 import sizeof from 'object-sizeof';
+
+const driftEnv = process.env.DRIFT_ENV || 'devnet';
 
 export class Metrics {
 	private exporter: PrometheusExporter;
@@ -45,7 +47,7 @@ export class Metrics {
 	private openOrdersGauge: ObservableGauge;
 
 	private openPositionsLock = new Mutex();
-	private openPositionPerMarket: Array<UserPosition> = [];
+	private openPositionPerMarket: Array<PerpPosition> = [];
 	private openPositionLastCumulativeFundingRateGauge: ObservableGauge;
 	private openPositionBaseAssetAmountGauge: ObservableGauge;
 	private openPositionQuoteAssetAmountGauge: ObservableGauge;
@@ -182,7 +184,7 @@ export class Metrics {
 		});
 		this.openOrdersGauge.addCallback(
 			async (observableResult: ObservableResult): Promise<void> => {
-				this.openOrdersLock.runExclusive(async () => {
+				await this.openOrdersLock.runExclusive(async () => {
 					observableResult.observe(this.openOrders, {
 						userPubKey: this.authority.toBase58(),
 					});
@@ -248,8 +250,8 @@ export class Metrics {
 			}
 		);
 		this.meter.addBatchObservableCallback(
-			(observableResult: BatchObservableResult): void => {
-				this.openPositionsLock.runExclusive(async () => {
+			async (observableResult: BatchObservableResult) => {
+				await this.openPositionsLock.runExclusive(async () => {
 					for (let i = 0; i < this.openPositionPerMarket.length; i++) {
 						const p = this.openPositionPerMarket[i];
 						if (!p) {
@@ -263,7 +265,7 @@ export class Metrics {
 							),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -272,7 +274,7 @@ export class Metrics {
 							convertToNumber(p.baseAssetAmount, BASE_PRECISION),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -281,7 +283,7 @@ export class Metrics {
 							convertToNumber(p.quoteAssetAmount, QUOTE_PRECISION),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -290,7 +292,7 @@ export class Metrics {
 							convertToNumber(p.quoteEntryAmount, QUOTE_PRECISION),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -299,7 +301,7 @@ export class Metrics {
 						// 	convertToNumber(p.unsettledPnl, QUOTE_PRECISION),
 						// 	{
 						// 		marketIndex: i,
-						// 		marketSymbol: DevnetMarkets[i].symbol,
+						// 		marketSymbol: PerpMarkets[driftEnv][i].symbol,
 						// 		userPubKey: this.authority.toBase58(),
 						// 	}
 						// );
@@ -308,7 +310,7 @@ export class Metrics {
 							p.openOrders.toNumber(),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -317,7 +319,7 @@ export class Metrics {
 							convertToNumber(p.openBids, BASE_PRECISION),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -326,7 +328,7 @@ export class Metrics {
 							convertToNumber(p.openAsks, BASE_PRECISION),
 							{
 								marketIndex: i,
-								marketSymbol: DevnetMarkets[i].symbol,
+								marketSymbol: PerpMarkets[driftEnv][i].symbol,
 								userPubKey: this.authority.toBase58(),
 							}
 						);
@@ -370,8 +372,8 @@ export class Metrics {
 			}
 		);
 		this.chUserUnrealizedPNLGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.chUserUnrealizedPNLLock.runExclusive(async () => {
+			async (observableResult: ObservableResult) => {
+				await this.chUserUnrealizedPNLLock.runExclusive(async () => {
 					observableResult.observe(this.chUserUnrealizedPNL, {
 						userPubKey: this.authority.toBase58(),
 					});
@@ -387,8 +389,8 @@ export class Metrics {
 			}
 		);
 		this.chUserUnrealizedFundingPNLGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.chUserUnrealizedFundingPNLLock.runExclusive(async () => {
+			async (observableResult: ObservableResult) => {
+				await this.chUserUnrealizedFundingPNLLock.runExclusive(async () => {
 					observableResult.observe(this.chUserUnrealizedFundingPNL, {
 						userPubKey: this.authority.toBase58(),
 					});
@@ -404,8 +406,8 @@ export class Metrics {
 			}
 		);
 		this.chUserInitialMarginRequirementGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.chUserInitialMarginRequirementLock.runExclusive(async () => {
+			async (observableResult: ObservableResult) => {
+				await this.chUserInitialMarginRequirementLock.runExclusive(async () => {
 					observableResult.observe(this.chUserInitialMarginRequirement, {
 						userPubKey: this.authority.toBase58(),
 					});
@@ -422,12 +424,14 @@ export class Metrics {
 				}
 			);
 		this.chUserMaintenanceMarginRequirementGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.chUserMaintenanceMarginRequirementLock.runExclusive(async () => {
-					observableResult.observe(this.chUserMaintenanceMarginRequirement, {
-						userPubKey: this.authority.toBase58(),
-					});
-				});
+			async (observableResult: ObservableResult) => {
+				await this.chUserMaintenanceMarginRequirementLock.runExclusive(
+					async () => {
+						observableResult.observe(this.chUserMaintenanceMarginRequirement, {
+							userPubKey: this.authority.toBase58(),
+						});
+					}
+				);
 			}
 		);
 
@@ -439,8 +443,8 @@ export class Metrics {
 			}
 		);
 		this.objectsToTrackSizeGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.objectsToTrackSizeLock.runExclusive(async () => {
+			async (observableResult: ObservableResult) => {
+				await this.objectsToTrackSizeLock.runExclusive(async () => {
 					// iterate over all tracked objects, name and obj
 					for (const [name, obj] of this.objectsToTrackSize) {
 						observableResult.observe(sizeof(obj), {
@@ -502,8 +506,8 @@ export class Metrics {
 			}
 		);
 		this.fillableOrdersSeentGauge.addCallback(
-			(observableResult: ObservableResult): void => {
-				this.fillableOrdersSeenLock.runExclusive(async () => {
+			async (observableResult: ObservableResult) => {
+				await this.fillableOrdersSeenLock.runExclusive(async () => {
 					for (const [marketIndex, fillableOrders] of this
 						.fillableOrdersSeenByMarket) {
 						observableResult.observe(fillableOrders, {
@@ -602,21 +606,21 @@ export class Metrics {
 		} else if (isVariant(event.liquidationType, 'liquidateBorrow')) {
 			liquidationType = 'liquidateBorrow';
 			liquidatedAssetBankIndex =
-				event.liquidateBorrow.assetBankIndex.toNumber();
+				event.liquidateBorrow.assetMarketIndex.toNumber();
 			liquidatedLiabilityIndex =
-				event.liquidateBorrow.liabilityBankIndex.toNumber();
+				event.liquidateBorrow.liabilityMarketIndex.toNumber();
 		} else if (isVariant(event.liquidationType, 'liquidateBorrowForPerpPnl')) {
 			liquidationType = 'liquidateBorrowForPerpPnl';
 			liquidatedMarketIndex =
-				event.liquidateBorrowForPerpPnl.marketIndex.toNumber();
+				event.liquidateBorrowForPerpPnl.perpMarketIndex.toNumber();
 			liquidatedLiabilityIndex =
-				event.liquidateBorrowForPerpPnl.liabilityBankIndex.toNumber();
+				event.liquidateBorrowForPerpPnl.liabilityMarketIndex.toNumber();
 		} else if (isVariant(event.liquidationType, 'liquidatePerpPnlForDeposit')) {
 			liquidationType = 'liquidatePerpPnlForDeposit';
 			liquidatedMarketIndex =
-				event.liquidatePerpPnlForDeposit.marketIndex.toNumber();
+				event.liquidatePerpPnlForDeposit.perpMarketIndex.toNumber();
 			liquidatedAssetBankIndex =
-				event.liquidatePerpPnlForDeposit.assetBankIndex.toNumber();
+				event.liquidatePerpPnlForDeposit.assetMarketIndex.toNumber();
 		}
 
 		this.liquidationEventsCounter.add(1, {
@@ -629,14 +633,14 @@ export class Metrics {
 		});
 	}
 
-	recordFillableOrdersSeen(marketIndex: number, fillableOrders: number) {
-		this.fillableOrdersSeenLock.runExclusive(async () => {
+	async recordFillableOrdersSeen(marketIndex: number, fillableOrders: number) {
+		await this.fillableOrdersSeenLock.runExclusive(async () => {
 			this.fillableOrdersSeenByMarket.set(marketIndex, fillableOrders);
 		});
 	}
 
-	trackObjectSize(name: string, object: any) {
-		this.objectsToTrackSizeLock.runExclusive(async () => {
+	async trackObjectSize(name: string, object: any) {
+		await this.objectsToTrackSizeLock.runExclusive(async () => {
 			this.objectsToTrackSize.set(name, object);
 		});
 	}
@@ -669,7 +673,7 @@ export class Metrics {
 		// 	this.solBalance = lamportsBal / 10 ** 9;
 		// });
 
-		this.openOrdersLock.runExclusive(async () => {
+		await this.openOrdersLock.runExclusive(async () => {
 			let openOrdersCount = 0;
 			for (let i = 0; i < chUser.getUserAccount().orders.length; i++) {
 				const o = chUser.getUserAccount().orders[i];
@@ -680,15 +684,15 @@ export class Metrics {
 			this.openOrders = openOrdersCount;
 		});
 
-		this.openPositionsLock.runExclusive(async () => {
-			if (this.openPositionPerMarket.length != DevnetMarkets.length) {
-				this.openPositionPerMarket = Array<UserPosition>(
-					DevnetMarkets.length
+		await this.openPositionsLock.runExclusive(async () => {
+			if (this.openPositionPerMarket.length != PerpMarkets[driftEnv].length) {
+				this.openPositionPerMarket = Array<PerpPosition>(
+					PerpMarkets[driftEnv].length
 				).fill(undefined);
 			}
-			for (let i = 0; i < DevnetMarkets.length; i++) {
+			for (let i = 0; i < PerpMarkets[driftEnv].length; i++) {
 				let foundPositionInMarket = false;
-				chUser.getUserAccount().positions.forEach((p: UserPosition) => {
+				chUser.getUserAccount().perpPositions.forEach((p: PerpPosition) => {
 					if (!foundPositionInMarket && p.marketIndex.toNumber() === i) {
 						foundPositionInMarket = true;
 						this.openPositionPerMarket[p.marketIndex.toNumber()] = p;
@@ -701,14 +705,14 @@ export class Metrics {
 			}
 		});
 
-		this.chUserUnrealizedPNLLock.runExclusive(async () => {
+		await this.chUserUnrealizedPNLLock.runExclusive(async () => {
 			this.chUserUnrealizedPNL = convertToNumber(
 				chUser.getUnrealizedPNL(),
 				QUOTE_PRECISION
 			);
 		});
 
-		this.chUserUnrealizedFundingPNLLock.runExclusive(async () => {
+		await this.chUserUnrealizedFundingPNLLock.runExclusive(async () => {
 			this.chUserUnrealizedFundingPNL = convertToNumber(
 				chUser.getUnrealizedFundingPNL(),
 				QUOTE_PRECISION
@@ -720,13 +724,13 @@ export class Metrics {
 		// 		QUOTE_PRECISION
 		// 	);
 		// });
-		this.chUserInitialMarginRequirementLock.runExclusive(async () => {
+		await this.chUserInitialMarginRequirementLock.runExclusive(async () => {
 			this.chUserInitialMarginRequirement = convertToNumber(
 				chUser.getInitialMarginRequirement(),
 				QUOTE_PRECISION
 			);
 		});
-		this.chUserMaintenanceMarginRequirementLock.runExclusive(async () => {
+		await this.chUserMaintenanceMarginRequirementLock.runExclusive(async () => {
 			this.chUserMaintenanceMarginRequirement = convertToNumber(
 				chUser.getMaintenanceMarginRequirement(),
 				QUOTE_PRECISION

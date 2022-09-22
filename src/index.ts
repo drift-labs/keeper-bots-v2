@@ -10,6 +10,7 @@ import {
 	ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 import {
+	getVariant,
 	BulkAccountLoader,
 	ClearingHouse,
 	ClearingHouseUser,
@@ -20,9 +21,9 @@ import {
 	SlotSubscriber,
 	convertToNumber,
 	QUOTE_PRECISION,
-	DevnetBanks,
+	SpotMarkets,
+	PerpMarkets,
 	BN,
-	DevnetMarkets,
 	BASE_PRECISION,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
@@ -33,8 +34,8 @@ import { constants } from './types';
 import { FillerBot } from './bots/filler';
 import { TriggerBot } from './bots/trigger';
 import { JitMakerBot } from './bots/jitMaker';
-import { LiquidatorBot } from './bots/liquidator';
-import { FloatingMakerBot } from './bots/floatingMaker';
+import { PerpLiquidatorBot } from './bots/liquidator';
+import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { Metrics } from './metrics';
 import { PnlSettlerBot } from './bots/pnlSettler';
@@ -139,12 +140,12 @@ function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
 }
 
 function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
-	logger.info('Open Positions:');
-	for (const p of clearingHouseUser.getUserAccount().positions) {
+	logger.info('Open Perp Positions:');
+	for (const p of clearingHouseUser.getUserAccount().perpPositions) {
 		if (p.baseAssetAmount.isZero()) {
 			continue;
 		}
-		const market = DevnetMarkets[p.marketIndex.toNumber()];
+		const market = PerpMarkets[driftEnv][p.marketIndex.toNumber()];
 		console.log(`[${market.symbol}]`);
 		console.log(
 			` . baseAssetAmount:  ${convertToNumber(
@@ -172,7 +173,32 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 			)}`
 		);
 		console.log(
-			` . openOrders: ${p.openOrders.toString()}, openBids: ${p.openBids.toString()}, openAsks: ${p.openAsks.toString()}`
+			` . openOrders: ${p.openOrders.toString()}, openBids: ${convertToNumber(
+				p.openBids,
+				BASE_PRECISION
+			)}, openAsks: ${convertToNumber(p.openAsks, BASE_PRECISION)}`
+		);
+	}
+
+	logger.info('Open Spot Positions:');
+	for (const p of clearingHouseUser.getUserAccount().spotPositions) {
+		if (p.balance.isZero()) {
+			continue;
+		}
+		const market = PerpMarkets[driftEnv][p.marketIndex.toNumber()];
+		console.log(`[${market.symbol}]`);
+		console.log(
+			` . baseAssetAmount:  ${convertToNumber(
+				p.balance,
+				QUOTE_PRECISION
+			).toString()}`
+		);
+		console.log(` . balanceType: ${getVariant(p.balanceType)}`);
+		console.log(
+			` . openOrders: ${p.openOrders.toString()}, openBids: ${convertToNumber(
+				p.openBids,
+				BASE_PRECISION
+			)}, openAsks: ${convertToNumber(p.openAsks, BASE_PRECISION)}`
 		);
 	}
 }
@@ -297,15 +323,30 @@ const runBot = async () => {
 
 	printUserAccountStats(clearingHouseUser);
 	if (opts.closeOpenPositions) {
-		logger.info(`Closing open positions`);
-		for await (const p of clearingHouseUser.getUserAccount().positions) {
+		logger.info(`Closing open spot positions`);
+		let closedPerps = 0;
+		for await (const p of clearingHouseUser.getUserAccount().perpPositions) {
 			if (p.baseAssetAmount.isZero()) {
 				logger.info(`no position on market: ${p.marketIndex.toNumber()}`);
 				continue;
 			}
 			logger.info(`closing position on ${p.marketIndex.toNumber()}`);
 			logger.info(` . ${await clearingHouse.closePosition(p.marketIndex)}`);
+			closedPerps++;
 		}
+		console.log(`Closed ${closedPerps} perp positions`);
+
+		let closedSpots = 0;
+		for await (const p of clearingHouseUser.getUserAccount().spotPositions) {
+			if (p.balance.isZero()) {
+				logger.info(`no position on market: ${p.marketIndex.toNumber()}`);
+				continue;
+			}
+			logger.info(`closing position on ${p.marketIndex.toNumber()}`);
+			logger.info(` . ${await clearingHouse.closePosition(p.marketIndex)}`);
+			closedSpots++;
+		}
+		console.log(`Closed ${closedSpots} spot positions`);
 	}
 
 	// check that user has collateral
@@ -330,7 +371,7 @@ const runBot = async () => {
 		const ata = await Token.getAssociatedTokenAddress(
 			ASSOCIATED_TOKEN_PROGRAM_ID,
 			TOKEN_PROGRAM_ID,
-			DevnetBanks[0].mint, // USDC
+			SpotMarkets[driftEnv][0].mint, // TODO: are index 0 always USDC???, support other collaterals
 			wallet.publicKey
 		);
 
@@ -403,12 +444,12 @@ const runBot = async () => {
 	}
 	if (opts.liquidator) {
 		bots.push(
-			new LiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
+			new PerpLiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
 		);
 	}
 	if (opts.floatingMaker) {
 		bots.push(
-			new FloatingMakerBot(
+			new FloatingPerpMakerBot(
 				'floatingMaker',
 				!!opts.dry,
 				clearingHouse,
@@ -424,8 +465,8 @@ const runBot = async () => {
 				'pnlSettler',
 				!!opts.dry,
 				clearingHouse,
-				// update to current env markets before deploy to mainnet
-				DevnetMarkets,
+				PerpMarkets[driftEnv],
+				SpotMarkets[driftEnv],
 				metrics
 			)
 		);

@@ -5,12 +5,19 @@ import {
 	ReferrerInfo,
 	isOracleValid,
 	ClearingHouse,
-	MarketAccount,
+	PerpMarketAccount,
+	SpotMarketAccount,
 	SlotSubscriber,
 	calculateAskPrice,
 	calculateBidPrice,
 	MakerInfo,
 	isFillableByVAMM,
+	isOneOfVariant,
+	DLOB,
+	NodeToFill,
+	UserMap,
+	UserStatsMap,
+	MarketType,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -24,11 +31,7 @@ import {
 	ComputeBudgetProgram,
 } from '@solana/web3.js';
 
-import { getErrorCode, getErrorMessage } from '../error';
 import { logger } from '../logger';
-import { DLOB, NodeToFill } from '../dlob/DLOB';
-import { UserMap } from '../userMap';
-import { UserStatsMap } from '../userStatsMap';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
@@ -138,8 +141,8 @@ export class FillerBot implements Bot {
 		return this.dlob;
 	}
 
-	private async getFillableNodesForMarket(
-		market: MarketAccount
+	private async getPerpFillableNodesForMarket(
+		market: PerpMarketAccount
 	): Promise<Array<NodeToFill>> {
 		const marketIndex = market.marketIndex;
 		const oraclePriceData =
@@ -150,6 +153,10 @@ export class FillerBot implements Bot {
 			this.clearingHouse.getStateAccount().oracleGuardRails,
 			this.slotSubscriber.getSlot()
 		);
+		if (!oracleIsValid) {
+			console.error(`Oracle is not valid for market ${marketIndex}`);
+			return [];
+		}
 
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
@@ -161,7 +168,33 @@ export class FillerBot implements Bot {
 				vBid,
 				vAsk,
 				this.slotSubscriber.getSlot(),
-				oracleIsValid ? oraclePriceData : undefined
+				MarketType.PERP,
+				oraclePriceData
+			);
+		});
+
+		return nodes;
+	}
+
+	private async getSpotFillableNodesForMarket(
+		market: SpotMarketAccount
+	): Promise<Array<NodeToFill>> {
+		let nodes: Array<NodeToFill> = [];
+
+		const oraclePriceData = this.clearingHouse.getOracleDataForSpotMarket(
+			market.marketIndex
+		);
+
+		// TODO: check oracle validity when ready
+
+		await this.dlobMutex.runExclusive(async () => {
+			nodes = this.dlob.findNodesToFill(
+				market.marketIndex,
+				undefined,
+				undefined,
+				this.slotSubscriber.getSlot(),
+				MarketType.SPOT,
+				oraclePriceData
 			);
 		});
 
@@ -201,12 +234,12 @@ export class FillerBot implements Bot {
 
 		if (
 			!nodeToFill.makerNode &&
+			isOneOfVariant(nodeToFill.node.order.marketType, ['perp']) &&
 			!isFillableByVAMM(
 				nodeToFill.node.order,
-				nodeToFill.node.market,
+				nodeToFill.node.market as PerpMarketAccount,
 				oraclePriceData,
-				this.slotSubscriber.getSlot(),
-				this.clearingHouse.getStateAccount().maxAuctionDuration
+				this.slotSubscriber.getSlot()
 			)
 		) {
 			return false;
@@ -248,97 +281,6 @@ export class FillerBot implements Bot {
 			chUser,
 			referrerInfo,
 		});
-	}
-
-	private async tryFillNode(
-		nodeToFill: NodeToFill
-	): Promise<TransactionSignature> {
-		if (!nodeToFill) {
-			logger.error(`${this.name} nodeToFill is null`);
-			return;
-		}
-
-		const marketIndex = nodeToFill.node.market.marketIndex;
-
-		logger.info(
-			`${
-				this.name
-			} trying to fill (account: ${nodeToFill.node.userAccount.toString()}) order ${nodeToFill.node.order.orderId.toString()} on mktIdx: ${marketIndex.toString()}`
-		);
-
-		const { makerInfo, chUser, referrerInfo } = await this.getNodeFillInfo(
-			nodeToFill
-		);
-
-		if (this.dryRun) {
-			logger.info(`${this.name} dry run, not filling`);
-			return;
-		}
-
-		let txSig: null | TransactionSignature;
-		const reqStart = Date.now();
-		try {
-			this.metrics?.recordRpcRequests('fillOrder', this.name);
-			txSig = await this.clearingHouse.fillOrder(
-				nodeToFill.node.userAccount,
-				chUser.getUserAccount(),
-				nodeToFill.node.order,
-				makerInfo,
-				referrerInfo
-			);
-			this.metrics?.recordFilledOrder(
-				this.clearingHouse.provider.wallet.publicKey,
-				this.name
-			);
-			logger.info(
-				`${
-					this.name
-				} Filled user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, Tx: ${txSig}`
-			);
-		} catch (error) {
-			nodeToFill.node.haveFilled = false;
-			this.throttledNodes.set(
-				this.getNodeToFillSignature(nodeToFill),
-				Date.now()
-			);
-
-			const errorCode = getErrorCode(error);
-			this.metrics?.recordErrorCode(
-				errorCode,
-				this.clearingHouse.provider.wallet.publicKey,
-				this.name
-			);
-
-			const errorMessage = getErrorMessage(error as SendTransactionError);
-
-			if (errorMessage === 'OrderDoesNotExist') {
-				// await this.dlobMutex.runExclusive(async () => {
-				// 	this.dlob.remove(
-				// 		nodeToFill.node.order,
-				// 		nodeToFill.node.userAccount,
-				// 		() => {
-				// 			logger.error(
-				// 				`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-				// 			);
-				// 		}
-				// 	);
-				// });
-			}
-			logger.error(
-				`Error (${errorCode}) filling user (account: ${nodeToFill.node.userAccount.toString()}) order: ${nodeToFill.node.order.orderId.toString()}, mktIdx: ${marketIndex.toNumber()}`
-			);
-		} finally {
-			const duration = Date.now() - reqStart;
-			this.metrics?.recordRpcDuration(
-				this.clearingHouse.connection.rpcEndpoint,
-				'fillOrder',
-				duration,
-				false,
-				this.name
-			);
-		}
-
-		return txSig;
 	}
 
 	/**
@@ -633,19 +575,29 @@ export class FillerBot implements Bot {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
 					delete this.dlob;
-					this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+					this.dlob = new DLOB(
+						this.clearingHouse.getPerpMarketAccounts(),
+						this.clearingHouse.getSpotMarketAccounts(),
+						true
+					);
 					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
 					await this.dlob.init(this.clearingHouse, this.userMap);
 				});
 
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];
-				for (const market of this.clearingHouse.getMarketAccounts()) {
+				for (const market of this.clearingHouse.getPerpMarketAccounts()) {
 					fillableNodes = fillableNodes.concat(
-						await this.getFillableNodesForMarket(market)
+						await this.getPerpFillableNodesForMarket(market)
+					);
+				}
+				for (const market of this.clearingHouse.getSpotMarketAccounts()) {
+					fillableNodes = fillableNodes.concat(
+						await this.getSpotFillableNodesForMarket(market)
 					);
 				}
 
+				// TODO: can remove this if no dupes?
 				const seenNodes = new Set<string>();
 				const filteredNodes = fillableNodes.filter((node) => {
 					const sig = this.getNodeToFillSignature(node);

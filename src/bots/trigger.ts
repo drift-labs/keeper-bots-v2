@@ -1,15 +1,18 @@
 import {
 	ClearingHouse,
-	MarketAccount,
+	PerpMarketAccount,
+	SpotMarketAccount,
 	OrderRecord,
 	SlotSubscriber,
 	NewUserRecord,
+	DLOB,
+	NodeToTrigger,
+	UserMap,
+	MarketType,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
 import { logger } from '../logger';
-import { DLOB, NodeToTrigger } from '../dlob/DLOB';
-import { UserMap } from '../userMap';
 import { Bot } from '../types';
 import { getErrorCode } from '../error';
 import { Metrics } from '../metrics';
@@ -93,7 +96,7 @@ export class TriggerBot implements Bot {
 		return this.dlob;
 	}
 
-	private async tryTriggerForMarket(market: MarketAccount) {
+	private async tryTriggerForPerpMarket(market: PerpMarketAccount) {
 		const marketIndex = market.marketIndex;
 
 		try {
@@ -101,14 +104,16 @@ export class TriggerBot implements Bot {
 				this.clearingHouse.getOracleDataForMarket(marketIndex);
 
 			let nodesToTrigger: Array<NodeToTrigger> = [];
-			this.dlobMutex.runExclusive(async () => {
+			await this.dlobMutex.runExclusive(async () => {
 				nodesToTrigger = this.dlob.findNodesToTrigger(
 					marketIndex,
 					this.slotSubscriber.getSlot(),
-					oraclePriceData.price
+					oraclePriceData.price,
+					MarketType.PERP
 				);
 			});
 
+			console.log(`nodes to trig: ${nodesToTrigger.length}`);
 			for (const nodeToTrigger of nodesToTrigger) {
 				if (nodeToTrigger.node.haveTrigger) {
 					continue;
@@ -117,7 +122,7 @@ export class TriggerBot implements Bot {
 				nodeToTrigger.node.haveTrigger = true;
 
 				logger.info(
-					`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) order ${nodeToTrigger.node.order.orderId.toString()}`
+					`trying to trigger perp order (account: ${nodeToTrigger.node.userAccount.toString()}) perp order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
 				const user = await this.userMap.mustGet(
@@ -131,7 +136,7 @@ export class TriggerBot implements Bot {
 					)
 					.then((txSig) => {
 						logger.info(
-							`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+							`Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.info(`Tx: ${txSig}`);
 					})
@@ -145,7 +150,7 @@ export class TriggerBot implements Bot {
 
 						nodeToTrigger.node.haveTrigger = false;
 						logger.error(
-							`Error (${errorCode}) triggering user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+							`Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.error(error);
 					});
@@ -158,22 +163,95 @@ export class TriggerBot implements Bot {
 		}
 	}
 
+	private async tryTriggerForSpotMarket(market: SpotMarketAccount) {
+		const marketIndex = market.marketIndex;
+
+		try {
+			const oraclePriceData =
+				this.clearingHouse.getOracleDataForMarket(marketIndex);
+
+			let nodesToTrigger: Array<NodeToTrigger> = [];
+			await this.dlobMutex.runExclusive(async () => {
+				nodesToTrigger = this.dlob.findNodesToTrigger(
+					marketIndex,
+					this.slotSubscriber.getSlot(),
+					oraclePriceData.price,
+					MarketType.SPOT
+				);
+			});
+
+			for (const nodeToTrigger of nodesToTrigger) {
+				if (nodeToTrigger.node.haveTrigger) {
+					continue;
+				}
+
+				nodeToTrigger.node.haveTrigger = true;
+
+				logger.info(
+					`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) spot order ${nodeToTrigger.node.order.orderId.toString()}`
+				);
+
+				const user = await this.userMap.mustGet(
+					nodeToTrigger.node.userAccount.toString()
+				);
+				this.clearingHouse
+					.triggerSpotOrder(
+						nodeToTrigger.node.userAccount,
+						user.getUserAccount(),
+						nodeToTrigger.node.order
+					)
+					.then((txSig) => {
+						logger.info(
+							`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
+						);
+						logger.info(`Tx: ${txSig}`);
+					})
+					.catch((error) => {
+						const errorCode = getErrorCode(error);
+						this?.metrics.recordErrorCode(
+							errorCode,
+							this.clearingHouse.provider.wallet.publicKey,
+							this.name
+						);
+
+						nodeToTrigger.node.haveTrigger = false;
+						logger.error(
+							`Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
+						);
+						logger.error(error);
+					});
+			}
+		} catch (e) {
+			logger.error(
+				`Unexpected error for spot market ${marketIndex.toString()} during triggers`
+			);
+			console.error(e);
+		}
+	}
+
 	private async tryTrigger() {
 		const start = Date.now();
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
-					this.dlob = new DLOB(this.clearingHouse.getMarketAccounts(), true);
+					this.dlob = new DLOB(
+						this.clearingHouse.getPerpMarketAccounts(),
+						this.clearingHouse.getSpotMarketAccounts(),
+						true
+					);
 					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
 					await this.dlob.init(this.clearingHouse, this.userMap);
 				});
 
-				await Promise.all(
-					this.clearingHouse.getMarketAccounts().map((marketAccount) => {
-						this.tryTriggerForMarket(marketAccount);
-					})
-				);
+				await Promise.all([
+					this.clearingHouse.getPerpMarketAccounts().map((marketAccount) => {
+						this.tryTriggerForPerpMarket(marketAccount);
+					}),
+					this.clearingHouse.getSpotMarketAccounts().map((marketAccount) => {
+						this.tryTriggerForSpotMarket(marketAccount);
+					}),
+				]);
 				ran = true;
 			});
 		} catch (e) {
