@@ -113,7 +113,6 @@ export class TriggerBot implements Bot {
 				);
 			});
 
-			console.log(`nodes to trig: ${nodesToTrigger.length}`);
 			for (const nodeToTrigger of nodesToTrigger) {
 				if (nodeToTrigger.node.haveTrigger) {
 					continue;

@@ -1,4 +1,5 @@
 import {
+	DriftEnv,
 	NewUserRecord,
 	OrderRecord,
 	ClearingHouseUser,
@@ -6,13 +7,12 @@ import {
 	isOracleValid,
 	ClearingHouse,
 	PerpMarketAccount,
-	SpotMarketAccount,
 	SlotSubscriber,
 	calculateAskPrice,
 	calculateBidPrice,
 	MakerInfo,
 	isFillableByVAMM,
-	isOneOfVariant,
+	isVariant,
 	DLOB,
 	NodeToFill,
 	UserMap,
@@ -44,6 +44,7 @@ export class FillerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 1000;
 
+	private driftEnv: DriftEnv;
 	private clearingHouse: ClearingHouse;
 	private slotSubscriber: SlotSubscriber;
 
@@ -71,6 +72,7 @@ export class FillerBot implements Bot {
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
 		slotSubscriber: SlotSubscriber,
+		env: DriftEnv,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
@@ -78,6 +80,7 @@ export class FillerBot implements Bot {
 		this.clearingHouse = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
 		this.metrics = metrics;
+		this.driftEnv = env;
 	}
 
 	public async init() {
@@ -176,31 +179,6 @@ export class FillerBot implements Bot {
 		return nodes;
 	}
 
-	private async getSpotFillableNodesForMarket(
-		market: SpotMarketAccount
-	): Promise<Array<NodeToFill>> {
-		let nodes: Array<NodeToFill> = [];
-
-		const oraclePriceData = this.clearingHouse.getOracleDataForSpotMarket(
-			market.marketIndex
-		);
-
-		// TODO: check oracle validity when ready
-
-		await this.dlobMutex.runExclusive(async () => {
-			nodes = this.dlob.findNodesToFill(
-				market.marketIndex,
-				undefined,
-				undefined,
-				this.slotSubscriber.getSlot(),
-				MarketType.SPOT,
-				oraclePriceData
-			);
-		});
-
-		return nodes;
-	}
-
 	private getNodeToFillSignature(node: NodeToFill): string {
 		if (!node.node.userAccount) {
 			return '~';
@@ -234,7 +212,7 @@ export class FillerBot implements Bot {
 
 		if (
 			!nodeToFill.makerNode &&
-			isOneOfVariant(nodeToFill.node.order.marketType, ['perp']) &&
+			isVariant(nodeToFill.node.order.marketType, 'perp') &&
 			!isFillableByVAMM(
 				nodeToFill.node.order,
 				nodeToFill.node.market as PerpMarketAccount,
@@ -252,6 +230,7 @@ export class FillerBot implements Bot {
 		makerInfo: MakerInfo | undefined;
 		chUser: ClearingHouseUser;
 		referrerInfo: ReferrerInfo;
+		marketType: MarketType;
 	}> {
 		let makerInfo: MakerInfo | undefined;
 		if (nodeToFill.makerNode) {
@@ -276,10 +255,12 @@ export class FillerBot implements Bot {
 				chUser.getUserAccount().authority.toString()
 			)
 		).getReferrerInfo();
+
 		return Promise.resolve({
 			makerInfo,
 			chUser,
 			referrerInfo,
+			marketType: nodeToFill.node.order.marketType,
 		});
 	}
 
@@ -370,17 +351,6 @@ export class FillerBot implements Bot {
 					logger.error(
 						`   assoc order: ${filledNode.node.userAccount.toString()}, ${filledNode.node.order.orderId.toNumber()}`
 					);
-					// await this.dlobMutex.runExclusive(async () => {
-					// 	this.dlob.remove(
-					// 		filledNode.node.order,
-					// 		filledNode.node.userAccount,
-					// 		() => {
-					// 			logger.error(
-					// 				`Order ${filledNode.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-					// 			);
-					// 		}
-					// 	);
-					// });
 				} else if (log.includes('Amm cant fulfill order')) {
 					const filledNode = nodesFilled[ixIdx];
 					logger.error(` ${log}, ix: ${ixIdx}`);
@@ -412,7 +382,7 @@ export class FillerBot implements Bot {
 		);
 	}
 
-	private async tryBulkFillNodes(
+	private async tryBulkFillPerpNodes(
 		nodesToFill: Array<NodeToFill>
 	): Promise<[TransactionSignature, number]> {
 		const tx = new Transaction();
@@ -464,9 +434,16 @@ export class FillerBot implements Bot {
 		const nodesSent: Array<NodeToFill> = [];
 		let idxUsed = 0;
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
-			const { makerInfo, chUser, referrerInfo } = await this.getNodeFillInfo(
-				nodeToFill
+			logger.info(
+				`filling perp node ${idx}: ${nodeToFill.node.userAccount.toString()}, ${nodeToFill.node.order.orderId.toNumber()}`
 			);
+
+			const { makerInfo, chUser, referrerInfo, marketType } =
+				await this.getNodeFillInfo(nodeToFill);
+
+			if (!isVariant(marketType, 'perp')) {
+				throw new Error('expected perp market type');
+			}
 
 			const ix = await this.clearingHouse.getFillOrderIx(
 				chUser.getUserAccountPublicKey(),
@@ -475,6 +452,11 @@ export class FillerBot implements Bot {
 				makerInfo,
 				referrerInfo
 			);
+
+			if (!ix) {
+				logger.error(`failed to generate an ix`);
+				break;
+			}
 
 			// first estimate new tx size with this additional ix and new accounts
 			const ixKeys = ix.keys.map((key) => key.pubkey);
@@ -487,11 +469,17 @@ export class FillerBot implements Bot {
 					? this.calcCompactU16EncodedSize(newAccounts, 32) - 1
 					: 0;
 
-			// check it; appears we cannot send exactly maxTxSize.
+			// We have to use MAX_TX_PACK_SIZE because it appears we cannot send tx with a size of exactly 1232 bytes.
+			// Also, some logs may get truncated near the end of the tx, so we need to leave some room for that.
 			if (
 				runningTxSize + newIxCost + additionalAccountsCost >=
 				MAX_TX_PACK_SIZE
 			) {
+				logger.error(
+					`too much sizee: expected ${
+						runningTxSize + newIxCost + additionalAccountsCost
+					}, max: ${MAX_TX_PACK_SIZE}`
+				);
 				break;
 			}
 
@@ -507,6 +495,12 @@ export class FillerBot implements Bot {
 			idxUsed++;
 			nodesSent.push(nodeToFill);
 			lastIdxFilled = idx;
+
+			this.metrics?.recordFillableOrdersSeen(
+				nodeToFill.node.order.marketIndex.toNumber(),
+				marketType,
+				1
+			);
 		}
 		logger.debug(`txPacker took ${Date.now() - txPackerStart}ms`);
 
@@ -565,6 +559,7 @@ export class FillerBot implements Bot {
 				logger.error(`${log}`);
 			}
 		}
+
 		return [txSig, lastIdxFilled];
 	}
 
@@ -577,7 +572,7 @@ export class FillerBot implements Bot {
 					delete this.dlob;
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),
-						this.clearingHouse.getSpotMarketAccounts(),
+						this.clearingHouse.getSpotMarketAccounts(), // TODO: new sdk - remove this
 						true
 					);
 					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
@@ -591,13 +586,8 @@ export class FillerBot implements Bot {
 						await this.getPerpFillableNodesForMarket(market)
 					);
 				}
-				for (const market of this.clearingHouse.getSpotMarketAccounts()) {
-					fillableNodes = fillableNodes.concat(
-						await this.getSpotFillableNodesForMarket(market)
-					);
-				}
 
-				// TODO: can remove this if no dupes?
+				// TODO TODO TODO: can remove this if no dupes?
 				const seenNodes = new Set<string>();
 				const filteredNodes = fillableNodes.filter((node) => {
 					const sig = this.getNodeToFillSignature(node);
@@ -608,13 +598,11 @@ export class FillerBot implements Bot {
 					return this.filterFillableNodes(node);
 				});
 
-				this.metrics?.recordFillableOrdersSeen(-1, filteredNodes.length);
-				// fill the nodes
+				// fill the perp nodes
 				let filledNodeCount = 0;
 				while (filledNodeCount < filteredNodes.length) {
 					const resp = await promiseTimeout(
-						// this.tryFillNode(this.randomIndex(filteredNodes)),
-						this.tryBulkFillNodes(filteredNodes.slice(filledNodeCount)),
+						this.tryBulkFillPerpNodes(filteredNodes.slice(filledNodeCount)),
 						30000
 					);
 

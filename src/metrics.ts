@@ -27,6 +27,7 @@ import {
 	PerpPosition,
 	LiquidationRecord,
 	isVariant,
+	MarketType,
 } from '@drift-labs/sdk';
 
 import { Mutex } from 'async-mutex';
@@ -78,7 +79,8 @@ export class Metrics {
 	private chUserMaintenanceMarginRequirementGauge: ObservableGauge;
 
 	private fillableOrdersSeenLock = new Mutex();
-	private fillableOrdersSeenByMarket = new Map<number, number>();
+	private fillablePerpOrdersSeenByMarket = new Map<number, number>();
+	private fillableSpotOrdersSeenByMarket = new Map<number, number>();
 	private fillableOrdersSeentGauge: ObservableGauge;
 
 	private errorsCounter: Counter;
@@ -509,9 +511,17 @@ export class Metrics {
 			async (observableResult: ObservableResult) => {
 				await this.fillableOrdersSeenLock.runExclusive(async () => {
 					for (const [marketIndex, fillableOrders] of this
-						.fillableOrdersSeenByMarket) {
+						.fillablePerpOrdersSeenByMarket) {
 						observableResult.observe(fillableOrders, {
 							market: marketIndex,
+							marketType: 'perp',
+						});
+					}
+					for (const [marketIndex, fillableOrders] of this
+						.fillableSpotOrdersSeenByMarket) {
+						observableResult.observe(fillableOrders, {
+							market: marketIndex,
+							marketType: 'spot',
 						});
 					}
 				});
@@ -633,9 +643,17 @@ export class Metrics {
 		});
 	}
 
-	async recordFillableOrdersSeen(marketIndex: number, fillableOrders: number) {
+	async recordFillableOrdersSeen(
+		marketIndex: number,
+		marketType: MarketType,
+		fillableOrders: number
+	) {
 		await this.fillableOrdersSeenLock.runExclusive(async () => {
-			this.fillableOrdersSeenByMarket.set(marketIndex, fillableOrders);
+			if (isVariant(marketType, 'perp')) {
+				this.fillablePerpOrdersSeenByMarket.set(marketIndex, fillableOrders);
+			} else if (isVariant(marketType, 'spot')) {
+				this.fillableSpotOrdersSeenByMarket.set(marketIndex, fillableOrders);
+			}
 		});
 	}
 
