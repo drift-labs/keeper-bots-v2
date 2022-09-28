@@ -151,7 +151,7 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 		if (p.baseAssetAmount.isZero()) {
 			continue;
 		}
-		const market = PerpMarkets[driftEnv][p.marketIndex.toNumber()];
+		const market = PerpMarkets[driftEnv][p.marketIndex];
 		console.log(`[${market.symbol}]`);
 		console.log(
 			` . baseAssetAmount:  ${convertToNumber(
@@ -191,7 +191,7 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 		if (p.balance.isZero()) {
 			continue;
 		}
-		const market = PerpMarkets[driftEnv][p.marketIndex.toNumber()];
+		const market = PerpMarkets[driftEnv][p.marketIndex];
 		console.log(`[${market.symbol}]`);
 		console.log(
 			` . baseAssetAmount:  ${convertToNumber(
@@ -333,10 +333,10 @@ const runBot = async () => {
 		let closedPerps = 0;
 		for await (const p of clearingHouseUser.getUserAccount().perpPositions) {
 			if (p.baseAssetAmount.isZero()) {
-				logger.info(`no position on market: ${p.marketIndex.toNumber()}`);
+				logger.info(`no position on market: ${p.marketIndex}`);
 				continue;
 			}
-			logger.info(`closing position on ${p.marketIndex.toNumber()}`);
+			logger.info(`closing position on ${p.marketIndex}`);
 			logger.info(` . ${await clearingHouse.closePosition(p.marketIndex)}`);
 			closedPerps++;
 		}
@@ -345,10 +345,10 @@ const runBot = async () => {
 		let closedSpots = 0;
 		for await (const p of clearingHouseUser.getUserAccount().spotPositions) {
 			if (p.balance.isZero()) {
-				logger.info(`no position on market: ${p.marketIndex.toNumber()}`);
+				logger.info(`no position on market: ${p.marketIndex}`);
 				continue;
 			}
-			logger.info(`closing position on ${p.marketIndex.toNumber()}`);
+			logger.info(`closing position on ${p.marketIndex}`);
 			logger.info(` . ${await clearingHouse.closePosition(p.marketIndex)}`);
 			closedSpots++;
 		}
@@ -383,7 +383,7 @@ const runBot = async () => {
 
 		const tx = await clearingHouse.deposit(
 			new BN(opts.forceDeposit).mul(QUOTE_PRECISION),
-			new BN(0), // USDC bank
+			0, // USDC bank
 			ata
 		);
 		logger.info(`Deposit transaction: ${tx}`);

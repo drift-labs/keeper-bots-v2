@@ -497,7 +497,7 @@ export class FillerBot implements Bot {
 			lastIdxFilled = idx;
 
 			this.metrics?.recordFillableOrdersSeen(
-				nodeToFill.node.order.marketIndex.toNumber(),
+				nodeToFill.node.order.marketIndex,
 				marketType,
 				1
 			);

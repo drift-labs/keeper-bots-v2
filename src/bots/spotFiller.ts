@@ -273,11 +273,11 @@ export class SpotFillerBot implements Bot {
 		if (this.driftEnv === 'mainnet-beta') {
 			throw new Error('need mainnet markets');
 		} else if (this.driftEnv === 'devnet') {
-			if (nodeToFill.node.order.marketIndex.toNumber() === 1) {
+			if (nodeToFill.node.order.marketIndex === 1) {
 				serumMarketAddress = new PublicKey(
 					'8N37SsnTu8RYxtjrV9SStjkkwVhmU8aCWhLvwduAPEKW'
 				);
-			} else if (nodeToFill.node.order.marketIndex.toNumber() === 2) {
+			} else if (nodeToFill.node.order.marketIndex === 2) {
 				serumMarketAddress = new PublicKey(
 					'AGsmbVu3MS9u68GEYABWosQQCZwmLcBHu4pWEuBYH7Za'
 				);
@@ -290,7 +290,7 @@ export class SpotFillerBot implements Bot {
 		);
 
 		this.metrics?.recordFillableOrdersSeen(
-			nodeToFill.node.order.marketIndex.toNumber(),
+			nodeToFill.node.order.marketIndex,
 			marketType,
 			1
 		);

@@ -309,7 +309,7 @@ export class Metrics {
 						// );
 						observableResult.observe(
 							this.openPositionOpenOrdersAmountGauge,
-							p.openOrders.toNumber(),
+							p.openOrders,
 							{
 								marketIndex: i,
 								marketSymbol: PerpMarkets[driftEnv][i].symbol,
@@ -612,25 +612,21 @@ export class Metrics {
 
 		if (isVariant(event.liquidationType, 'liquidatePerp')) {
 			liquidationType = 'liquidatePerp';
-			liquidatedMarketIndex = event.liquidatePerp.marketIndex.toNumber();
+			liquidatedMarketIndex = event.liquidatePerp.marketIndex;
 		} else if (isVariant(event.liquidationType, 'liquidateBorrow')) {
 			liquidationType = 'liquidateBorrow';
-			liquidatedAssetBankIndex =
-				event.liquidateBorrow.assetMarketIndex.toNumber();
-			liquidatedLiabilityIndex =
-				event.liquidateBorrow.liabilityMarketIndex.toNumber();
+			liquidatedAssetBankIndex = event.liquidateBorrow.assetMarketIndex;
+			liquidatedLiabilityIndex = event.liquidateBorrow.liabilityMarketIndex;
 		} else if (isVariant(event.liquidationType, 'liquidateBorrowForPerpPnl')) {
 			liquidationType = 'liquidateBorrowForPerpPnl';
-			liquidatedMarketIndex =
-				event.liquidateBorrowForPerpPnl.perpMarketIndex.toNumber();
+			liquidatedMarketIndex = event.liquidateBorrowForPerpPnl.perpMarketIndex;
 			liquidatedLiabilityIndex =
-				event.liquidateBorrowForPerpPnl.liabilityMarketIndex.toNumber();
+				event.liquidateBorrowForPerpPnl.liabilityMarketIndex;
 		} else if (isVariant(event.liquidationType, 'liquidatePerpPnlForDeposit')) {
 			liquidationType = 'liquidatePerpPnlForDeposit';
-			liquidatedMarketIndex =
-				event.liquidatePerpPnlForDeposit.perpMarketIndex.toNumber();
+			liquidatedMarketIndex = event.liquidatePerpPnlForDeposit.perpMarketIndex;
 			liquidatedAssetBankIndex =
-				event.liquidatePerpPnlForDeposit.assetMarketIndex.toNumber();
+				event.liquidatePerpPnlForDeposit.assetMarketIndex;
 		}
 
 		this.liquidationEventsCounter.add(1, {
@@ -711,9 +707,9 @@ export class Metrics {
 			for (let i = 0; i < PerpMarkets[driftEnv].length; i++) {
 				let foundPositionInMarket = false;
 				chUser.getUserAccount().perpPositions.forEach((p: PerpPosition) => {
-					if (!foundPositionInMarket && p.marketIndex.toNumber() === i) {
+					if (!foundPositionInMarket && p.marketIndex === i) {
 						foundPositionInMarket = true;
-						this.openPositionPerMarket[p.marketIndex.toNumber()] = p;
+						this.openPositionPerMarket[p.marketIndex] = p;
 					}
 				});
 

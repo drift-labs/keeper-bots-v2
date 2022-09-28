@@ -51,12 +51,13 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/sdk@0.2.0-master.29":
-  version "0.2.0-master.29"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.2.0-master.29.tgz#beb82167d6a7a0869dea4269d63f4f38f5bcf4e2"
-  integrity sha512-xDiL3y7gdvi7AuHik4Y2rrGQRm3nXqDD1gqqtTwTD1BDRZ+4s34V1apXPdhLrBf43VumSJhty6d5e6JsHyaCNA==
+"@drift-labs/sdk@0.2.0-master.30":
+  version "0.2.0-master.30"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.2.0-master.30.tgz#395372d7894c859da1bdd83008c9d72efc616e56"
+  integrity sha512-Ty9mVvsjmdrfzrNszlcovXIb3x4gQLP+UX9EmcLUo+unQvSRKD0FhP0499u+hDO8b0EtxyT7AFqzhZcIYEMtSg==
   dependencies:
     "@project-serum/anchor" "0.24.2"
+    "@project-serum/serum" "^0.13.38"
     "@pythnetwork/client" "2.5.3"
     "@solana/spl-token" "^0.1.6"
     "@solana/web3.js" "1.41.0"
@@ -803,7 +804,7 @@
     bn.js "^5.1.2"
     buffer-layout "^1.2.0"
 
-"@project-serum/serum@^0.13.65":
+"@project-serum/serum@^0.13.38", "@project-serum/serum@^0.13.65":
   version "0.13.65"
   resolved "https://registry.yarnpkg.com/@project-serum/serum/-/serum-0.13.65.tgz#6d3cf07912f13985765237f053cca716fe84b0b0"
   integrity sha512-BHRqsTqPSfFB5p+MgI2pjvMBAQtO8ibTK2fYY96boIFkCI3TTwXDt2gUmspeChKO2pqHr5aKevmexzAcXxrSRA==

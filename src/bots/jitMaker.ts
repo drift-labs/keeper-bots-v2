@@ -11,7 +11,7 @@ import {
 	BASE_PRECISION,
 	QUOTE_PRECISION,
 	convertToNumber,
-	MARK_PRICE_PRECISION,
+	PRICE_PRECISION,
 	PerpPosition,
 	SpotPosition,
 	DLOB,
@@ -32,7 +32,7 @@ import { Metrics } from '../metrics';
 
 type Action = {
 	baseAssetAmount: BN;
-	marketIndex: BN;
+	marketIndex: number;
 	direction: PositionDirection;
 	price: BN;
 	node: DLOBNode;
@@ -270,17 +270,12 @@ export class JitMakerBot implements Bot {
 			}
 
 			// update current position based on market position
-			this.agentState.perpMarketPosition.set(p.marketIndex.toNumber(), p);
+			this.agentState.perpMarketPosition.set(p.marketIndex, p);
 
 			// update state
-			let currentState = this.agentState.stateType.get(
-				p.marketIndex.toNumber()
-			);
+			let currentState = this.agentState.stateType.get(p.marketIndex);
 			if (!currentState) {
-				this.agentState.stateType.set(
-					p.marketIndex.toNumber(),
-					StateType.NEUTRAL
-				);
+				this.agentState.stateType.set(p.marketIndex, StateType.NEUTRAL);
 				currentState = StateType.NEUTRAL;
 			}
 
@@ -310,32 +305,23 @@ export class JitMakerBot implements Bot {
 					// state becomes closing only
 					if (p.baseAssetAmount.gt(new BN(0))) {
 						this.agentState.stateType.set(
-							p.marketIndex.toNumber(),
+							p.marketIndex,
 							StateType.CLOSING_LONG
 						);
 					} else {
 						this.agentState.stateType.set(
-							p.marketIndex.toNumber(),
+							p.marketIndex,
 							StateType.CLOSING_SHORT
 						);
 					}
 				} else {
 					// update state to be whatever our current position is
 					if (p.baseAssetAmount.gt(new BN(0))) {
-						this.agentState.stateType.set(
-							p.marketIndex.toNumber(),
-							StateType.LONG
-						);
+						this.agentState.stateType.set(p.marketIndex, StateType.LONG);
 					} else if (p.baseAssetAmount.lt(new BN(0))) {
-						this.agentState.stateType.set(
-							p.marketIndex.toNumber(),
-							StateType.SHORT
-						);
+						this.agentState.stateType.set(p.marketIndex, StateType.SHORT);
 					} else {
-						this.agentState.stateType.set(
-							p.marketIndex.toNumber(),
-							StateType.NEUTRAL
-						);
+						this.agentState.stateType.set(p.marketIndex, StateType.NEUTRAL);
 					}
 				}
 			}
@@ -378,10 +364,10 @@ export class JitMakerBot implements Bot {
 		orderBaseAmountAvailable: BN,
 		orderPrice: BN
 	): BN {
-		const priceNumber = convertToNumber(orderPrice, MARK_PRICE_PRECISION);
+		const priceNumber = convertToNumber(orderPrice, PRICE_PRECISION);
 		const worstCaseQuoteSpend = orderBaseAmountAvailable
 			.mul(orderPrice)
-			.div(BASE_PRECISION.mul(MARK_PRICE_PRECISION))
+			.div(BASE_PRECISION.mul(PRICE_PRECISION))
 			.mul(QUOTE_PRECISION);
 
 		const minOrderQuote = 20;
@@ -464,7 +450,7 @@ export class JitMakerBot implements Bot {
 			);
 
 			// calculate jit maker order params
-			const orderMarketIdx = nodeToFill.node.market.marketIndex.toNumber();
+			const orderMarketIdx = nodeToFill.node.market.marketIndex;
 			const orderDirection = nodeToFill.node.order.direction;
 			const jitMakerDirection = isVariant(orderDirection, 'long')
 				? PositionDirection.SHORT
@@ -493,7 +479,7 @@ export class JitMakerBot implements Bot {
 					4
 				)}, limit price: ${convertToNumber(
 					jitMakerPrice,
-					MARK_PRICE_PRECISION
+					PRICE_PRECISION
 				).toFixed(4)}, it has been ${
 					currSlot - orderSlot
 				} slots since order, auction ends in ${aucEnd - currSlot} slots`
@@ -555,9 +541,7 @@ export class JitMakerBot implements Bot {
 	}
 
 	private async executeAction(action: Action): Promise<TransactionSignature> {
-		const currentState = this.agentState.stateType.get(
-			action.marketIndex.toNumber()
-		);
+		const currentState = this.agentState.stateType.get(action.marketIndex);
 
 		if (this.RESTRICT_POSITION_SIZE) {
 			if (
@@ -565,9 +549,7 @@ export class JitMakerBot implements Bot {
 				action.direction === PositionDirection.LONG
 			) {
 				logger.info(
-					`${
-						this.name
-					}: Skipping long action on market ${action.marketIndex.toNumber()}, since currently CLOSING_LONG`
+					`${this.name}: Skipping long action on market ${action.marketIndex}, since currently CLOSING_LONG`
 				);
 				return;
 			}
@@ -576,9 +558,7 @@ export class JitMakerBot implements Bot {
 				action.direction === PositionDirection.SHORT
 			) {
 				logger.info(
-					`${
-						this.name
-					}: Skipping short action on market ${action.marketIndex.toNumber()}, since currently CLOSING_SHORT`
+					`${this.name}: Skipping short action on market ${action.marketIndex}, since currently CLOSING_SHORT`
 				);
 				return;
 			}
