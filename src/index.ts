@@ -191,7 +191,7 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 		if (p.balance.isZero()) {
 			continue;
 		}
-		const market = PerpMarkets[driftEnv][p.marketIndex];
+		const market = SpotMarkets[driftEnv][p.marketIndex];
 		console.log(`[${market.symbol}]`);
 		console.log(
 			` . baseAssetAmount:  ${convertToNumber(
