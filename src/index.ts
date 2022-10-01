@@ -59,7 +59,7 @@ const stateCommitment: Commitment = 'confirmed';
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
 
 program
-	.option('--airdrop', 'Airdrop 1000 USDC for devnet')
+	.option('--airdrop', 'Airdrop USDC for devnet')
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
 	.option(
 		'--init-user',
