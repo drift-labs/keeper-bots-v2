@@ -52,16 +52,34 @@ export class PerpLiquidatorBot implements Bot {
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
+	/**
+	 *
+	 * @param name
+	 * @param dryRun
+	 * @param clearingHouse
+	 * @param metrics
+	 * @param collateralPercentageUsage
+	 */
 	constructor(
 		name: string,
 		dryRun: boolean,
 		clearingHouse: ClearingHouse,
-		metrics?: Metrics | undefined
+		metrics?: Metrics | undefined,
+		collateralPercentageUsage?: number | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.clearingHouse = clearingHouse;
 		this.metrics = metrics;
+		if (collateralPercentageUsage >= 1 && collateralPercentageUsage <= 100) {
+			this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL = new BN(
+				collateralPercentageUsage
+			);
+		} else {
+			logger.warn(
+				`collateral-percent-usage must be between 1 and 100 inclusive, using default value: ${this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL}%`
+			);
+		}
 	}
 
 	public async init(): Promise<void> {
@@ -97,11 +115,7 @@ export class PerpLiquidatorBot implements Bot {
 			`${this.name} free collateral: $${convertToNumber(
 				freeCollateral,
 				QUOTE_PRECISION
-			)}, spending at most ${
-				(this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL.toNumber() /
-					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM.toNumber()) *
-				100.0
-			}% per liquidation`
+			)}, spending at most ${this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL.toNumber()}% per liquidation`
 		);
 	}
 
