@@ -25,6 +25,7 @@
 		"winston": "^3.8.1"
 	},
 	"devDependencies": {
+		"@types/node": "^18.7.23",
 		"@typescript-eslint/eslint-plugin": "^4.28.0",
 		"@typescript-eslint/parser": "^4.28.0",
 		"eslint": "^7.29.0",
@@ -36,7 +37,7 @@
 	},
 	"scripts": {
 		"prepare": "husky install",
-		"build": "yarn clean && tsc",
+		"build": "ts-node build/index.ts",
 		"clean": "rm -rf lib",
 		"start": "node lib/index.js",
 		"dev": "ts-node src/index.ts",
