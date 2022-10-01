@@ -42,7 +42,7 @@ const dlobMutexError = new Error('dlobMutex timeout');
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 1000;
+	public readonly defaultIntervalMs: number = 3000;
 
 	private driftEnv: DriftEnv;
 	private clearingHouse: ClearingHouse;
