@@ -70,7 +70,8 @@ program
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
 	.option('--floating-maker', 'Enable floating maker bot')
-	.option('--liquidator', 'Enable liquidator bot')
+	.option('--liquidator', 'Enable liquidator bot using a percentage of total collateral available')
+	.option('-m <number>', '--max-liquidator-collateral-usage <number>', 'Max amount of collateral percentage to use per liquidation')
 	.option('--pnl-settler', 'Enable PnL settler bot')
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option('--close-open-positions', 'close all open positions')
@@ -605,7 +606,7 @@ const runBot = async () => {
 	}
 	if (opts.liquidator) {
 		bots.push(
-			new PerpLiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
+			new PerpLiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics, new Number(opts.m).valueOf())
 		);
 	}
 	if (opts.floatingMaker) {
