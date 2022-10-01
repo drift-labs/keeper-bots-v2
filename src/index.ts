@@ -102,8 +102,11 @@ export function getWallet(): Wallet | null {
 	let keypair: Keypair;
 	try {
 		try {
+			// try from bs58 decode
 			keypair = Keypair.fromSecretKey(bs58.decode(privateKey));
 		} catch (error) {
+			// failed to load from bs58 encoded
+			// try from uint8array file
 			if (fs.existsSync(privateKey)) {
 				logger.info(`loading private key from ${privateKey}`);
 				keypair = Keypair.fromSecretKey(
@@ -112,6 +115,7 @@ export function getWallet(): Wallet | null {
 					)
 				);
 			} else {
+				// try from uint8array
 				if (privateKey.startsWith('[') && privateKey.endsWith(']')) {
 					logger.info(
 						`loading private key as array of comma seperated numbers`
@@ -119,6 +123,7 @@ export function getWallet(): Wallet | null {
 					keypair = Keypair.fromSecretKey(
 						Uint8Array.from(JSON.parse(privateKey))
 					);
+					// from comma seperated numbers (data inside array)
 				} else {
 					logger.info(`loading private key as comma separated numbers`);
 					keypair = Keypair.fromSecretKey(
