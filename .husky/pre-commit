@@ -1,5 +1,5 @@
 #!/bin/sh
 . "$(dirname "$0")/_/husky.sh"
 
-yarn prettify
-yarn lint
+yarn prettify:fix
+yarn lint:fix
