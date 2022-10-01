@@ -17,6 +17,7 @@
 		"async": "^3.2.2",
 		"async-mutex": "0.3.2",
 		"aws-sdk": "^2.1062.0",
+		"bs58": "^5.0.0",
 		"commander": "^9.4.0",
 		"dotenv": "^10.0.0",
 		"object-sizeof": "^1.6.3",
@@ -44,8 +45,8 @@
 		"dev:jitmaker": "ts-node src/index.ts --jit-maker --metrics 9464",
 		"dev:liquidator": "ts-node src/index.ts --liquidator --metrics 9464",
 		"dev:pnlsettler": "ts-node src/index.ts --pnl-settler --metrics 9464",
-		"prettify": "prettier --check './src/**/*.ts'",
-		"prettify:fix": "prettier --write './src/**/*.ts'",
+		"prettify": "prettier --check \"./src/**/*.ts\"",
+		"prettify:fix": "prettier --write \"./src/**/*.ts\"",
 		"lint": "eslint . --ext ts --quiet",
 		"lint:fix": "eslint . --ext ts --fix"
 	}
