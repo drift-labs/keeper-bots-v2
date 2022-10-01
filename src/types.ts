@@ -1,11 +1,5 @@
 import { DLOB } from '@drift-labs/sdk';
 
-export const constants = {
-	devnet: {
-		USDCMint: '8zGuJQqwhZafTah7Uc7Z4tXRnguqkn5KLFAP8oV6PHe2',
-	},
-};
-
 export interface Bot {
 	readonly name: string;
 	readonly dryRun: boolean;

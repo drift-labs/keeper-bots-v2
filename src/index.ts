@@ -2,12 +2,21 @@ import fs from 'fs';
 import { program, Option } from 'commander';
 import * as http from 'http';
 
-import { Connection, Commitment, Keypair, PublicKey } from '@solana/web3.js';
+import {
+	Connection,
+	Commitment,
+	Keypair,
+	PublicKey,
+	AccountMeta,
+	TransactionInstruction,
+	Transaction,
+} from '@solana/web3.js';
 
 import {
 	Token,
 	TOKEN_PROGRAM_ID,
 	ASSOCIATED_TOKEN_PROGRAM_ID,
+	// u64
 } from '@solana/spl-token';
 import {
 	getVariant,
@@ -30,7 +39,6 @@ import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
 
 import { logger, setLogLevel } from './logger';
-import { constants } from './types';
 import { FillerBot } from './bots/filler';
 import { SpotFillerBot } from './bots/spotFiller';
 import { TriggerBot } from './bots/trigger';
@@ -51,6 +59,7 @@ const stateCommitment: Commitment = 'confirmed';
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
 
 program
+	.option('--airdrop', 'Airdrop 1000 USDC for devnet')
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
 	.option(
 		'--init-user',
@@ -239,6 +248,72 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 }
 
 const bots: Bot[] = [];
+
+/**
+ *
+ * @param connection
+ * @param mintToken
+ * @param recipientTokenAddress
+ * @param wallet
+ * @returns
+ */
+const airdrop = async (
+	connection: Connection,
+	mintToken: Token,
+	recipientTokenAddress: PublicKey,
+	wallet: Wallet
+) => {
+	const faucetPublicKey = new PublicKey(
+		'7GWXZ5esgVjUek9zDapKN5QAXPFLT2E7MafLb1p7zF6U'
+	);
+	const faucetProgramId = new PublicKey(
+		'V4v1mQiAdLz4qwckEb45WqHYceYizoib39cDBHSWfaB'
+	);
+
+	try {
+		// const getPDA = () => PublicKey.findProgramAddress([Buffer.from("faucet")], faucetProgramId);
+		// const pubkeyNonce = await getPDA();
+
+		const keys = [
+			{
+				pubkey: new PublicKey('A5TtJFy3PgCSg9MdBHLCHtewa7Sx613heaJ5atjNZCtJ'),
+				isSigner: false,
+				isWritable: false,
+			},
+			{
+				pubkey: mintToken.publicKey,
+				isSigner: false,
+				isWritable: true,
+			},
+			{ pubkey: recipientTokenAddress, isSigner: false, isWritable: true },
+			{ pubkey: faucetPublicKey, isSigner: false, isWritable: false },
+			{ pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+		] as Array<AccountMeta>;
+
+		// const amountU64 : u64 = new u64((amount * (10 ** (await mintToken.getMintInfo()).decimals)));
+		const txIX = new TransactionInstruction({
+			programId: faucetProgramId,
+			data: Buffer.from(bs58.decode('AMbA5aEcoknsMEMSzSjYH5')),
+			// data: Buffer.from([1, ...amountU64.toArray("le", 8)]),
+			keys,
+		});
+		const tx = new Transaction().add(txIX);
+		tx.recentBlockhash = (
+			await connection.getRecentBlockhash('processed')
+		).blockhash;
+		tx.sign(wallet.payer);
+		const signature = await connection.sendRawTransaction(tx.serialize(), {
+			skipPreflight: true,
+			preflightCommitment: 'processed',
+		});
+		logger.info('sent tx: ' + signature);
+		return await connection.confirmTransaction(signature, 'processed');
+	} catch (error) {
+		logger.error(error);
+		return error;
+	}
+};
+
 const runBot = async () => {
 	const wallet = getWallet();
 	if (wallet === null) {
@@ -299,13 +374,45 @@ const runBot = async () => {
 	);
 	logger.info(`Wallet pubkey: ${wallet.publicKey.toBase58()}`);
 	logger.info(` . SOL balance: ${lamportsBalance / 10 ** 9}`);
-	const tokenAccount = await Token.getAssociatedTokenAddress(
-		ASSOCIATED_TOKEN_PROGRAM_ID,
+
+	// the USDC token
+	const USDC_TOKEN = new Token(
+		connection,
+		new PublicKey(sdkConfig.USDC_MINT_ADDRESS),
 		TOKEN_PROGRAM_ID,
-		new PublicKey(constants.devnet.USDCMint),
+		wallet.payer
+	);
+	// create the token account if it doesn't exist
+	const walletUSDC = await USDC_TOKEN.getOrCreateAssociatedAccountInfo(
 		wallet.publicKey
 	);
-	const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
+
+	if (opts.airdrop) {
+		if (process.env.ENV === 'devnet') {
+			logger.info('airdropping USDC to ' + walletUSDC.address.toBase58());
+
+			const response = await airdrop(
+				connection,
+				USDC_TOKEN,
+				walletUSDC.address,
+				wallet
+			);
+
+			if (response.value.err === null) {
+				logger.info('airdropped USDC!');
+				logger.info('exiting...run again without --airdrop flag');
+				process.exit();
+			}
+		} else {
+			logger.warn('airdrop only works on devnet');
+			process.exit();
+		}
+	}
+
+	const usdcBalance = await connection.getTokenAccountBalance(
+		walletUSDC.address
+	);
+
 	logger.info(` . USDC balance: ${usdcBalance.value.uiAmount}`);
 
 	await clearingHouse.subscribe();
@@ -397,6 +504,7 @@ const runBot = async () => {
 			`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
 		);
 	}
+
 	if (opts.forceDeposit) {
 		logger.info(
 			`Depositing (${new BN(
@@ -421,9 +529,10 @@ const runBot = async () => {
 			0, // USDC bank
 			ata
 		);
+
 		logger.info(`Deposit transaction: ${tx}`);
 		logger.info(`exiting...run again without --force-deposit flag`);
-		return;
+		process.exit();
 	}
 
 	// print user orders

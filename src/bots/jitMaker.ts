@@ -127,7 +127,7 @@ export class JitMakerBot implements Bot {
 		this.metrics = metrics;
 	}
 
-	public async init() {
+	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
 		const initPromises: Array<Promise<any>> = [];
 
@@ -160,7 +160,7 @@ export class JitMakerBot implements Bot {
 		await Promise.all(initPromises);
 	}
 
-	public async reset() {
+	public async reset(): Promise<void> {
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId);
 		}
@@ -170,7 +170,7 @@ export class JitMakerBot implements Bot {
 		delete this.userStatsMap;
 	}
 
-	public async startIntervalLoop(intervalMs: number) {
+	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		await this.tryMake();
 		const intervalId = setInterval(this.tryMake.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
@@ -187,7 +187,11 @@ export class JitMakerBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(record: any): Promise<void> {
+	public async trigger(
+		record:
+			| (OrderRecord & { eventType: string })
+			| (NewUserRecord & { eventType: string })
+	): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
 			await this.userMap.updateWithOrderRecord(record as OrderRecord);
 			await this.userStatsMap.updateWithOrderRecord(
