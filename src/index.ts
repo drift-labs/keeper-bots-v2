@@ -40,11 +40,12 @@ import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { Metrics } from './metrics';
 import { PnlSettlerBot } from './bots/pnlSettler';
+import bs58 from 'bs58';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
-//@ts-ignore
-const sdkConfig = initialize({ env: process.env.ENV });
+
+const sdkConfig = initialize({ env: process.env.ENV as DriftEnv });
 
 const stateCommitment: Commitment = 'confirmed';
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
@@ -90,28 +91,51 @@ JitMakerBot enabled: ${!!opts.jitMaker},\n\
 PnlSettler enabled: ${!!opts.pnlSettler},\n\
 `);
 
-export function getWallet(): Wallet {
+export function getWallet(): Wallet | null {
 	const privateKey = process.env.KEEPER_PRIVATE_KEY;
 	if (!privateKey) {
 		throw new Error(
-			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
+			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers (with or without being enclosed by [])'
 		);
 	}
 	// try to load privateKey as a filepath
-	let loadedKey: Uint8Array;
-	if (fs.existsSync(privateKey)) {
-		logger.info(`loading private key from ${privateKey}`);
-		loadedKey = new Uint8Array(
-			JSON.parse(fs.readFileSync(privateKey).toString())
+	let keypair: Keypair;
+	try {
+		try {
+			keypair = Keypair.fromSecretKey(bs58.decode(privateKey));
+		} catch (error) {
+			if (fs.existsSync(privateKey)) {
+				logger.info(`loading private key from ${privateKey}`);
+				keypair = Keypair.fromSecretKey(
+					Uint8Array.from(
+						new Uint8Array(JSON.parse(fs.readFileSync(privateKey).toString()))
+					)
+				);
+			} else {
+				if (privateKey.startsWith('[') && privateKey.endsWith(']')) {
+					logger.info(
+						`loading private key as array of comma seperated numbers`
+					);
+					keypair = Keypair.fromSecretKey(
+						Uint8Array.from(JSON.parse(privateKey))
+					);
+				} else {
+					logger.info(`loading private key as comma separated numbers`);
+					keypair = Keypair.fromSecretKey(
+						Uint8Array.from(
+							Uint8Array.from(privateKey.split(',').map((val) => Number(val)))
+						)
+					);
+				}
+			}
+		}
+	} catch (error) {
+		console.error(
+			'Failed to parse private key from Uint8Array (solana-keygen) and base58 encoded string (phantom wallet export)'
 		);
-	} else {
-		logger.info(`loading private key as comma separated numbers`);
-		loadedKey = Uint8Array.from(
-			privateKey.split(',').map((val) => Number(val))
-		);
+		return null;
 	}
 
-	const keypair = Keypair.fromSecretKey(Uint8Array.from(loadedKey));
 	return new Wallet(keypair);
 }
 
@@ -212,6 +236,12 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 const bots: Bot[] = [];
 const runBot = async () => {
 	const wallet = getWallet();
+	if (wallet === null) {
+		console.error(
+			'Failed to load wallet. Please check your `.env` file. https://docs.drift.trade/keeper-bots#wtT1U'
+		);
+		process.exit();
+	}
 	const clearingHousePublicKey = new PublicKey(
 		sdkConfig.CLEARING_HOUSE_PROGRAM_ID
 	);
