@@ -250,12 +250,12 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 const bots: Bot[] = [];
 
 /**
- *
- * @param connection
- * @param mintToken
- * @param recipientTokenAddress
- * @param wallet
- * @returns
+ * Airdrops Devnet USDC to the bot wallet
+ * @param connection Solana Connection
+ * @param mintToken the USDC SPL Token
+ * @param recipientTokenAddress the reciepient's token address
+ * @param wallet the tx payer
+ * @returns confirmed transaction or error
  */
 const airdrop = async (
 	connection: Connection,
@@ -271,9 +271,6 @@ const airdrop = async (
 	);
 
 	try {
-		// const getPDA = () => PublicKey.findProgramAddress([Buffer.from("faucet")], faucetProgramId);
-		// const pubkeyNonce = await getPDA();
-
 		const keys = [
 			{
 				pubkey: new PublicKey('A5TtJFy3PgCSg9MdBHLCHtewa7Sx613heaJ5atjNZCtJ'),
@@ -290,17 +287,18 @@ const airdrop = async (
 			{ pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
 		] as Array<AccountMeta>;
 
-		// const amountU64 : u64 = new u64((amount * (10 ** (await mintToken.getMintInfo()).decimals)));
 		const txIX = new TransactionInstruction({
 			programId: faucetProgramId,
-			data: Buffer.from(bs58.decode('AMbA5aEcoknsMEMSzSjYH5')),
-			// data: Buffer.from([1, ...amountU64.toArray("le", 8)]),
+			data: Buffer.from(bs58.decode('AMbA5aEcoknsMEMSzSjYH5')), // taken from successful airdrop tx data
 			keys,
 		});
+
 		const tx = new Transaction().add(txIX);
+
 		tx.recentBlockhash = (
 			await connection.getRecentBlockhash('processed')
 		).blockhash;
+
 		tx.sign(wallet.payer);
 		const signature = await connection.sendRawTransaction(tx.serialize(), {
 			skipPreflight: true,
