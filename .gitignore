@@ -140,3 +140,5 @@ src/**.js.map
 
 .env
 lib
+
+my-keypair.json
