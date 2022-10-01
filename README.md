@@ -35,14 +35,22 @@ Downloads the required libraries to be able to build the bot
 yarn build
 ```
   
-Builds the bot, this will need to be run if you make changes to the source
+Builds the bot  
+
+```shell
+yarn dev:<bot> --option
+```
+
+Runs the bot from source  
+
+
 
 ## Initialize User
 
 A `ClearingHouseUser` must be created before interacting with the `ClearingHouse` program.
 
 ```shell
-yarn run dev --init-user
+yarn dev --init-user
 ```
 
 ## Airdrop Devnet USDC
