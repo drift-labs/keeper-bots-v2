@@ -11,6 +11,6 @@ export const logger = createLogger({
 	),
 });
 
-export const setLogLevel = (logLevel: string) => {
+export const setLogLevel = (logLevel: string): void => {
 	logger.level = logLevel;
 };

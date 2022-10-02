@@ -529,7 +529,7 @@ export class Metrics {
 		);
 	}
 
-	async init() {
+	async init(): Promise<void> {
 		this.runPeriodicTasks();
 		const intervalId = setInterval(this.runPeriodicTasks.bind(this), 5000);
 		this.intervalIds.push(intervalId);
@@ -542,7 +542,7 @@ export class Metrics {
 		this.intervalIds = [];
 	}
 
-	recordErrorCode(errorCode: number, authority: PublicKey, bot: string) {
+	recordErrorCode(errorCode: number, authority: PublicKey, bot: string): void {
 		this.errorsCounter.add(1, {
 			errorCode: errorCode,
 			user: authority.toBase58(),
@@ -550,27 +550,27 @@ export class Metrics {
 		});
 	}
 
-	recordFilledOrder(authority: PublicKey, bot: string, count = 1) {
+	recordFilledOrder(authority: PublicKey, bot: string, count = 1): void {
 		this.filledOrdersCounter.add(count, {
 			user: authority.toBase58(),
 			bot: bot,
 		});
 	}
 
-	recordSettlePnl(numSettled: number, marketIndex: number, bot: string) {
+	recordSettlePnl(numSettled: number, marketIndex: number, bot: string): void {
 		this.settlePnlCounter.add(numSettled, {
 			market: marketIndex,
 			bot: bot,
 		});
 	}
 
-	recordMutexBusy(bot: string) {
+	recordMutexBusy(bot: string): void {
 		this.mutexBusyCounter.add(1, {
 			bot: bot,
 		});
 	}
 
-	recordRpcRequests(method: string, bot: string) {
+	recordRpcRequests(method: string, bot: string): void {
 		this.rpcRequestsCounter.add(1, {
 			method: method,
 			bot: bot,
@@ -583,7 +583,7 @@ export class Metrics {
 		duration: number,
 		timeout: boolean,
 		bot: string
-	) {
+	): void {
 		this.rpcRequestsDurationHistogram.record(duration, {
 			endpoint: endpoint,
 			method: method,
@@ -596,7 +596,7 @@ export class Metrics {
 		liquidator: PublicKey,
 		liquidatee: PublicKey,
 		bot: string
-	) {
+	): void {
 		this.perpLiquidationsCounter.add(1, {
 			liquidator: liquidator.toBase58(),
 			liquidatee: liquidatee.toBase58(),
@@ -604,7 +604,7 @@ export class Metrics {
 		});
 	}
 
-	recordLiquidationEvent(event: LiquidationRecord, bot: string) {
+	recordLiquidationEvent(event: LiquidationRecord, bot: string): void {
 		let liquidationType: string;
 		let liquidatedMarketIndex: number | undefined;
 		let liquidatedAssetBankIndex: number | undefined;
@@ -643,7 +643,7 @@ export class Metrics {
 		marketIndex: number,
 		marketType: MarketType,
 		fillableOrders: number
-	) {
+	): Promise<void> {
 		await this.fillableOrdersSeenLock.runExclusive(async () => {
 			if (isVariant(marketType, 'perp')) {
 				this.fillablePerpOrdersSeenByMarket.set(marketIndex, fillableOrders);
@@ -653,7 +653,8 @@ export class Metrics {
 		});
 	}
 
-	async trackObjectSize(name: string, object: any) {
+	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
+	async trackObjectSize(name: string, object: any): Promise<void> {
 		await this.objectsToTrackSizeLock.runExclusive(async () => {
 			this.objectsToTrackSize.set(name, object);
 		});
@@ -665,7 +666,7 @@ export class Metrics {
 	 * Periodically update metrics, so that when metric collections are initiated
 	 * they are available immediately.
 	 */
-	async runPeriodicTasks() {
+	async runPeriodicTasks(): Promise<void> {
 		const chUser = this.clearingHouse.getUser();
 
 		// this.collateralValueLock.runExclusive(async () => {

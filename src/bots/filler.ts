@@ -83,7 +83,7 @@ export class FillerBot implements Bot {
 		this.driftEnv = env;
 	}
 
-	public async init() {
+	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
 
 		const initPromises: Array<Promise<any>> = [];
@@ -105,9 +105,9 @@ export class FillerBot implements Bot {
 		await Promise.all(initPromises);
 	}
 
-	public async reset() {}
+	public async reset(): Promise<void> {}
 
-	public async startIntervalLoop(intervalMs: number) {
+	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		// await this.tryFill();
 		const intervalId = setInterval(this.tryFill.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
