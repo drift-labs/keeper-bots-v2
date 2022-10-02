@@ -128,12 +128,7 @@ export class PerpLiquidatorBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(
-		record:
-			| (OrderRecord & { eventType: string })
-			| (NewUserRecord & { eventType: string })
-			| (LiquidationRecord & { eventType: string })
-	): Promise<void> {
+	public async trigger(record: any & { eventType: string }): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
 			await this.userMap.updateWithOrderRecord(record as OrderRecord);
 		} else if (record.eventType === 'NewUserRecord') {

@@ -84,7 +84,7 @@ export class FloatingPerpMakerBot implements Bot {
 		this.metrics = metrics;
 	}
 
-	public async init() {
+	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
 		this.agentState = {
 			marketPosition: new Map<number, PerpPosition>(),
@@ -93,14 +93,14 @@ export class FloatingPerpMakerBot implements Bot {
 		this.updateAgentState();
 	}
 
-	public async reset() {
+	public async reset(): Promise<void> {
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId);
 		}
 		this.intervalIds = [];
 	}
 
-	public async startIntervalLoop(intervalMs: number) {
+	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		await this.updateOpenOrders();
 		const intervalId = setInterval(
 			this.updateOpenOrders.bind(this),
@@ -120,7 +120,7 @@ export class FloatingPerpMakerBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(_record: any): Promise<void> {}
+	public async trigger(_record: any & { eventType: string }): Promise<void> {}
 
 	public viewDlob(): undefined {
 		return undefined;

@@ -32,16 +32,16 @@ yarn
 Downloads the required libraries to be able to build the bot
 
 ```shell
-yarn build
-```
-  
-Builds the bot  
-
-```shell
 yarn dev:<bot> --option
 ```
 
 Runs the bot from source  
+
+```shell
+yarn build
+```
+  
+Builds the bot  
 
 
 
@@ -83,7 +83,7 @@ yarn dev:filler
 ## Run Trigger Bot
 ```shell
 
-yarn dev:filler
+yarn dev:trigger
 ```
 
 ## Run JIT Maker Bot

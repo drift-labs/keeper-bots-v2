@@ -62,7 +62,7 @@ export class PnlSettlerBot implements Bot {
 		this.metrics = metrics;
 	}
 
-	public async init() {
+	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
 		// initialize userMap instance
 		this.userMap = new UserMap(
@@ -72,7 +72,7 @@ export class PnlSettlerBot implements Bot {
 		await this.userMap.fetchAllUsers();
 	}
 
-	public async reset() {
+	public async reset(): Promise<void> {
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId);
 		}
@@ -96,7 +96,7 @@ export class PnlSettlerBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(record: any): Promise<void> {
+	public async trigger(record: any & { eventType: string }): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
 			await this.userMap.updateWithOrderRecord(record as OrderRecord);
 		} else if (record.eventType === 'NewUserRecord') {

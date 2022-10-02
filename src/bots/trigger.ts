@@ -54,7 +54,7 @@ export class TriggerBot implements Bot {
 		this.metrics = metrics;
 	}
 
-	public async init() {
+	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
 		// initialize userMap instance
 		this.userMap = new UserMap(
@@ -64,7 +64,7 @@ export class TriggerBot implements Bot {
 		await this.userMap.fetchAllUsers();
 	}
 
-	public async reset() {}
+	public async reset(): Promise<void> {}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		this.tryTrigger();
@@ -83,7 +83,7 @@ export class TriggerBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(record: any): Promise<void> {
+	public async trigger(record: any & { eventType: string }): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
 			await this.userMap.updateWithOrderRecord(record as OrderRecord);
 			this.tryTrigger();

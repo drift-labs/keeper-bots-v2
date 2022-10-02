@@ -124,7 +124,7 @@ export class FillerBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(record: any) {
+	public async trigger(record: any & { eventType: string }): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
 			await this.userMap.updateWithOrderRecord(record as OrderRecord);
 			await this.userStatsMap.updateWithOrderRecord(

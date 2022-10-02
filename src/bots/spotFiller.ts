@@ -80,7 +80,7 @@ export class SpotFillerBot implements Bot {
 		this.driftEnv = env;
 	}
 
-	public async init() {
+	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
 
 		const initPromises: Array<Promise<any>> = [];
@@ -102,9 +102,9 @@ export class SpotFillerBot implements Bot {
 		await Promise.all(initPromises);
 	}
 
-	public async reset() {}
+	public async reset(): Promise<void> {}
 
-	public async startIntervalLoop(intervalMs: number) {
+	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		// await this.tryFill();
 		const intervalId = setInterval(this.trySpotFill.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
@@ -121,7 +121,7 @@ export class SpotFillerBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(record: any) {
+	public async trigger(record: any & { eventType: string }): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
 			await this.userMap.updateWithOrderRecord(record as OrderRecord);
 			await this.userStatsMap.updateWithOrderRecord(
