@@ -204,14 +204,16 @@ export class SpotFillerBot implements Bot {
 	}> {
 		let makerInfo: MakerInfo | undefined;
 		if (nodeToFill.makerNode) {
-			const makerAuthority = (
+			const makerUserAccount = (
 				await this.userMap.mustGet(nodeToFill.makerNode.userAccount.toString())
-			).getUserAccount().authority;
+			).getUserAccount();
+			const makerAuthority = makerUserAccount.authority;
 			const makerUserStats = (
 				await this.userStatsMap.mustGet(makerAuthority.toString())
 			).userStatsAccountPublicKey;
 			makerInfo = {
 				maker: nodeToFill.makerNode.userAccount,
+				makerUserAccount: makerUserAccount,
 				order: nodeToFill.makerNode.order,
 				makerStats: makerUserStats,
 			};
@@ -258,7 +260,9 @@ export class SpotFillerBot implements Bot {
 		this.throttleNode(nodeSignature);
 
 		logger.info(
-			`filling spot node: ${nodeToFill.node.userAccount.toString()}, ${nodeToFill.node.order.orderId.toNumber()}`
+			`filling spot node: ${nodeToFill.node.userAccount.toString()}, ${
+				nodeToFill.node.order.orderId
+			}`
 		);
 
 		const { makerInfo, chUser, referrerInfo, marketType } =

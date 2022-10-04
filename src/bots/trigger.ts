@@ -194,7 +194,7 @@ export class TriggerBot implements Bot {
 					nodeToTrigger.node.userAccount.toString()
 				);
 				this.clearingHouse
-					.triggerSpotOrder(
+					.triggerOrder(
 						nodeToTrigger.node.userAccount,
 						user.getUserAccount(),
 						nodeToTrigger.node.order

@@ -615,8 +615,8 @@ export class Metrics {
 			liquidatedMarketIndex = event.liquidatePerp.marketIndex;
 		} else if (isVariant(event.liquidationType, 'liquidateBorrow')) {
 			liquidationType = 'liquidateBorrow';
-			liquidatedAssetBankIndex = event.liquidateBorrow.assetMarketIndex;
-			liquidatedLiabilityIndex = event.liquidateBorrow.liabilityMarketIndex;
+			liquidatedAssetBankIndex = event.liquidateSpot.assetMarketIndex;
+			liquidatedLiabilityIndex = event.liquidateSpot.liabilityMarketIndex;
 		} else if (isVariant(event.liquidationType, 'liquidateBorrowForPerpPnl')) {
 			liquidationType = 'liquidateBorrowForPerpPnl';
 			liquidatedMarketIndex = event.liquidateBorrowForPerpPnl.perpMarketIndex;
