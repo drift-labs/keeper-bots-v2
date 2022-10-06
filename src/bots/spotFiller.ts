@@ -320,7 +320,10 @@ export class SpotFillerBot implements Bot {
 		await tryAcquire(this.periodicTaskMutex)
 			.runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
-					delete this.dlob;
+					if (this.dlob) {
+						this.dlob.clear();
+						delete this.dlob;
+					}
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(), // TODO: new sdk - remove this
 						this.clearingHouse.getSpotMarketAccounts(),
