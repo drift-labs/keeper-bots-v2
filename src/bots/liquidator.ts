@@ -7,7 +7,7 @@ import {
 	OrderRecord,
 	LiquidationRecord,
 	BASE_PRECISION,
-	MARK_PRICE_PRECISION,
+	PRICE_PRECISION,
 	QUOTE_PRECISION,
 	NewUserRecord,
 	PerpPosition,
@@ -198,7 +198,7 @@ export class PerpLiquidatorBot implements Bot {
 		).price;
 		const collateralToSpend = liquidatorUser
 			.getFreeCollateral()
-			.mul(MARK_PRICE_PRECISION)
+			.mul(PRICE_PRECISION)
 			.mul(this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL)
 			.mul(BASE_PRECISION);
 		const baseAssetAmountToLiquidate = collateralToSpend.div(

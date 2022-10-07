@@ -26,7 +26,7 @@ type SettlePnlIxParams = {
 		settleeUserAccountPublicKey: PublicKey;
 		settleeUserAccount: UserAccount;
 	}[];
-	marketIndex: BN;
+	marketIndex: number;
 };
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
@@ -124,7 +124,7 @@ export class PnlSettlerBot implements Bot {
 			} = {};
 
 			this.perpMarkets.forEach((market) => {
-				perpMarketAndOracleData[market.marketIndex.toNumber()] = {
+				perpMarketAndOracleData[market.marketIndex] = {
 					marketAccount: this.clearingHouse.getPerpMarketAccount(
 						market.marketIndex
 					),
@@ -134,7 +134,7 @@ export class PnlSettlerBot implements Bot {
 				};
 			});
 			this.spotMarkets.forEach((market) => {
-				spotMarketAndOracleData[market.marketIndex.toNumber()] = {
+				spotMarketAndOracleData[market.marketIndex] = {
 					marketAccount: this.clearingHouse.getSpotMarketAccount(
 						market.marketIndex
 					),
@@ -150,7 +150,7 @@ export class PnlSettlerBot implements Bot {
 				const userAccount = user.getUserAccount();
 
 				for (const settleePosition of userAccount.perpPositions) {
-					const marketIndexNum = settleePosition.marketIndex.toNumber();
+					const marketIndexNum = settleePosition.marketIndex;
 					const unsettledPnl = calculateClaimablePnl(
 						perpMarketAndOracleData[marketIndexNum].marketAccount,
 						spotMarketAndOracleData[marketIndexNum].marketAccount,
@@ -165,11 +165,11 @@ export class PnlSettlerBot implements Bot {
 						};
 						if (
 							usersToSettle
-								.map((item) => item.marketIndex.toNumber())
+								.map((item) => item.marketIndex)
 								.includes(marketIndexNum)
 						) {
 							usersToSettle
-								.find((item) => item.marketIndex.toNumber() == marketIndexNum)
+								.find((item) => item.marketIndex == marketIndexNum)
 								.users.push(userData);
 						} else {
 							usersToSettle.push({
@@ -182,8 +182,8 @@ export class PnlSettlerBot implements Bot {
 			}
 
 			usersToSettle.forEach((params) => {
-				const marketStr = this.perpMarkets.find((mkt) =>
-					mkt.marketIndex.eq(params.marketIndex)
+				const marketStr = this.perpMarkets.find(
+					(mkt) => mkt.marketIndex === params.marketIndex
 				).symbol;
 
 				logger.info(
@@ -204,7 +204,7 @@ export class PnlSettlerBot implements Bot {
 							);
 							this.metrics?.recordSettlePnl(
 								usersChunk.length,
-								params.marketIndex.toNumber(),
+								params.marketIndex,
 								this.name
 							);
 						})

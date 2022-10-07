@@ -10,7 +10,7 @@ import {
 	OrderType,
 	BASE_PRECISION,
 	convertToNumber,
-	MARK_PRICE_PRECISION,
+	PRICE_PRECISION,
 	Order,
 	PerpPosition,
 	PerpMarkets,
@@ -143,7 +143,7 @@ export class FloatingPerpMakerBot implements Bot {
 			if (p.baseAssetAmount.isZero()) {
 				return;
 			}
-			this.agentState.marketPosition.set(p.marketIndex.toNumber(), p);
+			this.agentState.marketPosition.set(p.marketIndex, p);
 		});
 
 		// zeor out the open orders
@@ -155,7 +155,7 @@ export class FloatingPerpMakerBot implements Bot {
 			if (isVariant(o.status, 'init')) {
 				return;
 			}
-			const marketIndex = o.marketIndex.toNumber();
+			const marketIndex = o.marketIndex;
 			this.agentState.openOrders.set(marketIndex, [
 				...this.agentState.openOrders.get(marketIndex),
 				o,
@@ -167,14 +167,14 @@ export class FloatingPerpMakerBot implements Bot {
 		const currSlot = this.slotSubscriber.currentSlot;
 		const marketIndex = marketAccount.marketIndex;
 		const nextUpdateSlot =
-			this.lastSlotMarketUpdated.get(marketIndex.toNumber()) +
+			this.lastSlotMarketUpdated.get(marketIndex) +
 			MARKET_UPDATE_COOLDOWN_SLOTS;
 
 		if (nextUpdateSlot > currSlot) {
 			return;
 		}
 
-		const openOrders = this.agentState.openOrders.get(marketIndex.toNumber());
+		const openOrders = this.agentState.openOrders.get(marketIndex);
 		const oracle = this.clearingHouse.getOracleDataForMarket(marketIndex);
 		const vAsk = calculateAskPrice(marketAccount, oracle);
 		const vBid = calculateBidPrice(marketAccount, oracle);
@@ -192,27 +192,20 @@ export class FloatingPerpMakerBot implements Bot {
 			);
 			console.log(` .        qaa: ${o.quoteAssetAmount}`);
 			console.log(
-				` .        price:       ${convertToNumber(
-					o.price,
-					MARK_PRICE_PRECISION
-				)}`
+				` .        price:       ${convertToNumber(o.price, PRICE_PRECISION)}`
 			);
 			console.log(
 				` .        priceOffset: ${convertToNumber(
 					o.oraclePriceOffset,
-					MARK_PRICE_PRECISION
+					PRICE_PRECISION
 				)}`
 			);
-			console.log(
-				` .        vBid: ${convertToNumber(vBid, MARK_PRICE_PRECISION)}`
-			);
-			console.log(
-				` .        vAsk: ${convertToNumber(vAsk, MARK_PRICE_PRECISION)}`
-			);
+			console.log(` .        vBid: ${convertToNumber(vBid, PRICE_PRECISION)}`);
+			console.log(` .        vAsk: ${convertToNumber(vAsk, PRICE_PRECISION)}`);
 			console.log(
 				` .        oraclePrice: ${convertToNumber(
 					oracle.price,
-					MARK_PRICE_PRECISION
+					PRICE_PRECISION
 				)}`
 			);
 			console.log(` .        oracleSlot:  ${oracle.slot.toString()}`);
@@ -224,7 +217,7 @@ export class FloatingPerpMakerBot implements Bot {
 
 		if (
 			(openOrders.length > 0 && openOrders.length != 2) ||
-			marketIndex.eq(new BN(0))
+			marketIndex === 0
 		) {
 			// cancel orders
 			for (const o of openOrders) {
@@ -264,7 +257,7 @@ export class FloatingPerpMakerBot implements Bot {
 		}
 
 		// enforce cooldown on market
-		this.lastSlotMarketUpdated.set(marketIndex.toNumber(), currSlot);
+		this.lastSlotMarketUpdated.set(marketIndex, currSlot);
 	}
 
 	private async updateOpenOrders() {

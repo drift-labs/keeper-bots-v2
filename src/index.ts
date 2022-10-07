@@ -32,6 +32,7 @@ import { Mutex } from 'async-mutex';
 import { logger, setLogLevel } from './logger';
 import { constants } from './types';
 import { FillerBot } from './bots/filler';
+import { SpotFillerBot } from './bots/spotFiller';
 import { TriggerBot } from './bots/trigger';
 import { JitMakerBot } from './bots/jitMaker';
 import { PerpLiquidatorBot } from './bots/liquidator';
@@ -55,6 +56,7 @@ program
 		'calls clearingHouse.initializeUserAccount if no user account exists'
 	)
 	.option('--filler', 'Enable filler bot')
+	.option('--spot-filler', 'Enable spot filler bot')
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
 	.option('--floating-maker', 'Enable floating maker bot')
@@ -80,9 +82,13 @@ program
 const opts = program.opts();
 setLogLevel(opts.debug ? 'debug' : 'info');
 
-logger.info(
-	`Dry run: ${!!opts.dry}, FillerBot enabled: ${!!opts.filler}, TriggerBot enabled: ${!!opts.trigger} JitMakerBot enabled: ${!!opts.jitMaker} PnlSettler enabled: ${!!opts.pnlSettler}`
-);
+logger.info(`Dry run: ${!!opts.dry},\n\
+FillerBot enabled: ${!!opts.filler},\n\
+SpotFillerBot enabled: ${!!opts.spotFiller},\n\
+TriggerBot enabled: ${!!opts.trigger},\n\
+JitMakerBot enabled: ${!!opts.jitMaker},\n\
+PnlSettler enabled: ${!!opts.pnlSettler},\n\
+`);
 
 export function getWallet(): Wallet {
 	const privateKey = process.env.KEEPER_PRIVATE_KEY;
@@ -145,7 +151,7 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 		if (p.baseAssetAmount.isZero()) {
 			continue;
 		}
-		const market = PerpMarkets[driftEnv][p.marketIndex.toNumber()];
+		const market = PerpMarkets[driftEnv][p.marketIndex];
 		console.log(`[${market.symbol}]`);
 		console.log(
 			` . baseAssetAmount:  ${convertToNumber(
@@ -185,7 +191,7 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 		if (p.balance.isZero()) {
 			continue;
 		}
-		const market = PerpMarkets[driftEnv][p.marketIndex.toNumber()];
+		const market = SpotMarkets[driftEnv][p.marketIndex];
 		console.log(`[${market.symbol}]`);
 		console.log(
 			` . baseAssetAmount:  ${convertToNumber(
@@ -327,10 +333,10 @@ const runBot = async () => {
 		let closedPerps = 0;
 		for await (const p of clearingHouseUser.getUserAccount().perpPositions) {
 			if (p.baseAssetAmount.isZero()) {
-				logger.info(`no position on market: ${p.marketIndex.toNumber()}`);
+				logger.info(`no position on market: ${p.marketIndex}`);
 				continue;
 			}
-			logger.info(`closing position on ${p.marketIndex.toNumber()}`);
+			logger.info(`closing position on ${p.marketIndex}`);
 			logger.info(` . ${await clearingHouse.closePosition(p.marketIndex)}`);
 			closedPerps++;
 		}
@@ -339,10 +345,10 @@ const runBot = async () => {
 		let closedSpots = 0;
 		for await (const p of clearingHouseUser.getUserAccount().spotPositions) {
 			if (p.balance.isZero()) {
-				logger.info(`no position on market: ${p.marketIndex.toNumber()}`);
+				logger.info(`no position on market: ${p.marketIndex}`);
 				continue;
 			}
-			logger.info(`closing position on ${p.marketIndex.toNumber()}`);
+			logger.info(`closing position on ${p.marketIndex}`);
 			logger.info(` . ${await clearingHouse.closePosition(p.marketIndex)}`);
 			closedSpots++;
 		}
@@ -377,7 +383,7 @@ const runBot = async () => {
 
 		const tx = await clearingHouse.deposit(
 			new BN(opts.forceDeposit).mul(QUOTE_PRECISION),
-			new BN(0), // USDC bank
+			0, // USDC bank
 			ata
 		);
 		logger.info(`Deposit transaction: ${tx}`);
@@ -388,7 +394,7 @@ const runBot = async () => {
 	// print user orders
 	logger.info('');
 	logger.info('Open orders:');
-	const ordersToCancel: Array<BN> = [];
+	const ordersToCancel: Array<number> = [];
 	for (const order of clearingHouseUser.getUserAccount().orders) {
 		if (order.baseAssetAmount.isZero()) {
 			continue;
@@ -416,6 +422,19 @@ const runBot = async () => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
+				driftEnv,
+				metrics
+			)
+		);
+	}
+	if (opts.spotFiller) {
+		bots.push(
+			new SpotFillerBot(
+				'spotFiller',
+				!!opts.dry,
+				clearingHouse,
+				slotSubscriber,
+				driftEnv,
 				metrics
 			)
 		);

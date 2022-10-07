@@ -27,6 +27,7 @@ import {
 	PerpPosition,
 	LiquidationRecord,
 	isVariant,
+	MarketType,
 } from '@drift-labs/sdk';
 
 import { Mutex } from 'async-mutex';
@@ -78,7 +79,8 @@ export class Metrics {
 	private chUserMaintenanceMarginRequirementGauge: ObservableGauge;
 
 	private fillableOrdersSeenLock = new Mutex();
-	private fillableOrdersSeenByMarket = new Map<number, number>();
+	private fillablePerpOrdersSeenByMarket = new Map<number, number>();
+	private fillableSpotOrdersSeenByMarket = new Map<number, number>();
 	private fillableOrdersSeentGauge: ObservableGauge;
 
 	private errorsCounter: Counter;
@@ -307,7 +309,7 @@ export class Metrics {
 						// );
 						observableResult.observe(
 							this.openPositionOpenOrdersAmountGauge,
-							p.openOrders.toNumber(),
+							p.openOrders,
 							{
 								marketIndex: i,
 								marketSymbol: PerpMarkets[driftEnv][i].symbol,
@@ -509,9 +511,17 @@ export class Metrics {
 			async (observableResult: ObservableResult) => {
 				await this.fillableOrdersSeenLock.runExclusive(async () => {
 					for (const [marketIndex, fillableOrders] of this
-						.fillableOrdersSeenByMarket) {
+						.fillablePerpOrdersSeenByMarket) {
 						observableResult.observe(fillableOrders, {
 							market: marketIndex,
+							marketType: 'perp',
+						});
+					}
+					for (const [marketIndex, fillableOrders] of this
+						.fillableSpotOrdersSeenByMarket) {
+						observableResult.observe(fillableOrders, {
+							market: marketIndex,
+							marketType: 'spot',
 						});
 					}
 				});
@@ -602,25 +612,21 @@ export class Metrics {
 
 		if (isVariant(event.liquidationType, 'liquidatePerp')) {
 			liquidationType = 'liquidatePerp';
-			liquidatedMarketIndex = event.liquidatePerp.marketIndex.toNumber();
+			liquidatedMarketIndex = event.liquidatePerp.marketIndex;
 		} else if (isVariant(event.liquidationType, 'liquidateBorrow')) {
 			liquidationType = 'liquidateBorrow';
-			liquidatedAssetBankIndex =
-				event.liquidateBorrow.assetMarketIndex.toNumber();
-			liquidatedLiabilityIndex =
-				event.liquidateBorrow.liabilityMarketIndex.toNumber();
+			liquidatedAssetBankIndex = event.liquidateSpot.assetMarketIndex;
+			liquidatedLiabilityIndex = event.liquidateSpot.liabilityMarketIndex;
 		} else if (isVariant(event.liquidationType, 'liquidateBorrowForPerpPnl')) {
 			liquidationType = 'liquidateBorrowForPerpPnl';
-			liquidatedMarketIndex =
-				event.liquidateBorrowForPerpPnl.perpMarketIndex.toNumber();
+			liquidatedMarketIndex = event.liquidateBorrowForPerpPnl.perpMarketIndex;
 			liquidatedLiabilityIndex =
-				event.liquidateBorrowForPerpPnl.liabilityMarketIndex.toNumber();
+				event.liquidateBorrowForPerpPnl.liabilityMarketIndex;
 		} else if (isVariant(event.liquidationType, 'liquidatePerpPnlForDeposit')) {
 			liquidationType = 'liquidatePerpPnlForDeposit';
-			liquidatedMarketIndex =
-				event.liquidatePerpPnlForDeposit.perpMarketIndex.toNumber();
+			liquidatedMarketIndex = event.liquidatePerpPnlForDeposit.perpMarketIndex;
 			liquidatedAssetBankIndex =
-				event.liquidatePerpPnlForDeposit.assetMarketIndex.toNumber();
+				event.liquidatePerpPnlForDeposit.assetMarketIndex;
 		}
 
 		this.liquidationEventsCounter.add(1, {
@@ -633,9 +639,17 @@ export class Metrics {
 		});
 	}
 
-	async recordFillableOrdersSeen(marketIndex: number, fillableOrders: number) {
+	async recordFillableOrdersSeen(
+		marketIndex: number,
+		marketType: MarketType,
+		fillableOrders: number
+	) {
 		await this.fillableOrdersSeenLock.runExclusive(async () => {
-			this.fillableOrdersSeenByMarket.set(marketIndex, fillableOrders);
+			if (isVariant(marketType, 'perp')) {
+				this.fillablePerpOrdersSeenByMarket.set(marketIndex, fillableOrders);
+			} else if (isVariant(marketType, 'spot')) {
+				this.fillableSpotOrdersSeenByMarket.set(marketIndex, fillableOrders);
+			}
 		});
 	}
 
@@ -693,9 +707,9 @@ export class Metrics {
 			for (let i = 0; i < PerpMarkets[driftEnv].length; i++) {
 				let foundPositionInMarket = false;
 				chUser.getUserAccount().perpPositions.forEach((p: PerpPosition) => {
-					if (!foundPositionInMarket && p.marketIndex.toNumber() === i) {
+					if (!foundPositionInMarket && p.marketIndex === i) {
 						foundPositionInMarket = true;
-						this.openPositionPerMarket[p.marketIndex.toNumber()] = p;
+						this.openPositionPerMarket[p.marketIndex] = p;
 					}
 				});
 

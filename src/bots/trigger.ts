@@ -113,7 +113,6 @@ export class TriggerBot implements Bot {
 				);
 			});
 
-			console.log(`nodes to trig: ${nodesToTrigger.length}`);
 			for (const nodeToTrigger of nodesToTrigger) {
 				if (nodeToTrigger.node.haveTrigger) {
 					continue;
@@ -195,7 +194,7 @@ export class TriggerBot implements Bot {
 					nodeToTrigger.node.userAccount.toString()
 				);
 				this.clearingHouse
-					.triggerSpotOrder(
+					.triggerOrder(
 						nodeToTrigger.node.userAccount,
 						user.getUserAccount(),
 						nodeToTrigger.node.order
@@ -235,6 +234,10 @@ export class TriggerBot implements Bot {
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
+					if (this.dlob) {
+						this.dlob.clear();
+						delete this.dlob;
+					}
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),
 						this.clearingHouse.getSpotMarketAccounts(),
