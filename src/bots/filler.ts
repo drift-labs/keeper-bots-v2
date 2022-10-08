@@ -234,14 +234,16 @@ export class FillerBot implements Bot {
 	}> {
 		let makerInfo: MakerInfo | undefined;
 		if (nodeToFill.makerNode) {
-			const makerAuthority = (
+			const makerUserAccount = (
 				await this.userMap.mustGet(nodeToFill.makerNode.userAccount.toString())
-			).getUserAccount().authority;
+			).getUserAccount();
+			const makerAuthority = makerUserAccount.authority;
 			const makerUserStats = (
 				await this.userStatsMap.mustGet(makerAuthority.toString())
 			).userStatsAccountPublicKey;
 			makerInfo = {
 				maker: nodeToFill.makerNode.userAccount,
+				makerUserAccount: makerUserAccount,
 				order: nodeToFill.makerNode.order,
 				makerStats: makerUserStats,
 			};
@@ -349,13 +351,17 @@ export class FillerBot implements Bot {
 					const filledNode = nodesFilled[ixIdx];
 					logger.error(` ${log}, ix: ${ixIdx}`);
 					logger.error(
-						`   assoc order: ${filledNode.node.userAccount.toString()}, ${filledNode.node.order.orderId.toNumber()}`
+						`   assoc order: ${filledNode.node.userAccount.toString()}, ${
+							filledNode.node.order.orderId
+						}`
 					);
 				} else if (log.includes('Amm cant fulfill order')) {
 					const filledNode = nodesFilled[ixIdx];
 					logger.error(` ${log}, ix: ${ixIdx}`);
 					logger.error(
-						`  assoc order: ${filledNode.node.userAccount.toString()}, ${filledNode.node.order.orderId.toNumber()}`
+						`  assoc order: ${filledNode.node.userAccount.toString()}, ${
+							filledNode.node.order.orderId
+						}`
 					);
 					this.throttledNodes.set(
 						this.getNodeToFillSignature(filledNode),
@@ -435,7 +441,9 @@ export class FillerBot implements Bot {
 		let idxUsed = 0;
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			logger.info(
-				`filling perp node ${idx}: ${nodeToFill.node.userAccount.toString()}, ${nodeToFill.node.order.orderId.toNumber()}`
+				`filling perp node ${idx}: ${nodeToFill.node.userAccount.toString()}, ${
+					nodeToFill.node.order.orderId
+				}`
 			);
 
 			const { makerInfo, chUser, referrerInfo, marketType } =
@@ -569,7 +577,10 @@ export class FillerBot implements Bot {
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
-					delete this.dlob;
+					if (this.dlob) {
+						this.dlob.clear();
+						delete this.dlob;
+					}
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),
 						this.clearingHouse.getSpotMarketAccounts(), // TODO: new sdk - remove this

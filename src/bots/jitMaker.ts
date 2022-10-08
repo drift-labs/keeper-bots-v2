@@ -165,7 +165,10 @@ export class JitMakerBot implements Bot {
 			clearInterval(intervalId);
 		}
 		this.intervalIds = [];
-		delete this.dlob;
+		if (this.dlob) {
+			this.dlob.clear();
+			delete this.dlob;
+		}
 		delete this.userMap;
 		delete this.userStatsMap;
 	}
@@ -606,6 +609,10 @@ export class JitMakerBot implements Bot {
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
+					if (this.dlob) {
+						this.dlob.clear();
+						delete this.dlob;
+					}
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),
 						this.clearingHouse.getSpotMarketAccounts(),
