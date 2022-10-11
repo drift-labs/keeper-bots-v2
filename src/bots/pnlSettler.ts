@@ -30,6 +30,7 @@ type SettlePnlIxParams = {
 };
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
+const SETTLE_USER_CHUNKS = 2;
 
 export class PnlSettlerBot implements Bot {
 	public readonly name: string;
@@ -194,8 +195,8 @@ export class PnlSettlerBot implements Bot {
 					throw new Error('Dry run - not sending settle pnl tx');
 				}
 
-				for (let i = 0; i < params.users.length; i += 5) {
-					const usersChunk = params.users.slice(i, i + 5);
+				for (let i = 0; i < params.users.length; i += SETTLE_USER_CHUNKS) {
+					const usersChunk = params.users.slice(i, i + SETTLE_USER_CHUNKS);
 					this.clearingHouse
 						.settlePNLs(usersChunk, params.marketIndex)
 						.then((txSig) => {
