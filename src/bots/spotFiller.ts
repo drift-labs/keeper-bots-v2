@@ -14,11 +14,16 @@ import {
 	UserMap,
 	UserStatsMap,
 	MarketType,
+	initialize,
+	SerumSubscriber,
+	PollingClearingHouseAccountSubscriber,
+	SerumFulfillmentConfigMap,
+	promiseTimeout,
+	SerumV3FulfillmentConfigAccount,
 } from '@drift-labs/sdk';
-import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
-import { TransactionSignature, PublicKey } from '@solana/web3.js';
+import { PublicKey, TransactionSignature } from '@solana/web3.js';
 
 import { logger } from '../logger';
 import { Bot } from '../types';
@@ -55,6 +60,9 @@ export class SpotFillerBot implements Bot {
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
 
+	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
+	private serumSubscribers: Map<number, SerumSubscriber>;
+
 	private periodicTaskMutex = new Mutex();
 
 	private watchdogTimerMutex = new Mutex();
@@ -78,6 +86,10 @@ export class SpotFillerBot implements Bot {
 		this.slotSubscriber = slotSubscriber;
 		this.metrics = metrics;
 		this.driftEnv = env;
+		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
+			clearingHouse
+		);
+		this.serumSubscribers = new Map<number, SerumSubscriber>();
 	}
 
 	public async init() {
@@ -98,6 +110,38 @@ export class SpotFillerBot implements Bot {
 		);
 		this.metrics?.trackObjectSize('filler-userStatsMap', this.userStatsMap);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
+
+		const config = initialize({ env: this.driftEnv });
+		for (const spotMarketConfig of config.SPOT_MARKETS) {
+			if (spotMarketConfig.serumMarket) {
+				// set up fulfillment config
+				initPromises.push(
+					this.serumFulfillmentConfigMap.add(
+						spotMarketConfig.marketIndex,
+						spotMarketConfig.serumMarket
+					)
+				);
+
+				// set up serum price subscriber
+				const serumSubscriber = new SerumSubscriber({
+					connection: this.clearingHouse.connection,
+					programId: new PublicKey(config.SERUM_V3),
+					marketAddress: spotMarketConfig.serumMarket,
+					accountSubscription: {
+						type: 'polling',
+						accountLoader: (
+							this.clearingHouse
+								.accountSubscriber as PollingClearingHouseAccountSubscriber
+						).accountLoader,
+					},
+				});
+				initPromises.push(serumSubscriber.subscribe());
+				this.serumSubscribers.set(
+					spotMarketConfig.marketIndex,
+					serumSubscriber
+				);
+			}
+		}
 
 		await Promise.all(initPromises);
 	}
@@ -153,10 +197,14 @@ export class SpotFillerBot implements Bot {
 		// TODO: check oracle validity when ready
 
 		await this.dlobMutex.runExclusive(async () => {
+			const serumSubscriber = this.serumSubscribers.get(market.marketIndex);
+			const serumBestBid = serumSubscriber?.getBestBid();
+			const serumBestAsk = serumSubscriber?.getBestAsk();
+
 			nodes = this.dlob.findNodesToFill(
 				market.marketIndex,
-				undefined,
-				undefined,
+				serumBestBid,
+				serumBestAsk,
 				this.slotSubscriber.getSlot(),
 				MarketType.SPOT,
 				oraclePriceData
@@ -272,26 +320,12 @@ export class SpotFillerBot implements Bot {
 			throw new Error('expected spot market type');
 		}
 
-		// TODO: use DevnetSpotMarkets in new SDK
-		let serumMarketAddress: PublicKey;
-		if (this.driftEnv === 'mainnet-beta') {
-			throw new Error('need mainnet markets');
-		} else if (this.driftEnv === 'devnet') {
-			if (nodeToFill.node.order.marketIndex === 1) {
-				serumMarketAddress = new PublicKey(
-					'8N37SsnTu8RYxtjrV9SStjkkwVhmU8aCWhLvwduAPEKW'
-				);
-			} else if (nodeToFill.node.order.marketIndex === 2) {
-				serumMarketAddress = new PublicKey(
-					'AGsmbVu3MS9u68GEYABWosQQCZwmLcBHu4pWEuBYH7Za'
-				);
-			} else {
-				throw new Error('invalid market index');
-			}
+		let serumFulfillmentConfig: SerumV3FulfillmentConfigAccount = undefined;
+		if (makerInfo === undefined) {
+			serumFulfillmentConfig = this.serumFulfillmentConfigMap.get(
+				nodeToFill.node.order.marketIndex
+			);
 		}
-		const serumConfig = await this.clearingHouse.getSerumV3FulfillmentConfig(
-			serumMarketAddress
-		);
 
 		this.metrics?.recordFillableOrdersSeen(
 			nodeToFill.node.order.marketIndex,
@@ -303,7 +337,7 @@ export class SpotFillerBot implements Bot {
 			chUser.getUserAccountPublicKey(),
 			chUser.getUserAccount(),
 			nodeToFill.node.order,
-			serumConfig,
+			serumFulfillmentConfig,
 			makerInfo,
 			referrerInfo
 		);
@@ -327,10 +361,12 @@ export class SpotFillerBot implements Bot {
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(), // TODO: new sdk - remove this
 						this.clearingHouse.getSpotMarketAccounts(),
+						this.clearingHouse.getStateAccount(),
+						this.userMap,
 						true
 					);
 					this.metrics?.trackObjectSize('spot-filler-dlob', this.dlob);
-					await this.dlob.init(this.clearingHouse, this.userMap);
+					await this.dlob.init();
 				});
 
 				if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
