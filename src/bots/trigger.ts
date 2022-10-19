@@ -241,12 +241,10 @@ export class TriggerBot implements Bot {
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),
 						this.clearingHouse.getSpotMarketAccounts(),
-						this.clearingHouse.getStateAccount(),
-						this.userMap,
 						true
 					);
 					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
-					await this.dlob.init();
+					await this.dlob.init(this.clearingHouse, this.userMap);
 				});
 
 				await Promise.all([
