@@ -150,8 +150,6 @@ export class FillerBot implements Bot {
 		// TODO: temp fix for settled market
 		const marketIndex = market.marketIndex;
 		if (marketIndex === 2) {
-			console.log(`skipping marketIndex ${marketIndex}`);
-			``;
 			return [];
 		}
 
