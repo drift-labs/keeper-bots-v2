@@ -147,7 +147,14 @@ export class FillerBot implements Bot {
 	private async getPerpFillableNodesForMarket(
 		market: PerpMarketAccount
 	): Promise<Array<NodeToFill>> {
+		// TODO: temp fix for settled market
 		const marketIndex = market.marketIndex;
+		if (marketIndex === 2) {
+			console.log(`skipping marketIndex ${marketIndex}`);
+			``;
+			return [];
+		}
+
 		const oraclePriceData =
 			this.clearingHouse.getOracleDataForMarket(marketIndex);
 		const oracleIsValid = isOracleValid(
@@ -441,7 +448,9 @@ export class FillerBot implements Bot {
 		let idxUsed = 0;
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			logger.info(
-				`filling perp node ${idx}: ${nodeToFill.node.userAccount.toString()}, ${
+				`filling perp node ${idx}, marketIdx: ${
+					nodeToFill.node.order.marketIndex
+				}: ${nodeToFill.node.userAccount.toString()}, ${
 					nodeToFill.node.order.orderId
 				}`
 			);
