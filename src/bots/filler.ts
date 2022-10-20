@@ -591,10 +591,12 @@ export class FillerBot implements Bot {
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),
 						this.clearingHouse.getSpotMarketAccounts(), // TODO: new sdk - remove this
+						this.clearingHouse.getStateAccount(),
+						this.userMap,
 						true
 					);
 					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
-					await this.dlob.init(this.clearingHouse, this.userMap);
+					await this.dlob.init();
 				});
 
 				// 1) get all fillable nodes
