@@ -236,7 +236,7 @@ export class FloatingPerpMakerBot implements Bot {
 			const biasDenom = new BN(100);
 
 			const oracleBidSpread = oracle.price.sub(vBid);
-			const tx0 = await this.clearingHouse.placeOrder({
+			const tx0 = await this.clearingHouse.placeSpotOrder({
 				marketIndex: marketIndex,
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.LONG,
@@ -250,7 +250,7 @@ export class FloatingPerpMakerBot implements Bot {
 			console.log(`${this.name} placing long: ${tx0}`);
 
 			const oracleAskSpread = vAsk.sub(oracle.price);
-			const tx1 = await this.clearingHouse.placeOrder({
+			const tx1 = await this.clearingHouse.placeSpotOrder({
 				marketIndex: marketIndex,
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.SHORT,

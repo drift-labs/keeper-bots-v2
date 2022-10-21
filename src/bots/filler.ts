@@ -12,12 +12,14 @@ import {
 	calculateBidPrice,
 	MakerInfo,
 	isFillableByVAMM,
+	calculateBaseAssetAmountForAmmToFulfill,
 	isVariant,
 	DLOB,
 	NodeToFill,
 	UserMap,
 	UserStatsMap,
 	MarketType,
+	isOrderExpired,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -188,10 +190,16 @@ export class FillerBot implements Bot {
 
 	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
 		if (nodeToFill.node.isVammNode()) {
+			logger.warn(
+				`filtered out a vAMM node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
+			);
 			return false;
 		}
 
 		if (nodeToFill.node.haveFilled) {
+			logger.warn(
+				`filtered out filled node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
+			);
 			return false;
 		}
 
@@ -200,6 +208,9 @@ export class FillerBot implements Bot {
 				this.getNodeToFillSignature(nodeToFill)
 			);
 			if (lastFillAttempt + FILL_ORDER_BACKOFF > Date.now()) {
+				logger.warn(
+					`throttling node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
+				);
 				return false;
 			} else {
 				this.throttledNodes.delete(this.getNodeToFillSignature(nodeToFill));
@@ -209,6 +220,14 @@ export class FillerBot implements Bot {
 		const marketIndex = nodeToFill.node.market.marketIndex;
 		const oraclePriceData =
 			this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
+
+		// return early to fill if order is expired
+		if (isOrderExpired(nodeToFill.node.order, Date.now() / 1000)) {
+			logger.warn(
+				`order is expired on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
+			);
+			return true;
+		}
 
 		if (
 			!nodeToFill.makerNode &&
@@ -221,6 +240,30 @@ export class FillerBot implements Bot {
 				Date.now() / 1000
 			)
 		) {
+			logger.warn(
+				`filtered out unfillable node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
+			);
+			logger.warn(` . no maker node: ${!nodeToFill.makerNode}`);
+			logger.warn(
+				` . is perp: ${isVariant(nodeToFill.node.order.marketType, 'perp')}`
+			);
+			logger.warn(
+				` . is not fillable by vamm: ${!isFillableByVAMM(
+					nodeToFill.node.order,
+					nodeToFill.node.market as PerpMarketAccount,
+					oraclePriceData,
+					this.slotSubscriber.getSlot(),
+					Date.now() / 1000
+				)}`
+			);
+			logger.warn(
+				` .     calculateBaseAssetAmountForAmmToFulfill: ${calculateBaseAssetAmountForAmmToFulfill(
+					nodeToFill.node.order,
+					nodeToFill.node.market as PerpMarketAccount,
+					oraclePriceData,
+					this.slotSubscriber.getSlot()
+				).toString()}`
+			);
 			return false;
 		}
 
@@ -456,7 +499,7 @@ export class FillerBot implements Bot {
 				throw new Error('expected perp market type');
 			}
 
-			const ix = await this.clearingHouse.getFillOrderIx(
+			const ix = await this.clearingHouse.getFillPerpOrderIx(
 				chUser.getUserAccountPublicKey(),
 				chUser.getUserAccount(),
 				nodeToFill.node.order,
@@ -600,9 +643,12 @@ export class FillerBot implements Bot {
 					fillableNodes = fillableNodes.concat(
 						await this.getPerpFillableNodesForMarket(market)
 					);
+					logger.debug(
+						`got ${fillableNodes.length} fillable nodes on market ${market.marketIndex}`
+					);
 				}
 
-				// TODO TODO TODO: can remove this if no dupes?
+				// filter out nodes that we know cannot be filled
 				const seenNodes = new Set<string>();
 				const filteredNodes = fillableNodes.filter((node) => {
 					const sig = this.getNodeToFillSignature(node);
@@ -612,6 +658,9 @@ export class FillerBot implements Bot {
 					seenNodes.add(sig);
 					return this.filterFillableNodes(node);
 				});
+				logger.debug(
+					`filtered ${fillableNodes.length} to ${filteredNodes.length}`
+				);
 
 				// fill the perp nodes
 				let filledNodeCount = 0;

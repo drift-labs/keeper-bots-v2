@@ -580,7 +580,7 @@ export class JitMakerBot implements Bot {
 		const takerUserStatsPublicKey = takerUserStats.userStatsAccountPublicKey;
 		const referrerInfo = takerUserStats.getReferrerInfo();
 
-		return await this.clearingHouse.placeAndMake(
+		return await this.clearingHouse.placeAndMakeSpotOrder(
 			{
 				orderType: OrderType.LIMIT,
 				marketIndex: action.marketIndex,
