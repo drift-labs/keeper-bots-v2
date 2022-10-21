@@ -51,10 +51,10 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/sdk@0.2.0-master.32":
-  version "0.2.0-master.32"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.2.0-master.32.tgz#6a08b8b7c84efa1efa64cffe36c0e299a4824757"
-  integrity sha512-e6eyln62XmTdbIob/fg6oA4CVGkj0wG2LicZl3Gu5S7wpLOp4O8ZjujXU05/2PHrAu006/cEv2GWWWqIa0yH9w==
+"@drift-labs/sdk@0.2.0-master.34":
+  version "0.2.0-master.34"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.2.0-master.34.tgz#46e455ff5c34049c2e49b36c5aa3c15e59ae1cee"
+  integrity sha512-+s0gO7h/cS6DnhEWOmgxIdm0s7tG1nfYZuMHtIJNNt6KsHQRXcBIW9ltCthrR5fSwb0gwqwywfW7frDoCeJ6rg==
   dependencies:
     "@project-serum/anchor" "0.25.0-beta.1"
     "@project-serum/serum" "^0.13.38"
@@ -3086,13 +3086,6 @@ object-keys@^1.1.1:
   version "1.1.1"
   resolved "https://registry.yarnpkg.com/object-keys/-/object-keys-1.1.1.tgz#1c47f272df277f3b1daf061677d9c82e2322c60e"
   integrity sha512-NuAESUOUMrlIXOfHKzD6bpPu3tYt3xvjNdRIQ+FeT0lNb4K8WR70CaDxhuNguS2XG+GjkyMwOzsN5ZktImfhLA==
-
-object-sizeof@^1.6.3:
-  version "1.6.3"
-  resolved "https://registry.yarnpkg.com/object-sizeof/-/object-sizeof-1.6.3.tgz#6edbbf26825b971fd7a32125a800ed2a9895af95"
-  integrity sha512-LGtilAKuDGKCcvu1Xg3UvAhAeJJlFmblo3faltmOQ80xrGwAHxnauIXucalKdTEksHp/Pq9tZGz1hfyEmjFJPQ==
-  dependencies:
-    buffer "^5.6.0"
 
 object.assign@^4.1.2:
   version "4.1.2"

@@ -175,7 +175,7 @@ export class FloatingPerpMakerBot implements Bot {
 		}
 
 		const openOrders = this.agentState.openOrders.get(marketIndex);
-		const oracle = this.clearingHouse.getOracleDataForMarket(marketIndex);
+		const oracle = this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
 		const vAsk = calculateAskPrice(marketAccount, oracle);
 		const vBid = calculateBidPrice(marketAccount, oracle);
 
@@ -196,7 +196,7 @@ export class FloatingPerpMakerBot implements Bot {
 			);
 			console.log(
 				` .        priceOffset: ${convertToNumber(
-					o.oraclePriceOffset,
+					new BN(o.oraclePriceOffset),
 					PRICE_PRECISION
 				)}`
 			);
@@ -241,7 +241,11 @@ export class FloatingPerpMakerBot implements Bot {
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.LONG,
 				baseAssetAmount: BASE_PRECISION.mul(new BN(100)),
-				oraclePriceOffset: oracleBidSpread.mul(biasNum).div(biasDenom).neg(), // limit bid below oracle
+				oraclePriceOffset: oracleBidSpread
+					.mul(biasNum)
+					.div(biasDenom)
+					.neg()
+					.toNumber(), // limit bid below oracle
 			});
 			console.log(`${this.name} placing long: ${tx0}`);
 
@@ -251,7 +255,10 @@ export class FloatingPerpMakerBot implements Bot {
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.SHORT,
 				baseAssetAmount: BASE_PRECISION.mul(new BN(100)),
-				oraclePriceOffset: oracleAskSpread.mul(biasNum).div(biasDenom), // limit ask above oracle
+				oraclePriceOffset: oracleAskSpread
+					.mul(biasNum)
+					.div(biasDenom)
+					.toNumber(), // limit ask above oracle
 			});
 			console.log(`${this.name} placing short: ${tx1}`);
 		}

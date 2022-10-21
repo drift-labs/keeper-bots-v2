@@ -129,7 +129,7 @@ export class PnlSettlerBot implements Bot {
 					marketAccount: this.clearingHouse.getPerpMarketAccount(
 						market.marketIndex
 					),
-					oraclePriceData: this.clearingHouse.getOracleDataForMarket(
+					oraclePriceData: this.clearingHouse.getOracleDataForPerpMarket(
 						market.marketIndex
 					),
 				};

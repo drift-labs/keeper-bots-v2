@@ -622,7 +622,6 @@ export class JitMakerBot implements Bot {
 						this.userMap,
 						true
 					);
-					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
 					await this.dlob.init();
 				});
 

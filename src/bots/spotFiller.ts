@@ -101,14 +101,12 @@ export class SpotFillerBot implements Bot {
 			this.clearingHouse,
 			this.clearingHouse.userAccountSubscriptionConfig
 		);
-		this.metrics?.trackObjectSize('filler-userMap', this.userMap);
 		initPromises.push(this.userMap.fetchAllUsers());
 
 		this.userStatsMap = new UserStatsMap(
 			this.clearingHouse,
 			this.clearingHouse.userAccountSubscriptionConfig
 		);
-		this.metrics?.trackObjectSize('filler-userStatsMap', this.userStatsMap);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		const config = initialize({ env: this.driftEnv });
@@ -206,6 +204,7 @@ export class SpotFillerBot implements Bot {
 				serumBestBid,
 				serumBestAsk,
 				this.slotSubscriber.getSlot(),
+				Date.now() / 1000,
 				MarketType.SPOT,
 				oraclePriceData
 			);
@@ -219,29 +218,6 @@ export class SpotFillerBot implements Bot {
 			return '~';
 		}
 		return `${node.node.userAccount.toString()}-${node.node.order.orderId.toString()}`;
-	}
-
-	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
-		if (nodeToFill.node.isVammNode()) {
-			return false;
-		}
-
-		if (nodeToFill.node.haveFilled) {
-			return false;
-		}
-
-		// if (this.throttledNodes.has(this.getNodeToFillSignature(nodeToFill))) {
-		// 	const lastFillAttempt = this.throttledNodes.get(
-		// 		this.getNodeToFillSignature(nodeToFill)
-		// 	);
-		// 	if (lastFillAttempt + FILL_ORDER_BACKOFF > Date.now()) {
-		// 		return false;
-		// 	} else {
-		// 		this.throttledNodes.delete(this.getNodeToFillSignature(nodeToFill));
-		// 	}
-		// }
-
-		return true;
 	}
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
@@ -365,7 +341,6 @@ export class SpotFillerBot implements Bot {
 						this.userMap,
 						true
 					);
-					this.metrics?.trackObjectSize('spot-filler-dlob', this.dlob);
 					await this.dlob.init();
 				});
 

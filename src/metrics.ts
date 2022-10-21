@@ -31,7 +31,6 @@ import {
 } from '@drift-labs/sdk';
 
 import { Mutex } from 'async-mutex';
-import sizeof from 'object-sizeof';
 
 const driftEnv = process.env.DRIFT_ENV || 'devnet';
 
@@ -57,10 +56,6 @@ export class Metrics {
 	private openPositionOpenOrdersAmountGauge: ObservableGauge;
 	private openPositionOpenBidsAmountGauge: ObservableGauge;
 	private openPositionOpenAsksAmountGauge: ObservableGauge;
-
-	private objectsToTrackSizeLock = new Mutex();
-	private objectsToTrackSize = new Map<string, any>();
-	private objectsToTrackSizeGauge: ObservableGauge;
 
 	private chUserUnrealizedPNLLock = new Mutex();
 	private chUserUnrealizedPNL: number;
@@ -437,27 +432,6 @@ export class Metrics {
 			}
 		);
 
-		this.objectsToTrackSizeGauge = this.meter.createObservableGauge(
-			'tracked_object_sizes',
-			{
-				description: 'Bytes size of tracked objects',
-				valueType: ValueType.INT,
-			}
-		);
-		this.objectsToTrackSizeGauge.addCallback(
-			async (observableResult: ObservableResult) => {
-				await this.objectsToTrackSizeLock.runExclusive(async () => {
-					// iterate over all tracked objects, name and obj
-					for (const [name, obj] of this.objectsToTrackSize) {
-						observableResult.observe(sizeof(obj), {
-							object: name,
-							userPubKey: this.authority.toBase58(),
-						});
-					}
-				});
-			}
-		);
-
 		this.errorsCounter = this.meter.createCounter('errors', {
 			description: 'ClearingHouse error counter',
 		});
@@ -650,12 +624,6 @@ export class Metrics {
 			} else if (isVariant(marketType, 'spot')) {
 				this.fillableSpotOrdersSeenByMarket.set(marketIndex, fillableOrders);
 			}
-		});
-	}
-
-	async trackObjectSize(name: string, object: any) {
-		await this.objectsToTrackSizeLock.runExclusive(async () => {
-			this.objectsToTrackSize.set(name, object);
 		});
 	}
 

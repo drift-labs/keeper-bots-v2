@@ -92,14 +92,12 @@ export class FillerBot implements Bot {
 			this.clearingHouse,
 			this.clearingHouse.userAccountSubscriptionConfig
 		);
-		this.metrics?.trackObjectSize('filler-userMap', this.userMap);
 		initPromises.push(this.userMap.fetchAllUsers());
 
 		this.userStatsMap = new UserStatsMap(
 			this.clearingHouse,
 			this.clearingHouse.userAccountSubscriptionConfig
 		);
-		this.metrics?.trackObjectSize('filler-userStatsMap', this.userStatsMap);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		await Promise.all(initPromises);
@@ -154,7 +152,7 @@ export class FillerBot implements Bot {
 		}
 
 		const oraclePriceData =
-			this.clearingHouse.getOracleDataForMarket(marketIndex);
+			this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
 		const oracleIsValid = isOracleValid(
 			market.amm,
 			oraclePriceData,
@@ -176,6 +174,7 @@ export class FillerBot implements Bot {
 				vBid,
 				vAsk,
 				this.slotSubscriber.getSlot(),
+				Date.now() / 1000,
 				MarketType.PERP,
 				oraclePriceData
 			);
@@ -213,7 +212,7 @@ export class FillerBot implements Bot {
 
 		const marketIndex = nodeToFill.node.market.marketIndex;
 		const oraclePriceData =
-			this.clearingHouse.getOracleDataForMarket(marketIndex);
+			this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
 
 		if (
 			!nodeToFill.makerNode &&
@@ -222,7 +221,8 @@ export class FillerBot implements Bot {
 				nodeToFill.node.order,
 				nodeToFill.node.market as PerpMarketAccount,
 				oraclePriceData,
-				this.slotSubscriber.getSlot()
+				this.slotSubscriber.getSlot(),
+				Date.now() / 1000
 			)
 		) {
 			return false;
@@ -595,7 +595,6 @@ export class FillerBot implements Bot {
 						this.userMap,
 						true
 					);
-					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
 					await this.dlob.init();
 				});
 
