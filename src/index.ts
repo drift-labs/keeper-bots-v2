@@ -529,6 +529,7 @@ const runBot = async () => {
 				});
 				if (!healthySlot) {
 					res.writeHead(500);
+					logger.error(`SlotSubscriber is not healthy`);
 					res.end(`SlotSubscriber is not healthy`);
 					return;
 				}
