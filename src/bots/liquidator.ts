@@ -193,7 +193,7 @@ export class PerpLiquidatorBot implements Bot {
 		liquidatorUser: ClearingHouseUser,
 		liquidateePosition: PerpPosition
 	): BN {
-		const oraclePrice = this.clearingHouse.getOracleDataForMarket(
+		const oraclePrice = this.clearingHouse.getOracleDataForPerpMarket(
 			liquidateePosition.marketIndex
 		).price;
 		const collateralToSpend = liquidatorUser

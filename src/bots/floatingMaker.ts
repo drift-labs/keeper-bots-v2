@@ -175,7 +175,7 @@ export class FloatingPerpMakerBot implements Bot {
 		}
 
 		const openOrders = this.agentState.openOrders.get(marketIndex);
-		const oracle = this.clearingHouse.getOracleDataForMarket(marketIndex);
+		const oracle = this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
 		const vAsk = calculateAskPrice(marketAccount, oracle);
 		const vBid = calculateBidPrice(marketAccount, oracle);
 
@@ -196,7 +196,7 @@ export class FloatingPerpMakerBot implements Bot {
 			);
 			console.log(
 				` .        priceOffset: ${convertToNumber(
-					o.oraclePriceOffset,
+					new BN(o.oraclePriceOffset),
 					PRICE_PRECISION
 				)}`
 			);
@@ -236,22 +236,29 @@ export class FloatingPerpMakerBot implements Bot {
 			const biasDenom = new BN(100);
 
 			const oracleBidSpread = oracle.price.sub(vBid);
-			const tx0 = await this.clearingHouse.placeOrder({
+			const tx0 = await this.clearingHouse.placeSpotOrder({
 				marketIndex: marketIndex,
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.LONG,
 				baseAssetAmount: BASE_PRECISION.mul(new BN(100)),
-				oraclePriceOffset: oracleBidSpread.mul(biasNum).div(biasDenom).neg(), // limit bid below oracle
+				oraclePriceOffset: oracleBidSpread
+					.mul(biasNum)
+					.div(biasDenom)
+					.neg()
+					.toNumber(), // limit bid below oracle
 			});
 			console.log(`${this.name} placing long: ${tx0}`);
 
 			const oracleAskSpread = vAsk.sub(oracle.price);
-			const tx1 = await this.clearingHouse.placeOrder({
+			const tx1 = await this.clearingHouse.placeSpotOrder({
 				marketIndex: marketIndex,
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.SHORT,
 				baseAssetAmount: BASE_PRECISION.mul(new BN(100)),
-				oraclePriceOffset: oracleAskSpread.mul(biasNum).div(biasDenom), // limit ask above oracle
+				oraclePriceOffset: oracleAskSpread
+					.mul(biasNum)
+					.div(biasDenom)
+					.toNumber(), // limit ask above oracle
 			});
 			console.log(`${this.name} placing short: ${tx1}`);
 		}

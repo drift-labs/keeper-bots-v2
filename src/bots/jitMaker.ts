@@ -134,9 +134,11 @@ export class JitMakerBot implements Bot {
 		this.dlob = new DLOB(
 			this.clearingHouse.getPerpMarketAccounts(),
 			this.clearingHouse.getSpotMarketAccounts(),
+			this.clearingHouse.getStateAccount(),
+			this.userMap,
 			true
 		);
-		initPromises.push(this.dlob.init(this.clearingHouse));
+		initPromises.push(this.dlob.init());
 
 		this.userMap = new UserMap(
 			this.clearingHouse,
@@ -578,7 +580,7 @@ export class JitMakerBot implements Bot {
 		const takerUserStatsPublicKey = takerUserStats.userStatsAccountPublicKey;
 		const referrerInfo = takerUserStats.getReferrerInfo();
 
-		return await this.clearingHouse.placeAndMake(
+		return await this.clearingHouse.placeAndMakeSpotOrder(
 			{
 				orderType: OrderType.LIMIT,
 				marketIndex: action.marketIndex,
@@ -616,10 +618,11 @@ export class JitMakerBot implements Bot {
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),
 						this.clearingHouse.getSpotMarketAccounts(),
+						this.clearingHouse.getStateAccount(),
+						this.userMap,
 						true
 					);
-					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
-					await this.dlob.init(this.clearingHouse, this.userMap);
+					await this.dlob.init();
 				});
 
 				await Promise.all(

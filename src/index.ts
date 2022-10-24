@@ -21,10 +21,12 @@ import {
 	SlotSubscriber,
 	convertToNumber,
 	QUOTE_PRECISION,
+	SPOT_MARKET_BALANCE_PRECISION,
 	SpotMarkets,
 	PerpMarkets,
 	BN,
 	BASE_PRECISION,
+	getSignedTokenAmount,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -188,23 +190,26 @@ function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
 
 	logger.info('Open Spot Positions:');
 	for (const p of clearingHouseUser.getUserAccount().spotPositions) {
-		if (p.balance.isZero()) {
+		if (p.scaledBalance.isZero()) {
 			continue;
 		}
 		const market = SpotMarkets[driftEnv][p.marketIndex];
 		console.log(`[${market.symbol}]`);
 		console.log(
 			` . baseAssetAmount:  ${convertToNumber(
-				p.balance,
-				QUOTE_PRECISION
+				getSignedTokenAmount(p.scaledBalance, p.balanceType),
+				SPOT_MARKET_BALANCE_PRECISION
 			).toString()}`
 		);
 		console.log(` . balanceType: ${getVariant(p.balanceType)}`);
 		console.log(
 			` . openOrders: ${p.openOrders.toString()}, openBids: ${convertToNumber(
 				p.openBids,
-				BASE_PRECISION
-			)}, openAsks: ${convertToNumber(p.openAsks, BASE_PRECISION)}`
+				SPOT_MARKET_BALANCE_PRECISION
+			)}, openAsks: ${convertToNumber(
+				p.openAsks,
+				SPOT_MARKET_BALANCE_PRECISION
+			)}`
 		);
 	}
 }
@@ -322,14 +327,11 @@ const runBot = async () => {
 	if (opts.metrics) {
 		metrics = new Metrics(clearingHouse, parseInt(opts?.metrics));
 		await metrics.init();
-		metrics.trackObjectSize('clearingHouse', clearingHouse);
-		metrics.trackObjectSize('clearingHouseUser', clearingHouseUser);
-		metrics.trackObjectSize('eventSubscriber', eventSubscriber);
 	}
 
 	printUserAccountStats(clearingHouseUser);
 	if (opts.closeOpenPositions) {
-		logger.info(`Closing open spot positions`);
+		logger.info(`Closing open perp positions`);
 		let closedPerps = 0;
 		for await (const p of clearingHouseUser.getUserAccount().perpPositions) {
 			if (p.baseAssetAmount.isZero()) {
@@ -340,11 +342,11 @@ const runBot = async () => {
 			logger.info(` . ${await clearingHouse.closePosition(p.marketIndex)}`);
 			closedPerps++;
 		}
-		console.log(`Closed ${closedPerps} perp positions`);
+		console.log(`Closed ${closedPerps} spot positions`);
 
 		let closedSpots = 0;
 		for await (const p of clearingHouseUser.getUserAccount().spotPositions) {
-			if (p.balance.isZero()) {
+			if (p.scaledBalance.isZero()) {
 				logger.info(`no position on market: ${p.marketIndex}`);
 				continue;
 			}
@@ -527,6 +529,7 @@ const runBot = async () => {
 				});
 				if (!healthySlot) {
 					res.writeHead(500);
+					logger.error(`SlotSubscriber is not healthy`);
 					res.end(`SlotSubscriber is not healthy`);
 					return;
 				}

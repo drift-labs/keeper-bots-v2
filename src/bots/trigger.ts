@@ -101,7 +101,7 @@ export class TriggerBot implements Bot {
 
 		try {
 			const oraclePriceData =
-				this.clearingHouse.getOracleDataForMarket(marketIndex);
+				this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
 
 			let nodesToTrigger: Array<NodeToTrigger> = [];
 			await this.dlobMutex.runExclusive(async () => {
@@ -167,7 +167,7 @@ export class TriggerBot implements Bot {
 
 		try {
 			const oraclePriceData =
-				this.clearingHouse.getOracleDataForMarket(marketIndex);
+				this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
 
 			let nodesToTrigger: Array<NodeToTrigger> = [];
 			await this.dlobMutex.runExclusive(async () => {
@@ -241,10 +241,11 @@ export class TriggerBot implements Bot {
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),
 						this.clearingHouse.getSpotMarketAccounts(),
+						this.clearingHouse.getStateAccount(),
+						this.userMap,
 						true
 					);
-					this.metrics?.trackObjectSize('filler-dlob', this.dlob);
-					await this.dlob.init(this.clearingHouse, this.userMap);
+					await this.dlob.init();
 				});
 
 				await Promise.all([
