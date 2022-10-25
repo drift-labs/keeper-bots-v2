@@ -6,6 +6,10 @@ import {
 } from '@solana/spl-token';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 
+export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
+	'V4v1mQiAdLz4qwckEb45WqHYceYizoib39cDBHSWfaB'
+);
+
 export async function getOrCreateAssociatedTokenAccount(
 	connection: Connection,
 	mint: PublicKey,

@@ -27,6 +27,7 @@ import {
 	BN,
 	BASE_PRECISION,
 	getSignedTokenAmount,
+	TokenFaucet,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -42,7 +43,10 @@ import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { Metrics } from './metrics';
 import { PnlSettlerBot } from './bots/pnlSettler';
-import { getOrCreateAssociatedTokenAccount } from './utils';
+import {
+	getOrCreateAssociatedTokenAccount,
+	TOKEN_FAUCET_PROGRAM_ID,
+} from './utils';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
@@ -376,15 +380,30 @@ const runBot = async () => {
 			throw new Error('Deposit amount must be greater than 0');
 		}
 
+		const mint = SpotMarkets[driftEnv][0].mint; // TODO: are index 0 always USDC???, support other collaterals
+
 		const ata = await Token.getAssociatedTokenAddress(
 			ASSOCIATED_TOKEN_PROGRAM_ID,
 			TOKEN_PROGRAM_ID,
-			SpotMarkets[driftEnv][0].mint, // TODO: are index 0 always USDC???, support other collaterals
+			mint,
 			wallet.publicKey
 		);
 
+		const amount = new BN(opts.forceDeposit).mul(QUOTE_PRECISION);
+
+		if (driftEnv == 'devnet') {
+			const tokenFaucet = new TokenFaucet(
+				connection,
+				wallet,
+				TOKEN_FAUCET_PROGRAM_ID,
+				mint,
+				opts
+			);
+			await tokenFaucet.mintToUser(ata, amount);
+		}
+
 		const tx = await clearingHouse.deposit(
-			new BN(opts.forceDeposit).mul(QUOTE_PRECISION),
+			amount,
 			0, // USDC bank
 			ata
 		);
