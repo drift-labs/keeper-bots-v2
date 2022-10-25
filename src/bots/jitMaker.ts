@@ -131,15 +131,6 @@ export class JitMakerBot implements Bot {
 		logger.info(`${this.name} initing`);
 		const initPromises: Array<Promise<any>> = [];
 
-		this.dlob = new DLOB(
-			this.clearingHouse.getPerpMarketAccounts(),
-			this.clearingHouse.getSpotMarketAccounts(),
-			this.clearingHouse.getStateAccount(),
-			this.userMap,
-			true
-		);
-		initPromises.push(this.dlob.init());
-
 		this.userMap = new UserMap(
 			this.clearingHouse,
 			this.clearingHouse.userAccountSubscriptionConfig
@@ -151,6 +142,15 @@ export class JitMakerBot implements Bot {
 			this.clearingHouse.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
+
+		this.dlob = new DLOB(
+			this.clearingHouse.getPerpMarketAccounts(),
+			this.clearingHouse.getSpotMarketAccounts(),
+			this.clearingHouse.getStateAccount(),
+			this.userMap,
+			true
+		);
+		initPromises.push(this.dlob.init());
 
 		this.agentState = {
 			stateType: new Map<number, StateType>(),
