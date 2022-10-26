@@ -40,7 +40,7 @@ import { Metrics } from '../metrics';
 const MAX_TX_PACK_SIZE = 900; //1232;
 const CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
-const FILL_ORDER_BACKOFF = 0; //5000;
+const FILL_ORDER_BACKOFF = 5000;
 const dlobMutexError = new Error('dlobMutex timeout');
 
 export class FillerBot implements Bot {
@@ -395,29 +395,41 @@ export class FillerBot implements Bot {
 			if (nextIsFillRecord) {
 				if (log.includes('Order does not exist')) {
 					const filledNode = nodesFilled[ixIdx];
-					logger.error(` ${log}, ix: ${ixIdx}`);
 					logger.error(
 						`   assoc order: ${filledNode.node.userAccount.toString()}, ${
 							filledNode.node.order.orderId
 						}`
 					);
+					logger.error(` ${log}, ixIdx: ${ixIdx}`);
+					this.throttledNodes.delete(this.getNodeToFillSignature(filledNode));
 				} else if (log.includes('Amm cant fulfill order')) {
 					const filledNode = nodesFilled[ixIdx];
-					logger.error(` ${log}, ix: ${ixIdx}`);
 					logger.error(
-						`  assoc order: ${filledNode.node.userAccount.toString()}, ${
+						`  'Amm cant fulfill order' log, assoc order: ${filledNode.node.userAccount.toString()}, ${
 							filledNode.node.order.orderId
 						}`
 					);
+					logger.error(` ${log}, ixIdx: ${ixIdx}`);
 					this.throttledNodes.set(
 						this.getNodeToFillSignature(filledNode),
 						Date.now()
 					);
 				} else if (log.length > 50) {
-					// probably rawe event data...?
+					// probably raw event data...?
 					successCount++;
 				} else {
-					logger.info(` how parse log?: ${log}`);
+					const filledNode = nodesFilled[ixIdx];
+					logger.error(`how parse log?: ${log}`);
+					logger.error(
+						`  got a log we don't know how to parse ,assoc order: ${filledNode.node.userAccount.toString()}, ${
+							filledNode.node.order.orderId
+						}`
+					);
+					logger.error(` ${log}, ixIdx: ${ixIdx}`);
+					this.throttledNodes.set(
+						this.getNodeToFillSignature(filledNode),
+						Date.now()
+					);
 				}
 
 				nextIsFillRecord = false;
