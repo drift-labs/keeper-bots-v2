@@ -38,6 +38,8 @@ import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
 const MAX_TX_PACK_SIZE = 900; //1232;
+const CU_PER_FILL = 13_000; // why sim error give 330_000???
+const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...
 const FILL_ORDER_BACKOFF = 0; //5000;
 const dlobMutexError = new Error('dlobMutex timeout');
 
@@ -451,6 +453,7 @@ export class FillerBot implements Bot {
 		 *		- instruction data (compact-u16, 1 byte per elem)
 		 */
 		let runningTxSize = 0;
+		let runningCUUsed = 0;
 
 		const uniqueAccounts = new Set<string>();
 		uniqueAccounts.add(this.clearingHouse.provider.wallet.publicKey.toString()); // fee payer goes first
@@ -527,12 +530,15 @@ export class FillerBot implements Bot {
 			// Also, some logs may get truncated near the end of the tx, so we need to leave some room for that.
 			if (
 				runningTxSize + newIxCost + additionalAccountsCost >=
-				MAX_TX_PACK_SIZE
+					MAX_TX_PACK_SIZE ||
+				runningCUUsed + CU_PER_FILL >= MAX_CU_PER_TX
 			) {
 				logger.error(
 					`too much sizee: expected ${
 						runningTxSize + newIxCost + additionalAccountsCost
-					}, max: ${MAX_TX_PACK_SIZE}`
+					}, max: ${MAX_TX_PACK_SIZE}, or too much CU: expected ${
+						runningCUUsed + CU_PER_FILL
+					}, max: ${MAX_CU_PER_TX}`
 				);
 				break;
 			}
@@ -545,6 +551,7 @@ export class FillerBot implements Bot {
 			);
 			tx.add(ix);
 			runningTxSize += newIxCost + additionalAccountsCost;
+			runningCUUsed += CU_PER_FILL;
 			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
 			idxUsed++;
 			nodesSent.push(nodeToFill);
@@ -612,6 +619,15 @@ export class FillerBot implements Bot {
 			for (const log of simError.logs) {
 				logger.error(`${log}`);
 			}
+
+			// @ts-ignore
+			this.clearingHouse.program._events._eventParser.parseLogs(
+				simError.logs,
+				(event) => {
+					console.log(`event name: ${event.name}`);
+					console.log(JSON.stringify(event.data, null, 2));
+				}
+			);
 		}
 
 		return [txSig, lastIdxFilled];
