@@ -20,6 +20,7 @@ import {
 	UserStatsMap,
 	MarketType,
 	isOrderExpired,
+	getVariant,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -39,6 +40,7 @@ import { Metrics } from '../metrics';
 
 const MAX_TX_PACK_SIZE = 900; //1232;
 const CU_PER_FILL = 200_000; // CU cost for a successful fill
+const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const FILL_ORDER_BACKOFF = 10000;
 const dlobMutexError = new Error('dlobMutex timeout');
@@ -70,6 +72,7 @@ export class FillerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private metrics: Metrics | undefined;
 	private throttledNodes = new Map<string, number>();
+	private useBurstCULimit = false;
 
 	constructor(
 		name: string,
@@ -383,10 +386,18 @@ export class FillerBot implements Bot {
 		let nextIsFillRecord = false;
 		let ixIdx = -1; // skip ComputeBudgetProgram
 		let successCount = 0;
+		let burstedCU = false;
 		for (const log of logs) {
 			if (log === null) {
 				logger.error(`log is null`);
 				continue;
+			}
+
+			if (log.includes('exceeded maximum number of instructions allowed')) {
+				// temporary burst CU limit
+				logger.warn(`Using bursted CU limit`);
+				this.useBurstCULimit = true;
+				burstedCU = true;
 			}
 
 			if (nextIsFillRecord) {
@@ -424,6 +435,10 @@ export class FillerBot implements Bot {
 				nextIsFillRecord = true;
 				ixIdx++;
 			}
+		}
+
+		if (!burstedCU) {
+			this.useBurstCULimit = false;
 		}
 
 		return successCount;
@@ -518,7 +533,7 @@ export class FillerBot implements Bot {
 					nodeToFill.node.order.marketIndex
 				}: ${nodeToFill.node.userAccount.toString()}, ${
 					nodeToFill.node.order.orderId
-				}`
+				}, orderType: ${getVariant(nodeToFill.node.order.orderType)}`
 			);
 
 			const { makerInfo, chUser, referrerInfo, marketType } =
@@ -554,16 +569,19 @@ export class FillerBot implements Bot {
 
 			// We have to use MAX_TX_PACK_SIZE because it appears we cannot send tx with a size of exactly 1232 bytes.
 			// Also, some logs may get truncated near the end of the tx, so we need to leave some room for that.
+			const cuToUsePerFill = this.useBurstCULimit
+				? BURST_CU_PER_FILL
+				: CU_PER_FILL;
 			if (
 				runningTxSize + newIxCost + additionalAccountsCost >=
 					MAX_TX_PACK_SIZE ||
-				runningCUUsed + CU_PER_FILL >= MAX_CU_PER_TX
+				runningCUUsed + cuToUsePerFill >= MAX_CU_PER_TX
 			) {
 				logger.error(
 					`too much sizee: expected ${
 						runningTxSize + newIxCost + additionalAccountsCost
 					}, max: ${MAX_TX_PACK_SIZE}, or too much CU: expected ${
-						runningCUUsed + CU_PER_FILL
+						runningCUUsed + cuToUsePerFill
 					}, max: ${MAX_CU_PER_TX}`
 				);
 				break;
@@ -577,7 +595,7 @@ export class FillerBot implements Bot {
 			);
 			tx.add(ix);
 			runningTxSize += newIxCost + additionalAccountsCost;
-			runningCUUsed += CU_PER_FILL;
+			runningCUUsed += cuToUsePerFill;
 			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
 			idxUsed++;
 			nodesSent.push(nodeToFill);
