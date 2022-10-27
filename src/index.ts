@@ -27,6 +27,7 @@ import {
 	BN,
 	BASE_PRECISION,
 	getSignedTokenAmount,
+	TokenFaucet,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -42,6 +43,10 @@ import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { Metrics } from './metrics';
 import { PnlSettlerBot } from './bots/pnlSettler';
+import {
+	getOrCreateAssociatedTokenAccount,
+	TOKEN_FAUCET_PROGRAM_ID,
+} from './utils';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
@@ -269,11 +274,10 @@ const runBot = async () => {
 	);
 	logger.info(`Wallet pubkey: ${wallet.publicKey.toBase58()}`);
 	logger.info(` . SOL balance: ${lamportsBalance / 10 ** 9}`);
-	const tokenAccount = await Token.getAssociatedTokenAddress(
-		ASSOCIATED_TOKEN_PROGRAM_ID,
-		TOKEN_PROGRAM_ID,
+	const tokenAccount = await getOrCreateAssociatedTokenAccount(
+		connection,
 		new PublicKey(constants.devnet.USDCMint),
-		wallet.publicKey
+		wallet
 	);
 	const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
 	logger.info(` . USDC balance: ${usdcBalance.value.uiAmount}`);
@@ -376,15 +380,30 @@ const runBot = async () => {
 			throw new Error('Deposit amount must be greater than 0');
 		}
 
+		const mint = SpotMarkets[driftEnv][0].mint; // TODO: are index 0 always USDC???, support other collaterals
+
 		const ata = await Token.getAssociatedTokenAddress(
 			ASSOCIATED_TOKEN_PROGRAM_ID,
 			TOKEN_PROGRAM_ID,
-			SpotMarkets[driftEnv][0].mint, // TODO: are index 0 always USDC???, support other collaterals
+			mint,
 			wallet.publicKey
 		);
 
+		const amount = new BN(opts.forceDeposit).mul(QUOTE_PRECISION);
+
+		if (driftEnv == 'devnet') {
+			const tokenFaucet = new TokenFaucet(
+				connection,
+				wallet,
+				TOKEN_FAUCET_PROGRAM_ID,
+				mint,
+				opts
+			);
+			await tokenFaucet.mintToUser(ata, amount);
+		}
+
 		const tx = await clearingHouse.deposit(
-			new BN(opts.forceDeposit).mul(QUOTE_PRECISION),
+			amount,
 			0, // USDC bank
 			ata
 		);
@@ -395,13 +414,14 @@ const runBot = async () => {
 
 	// print user orders
 	logger.info('');
-	logger.info('Open orders:');
+	logger.info(
+		`Open orders: ${clearingHouseUser.getUserAccount().orders.length}`
+	);
 	const ordersToCancel: Array<number> = [];
 	for (const order of clearingHouseUser.getUserAccount().orders) {
 		if (order.baseAssetAmount.isZero()) {
 			continue;
 		}
-		console.log(order);
 		ordersToCancel.push(order.orderId);
 	}
 	if (opts.cancelOpenOrders) {
