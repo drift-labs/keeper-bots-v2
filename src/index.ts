@@ -414,13 +414,14 @@ const runBot = async () => {
 
 	// print user orders
 	logger.info('');
-	logger.info('Open orders:');
+	logger.info(
+		`Open orders: ${clearingHouseUser.getUserAccount().orders.length}`
+	);
 	const ordersToCancel: Array<number> = [];
 	for (const order of clearingHouseUser.getUserAccount().orders) {
 		if (order.baseAssetAmount.isZero()) {
 			continue;
 		}
-		console.log(order);
 		ordersToCancel.push(order.orderId);
 	}
 	if (opts.cancelOpenOrders) {

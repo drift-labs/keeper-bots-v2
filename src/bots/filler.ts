@@ -38,9 +38,9 @@ import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
 const MAX_TX_PACK_SIZE = 900; //1232;
-const CU_PER_FILL = 250_000; // CU cost for a successful fill
+const CU_PER_FILL = 200_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
-const FILL_ORDER_BACKOFF = 5000;
+const FILL_ORDER_BACKOFF = 10000;
 const dlobMutexError = new Error('dlobMutex timeout');
 
 export class FillerBot implements Bot {
@@ -209,9 +209,14 @@ export class FillerBot implements Bot {
 			const lastFillAttempt = this.throttledNodes.get(
 				this.getNodeToFillSignature(nodeToFill)
 			);
-			if (lastFillAttempt + FILL_ORDER_BACKOFF > Date.now()) {
+			const now = Date.now();
+			if (lastFillAttempt + FILL_ORDER_BACKOFF > now) {
 				logger.warn(
-					`throttling node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
+					`skipping node (throttled, retry in ${
+						lastFillAttempt + FILL_ORDER_BACKOFF - now
+					}ms) on market ${nodeToFill.node.order.marketIndex} for user ${
+						nodeToFill.node.userAccount
+					}-${nodeToFill.node.order.orderId}`
 				);
 				return false;
 			} else {
@@ -360,7 +365,68 @@ export class FillerBot implements Bot {
 	}
 
 	private isLogFillOrder(log: string): boolean {
-		return log === 'Program log: Instruction: FillOrder';
+		return log.includes('Instruction: FillPerpOrder');
+	}
+
+	/**
+	 * Iterates through a tx's logs and handles it appropriately (e.g. throttling users, updating metrics, etc.)
+	 *
+	 * @param nodesFilled nodes that we sent a transaction to fill
+	 * @param logs logs from tx.meta.logMessages or this.clearingHouse.program._events._eventParser.parseLogs
+	 *
+	 * @returns number of nodes successfully filled
+	 */
+	private handleTransactionLogs(
+		nodesFilled: Array<NodeToFill>,
+		logs: string[]
+	): number {
+		let nextIsFillRecord = false;
+		let ixIdx = -1; // skip ComputeBudgetProgram
+		let successCount = 0;
+		for (const log of logs) {
+			if (log === null) {
+				logger.error(`log is null`);
+				continue;
+			}
+
+			if (nextIsFillRecord) {
+				if (log.includes('Order does not exist')) {
+					const filledNode = nodesFilled[ixIdx];
+					logger.error(
+						`   assoc order: ${filledNode.node.userAccount.toString()}, ${
+							filledNode.node.order.orderId
+						}`
+					);
+					logger.error(` ${log}, ixIdx: ${ixIdx}`);
+					this.throttledNodes.delete(this.getNodeToFillSignature(filledNode));
+					nextIsFillRecord = false;
+				} else if (log.includes('data')) {
+					// raw event data, this is expected
+					successCount++;
+					nextIsFillRecord = false;
+				} else {
+					const filledNode = nodesFilled[ixIdx];
+					logger.error(`how parse log?: ${log}`);
+					logger.error(
+						` assoc order, throttling: ${filledNode.node.userAccount.toString()}, ${
+							filledNode.node.order.orderId
+						}`
+					);
+					this.throttledNodes.set(
+						this.getNodeToFillSignature(filledNode),
+						Date.now()
+					);
+					nextIsFillRecord = false;
+				}
+
+				// nextIsFillRecord = false;
+			} else if (this.isLogFillOrder(log)) {
+				nextIsFillRecord = true;
+				ixIdx++;
+			}
+		}
+
+		return successCount;
 	}
 
 	private async processBulkFillTxLogs(
@@ -383,62 +449,10 @@ export class FillerBot implements Bot {
 			return;
 		}
 
-		let nextIsFillRecord = false;
-		let ixIdx = -1; // skip ComputeBudgetProgram
-		let successCount = 0;
-		for (const log of tx.meta.logMessages) {
-			if (log === null) {
-				logger.error(`null log message on tx: ${txSig}`);
-				continue;
-			}
-
-			if (nextIsFillRecord) {
-				if (log.includes('Order does not exist')) {
-					const filledNode = nodesFilled[ixIdx];
-					logger.error(
-						`   assoc order: ${filledNode.node.userAccount.toString()}, ${
-							filledNode.node.order.orderId
-						}`
-					);
-					logger.error(` ${log}, ixIdx: ${ixIdx}`);
-					this.throttledNodes.delete(this.getNodeToFillSignature(filledNode));
-				} else if (log.includes('Amm cant fulfill order')) {
-					const filledNode = nodesFilled[ixIdx];
-					logger.error(
-						`  'Amm cant fulfill order' log, assoc order: ${filledNode.node.userAccount.toString()}, ${
-							filledNode.node.order.orderId
-						}`
-					);
-					logger.error(` ${log}, ixIdx: ${ixIdx}`);
-					this.throttledNodes.set(
-						this.getNodeToFillSignature(filledNode),
-						Date.now()
-					);
-				} else if (log.length > 50) {
-					// probably raw event data...?
-					successCount++;
-				} else {
-					const filledNode = nodesFilled[ixIdx];
-					logger.error(`how parse log?: ${log}`);
-					logger.error(
-						`  got a log we don't know how to parse ,assoc order: ${filledNode.node.userAccount.toString()}, ${
-							filledNode.node.order.orderId
-						}`
-					);
-					logger.error(` ${log}, ixIdx: ${ixIdx}`);
-					this.throttledNodes.set(
-						this.getNodeToFillSignature(filledNode),
-						Date.now()
-					);
-				}
-
-				nextIsFillRecord = false;
-			} else if (this.isLogFillOrder(log)) {
-				nextIsFillRecord = true;
-				ixIdx++;
-			}
-		}
-
+		const successCount = this.handleTransactionLogs(
+			nodesFilled,
+			tx.meta.logMessages
+		);
 		this.metrics?.recordFilledOrder(
 			this.clearingHouse.provider.wallet.publicKey,
 			this.name,
@@ -625,21 +639,11 @@ export class FillerBot implements Bot {
 				nodesSent.length
 			);
 		} catch (e) {
-			logger.error(`failed to send packed tx:`);
-			console.error(e);
+			const start = Date.now();
+			logger.error(`Failed to send packed tx (error above):`);
 			const simError = e as SendTransactionError;
-			for (const log of simError.logs) {
-				logger.error(`${log}`);
-			}
-
-			// @ts-ignore
-			this.clearingHouse.program._events._eventParser.parseLogs(
-				simError.logs,
-				(event) => {
-					console.log(`event name: ${event.name}`);
-					console.log(JSON.stringify(event.data, null, 2));
-				}
-			);
+			this.handleTransactionLogs(nodesSent, simError.logs);
+			logger.error(`Handle sim error tx logs took: ${Date.now() - start}ms`);
 		}
 
 		return [txSig, lastIdxFilled];
