@@ -38,7 +38,7 @@ import { Bot } from '../types';
 import { Metrics } from '../metrics';
 
 const MAX_TX_PACK_SIZE = 900; //1232;
-const CU_PER_FILL = 350_000; // CU cost for a successful fill
+const CU_PER_FILL = 250_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const FILL_ORDER_BACKOFF = 5000;
 const dlobMutexError = new Error('dlobMutex timeout');
