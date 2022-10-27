@@ -42,6 +42,7 @@ const MAX_TX_PACK_SIZE = 900; //1232;
 const CU_PER_FILL = 200_000; // CU cost for a successful fill
 const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
+const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_BACKOFF = 10000;
 const dlobMutexError = new Error('dlobMutex timeout');
 
@@ -73,6 +74,7 @@ export class FillerBot implements Bot {
 	private metrics: Metrics | undefined;
 	private throttledNodes = new Map<string, number>();
 	private useBurstCULimit = false;
+	private fillTxSinceBurstCU = 0;
 
 	constructor(
 		name: string,
@@ -397,6 +399,7 @@ export class FillerBot implements Bot {
 				// temporary burst CU limit
 				logger.warn(`Using bursted CU limit`);
 				this.useBurstCULimit = true;
+				this.fillTxSinceBurstCU = 0;
 				burstedCU = true;
 			}
 
@@ -438,7 +441,10 @@ export class FillerBot implements Bot {
 		}
 
 		if (!burstedCU) {
-			this.useBurstCULimit = false;
+			if (this.fillTxSinceBurstCU > TX_COUNT_COOLDOWN_ON_BURST) {
+				this.useBurstCULimit = false;
+			}
+			this.fillTxSinceBurstCU += 1;
 		}
 
 		return successCount;
