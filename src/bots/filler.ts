@@ -165,7 +165,7 @@ export class FillerBot implements Bot {
 			this.slotSubscriber.getSlot()
 		);
 		if (!oracleIsValid) {
-			console.error(`Oracle is not valid for market ${marketIndex}`);
+			logger.error(`Oracle is not valid for market ${marketIndex}`);
 			return [];
 		}
 
@@ -583,10 +583,10 @@ export class FillerBot implements Bot {
 					MAX_TX_PACK_SIZE ||
 				runningCUUsed + cuToUsePerFill >= MAX_CU_PER_TX
 			) {
-				logger.error(
-					`too much sizee: expected ${
+				logger.info(
+					`Fully packed fill tx: est. tx size ${
 						runningTxSize + newIxCost + additionalAccountsCost
-					}, max: ${MAX_TX_PACK_SIZE}, or too much CU: expected ${
+					}, max: ${MAX_TX_PACK_SIZE}, est. CU used: expected ${
 						runningCUUsed + cuToUsePerFill
 					}, max: ${MAX_CU_PER_TX}`
 				);
