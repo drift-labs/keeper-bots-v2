@@ -227,7 +227,7 @@ export class PerpLiquidatorBot implements Bot {
 		const bankruptMarketIndices: Array<number> = [];
 
 		for (const market of this.clearingHouse.getPerpMarketAccounts()) {
-			const position = chUserToCheck.getUserPosition(market.marketIndex);
+			const position = chUserToCheck.getPerpPosition(market.marketIndex);
 			if (position.quoteAssetAmount.gte(ZERO)) {
 				// invalid position to liquidate
 				continue;
