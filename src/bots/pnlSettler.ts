@@ -158,26 +158,41 @@ export class PnlSettlerBot implements Bot {
 						settleePosition,
 						perpMarketAndOracleData[marketIndexNum].oraclePriceData
 					);
+
 					// only settle for $10 or more negative pnl
-					if (unsettledPnl.lte(MIN_PNL_TO_SETTLE)) {
-						const userData = {
-							settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
-							settleeUserAccount: userAccount,
-						};
-						if (
-							usersToSettle
-								.map((item) => item.marketIndex)
-								.includes(marketIndexNum)
-						) {
-							usersToSettle
-								.find((item) => item.marketIndex == marketIndexNum)
-								.users.push(userData);
-						} else {
-							usersToSettle.push({
-								users: [userData],
-								marketIndex: settleePosition.marketIndex,
-							});
-						}
+					if (unsettledPnl.gt(MIN_PNL_TO_SETTLE)) {
+						continue;
+					}
+
+					// only settle user pnl if they have enough collateral
+					if (
+						user.getTotalCollateral().lt(user.getMaintenanceMarginRequirement())
+					) {
+						logger.warn(
+							`Want to settle negative PnL for user ${user
+								.getUserAccountPublicKey()
+								.toBase58()}, but they have insufficient collateral`
+						);
+						continue;
+					}
+
+					const userData = {
+						settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
+						settleeUserAccount: userAccount,
+					};
+					if (
+						usersToSettle
+							.map((item) => item.marketIndex)
+							.includes(marketIndexNum)
+					) {
+						usersToSettle
+							.find((item) => item.marketIndex == marketIndexNum)
+							.users.push(userData);
+					} else {
+						usersToSettle.push({
+							users: [userData],
+							marketIndex: settleePosition.marketIndex,
+						});
 					}
 				}
 			}
