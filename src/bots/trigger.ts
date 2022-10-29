@@ -1,5 +1,5 @@
 import {
-	ClearingHouse,
+	DriftClient,
 	PerpMarketAccount,
 	SpotMarketAccount,
 	OrderRecord,
@@ -24,7 +24,7 @@ export class TriggerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 1000;
 
-	private clearingHouse: ClearingHouse;
+	private clearingHouse: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -43,7 +43,7 @@ export class TriggerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: ClearingHouse,
+		clearingHouse: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		metrics?: Metrics | undefined
 	) {

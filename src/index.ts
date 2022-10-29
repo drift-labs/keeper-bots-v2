@@ -12,8 +12,8 @@ import {
 import {
 	getVariant,
 	BulkAccountLoader,
-	ClearingHouse,
-	ClearingHouseUser,
+	DriftClient,
+	User,
 	initialize,
 	Wallet,
 	DriftEnv,
@@ -129,7 +129,7 @@ function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
+function printUserAccountStats(clearingHouseUser: User) {
 	const freeCollateral = clearingHouseUser.getFreeCollateral();
 	logger.info(
 		`User free collateral: $${convertToNumber(
@@ -152,7 +152,7 @@ function printUserAccountStats(clearingHouseUser: ClearingHouseUser) {
 	);
 }
 
-function printOpenPositions(clearingHouseUser: ClearingHouseUser) {
+function printOpenPositions(clearingHouseUser: User) {
 	logger.info('Open Perp Positions:');
 	for (const p of clearingHouseUser.getUserAccount().perpPositions) {
 		if (p.baseAssetAmount.isZero()) {
@@ -233,7 +233,7 @@ const runBot = async () => {
 		stateCommitment,
 		1000
 	);
-	const clearingHouse = new ClearingHouse({
+	const clearingHouse = new DriftClient({
 		connection,
 		wallet,
 		programID: clearingHousePublicKey,
@@ -270,7 +270,7 @@ const runBot = async () => {
 
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	logger.info(
-		`ClearingHouse ProgramId: ${clearingHouse.program.programId.toBase58()}`
+		`DriftClient ProgramId: ${clearingHouse.program.programId.toBase58()}`
 	);
 	logger.info(`Wallet pubkey: ${wallet.publicKey.toBase58()}`);
 	logger.info(` . SOL balance: ${lamportsBalance / 10 ** 9}`);
@@ -297,15 +297,13 @@ const runBot = async () => {
 	});
 
 	if (!(await clearingHouse.getUser().exists())) {
-		logger.error(`ClearingHouseUser for ${wallet.publicKey} does not exist`);
+		logger.error(`User for ${wallet.publicKey} does not exist`);
 		if (opts.initUser) {
-			logger.info(`Creating ClearingHouseUser for ${wallet.publicKey}`);
+			logger.info(`Creating User for ${wallet.publicKey}`);
 			const [txSig] = await clearingHouse.initializeUserAccount();
 			logger.info(`Initialized user account in transaction: ${txSig}`);
 		} else {
-			throw new Error(
-				"Run with '--init-user' flag to initialize a ClearingHouseUser"
-			);
+			throw new Error("Run with '--init-user' flag to initialize a User");
 		}
 	}
 
@@ -316,13 +314,11 @@ const runBot = async () => {
 		!(await clearingHouseUser.subscribe()) ||
 		!eventSubscriber.subscribe()
 	) {
-		logger.info('waiting to subscribe to ClearingHouse and ClearingHouseUser');
+		logger.info('waiting to subscribe to DriftClient and User');
 		await sleep(1000);
 	}
 	logger.info(
-		`ClearingHouseUser PublicKey: ${clearingHouseUser
-			.getUserAccountPublicKey()
-			.toBase58()}`
+		`User PublicKey: ${clearingHouseUser.getUserAccountPublicKey().toBase58()}`
 	);
 	await clearingHouse.fetchAccounts();
 	await clearingHouse.getUser().fetchAccounts();

@@ -18,7 +18,7 @@ import { logger } from './logger';
 
 import {
 	BN,
-	ClearingHouse,
+	DriftClient,
 	convertToNumber,
 	BASE_PRECISION,
 	QUOTE_PRECISION,
@@ -87,10 +87,10 @@ export class Metrics {
 	private rpcRequestsCounter: Counter;
 	private rpcRequestsDurationHistogram: Histogram;
 
-	private clearingHouse: ClearingHouse;
+	private clearingHouse: DriftClient;
 	private authority: PublicKey;
 
-	constructor(clearingHouse: ClearingHouse, metricsPort?: number) {
+	constructor(clearingHouse: DriftClient, metricsPort?: number) {
 		const { endpoint: defaultEndpoint, port: defaultPort } =
 			PrometheusExporter.DEFAULT_OPTIONS;
 		const port = metricsPort || defaultPort;
@@ -433,7 +433,7 @@ export class Metrics {
 		);
 
 		this.errorsCounter = this.meter.createCounter('errors', {
-			description: 'ClearingHouse error counter',
+			description: 'DriftClient error counter',
 		});
 
 		this.filledOrdersCounter = this.meter.createCounter('filled_orders', {

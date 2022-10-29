@@ -1,7 +1,7 @@
 import {
 	BN,
 	isVariant,
-	ClearingHouse,
+	DriftClient,
 	PerpMarketAccount,
 	SlotSubscriber,
 	PositionDirection,
@@ -76,7 +76,7 @@ export class JitMakerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 1000;
 
-	private clearingHouse: ClearingHouse;
+	private clearingHouse: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -116,7 +116,7 @@ export class JitMakerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: ClearingHouse,
+		clearingHouse: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		metrics?: Metrics | undefined
 	) {

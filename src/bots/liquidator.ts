@@ -1,8 +1,8 @@
 import {
 	BN,
 	convertToNumber,
-	ClearingHouse,
-	ClearingHouseUser,
+	DriftClient,
+	User,
 	isVariant,
 	OrderRecord,
 	LiquidationRecord,
@@ -33,7 +33,7 @@ export class PerpLiquidatorBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 10000;
 
-	private clearingHouse: ClearingHouse;
+	private clearingHouse: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private metrics: Metrics | undefined;
@@ -56,7 +56,7 @@ export class PerpLiquidatorBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: ClearingHouse,
+		clearingHouse: DriftClient,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
@@ -191,7 +191,7 @@ export class PerpLiquidatorBot implements Bot {
 	}
 
 	private calculateBaseAmountToLiquidate(
-		liquidatorUser: ClearingHouseUser,
+		liquidatorUser: User,
 		liquidateePosition: PerpPosition
 	): BN {
 		const oraclePrice = this.clearingHouse.getOracleDataForPerpMarket(
@@ -223,9 +223,7 @@ export class PerpLiquidatorBot implements Bot {
 	 * @param chUserToCheck
 	 * @returns
 	 */
-	private findPerpBankruptingMarkets(
-		chUserToCheck: ClearingHouseUser
-	): Array<number> {
+	private findPerpBankruptingMarkets(chUserToCheck: User): Array<number> {
 		const bankruptMarketIndices: Array<number> = [];
 
 		for (const market of this.clearingHouse.getPerpMarketAccounts()) {
@@ -246,22 +244,11 @@ export class PerpLiquidatorBot implements Bot {
 	 * @param chUserToCheck
 	 * @returns
 	 */
-	private findSpotBankruptingMarkets(
-		chUserToCheck: ClearingHouseUser
-	): Array<number> {
+	private findSpotBankruptingMarkets(chUserToCheck: User): Array<number> {
 		const bankruptMarketIndices: Array<number> = [];
 
-		// TODO: use getSpotMarketAccounts once it's merged to sdk
-		// for (const market of this.clearingHouse.getSpotMarketAccounts()) {
-		// 	const position = chUserToCheck.getSpotPosition(market.marketIndex);
-		// 	if (position.quoteAssetAmount.lt(largestPositionLoss)) {
-		// 		largestPositionLossMarketIndex = market.marketIndex;
-		// 		largestPositionLoss = position.quoteAssetAmount;
-		// 	}
-		// }
-
-		// temp on old sdk impl.
-		for (const position of chUserToCheck.getUserAccount().spotPositions) {
+		for (const market of this.clearingHouse.getSpotMarketAccounts()) {
+			const position = chUserToCheck.getSpotPosition(market.marketIndex);
 			if (!isVariant(position.balanceType, 'borrow')) {
 				// not possible to resolve non-borrow markets
 				continue;
@@ -276,7 +263,7 @@ export class PerpLiquidatorBot implements Bot {
 		return bankruptMarketIndices;
 	}
 
-	private async tryResolveBankruptUser(user: ClearingHouseUser) {
+	private async tryResolveBankruptUser(user: User) {
 		const userAcc = user.getUserAccount();
 		const userKey = user.getUserAccountPublicKey();
 
