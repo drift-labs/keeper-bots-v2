@@ -13,7 +13,6 @@ import {
 	PerpPosition,
 	UserMap,
 	ZERO,
-	getTokenAmount,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -224,20 +223,21 @@ export class PerpLiquidatorBot implements Bot {
 	 * @param chUserToCheck
 	 * @returns
 	 */
-	private findPerpBankruptingMarket(
+	private findPerpBankruptingMarkets(
 		chUserToCheck: ClearingHouseUser
-	): [number, BN] {
-		let largestPositionLossMarketIndex = -1;
-		let largestPositionLoss = ZERO;
+	): Array<number> {
+		const bankruptMarketIndices: Array<number> = [];
+
 		for (const market of this.clearingHouse.getPerpMarketAccounts()) {
 			const position = chUserToCheck.getUserPosition(market.marketIndex);
-			if (position.quoteAssetAmount.lt(largestPositionLoss)) {
-				largestPositionLossMarketIndex = market.marketIndex;
-				largestPositionLoss = position.quoteAssetAmount;
+			if (position.quoteAssetAmount.gte(ZERO)) {
+				// invalid position to liquidate
+				continue;
 			}
+			bankruptMarketIndices.push(position.marketIndex);
 		}
 
-		return [largestPositionLossMarketIndex, largestPositionLoss];
+		return bankruptMarketIndices;
 	}
 
 	/**
@@ -246,11 +246,10 @@ export class PerpLiquidatorBot implements Bot {
 	 * @param chUserToCheck
 	 * @returns
 	 */
-	private findSpotBankruptingMarket(
+	private findSpotBankruptingMarkets(
 		chUserToCheck: ClearingHouseUser
-	): [number, BN] {
-		let largestPositionLossMarketIndex = -1;
-		let largestPositionLoss = ZERO;
+	): Array<number> {
+		const bankruptMarketIndices: Array<number> = [];
 
 		// TODO: use getSpotMarketAccounts once it's merged to sdk
 		// for (const market of this.clearingHouse.getSpotMarketAccounts()) {
@@ -267,56 +266,26 @@ export class PerpLiquidatorBot implements Bot {
 				// not possible to resolve non-borrow markets
 				continue;
 			}
-			const spotMarket = this.clearingHouse.getSpotMarketAccount(
-				position.marketIndex
-			);
-			const positionBorrowAmount = getTokenAmount(
-				position.scaledBalance,
-				spotMarket,
-				position.balanceType
-			);
-
-			// spot borrow is uint
-			if (positionBorrowAmount.gt(largestPositionLoss)) {
-				largestPositionLoss = positionBorrowAmount;
-				largestPositionLossMarketIndex = position.marketIndex;
+			if (position.scaledBalance.lte(ZERO)) {
+				// invalid borrow
+				continue;
 			}
+			bankruptMarketIndices.push(position.marketIndex);
 		}
 
-		return [largestPositionLossMarketIndex, largestPositionLoss];
+		return bankruptMarketIndices;
 	}
 
 	private async tryResolveBankruptUser(user: ClearingHouseUser) {
 		const userAcc = user.getUserAccount();
 		const userKey = user.getUserAccountPublicKey();
-		const auth = userAcc.authority.toBase58();
 
 		// find out whether the user is perp-bankrupt or spot-bankrupt
-		const [perpIdx, perpLoss] = this.findPerpBankruptingMarket(user);
-		const [spotIdx, spotLoss] = this.findSpotBankruptingMarket(user);
+		const bankruptPerpMarkets = this.findPerpBankruptingMarkets(user);
+		const bankruptSpotMarkets = this.findSpotBankruptingMarkets(user);
 
-		// resolve the largest loss market
-		let marketTypeToResolve = '';
-		if (perpIdx === -1 && spotIdx === -1) {
-			// no market to resolve
-			logger.warn(
-				`UserAcc: ${userKey.toBase58()}, Auth: ${auth} is bankrupt but no resolvable market`
-			);
-		} else if (perpIdx > -1 && spotIdx === -1) {
-			marketTypeToResolve = 'perp';
-		} else if (perpIdx === -1 && spotIdx > -1) {
-			marketTypeToResolve = 'spot';
-		} else {
-			// TODO: are perpLoss and spotLoss precisions correct to compare here?
-			if (perpLoss.abs().gt(spotLoss.abs())) {
-				marketTypeToResolve = 'perp';
-			} else {
-				marketTypeToResolve = 'spot';
-			}
-		}
-
-		// send the resolve tx
-		if (marketTypeToResolve === 'perp') {
+		// resolve bankrupt markets
+		for (const perpIdx of bankruptPerpMarkets) {
 			logger.info(
 				`Resolving perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx}`
 			);
@@ -328,7 +297,9 @@ export class PerpLiquidatorBot implements Bot {
 			logger.info(
 				`Resolved perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx}: ${tx}`
 			);
-		} else if (marketTypeToResolve === 'spot') {
+		}
+
+		for (const spotIdx of bankruptSpotMarkets) {
 			logger.info(
 				`Resolving spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx}`
 			);
@@ -340,8 +311,6 @@ export class PerpLiquidatorBot implements Bot {
 			logger.info(
 				`Resolved spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx}: ${tx}`
 			);
-		} else {
-			throw new Error(`Failed to find perp or spot market to resolve`);
 		}
 	}
 
