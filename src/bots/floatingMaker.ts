@@ -3,7 +3,7 @@ import {
 	calculateBidPrice,
 	BN,
 	isVariant,
-	ClearingHouse,
+	DriftClient,
 	PerpMarketAccount,
 	SlotSubscriber,
 	PositionDirection,
@@ -41,7 +41,7 @@ export class FloatingPerpMakerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 5000;
 
-	private clearingHouse: ClearingHouse;
+	private clearingHouse: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 	private periodicTaskMutex = new Mutex();
 	private lastSlotMarketUpdated: Map<number, number> = new Map();
@@ -73,7 +73,7 @@ export class FloatingPerpMakerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: ClearingHouse,
+		clearingHouse: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		metrics?: Metrics | undefined
 	) {
