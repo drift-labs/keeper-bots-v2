@@ -22,7 +22,7 @@ Update values in `.env` accordingly
 
 ## Initialize User
 
-A `ClearingHouseUser` must be created before interacting with the `ClearingHouse` program.
+A `User` must be created before interacting with the `DriftClient` program.
 
 ```shell
 yarn run dev --init-user

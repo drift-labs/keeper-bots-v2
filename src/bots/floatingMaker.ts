@@ -41,7 +41,7 @@ export class FloatingPerpMakerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 5000;
 
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 	private periodicTaskMutex = new Mutex();
 	private lastSlotMarketUpdated: Map<number, number> = new Map();
@@ -73,13 +73,13 @@ export class FloatingPerpMakerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
-		this.clearingHouse = clearingHouse;
+		this.driftClient = driftClient;
 		this.slotSubscriber = slotSubscriber;
 		this.metrics = metrics;
 	}
@@ -139,7 +139,7 @@ export class FloatingPerpMakerBot implements Bot {
 	 * @returns {Promise<void>}
 	 */
 	private updateAgentState(): void {
-		this.clearingHouse.getUserAccount().perpPositions.map((p) => {
+		this.driftClient.getUserAccount().perpPositions.map((p) => {
 			if (p.baseAssetAmount.isZero()) {
 				return;
 			}
@@ -151,7 +151,7 @@ export class FloatingPerpMakerBot implements Bot {
 			this.agentState.openOrders.set(market.marketIndex.toNumber(), []);
 		}
 
-		this.clearingHouse.getUserAccount().orders.map((o) => {
+		this.driftClient.getUserAccount().orders.map((o) => {
 			if (isVariant(o.status, 'init')) {
 				return;
 			}
@@ -175,7 +175,7 @@ export class FloatingPerpMakerBot implements Bot {
 		}
 
 		const openOrders = this.agentState.openOrders.get(marketIndex);
-		const oracle = this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
+		const oracle = this.driftClient.getOracleDataForPerpMarket(marketIndex);
 		const vAsk = calculateAskPrice(marketAccount, oracle);
 		const vBid = calculateBidPrice(marketAccount, oracle);
 
@@ -221,9 +221,9 @@ export class FloatingPerpMakerBot implements Bot {
 		) {
 			// cancel orders
 			for (const o of openOrders) {
-				const tx = await this.clearingHouse.cancelOrder(o.orderId);
+				const tx = await this.driftClient.cancelOrder(o.orderId);
 				console.log(
-					`${this.name} cancelling order ${this.clearingHouse
+					`${this.name} cancelling order ${this.driftClient
 						.getUserAccount()
 						.authority.toBase58()}-${o.orderId}: ${tx}`
 				);
@@ -236,7 +236,7 @@ export class FloatingPerpMakerBot implements Bot {
 			const biasDenom = new BN(100);
 
 			const oracleBidSpread = oracle.price.sub(vBid);
-			const tx0 = await this.clearingHouse.placeSpotOrder({
+			const tx0 = await this.driftClient.placeSpotOrder({
 				marketIndex: marketIndex,
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.LONG,
@@ -250,7 +250,7 @@ export class FloatingPerpMakerBot implements Bot {
 			console.log(`${this.name} placing long: ${tx0}`);
 
 			const oracleAskSpread = vAsk.sub(oracle.price);
-			const tx1 = await this.clearingHouse.placeSpotOrder({
+			const tx1 = await this.driftClient.placeSpotOrder({
 				marketIndex: marketIndex,
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.SHORT,
@@ -274,7 +274,7 @@ export class FloatingPerpMakerBot implements Bot {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				this.updateAgentState();
 				await Promise.all(
-					this.clearingHouse.getPerpMarketAccounts().map((marketAccount) => {
+					this.driftClient.getPerpMarketAccounts().map((marketAccount) => {
 						console.log(
 							`${this.name} updating open orders for market ${marketAccount.marketIndex}`
 						);
@@ -294,7 +294,7 @@ export class FloatingPerpMakerBot implements Bot {
 			if (ran) {
 				const duration = Date.now() - start;
 				this.metrics?.recordRpcDuration(
-					this.clearingHouse.connection.rpcEndpoint,
+					this.driftClient.connection.rpcEndpoint,
 					'updateOpenOrders',
 					duration,
 					false,

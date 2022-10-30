@@ -24,7 +24,7 @@ export class TriggerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 1000;
 
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -43,13 +43,13 @@ export class TriggerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
-		this.clearingHouse = clearingHouse;
+		this.driftClient = driftClient;
 		this.slotSubscriber = slotSubscriber;
 		this.metrics = metrics;
 	}
@@ -58,8 +58,8 @@ export class TriggerBot implements Bot {
 		logger.info(`${this.name} initing`);
 		// initialize userMap instance
 		this.userMap = new UserMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		await this.userMap.fetchAllUsers();
 	}
@@ -101,7 +101,7 @@ export class TriggerBot implements Bot {
 
 		try {
 			const oraclePriceData =
-				this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
+				this.driftClient.getOracleDataForPerpMarket(marketIndex);
 
 			let nodesToTrigger: Array<NodeToTrigger> = [];
 			await this.dlobMutex.runExclusive(async () => {
@@ -127,7 +127,7 @@ export class TriggerBot implements Bot {
 				const user = await this.userMap.mustGet(
 					nodeToTrigger.node.userAccount.toString()
 				);
-				this.clearingHouse
+				this.driftClient
 					.triggerOrder(
 						nodeToTrigger.node.userAccount,
 						user.getUserAccount(),
@@ -143,7 +143,7 @@ export class TriggerBot implements Bot {
 						const errorCode = getErrorCode(error);
 						this?.metrics.recordErrorCode(
 							errorCode,
-							this.clearingHouse.provider.wallet.publicKey,
+							this.driftClient.provider.wallet.publicKey,
 							this.name
 						);
 
@@ -167,7 +167,7 @@ export class TriggerBot implements Bot {
 
 		try {
 			const oraclePriceData =
-				this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
+				this.driftClient.getOracleDataForPerpMarket(marketIndex);
 
 			let nodesToTrigger: Array<NodeToTrigger> = [];
 			await this.dlobMutex.runExclusive(async () => {
@@ -193,7 +193,7 @@ export class TriggerBot implements Bot {
 				const user = await this.userMap.mustGet(
 					nodeToTrigger.node.userAccount.toString()
 				);
-				this.clearingHouse
+				this.driftClient
 					.triggerOrder(
 						nodeToTrigger.node.userAccount,
 						user.getUserAccount(),
@@ -209,7 +209,7 @@ export class TriggerBot implements Bot {
 						const errorCode = getErrorCode(error);
 						this?.metrics.recordErrorCode(
 							errorCode,
-							this.clearingHouse.provider.wallet.publicKey,
+							this.driftClient.provider.wallet.publicKey,
 							this.name
 						);
 
@@ -239,9 +239,9 @@ export class TriggerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB(
-						this.clearingHouse.getPerpMarketAccounts(),
-						this.clearingHouse.getSpotMarketAccounts(),
-						this.clearingHouse.getStateAccount(),
+						this.driftClient.getPerpMarketAccounts(),
+						this.driftClient.getSpotMarketAccounts(),
+						this.driftClient.getStateAccount(),
 						this.userMap,
 						true
 					);
@@ -249,10 +249,10 @@ export class TriggerBot implements Bot {
 				});
 
 				await Promise.all([
-					this.clearingHouse.getPerpMarketAccounts().map((marketAccount) => {
+					this.driftClient.getPerpMarketAccounts().map((marketAccount) => {
 						this.tryTriggerForPerpMarket(marketAccount);
 					}),
-					this.clearingHouse.getSpotMarketAccounts().map((marketAccount) => {
+					this.driftClient.getSpotMarketAccounts().map((marketAccount) => {
 						this.tryTriggerForSpotMarket(marketAccount);
 					}),
 				]);
@@ -270,7 +270,7 @@ export class TriggerBot implements Bot {
 			if (ran) {
 				const duration = Date.now() - start;
 				this.metrics?.recordRpcDuration(
-					this.clearingHouse.connection.rpcEndpoint,
+					this.driftClient.connection.rpcEndpoint,
 					'tryTrigger',
 					duration,
 					false,

@@ -87,10 +87,10 @@ export class Metrics {
 	private rpcRequestsCounter: Counter;
 	private rpcRequestsDurationHistogram: Histogram;
 
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private authority: PublicKey;
 
-	constructor(clearingHouse: DriftClient, metricsPort?: number) {
+	constructor(driftClient: DriftClient, metricsPort?: number) {
 		const { endpoint: defaultEndpoint, port: defaultPort } =
 			PrometheusExporter.DEFAULT_OPTIONS;
 		const port = metricsPort || defaultPort;
@@ -122,8 +122,8 @@ export class Metrics {
 		meterProvider.addMetricReader(this.exporter);
 		this.meter = meterProvider.getMeter(meterName);
 
-		this.clearingHouse = clearingHouse;
-		this.authority = this.clearingHouse.provider.wallet.publicKey;
+		this.driftClient = driftClient;
+		this.authority = this.driftClient.provider.wallet.publicKey;
 
 		this.bootTimeMs = Date.now();
 		this.upTimeGauge = this.meter.createObservableGauge('boot_time', {
@@ -634,7 +634,7 @@ export class Metrics {
 	 * they are available immediately.
 	 */
 	async runPeriodicTasks() {
-		const chUser = this.clearingHouse.getUser();
+		const chUser = this.driftClient.getUser();
 
 		// this.collateralValueLock.runExclusive(async () => {
 		// 	this.collateralValuePerBank = [];
@@ -649,8 +649,8 @@ export class Metrics {
 		// });
 
 		// this.solBalanceLock.runExclusive(async () => {
-		// 	const lamportsBal = await this.clearingHouse.connection.getBalance(
-		// 		await this.clearingHouse.getUserAccountPublicKey()
+		// 	const lamportsBal = await this.driftClient.connection.getBalance(
+		// 		await this.driftClient.getUserAccountPublicKey()
 		// 	);
 		// 	this.solBalance = lamportsBal / 10 ** 9;
 		// });

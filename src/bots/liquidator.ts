@@ -33,7 +33,7 @@ export class PerpLiquidatorBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 10000;
 
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private metrics: Metrics | undefined;
@@ -56,12 +56,12 @@ export class PerpLiquidatorBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		driftClient: DriftClient,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
-		this.clearingHouse = clearingHouse;
+		this.driftClient = driftClient;
 		this.metrics = metrics;
 	}
 
@@ -69,8 +69,8 @@ export class PerpLiquidatorBot implements Bot {
 		logger.info(`${this.name} initing`);
 		// initialize userMap instance
 		this.userMap = new UserMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		await this.userMap.fetchAllUsers();
 	}
@@ -93,7 +93,7 @@ export class PerpLiquidatorBot implements Bot {
 
 		logger.info(`${this.name} Bot started!`);
 
-		const freeCollateral = this.clearingHouse.getUser().getFreeCollateral();
+		const freeCollateral = this.driftClient.getUser().getFreeCollateral();
 		logger.info(
 			`${this.name} free collateral: $${convertToNumber(
 				freeCollateral,
@@ -145,14 +145,14 @@ export class PerpLiquidatorBot implements Bot {
 		}
 
 		try {
-			const userAccount = this.clearingHouse.getUserAccount();
+			const userAccount = this.driftClient.getUserAccount();
 			// cancel open orders
 			let canceledOrders = 0;
 			for (const order of userAccount.orders) {
 				if (!isVariant(order.status, 'open')) {
 					continue;
 				}
-				const tx = await this.clearingHouse.cancelOrder(order.orderId);
+				const tx = await this.driftClient.cancelOrder(order.orderId);
 				logger.info(
 					`${this.name} canceling open order ${
 						order.orderId
@@ -172,7 +172,7 @@ export class PerpLiquidatorBot implements Bot {
 				if (position.baseAssetAmount.isZero()) {
 					continue;
 				}
-				const tx = await this.clearingHouse.closePosition(position.marketIndex);
+				const tx = await this.driftClient.closePosition(position.marketIndex);
 				logger.info(
 					`${
 						this.name
@@ -194,7 +194,7 @@ export class PerpLiquidatorBot implements Bot {
 		liquidatorUser: User,
 		liquidateePosition: PerpPosition
 	): BN {
-		const oraclePrice = this.clearingHouse.getOracleDataForPerpMarket(
+		const oraclePrice = this.driftClient.getOracleDataForPerpMarket(
 			liquidateePosition.marketIndex
 		).price;
 		const collateralToSpend = liquidatorUser
@@ -226,7 +226,7 @@ export class PerpLiquidatorBot implements Bot {
 	private findPerpBankruptingMarkets(chUserToCheck: User): Array<number> {
 		const bankruptMarketIndices: Array<number> = [];
 
-		for (const market of this.clearingHouse.getPerpMarketAccounts()) {
+		for (const market of this.driftClient.getPerpMarketAccounts()) {
 			const position = chUserToCheck.getPerpPosition(market.marketIndex);
 			if (position.quoteAssetAmount.gte(ZERO)) {
 				// invalid position to liquidate
@@ -247,7 +247,7 @@ export class PerpLiquidatorBot implements Bot {
 	private findSpotBankruptingMarkets(chUserToCheck: User): Array<number> {
 		const bankruptMarketIndices: Array<number> = [];
 
-		for (const market of this.clearingHouse.getSpotMarketAccounts()) {
+		for (const market of this.driftClient.getSpotMarketAccounts()) {
 			const position = chUserToCheck.getSpotPosition(market.marketIndex);
 			if (!isVariant(position.balanceType, 'borrow')) {
 				// not possible to resolve non-borrow markets
@@ -276,7 +276,7 @@ export class PerpLiquidatorBot implements Bot {
 			logger.info(
 				`Resolving perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx}`
 			);
-			const tx = await this.clearingHouse.resolvePerpBankruptcy(
+			const tx = await this.driftClient.resolvePerpBankruptcy(
 				userKey,
 				userAcc,
 				perpIdx
@@ -290,7 +290,7 @@ export class PerpLiquidatorBot implements Bot {
 			logger.info(
 				`Resolving spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx}`
 			);
-			const tx = await this.clearingHouse.resolveSpotBankruptcy(
+			const tx = await this.driftClient.resolveSpotBankruptcy(
 				userKey,
 				userAcc,
 				spotIdx
@@ -318,7 +318,7 @@ export class PerpLiquidatorBot implements Bot {
 				} else if (user.canBeLiquidated()) {
 					logger.info(`liquidating ${auth}: ${userKey}...`);
 
-					const liquidatorUser = this.clearingHouse.getUser();
+					const liquidatorUser = this.driftClient.getUser();
 
 					for (const liquidateePosition of user.getUserAccount()
 						.perpPositions) {
@@ -338,7 +338,7 @@ export class PerpLiquidatorBot implements Bot {
 										'--dry run flag enabled - not sending liquidate tx'
 									);
 								}
-								const tx = await this.clearingHouse.liquidatePerp(
+								const tx = await this.driftClient.liquidatePerp(
 									user.userAccountPublicKey,
 									user.getUserAccount(),
 									liquidateePosition.marketIndex,
@@ -354,7 +354,7 @@ export class PerpLiquidatorBot implements Bot {
 								const errorCode = getErrorCode(txError);
 								this.metrics?.recordErrorCode(
 									errorCode,
-									this.clearingHouse.provider.wallet.publicKey,
+									this.driftClient.provider.wallet.publicKey,
 									this.name
 								);
 								logger.error(

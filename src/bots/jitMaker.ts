@@ -76,7 +76,7 @@ export class JitMakerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 1000;
 
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -116,13 +116,13 @@ export class JitMakerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
-		this.clearingHouse = clearingHouse;
+		this.driftClient = driftClient;
 		this.slotSubscriber = slotSubscriber;
 		this.metrics = metrics;
 	}
@@ -132,21 +132,21 @@ export class JitMakerBot implements Bot {
 		const initPromises: Array<Promise<any>> = [];
 
 		this.userMap = new UserMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userMap.fetchAllUsers());
 
 		this.userStatsMap = new UserStatsMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		this.dlob = new DLOB(
-			this.clearingHouse.getPerpMarketAccounts(),
-			this.clearingHouse.getSpotMarketAccounts(),
-			this.clearingHouse.getStateAccount(),
+			this.driftClient.getPerpMarketAccounts(),
+			this.driftClient.getSpotMarketAccounts(),
+			this.driftClient.getStateAccount(),
 			this.userMap,
 			true
 		);
@@ -269,7 +269,7 @@ export class JitMakerBot implements Bot {
 	 */
 	private async updateAgentState(): Promise<void> {
 		// TODO: SPOT
-		for await (const p of this.clearingHouse.getUserAccount().perpPositions) {
+		for await (const p of this.driftClient.getUserAccount().perpPositions) {
 			if (p.baseAssetAmount.isZero()) {
 				continue;
 			}
@@ -297,7 +297,7 @@ export class JitMakerBot implements Bot {
 			if (canUpdateStateBasedOnPosition) {
 				// check if need to enter a closing state
 				const accountCollateral = convertToNumber(
-					this.clearingHouse.getUser().getTotalCollateral(),
+					this.driftClient.getUser().getTotalCollateral(),
 					QUOTE_PRECISION
 				);
 				const positionValue = convertToNumber(
@@ -423,7 +423,7 @@ export class JitMakerBot implements Bot {
 			if (
 				!this.nodeCanBeFilled(
 					nodeToFill.node,
-					await this.clearingHouse.getUserAccountPublicKey()
+					await this.driftClient.getUserAccountPublicKey()
 				)
 			) {
 				continue;
@@ -500,7 +500,7 @@ export class JitMakerBot implements Bot {
 				});
 
 				this.metrics?.recordFilledOrder(
-					this.clearingHouse.provider.wallet.publicKey,
+					this.driftClient.provider.wallet.publicKey,
 					this.name
 				);
 				logger.info(
@@ -518,7 +518,7 @@ export class JitMakerBot implements Bot {
 				const errorCode = getErrorCode(error);
 				this.metrics?.recordErrorCode(
 					errorCode,
-					this.clearingHouse.provider.wallet.publicKey,
+					this.driftClient.provider.wallet.publicKey,
 					this.name
 				);
 
@@ -580,7 +580,7 @@ export class JitMakerBot implements Bot {
 		const takerUserStatsPublicKey = takerUserStats.userStatsAccountPublicKey;
 		const referrerInfo = takerUserStats.getReferrerInfo();
 
-		return await this.clearingHouse.placeAndMakePerpOrder(
+		return await this.driftClient.placeAndMakePerpOrder(
 			{
 				orderType: OrderType.LIMIT,
 				marketIndex: action.marketIndex,
@@ -616,9 +616,9 @@ export class JitMakerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB(
-						this.clearingHouse.getPerpMarketAccounts(),
-						this.clearingHouse.getSpotMarketAccounts(),
-						this.clearingHouse.getStateAccount(),
+						this.driftClient.getPerpMarketAccounts(),
+						this.driftClient.getSpotMarketAccounts(),
+						this.driftClient.getStateAccount(),
 						this.userMap,
 						true
 					);
@@ -627,7 +627,7 @@ export class JitMakerBot implements Bot {
 
 				await Promise.all(
 					// TODO: spot
-					this.clearingHouse.getPerpMarketAccounts().map((marketAccount) => {
+					this.driftClient.getPerpMarketAccounts().map((marketAccount) => {
 						this.tryMakeJitAuctionForMarket(marketAccount);
 					})
 				);
@@ -646,7 +646,7 @@ export class JitMakerBot implements Bot {
 			if (ran) {
 				const duration = Date.now() - start;
 				this.metrics?.recordRpcDuration(
-					this.clearingHouse.connection.rpcEndpoint,
+					this.driftClient.connection.rpcEndpoint,
 					'tryMake',
 					duration,
 					false,

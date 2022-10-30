@@ -37,7 +37,7 @@ export class PnlSettlerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 600000;
 
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private perpMarkets: PerpMarketConfig[];
@@ -50,14 +50,14 @@ export class PnlSettlerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		driftClient: DriftClient,
 		perpMarkets: PerpMarketConfig[],
 		spotMarkets: SpotMarketConfig[],
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
-		this.clearingHouse = clearingHouse;
+		this.driftClient = driftClient;
 		this.perpMarkets = perpMarkets;
 		this.spotMarkets = spotMarkets;
 		this.metrics = metrics;
@@ -67,8 +67,8 @@ export class PnlSettlerBot implements Bot {
 		logger.info(`${this.name} initing`);
 		// initialize userMap instance
 		this.userMap = new UserMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		await this.userMap.fetchAllUsers();
 	}
@@ -126,20 +126,20 @@ export class PnlSettlerBot implements Bot {
 
 			this.perpMarkets.forEach((market) => {
 				perpMarketAndOracleData[market.marketIndex] = {
-					marketAccount: this.clearingHouse.getPerpMarketAccount(
+					marketAccount: this.driftClient.getPerpMarketAccount(
 						market.marketIndex
 					),
-					oraclePriceData: this.clearingHouse.getOracleDataForPerpMarket(
+					oraclePriceData: this.driftClient.getOracleDataForPerpMarket(
 						market.marketIndex
 					),
 				};
 			});
 			this.spotMarkets.forEach((market) => {
 				spotMarketAndOracleData[market.marketIndex] = {
-					marketAccount: this.clearingHouse.getSpotMarketAccount(
+					marketAccount: this.driftClient.getSpotMarketAccount(
 						market.marketIndex
 					),
-					oraclePriceData: this.clearingHouse.getOracleDataForSpotMarket(
+					oraclePriceData: this.driftClient.getOracleDataForSpotMarket(
 						market.marketIndex
 					),
 				};
@@ -212,7 +212,7 @@ export class PnlSettlerBot implements Bot {
 
 				for (let i = 0; i < params.users.length; i += SETTLE_USER_CHUNKS) {
 					const usersChunk = params.users.slice(i, i + SETTLE_USER_CHUNKS);
-					this.clearingHouse
+					this.driftClient
 						.settlePNLs(usersChunk, params.marketIndex)
 						.then((txSig) => {
 							logger.info(
@@ -228,7 +228,7 @@ export class PnlSettlerBot implements Bot {
 							const errorCode = getErrorCode(err);
 							this.metrics?.recordErrorCode(
 								errorCode,
-								this.clearingHouse.provider.wallet.publicKey,
+								this.driftClient.provider.wallet.publicKey,
 								this.name
 							);
 							logger.error(

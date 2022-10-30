@@ -47,7 +47,7 @@ export class SpotFillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 1000;
 
 	private driftEnv: DriftEnv;
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 
 	private dlobMutex = withTimeout(
@@ -75,20 +75,18 @@ export class SpotFillerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		env: DriftEnv,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
-		this.clearingHouse = clearingHouse;
+		this.driftClient = driftClient;
 		this.slotSubscriber = slotSubscriber;
 		this.metrics = metrics;
 		this.driftEnv = env;
-		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
-			clearingHouse
-		);
+		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(driftClient);
 		this.serumSubscribers = new Map<number, SerumSubscriber>();
 	}
 
@@ -98,14 +96,14 @@ export class SpotFillerBot implements Bot {
 		const initPromises: Array<Promise<any>> = [];
 
 		this.userMap = new UserMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userMap.fetchAllUsers());
 
 		this.userStatsMap = new UserStatsMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
@@ -122,13 +120,13 @@ export class SpotFillerBot implements Bot {
 
 				// set up serum price subscriber
 				const serumSubscriber = new SerumSubscriber({
-					connection: this.clearingHouse.connection,
+					connection: this.driftClient.connection,
 					programId: new PublicKey(config.SERUM_V3),
 					marketAddress: spotMarketConfig.serumMarket,
 					accountSubscription: {
 						type: 'polling',
 						accountLoader: (
-							this.clearingHouse
+							this.driftClient
 								.accountSubscriber as PollingDriftClientAccountSubscriber
 						).accountLoader,
 					},
@@ -188,7 +186,7 @@ export class SpotFillerBot implements Bot {
 	): Promise<Array<NodeToFill>> {
 		let nodes: Array<NodeToFill> = [];
 
-		const oraclePriceData = this.clearingHouse.getOracleDataForSpotMarket(
+		const oraclePriceData = this.driftClient.getOracleDataForSpotMarket(
 			market.marketIndex
 		);
 
@@ -309,7 +307,7 @@ export class SpotFillerBot implements Bot {
 			1
 		);
 
-		const tx = await this.clearingHouse.fillSpotOrder(
+		const tx = await this.driftClient.fillSpotOrder(
 			chUser.getUserAccountPublicKey(),
 			chUser.getUserAccount(),
 			nodeToFill.node.order,
@@ -335,9 +333,9 @@ export class SpotFillerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB(
-						this.clearingHouse.getPerpMarketAccounts(), // TODO: new sdk - remove this
-						this.clearingHouse.getSpotMarketAccounts(),
-						this.clearingHouse.getStateAccount(),
+						this.driftClient.getPerpMarketAccounts(), // TODO: new sdk - remove this
+						this.driftClient.getSpotMarketAccounts(),
+						this.driftClient.getStateAccount(),
 						this.userMap,
 						true
 					);
@@ -354,7 +352,7 @@ export class SpotFillerBot implements Bot {
 
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];
-				for (const market of this.clearingHouse.getSpotMarketAccounts()) {
+				for (const market of this.driftClient.getSpotMarketAccounts()) {
 					fillableNodes = fillableNodes.concat(
 						await this.getSpotFillableNodesForMarket(market)
 					);
@@ -391,7 +389,7 @@ export class SpotFillerBot implements Bot {
 				if (ran) {
 					const duration = Date.now() - startTime;
 					this.metrics?.recordRpcDuration(
-						this.clearingHouse.connection.rpcEndpoint,
+						this.driftClient.connection.rpcEndpoint,
 						'tryFill',
 						duration,
 						false,
