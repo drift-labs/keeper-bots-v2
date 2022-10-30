@@ -565,6 +565,16 @@ const runBot = async () => {
 	logger.info(`Health check server listening on port ${healthCheckPort}`);
 };
 
+process.on('unhandledRejection', (reason, promise) => {
+	console.error(
+		'Unhandled rejection promise: ',
+		promise,
+		', reason: ',
+		reason,
+		').'
+	);
+});
+
 async function recursiveTryCatch(f: () => void) {
 	try {
 		await f();
@@ -572,7 +582,7 @@ async function recursiveTryCatch(f: () => void) {
 		console.error(e);
 		for (const bot of bots) {
 			await bot.reset();
-			await bot.init();
+			//await bot.init();
 		}
 		await sleep(15000);
 		await recursiveTryCatch(f);

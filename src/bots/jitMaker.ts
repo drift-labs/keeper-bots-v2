@@ -89,7 +89,7 @@ export class JitMakerBot implements Bot {
 	private userStatsMap: UserStatsMap;
 	private orderLastSeenBaseAmount: Map<string, BN> = new Map(); // need some way to trim this down over time
 
-	private intervalIds: Array<NodeJS.Timer> = [];
+	private timeoutId?: NodeJS.Timer;
 	private metrics: Metrics | undefined;
 
 	private agentState: State;
@@ -163,23 +163,26 @@ export class JitMakerBot implements Bot {
 	}
 
 	public async reset() {
-		for (const intervalId of this.intervalIds) {
-			clearInterval(intervalId);
+		if (this.timeoutId) {
+			clearTimeout(this.timeoutId);
 		}
-		this.intervalIds = [];
-		if (this.dlob) {
-			this.dlob.clear();
-			delete this.dlob;
-		}
-		delete this.userMap;
-		delete this.userStatsMap;
+		//if (this.dlob) {
+		this.dlob.clear();
+		//delete this.dlob;
+		//}
+		//delete this.userMap;
+		//delete this.userStatsMap;
 	}
 
 	public async startIntervalLoop(intervalMs: number) {
-		await this.tryMake();
-		const intervalId = setInterval(this.tryMake.bind(this), intervalMs);
-		this.intervalIds.push(intervalId);
-
+		const tryMake = this.tryMake.bind(this);
+		this.timeoutId = setTimeout(function tick() {
+			(async () => {
+				this.timeoutId = undefined;
+				await tryMake();
+				this.timeoutId = setTimeout(tick, intervalMs);
+			})();
+		}, intervalMs);
 		logger.info(`${this.name} Bot started!`);
 	}
 
@@ -611,10 +614,10 @@ export class JitMakerBot implements Bot {
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
-					if (this.dlob) {
-						this.dlob.clear();
-						delete this.dlob;
-					}
+					//if (this.dlob) {
+					this.dlob.clear();
+					//delete this.dlob;
+					//}
 					this.dlob = new DLOB(
 						this.driftClient.getPerpMarketAccounts(),
 						this.driftClient.getSpotMarketAccounts(),
