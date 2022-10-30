@@ -510,7 +510,11 @@ const runBot = async () => {
 	);
 
 	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
-		Promise.all(bots.map((bot) => bot.trigger(event)));
+		await Promise.all(
+			bots.map(async (bot) => {
+				await bot.trigger(event);
+			})
+		);
 	});
 
 	// start http server listening to /health endpoint using http package
