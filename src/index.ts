@@ -466,8 +466,8 @@ const runBot = async () => {
 				'JitMaker',
 				!!opts.dry,
 				driftClient,
-				slotSubscriber
-				//metrics
+				slotSubscriber,
+				metrics
 			)
 		);
 	}
