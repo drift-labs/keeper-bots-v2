@@ -51,10 +51,10 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/sdk@0.2.0-master.39":
-  version "0.2.0-master.39"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.2.0-master.39.tgz#8947262f422555c247e46c45bceb3002662062f5"
-  integrity sha512-2eLwphbt/6aEoUP+Z88eyXirBuY8ONGWESyQT30zVEjZJH4TCan5XN2jr/PjOyY0mHlqyRXrbJBCy+0Vf/GVJA==
+"@drift-labs/sdk@0.2.0-master.40":
+  version "0.2.0-master.40"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-0.2.0-master.40.tgz#f02365ec6cd7790b8a2707b214dd10127b20610a"
+  integrity sha512-NCTp0Ws0NIFAsexE4hFXxex9xTqS6xGz/f2pF9kWcKQfR3TMwsqrhxIGArA/5iO5k6FTmI0QVK6h+lwdRpq4WA==
   dependencies:
     "@project-serum/anchor" "0.25.0-beta.1"
     "@project-serum/serum" "^0.13.38"
@@ -62,6 +62,7 @@
     "@solana/spl-token" "^0.1.6"
     "@solana/web3.js" "1.41.0"
     "@switchboard-xyz/switchboard-v2" "^0.0.67"
+    async-mutex "^0.4.0"
     strict-event-emitter-types "^2.0.0"
     uuid "^8.3.2"
 
@@ -1558,6 +1559,13 @@ async-mutex@0.3.2:
   integrity sha512-HuTK7E7MT7jZEh1P9GtRW9+aTWiDWWi9InbZ5hjxrnRa39KS4BW04+xLBhYNS2aXhHUIKZSw3gj4Pn1pj+qGAA==
   dependencies:
     tslib "^2.3.1"
+
+async-mutex@^0.4.0:
+  version "0.4.0"
+  resolved "https://registry.yarnpkg.com/async-mutex/-/async-mutex-0.4.0.tgz#ae8048cd4d04ace94347507504b3cf15e631c25f"
+  integrity sha512-eJFZ1YhRR8UN8eBLoNzcDPcy/jqjsg6I1AP+KvWQX80BqOSW1oJPJXDylPUEeMr2ZQvHgnQ//Lp6f3RQ1zI7HA==
+  dependencies:
+    tslib "^2.4.0"
 
 async@^3.2.2, async@^3.2.3:
   version "3.2.4"
@@ -3812,6 +3820,11 @@ tslib@^2.0.3, tslib@^2.3.1:
   version "2.4.0"
   resolved "https://registry.yarnpkg.com/tslib/-/tslib-2.4.0.tgz#7cecaa7f073ce680a05847aa77be941098f36dc3"
   integrity sha512-d6xOpEDfsi2CZVlPQzGeux8XMwLT9hssAsaPYExaQMuYskwb+x1x7J371tWlbBdWHroy99KnVB6qIkUbs5X3UQ==
+
+tslib@^2.4.0:
+  version "2.4.1"
+  resolved "https://registry.yarnpkg.com/tslib/-/tslib-2.4.1.tgz#0d0bfbaac2880b91e22df0768e55be9753a5b17e"
+  integrity sha512-tGyy4dAjRIEwI7BzsB0lynWgOpfqjUdq91XXAlIWD2OwKBH7oCl/GZG/HT4BOHrTlPMOASlMQ7veyTqpmRcrNA==
 
 tsutils@^3.21.0:
   version "3.21.0"
