@@ -313,7 +313,7 @@ export class PerpLiquidatorBot implements Bot {
 				const auth = userAcc.authority.toBase58();
 				const userKey = user.userAccountPublicKey.toBase58();
 
-				if (userAcc.isBankrupt) {
+				if (isVariant(userAcc.status, 'bankrupt')) {
 					await this.tryResolveBankruptUser(user);
 				} else if (user.canBeLiquidated()) {
 					logger.info(`liquidating ${auth}: ${userKey}...`);
