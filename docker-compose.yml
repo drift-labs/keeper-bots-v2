@@ -6,6 +6,12 @@ services:
     restart: unless-stopped
     hostname: grafana 
     user: "0"
+    volumes:
+      - ./monitoring/grafana/grafana.ini:/etc/grafana/grafana.ini
+      - ./monitoring/grafana/grafanaDatasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./monitoring/grafana/grafanaDashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
+      - ./monitoring/grafana/grafana-storage:/var/lib/grafana
     network_mode: host
     # ports:
     #   - 3000:3000

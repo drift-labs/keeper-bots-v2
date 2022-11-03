@@ -9,7 +9,7 @@
  * - [ ] ability to update variables without needing to restart the bot
  * - [ ] ability to hedge on spot market and additional markets
  */
-
+x;
 import {
 	BN,
 	isVariant,
