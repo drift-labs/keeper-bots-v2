@@ -51,7 +51,13 @@ yarn run dev:filler
 ## Run Trigger Bot
 ```shell
 yarn
-yarn run dev:filler
+yarn run dev:trigger
+```
+
+## Run Liquidator Bot
+```shell
+yarn
+yarn run dev:liquidator
 ```
 
 ## Run JIT Maker Bot

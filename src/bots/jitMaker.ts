@@ -127,22 +127,34 @@ export class JitMakerBot implements Bot {
 		this.metrics = metrics;
 	}
 
+	/**
+	 * Initializes the bot's state.
+	 * - user map
+	 * - user stats map
+	 * - dlob
+	 * - agent state
+	 */
 	public async init() {
-		logger.info(`${this.name} initing`);
+		logger.info(`${this.name} initializing...`);
+
+		// creating an array of promises as part of initialization
 		const initPromises: Array<Promise<any>> = [];
 
+		// creating a map of users in the clearing house
 		this.userMap = new UserMap(
 			this.clearingHouse,
 			this.clearingHouse.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userMap.fetchAllUsers());
 
+		// creating a map of user stats in the clearing house
 		this.userStatsMap = new UserStatsMap(
 			this.clearingHouse,
 			this.clearingHouse.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
+		// creating a new DLOB instance composed of the perp and spot market accounts
 		this.dlob = new DLOB(
 			this.clearingHouse.getPerpMarketAccounts(),
 			this.clearingHouse.getSpotMarketAccounts(),
@@ -152,6 +164,7 @@ export class JitMakerBot implements Bot {
 		);
 		initPromises.push(this.dlob.init());
 
+		// creating a new state object for the perp and spot markets
 		this.agentState = {
 			stateType: new Map<number, StateType>(),
 			spotMarketPosition: new Map<number, SpotPosition>(),
@@ -159,9 +172,14 @@ export class JitMakerBot implements Bot {
 		};
 		initPromises.push(this.updateAgentState());
 
-		await Promise.all(initPromises);
+		// waiting for all initializing promises to resolve
+		await Promise.all(initPromises); // TODO: add in some catching here to handle initialization errors
 	}
 
+	/**
+	 * Resets the bot's state
+	 * - deletes the user map, user stats map, and dlob
+	 */
 	public async reset() {
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId);
@@ -175,6 +193,11 @@ export class JitMakerBot implements Bot {
 		delete this.userStatsMap;
 	}
 
+	/**
+	 * Starts the bot's periodic tasks. The bot will periodically
+	 * call `tryMake` and attempt to fill orders via the JIT auction
+	 * @param intervalMs the interval in milliseconds to call `tryMake`
+	 */
 	public async startIntervalLoop(intervalMs: number) {
 		await this.tryMake();
 		const intervalId = setInterval(this.tryMake.bind(this), intervalMs);
@@ -183,6 +206,10 @@ export class JitMakerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
+	/**
+	 * A simple health check on the state of the bot
+	 * @returns the bot's current state
+	 */
 	public async healthCheck(): Promise<boolean> {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
@@ -192,6 +219,10 @@ export class JitMakerBot implements Bot {
 		return healthy;
 	}
 
+	/**
+	 * Takes an order or new user record and updates the bot's state
+	 * @param record order or user record to update the bot's state with
+	 */
 	public async trigger(record: any): Promise<void> {
 		if (record.eventType === 'OrderRecord') {
 			await this.userMap.updateWithOrderRecord(record as OrderRecord);
@@ -208,15 +239,23 @@ export class JitMakerBot implements Bot {
 		}
 	}
 
+	/**
+	 * Getter for the DLOB
+	 * @returns the current DLOB
+	 */
 	public viewDlob(): DLOB {
 		return this.dlob;
 	}
 
+	// TODO: understand this function more, why is a random choice being made?
 	/**
 	 * This function creates a distribution of the values in array based on the
 	 * weights array. The returned array should be used in randomIndex to make
 	 * a random draw from the distribution.
-	 *
+	 * @param array the array to create a distribution from
+	 * @param weights the weights to use for the distribution
+	 * @param size the size of the distribution
+	 * @returns the distribution
 	 */
 	private createDistribution(
 		array: Array<any>,
@@ -238,7 +277,7 @@ export class JitMakerBot implements Bot {
 	/**
 	 * Make a random choice from distribution
 	 * @param distribution array of values that can be drawn from
-	 * @returns
+	 * @returns a random value from the distribution
 	 */
 	private randomIndex(distribution: Array<number>): number {
 		const index = Math.floor(distribution.length * Math.random()); // random index
@@ -261,15 +300,22 @@ export class JitMakerBot implements Bot {
 	 * Our goal is to participate in JIT auctions while limiting the delta
 	 * exposure of the bot.
 	 *
-	 * We achieve this by allowing deltas to increase until MAX_POSITION_EXPOSURE
+	 * Initially this was achieved by allowing deltas to increase until MAX_POSITION_EXPOSURE
 	 * is hit, after which orders will only reduce risk until the position is
 	 * closed.
+	 *
+	 * This is a problem because it limits the scalability of the bot.
+	 * Delta exposure can be hedged on an additional exchange or if the
+	 * exposure if + the bot can hedge via the spot market.
+	 * // TODO: update the spot market and add it in to hedge the delta positions
 	 *
 	 * @returns {Promise<void>}
 	 */
 	private async updateAgentState(): Promise<void> {
-		// TODO: SPOT
+		// TODO: Update SPOT Here
+
 		for await (const p of this.clearingHouse.getUserAccount().perpPositions) {
+			// if position base amount is zero then we don't have a position
 			if (p.baseAssetAmount.isZero()) {
 				continue;
 			}
@@ -294,6 +340,8 @@ export class JitMakerBot implements Bot {
 				canUpdateStateBasedOnPosition = false;
 			}
 
+			// check if total position is greater than MAX_POSITION_EXPOSURE
+			// TODO: keep this, but expand it out to first logging delta exposure and second hedging it
 			if (canUpdateStateBasedOnPosition) {
 				// check if need to enter a closing state
 				const accountCollateral = convertToNumber(
@@ -333,6 +381,7 @@ export class JitMakerBot implements Bot {
 		}
 	}
 
+	// TODO: current location
 	private nodeCanBeFilled(
 		node: DLOBNode,
 		userAccountPublicKey: PublicKey

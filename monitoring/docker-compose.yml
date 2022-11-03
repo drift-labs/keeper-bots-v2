@@ -1,0 +1,43 @@
+version: "3.7"
+services:
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    hostname: grafana
+    user: "0"
+    volumes:
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+      - ./grafana/grafanaDatasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./grafana/grafanaDashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      - ./grafana/grafana-storage:/var/lib/grafana
+    ports:
+      - 3000:3000
+    networks:
+      - theta-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    user: root # https://github.com/prometheus/prometheus/issues/5976
+    restart: unless-stopped
+    hostname: prometheus
+    command: --storage.tsdb.retention.time=5y --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - 9090:9090
+    networks:
+      - theta-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  monitoring-storage:
+    driver: local
+networks:
+  monitoring-network:
+    driver: bridge
