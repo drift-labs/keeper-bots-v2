@@ -1,8 +1,10 @@
 global:
-  scrape_interval:     15s # By default, scrape targets every 15 seconds.
+  scrape_interval: 15s
 
 scrape_configs:
   - job_name: 'jit_maker'
     scrape_interval: 5s
+    metrics_path: '/metrics'
     static_configs:
-      - targets: ['localhost:9464']
+      - targets: ['host.docker.internal:9464'] # macos
+      # - targets: ['localhost:9464'] # linux 
