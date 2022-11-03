@@ -121,7 +121,9 @@ export class TriggerBot implements Bot {
 				nodeToTrigger.node.haveTrigger = true;
 
 				logger.info(
-					`trying to trigger perp order (account: ${nodeToTrigger.node.userAccount.toString()}) perp order ${nodeToTrigger.node.order.orderId.toString()}`
+					`trying to trigger perp order on market ${
+						nodeToTrigger.node.order.marketIndex
+					} (account: ${nodeToTrigger.node.userAccount.toString()}) perp order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
 				const user = await this.userMap.mustGet(
