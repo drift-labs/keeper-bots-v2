@@ -70,7 +70,7 @@ To do this you first need to follow the above steps - Setup Environment, Initial
 
 To use this first build the docker image:
 
-`docker build . -t drift/keeper:0.1.0`
+`docker build . -t drift/keeper:latest`
 
 Then run:
 
@@ -84,5 +84,4 @@ There are pre-configured dashboards for each of the bot types along with several
 ## Status
 
 The Dashboards need to refined to show what is relevant for each bot as there are many metrics exported by the bots that are not currently displayed
-A centralized logging solution would be very useful to add!
-
+A centralized logging solution would be very useful to add
