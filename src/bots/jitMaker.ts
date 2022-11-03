@@ -2,7 +2,8 @@
  * Improvements
  *
  * - [ ] vault
- * - [ ] monitoring
+ * - [x] monitoring
+ * - [ ] add in full grafana dashboards and datasources from load
  * - [ ] fixed random distribution for choosing bid amount
  * - [ ] ability to re bid a specific auction
  * - [ ] ability to update variables without needing to restart the bot
@@ -504,6 +505,12 @@ export class JitMakerBot implements Bot {
 		if (baseFillAmountBN.gt(orderBaseAmountAvailable)) {
 			baseFillAmountBN = orderBaseAmountAvailable;
 		}
+
+		logger.info!(
+			`Oracle Price / Worst Quote: ${maxOrderQuote}\n
+			Best Quote: ${orderQuote}\n
+			Order Size: ${orderBaseAmountAvailable}`
+		);
 
 		logger.info(
 			`jitMaker will fill base amount: ${convertToNumber(

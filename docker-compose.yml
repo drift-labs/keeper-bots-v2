@@ -1,0 +1,45 @@
+version: "3.7"
+services:
+  grafana:
+    container_name: grafana
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    hostname: grafana 
+    user: "0"
+    network_mode: host
+    # ports:
+    #   - 3000:3000
+    # networks:
+    #   - monitoring-network
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    user: root # https://github.com/prometheus/prometheus/issues/5976
+    restart: unless-stopped
+    hostname: prometheus
+    command: --storage.tsdb.retention.time=5y --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    network_mode: host
+    # ports:
+    #   - 9090:9090
+    # networks:
+    #   - monitoring-network
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+  
+  drift-jit-bot:
+    container_name: drift-jit-bot
+    image: drift-jit-bot:base
+    restart: unless-stopped
+    hostname: drift-jit-bot
+    network_mode: host
+    # ports:
+    #   - 9090:9090
+    # networks:
+    #   - monitoring-network
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
