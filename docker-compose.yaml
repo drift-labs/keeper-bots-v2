@@ -1,0 +1,92 @@
+version: "3"
+
+networks:
+  driftnet:
+
+
+volumes:
+  app_data: {}
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.34.0
+    volumes:
+      - ./infra/prometheus/:/etc/prometheus/
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - 9090:9090
+    networks:
+      - driftnet
+  grafana:
+    image: grafana/grafana:8.4.5
+    ports:
+      - 3000:3000
+    environment:
+      - GF_SECURITY_ADMIN_USER=drift
+      - GF_SECURITY_ADMIN_PASSWORD=drift
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - driftnet
+  nodeexporter:
+    image: prom/node-exporter:v0.18.1
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+    expose:
+      - 9100
+    networks:
+      - driftnet
+    labels:
+      org.label-schema.group: "monitoring"
+
+  cadvisor:
+    image: gcr.io/google-containers/cadvisor:v0.34.0
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      #- /cgroup:/cgroup:ro #doesn't work on MacOS only for Linux
+    restart: unless-stopped
+    expose:
+      - 8080
+    networks:
+      - driftnet
+    labels:
+      org.label-schema.group: "monitoring"
+  filler:
+    image: drift/keeper:0.1.0
+    networks:
+      - driftnet
+    command: dev:filler
+  trigger:
+    image: drift/keeper:0.1.0
+    networks:
+      - driftnet
+    command: dev:trigger
+  jitmaker:
+    image: drift/keeper:0.1.0
+    networks:
+      - driftnet
+    command: dev:jitmaker
+  liquidator:
+    image: drift/keeper:0.1.0
+    networks:
+      - driftnet
+    command: dev:liquidator
+  pnlsettler:
+    image: drift/keeper:0.1.0
+    networks:
+      - driftnet
+    command: dev:pnlsettler

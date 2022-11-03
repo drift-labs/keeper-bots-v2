@@ -62,3 +62,27 @@ yarn run dev:filler
 yarn
 yarn run dev:jitmaker
 ```
+
+# Running with Docker Compose 
+
+There is a docker-compose file for running all the keeper bot variants along with monitoring functionality.
+To do this you first need to follow the above steps - Setup Environment, Initialize User and Depositing Collateral
+
+To use this first build the docker image:
+
+`docker build . -t drift/keeper:0.1.0`
+
+Then run:
+
+`docker-compose up -d`
+
+You can view the metrics bots metrics in Grafana at `localhost:3000`
+The user name is drift, password is drift
+
+There are pre-configured dashboards for each of the bot types along with several dashboards for monitoring the host machine resources and container resource use.
+
+## Status
+
+The Dashboards need to refined to show what is relevant for each bot as there are many metrics exported by the bots that are not currently displayed
+A centralized logging solution would be very useful to add!
+
