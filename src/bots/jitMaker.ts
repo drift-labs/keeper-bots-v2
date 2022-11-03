@@ -1,11 +1,11 @@
 /**
- * Improvements 
- * 
- * - [ ] vault 
- * - [ ] monitoring 
- * - [ ] fixed random distribution for choosing bid amount 
+ * Improvements
+ *
+ * - [ ] vault
+ * - [ ] monitoring
+ * - [ ] fixed random distribution for choosing bid amount
  * - [ ] ability to re bid a specific auction
- * - [ ] ability to update variables without needing to restart the bot 
+ * - [ ] ability to update variables without needing to restart the bot
  * - [ ] ability to hedge on spot market and additional markets
  */
 
@@ -318,7 +318,7 @@ export class JitMakerBot implements Bot {
 	 * This is a problem because it limits the scalability of the bot.
 	 * Delta exposure can be hedged on an additional exchange or if the
 	 * exposure if + the bot can hedge via the spot market.
-	 * 
+	 *
 	 * // TODO: update the spot market and add it in to hedge the delta positions
 	 *
 	 * @returns {Promise<void>}
@@ -332,8 +332,8 @@ export class JitMakerBot implements Bot {
 			}
 
 			// update current position based on market position
-			this.agentState.spotMarketPosition.set(p.marketIndex, p);	
-			
+			this.agentState.spotMarketPosition.set(p.marketIndex, p);
+
 			// update state
 			let currentState = this.agentState.stateType.get(p.marketIndex);
 			if (!currentState) {
@@ -414,7 +414,7 @@ export class JitMakerBot implements Bot {
 
 	/**
 	 * Determines if an order in the DLOB (node in the tree) can be filled
-	 * 
+	 *
 	 * @param node an order in the DLOB tree
 	 * @param userAccountPublicKey public key of the user account
 	 * @returns if the node can be filled
@@ -446,7 +446,7 @@ export class JitMakerBot implements Bot {
 		// if orderLastSeenBaseAmount can be trimmed down this should be faster
 		const lastBaseAmountFilledSeen =
 			this.orderLastSeenBaseAmount.get(orderSignature);
-		
+
 		// if last seen amount is the same as the current amount then we have already filled this order
 		if (lastBaseAmountFilledSeen?.eq(node.order.baseAssetAmountFilled)) {
 			return false;
@@ -458,7 +458,7 @@ export class JitMakerBot implements Bot {
 
 	/**
 	 * Determine the base amount to fill for a given order
-	 * 
+	 *
 	 * @param orderBaseAmountAvailable the base amount available to fill
 	 * @param orderPrice the price of the order
 	 * @returns the base amount to fill as a BN
@@ -467,10 +467,10 @@ export class JitMakerBot implements Bot {
 		orderBaseAmountAvailable: BN,
 		orderPrice: BN
 	): BN {
-		// convert the order base amount available to a number with the correct precision 
+		// convert the order base amount available to a number with the correct precision
 		// TODO: what is this precision?
 		const priceNumber = convertToNumber(orderPrice, PRICE_PRECISION);
-		
+
 		// determine the worst case scenario for the base amount to fill
 		// defined as the amount * orderPrice
 		const worstCaseQuoteSpend = orderBaseAmountAvailable
@@ -521,7 +521,7 @@ export class JitMakerBot implements Bot {
 	/**
 	 * Determines all markets that can be filled, their pricing
 	 * and then trys to fill then
-	 * 
+	 *
 	 * @param market the market to get the perp orderbook for
 	 */
 	private async drawAndExecuteAction(market: PerpMarketAccount) {
@@ -549,7 +549,7 @@ export class JitMakerBot implements Bot {
 					nodeToFill.node.order.slot
 				}, current slot: ${this.slotSubscriber.getSlot()}`
 			);
-			
+
 			this.orderLastSeenBaseAmount.set(
 				getOrderSignature(
 					nodeToFill.node.order.orderId,
@@ -576,9 +576,9 @@ export class JitMakerBot implements Bot {
 			const jitMakerDirection = isVariant(orderDirection, 'long')
 				? PositionDirection.SHORT
 				: PositionDirection.LONG;
-			
-			// determine the auction starting price 
-			// this defaults to the oracle price 
+
+			// determine the auction starting price
+			// this defaults to the oracle price
 			// https://docs.drift.trade/just-in-time-jit-auctions#INgHr
 			const jitMakerPrice = nodeToFill.node.order.auctionStartPrice;
 
@@ -638,14 +638,17 @@ export class JitMakerBot implements Bot {
 				// If we get an error that order does not exist, assume its been filled by somebody else and we
 				// have not received the history record yet
 				// but given events could have arrived out of order, we need to check the orderbook to see if the order is still there
-				let orderStatus = this.nodeCanBeFilled(nodeToFill.node, nodeToFill.node.userAccount);
+				// let orderStatus = this.nodeCanBeFilled(
+				// 	nodeToFill.node,
+				// 	nodeToFill.node.userAccount
+				// );
 
 				// orderStatus is true if the order is still in the orderbook
-				// and is still able to be filled, otherwise it has already 
+				// and is still able to be filled, otherwise it has already
 				// been filled or does not exist
-				if (orderStatus) {
-					this.executeOrder()
-				}
+				// if (orderStatus) {
+				// 	this.executeOrder();
+				// }
 
 				// node was not able to be filled due to a transaction error
 				nodeToFill.node.haveFilled = false;
@@ -667,11 +670,13 @@ export class JitMakerBot implements Bot {
 
 	/**
 	 * Execute and place a `PerpOrder`
-	 * 
+	 *
 	 * @param action order to place and execute
 	 * @returns a promise that resolves to the transaction signature
 	 */
-	private async executePerpOrder(action: Action): Promise<TransactionSignature> {
+	private async executePerpOrder(
+		action: Action
+	): Promise<TransactionSignature> {
 		const currentState = this.agentState.stateType.get(action.marketIndex);
 
 		// checking if the action should be skipped due to the current state
@@ -729,7 +734,7 @@ export class JitMakerBot implements Bot {
 
 	/**
 	 * Given a perp market, update its state and begin to fill orders
-	 * 
+	 *
 	 * @param market perp market account to fill with
 	 */
 	private async tryMakeJitAuctionForMarket(market: PerpMarketAccount) {
@@ -738,8 +743,8 @@ export class JitMakerBot implements Bot {
 	}
 
 	/**
-	 * Make/Fill JIT Auctions 
-	 * - update all markets 
+	 * Make/Fill JIT Auctions
+	 * - update all markets
 	 * - begin to check, price, and fill oracles for each *perp* market
 	 */
 	private async tryMake() {
@@ -752,7 +757,7 @@ export class JitMakerBot implements Bot {
 						this.dlob.clear();
 						delete this.dlob;
 					}
-					
+
 					// creating a new DLOB instance and updating its state
 					this.dlob = new DLOB(
 						this.clearingHouse.getPerpMarketAccounts(),

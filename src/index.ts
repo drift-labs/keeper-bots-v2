@@ -122,6 +122,7 @@ export function getWallet(): Wallet {
 	return new Wallet(keypair);
 }
 
+// TODO: update this with an aggregation of endpoints and check their ping
 const endpoint = process.env.ENDPOINT;
 logger.info(`RPC endpoint: ${endpoint}`);
 
