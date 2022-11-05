@@ -169,7 +169,7 @@ export class TriggerBot implements Bot {
 
 		try {
 			const oraclePriceData =
-				this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
+				this.clearingHouse.getOracleDataForSpotMarket(marketIndex);
 
 			let nodesToTrigger: Array<NodeToTrigger> = [];
 			await this.dlobMutex.runExclusive(async () => {
