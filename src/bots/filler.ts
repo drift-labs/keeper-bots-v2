@@ -73,6 +73,7 @@ export class FillerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private metrics: Metrics | undefined;
 	private throttledNodes = new Map<string, number>();
+	private fillingNodes = new Map<string, number>();
 	private useBurstCULimit = false;
 	private fillTxSinceBurstCU = 0;
 
@@ -207,6 +208,10 @@ export class FillerBot implements Bot {
 			logger.warn(
 				`filtered out filled node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
 			);
+			return false;
+		}
+
+		if (this.fillingNodes.has(this.getNodeToFillSignature(nodeToFill))) {
 			return false;
 		}
 
@@ -515,6 +520,12 @@ export class FillerBot implements Bot {
 		);
 	}
 
+	private removeFillingNodes(nodes: Array<NodeToFill>) {
+		for (const node of nodes) {
+			this.fillingNodes.delete(this.getNodeToFillSignature(node));
+		}
+	}
+
 	private async tryBulkFillPerpNodes(
 		nodesToFill: Array<NodeToFill>
 	): Promise<[TransactionSignature, number]> {
@@ -596,7 +607,7 @@ export class FillerBot implements Bot {
 				break;
 			}
 
-			this.throttledNodes.set(
+			this.fillingNodes.set(
 				this.getNodeToFillSignature(nodeToFill),
 				Date.now()
 			);
@@ -652,6 +663,7 @@ export class FillerBot implements Bot {
 				1
 			);
 		}
+
 		logger.debug(`txPacker took ${Date.now() - txPackerStart}ms`);
 
 		if (nodesSent.length === 0) {
@@ -716,6 +728,9 @@ export class FillerBot implements Bot {
 						`Failed to send tx, sim error tx logs took: ${Date.now() - start}ms`
 					);
 				}
+			})
+			.finally(() => {
+				this.removeFillingNodes(nodesToFill);
 			});
 
 		return [txSig, lastIdxFilled];
