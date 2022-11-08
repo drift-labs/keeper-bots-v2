@@ -672,14 +672,16 @@ export class FillerBot implements Bot {
 					});
 			})
 			.catch((e) => {
-				const start = Date.now();
 				console.error(e);
 				logger.error(`Failed to send packed tx (error above):`);
 				const simError = e as SendTransactionError;
-				this.handleTransactionLogs(nodesSent, simError.logs);
-				logger.error(
-					`Failed to send tx, sim error tx logs took: ${Date.now() - start}ms`
-				);
+				if (simError.logs) {
+					const start = Date.now();
+					this.handleTransactionLogs(nodesSent, simError.logs);
+					logger.error(
+						`Failed to send tx, sim error tx logs took: ${Date.now() - start}ms`
+					);
+				}
 			});
 
 		return [txSig, lastIdxFilled];
