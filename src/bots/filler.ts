@@ -192,7 +192,17 @@ export class FillerBot implements Bot {
 		if (!node.node.userAccount) {
 			return '~';
 		}
-		return `${node.node.userAccount.toString()}-${node.node.order.orderId.toString()}`;
+		return this.getFillSignatureFromUserAccountAndOrderId(
+			node.node.userAccount.toString(),
+			node.node.order.orderId.toString()
+		);
+	}
+
+	private getFillSignatureFromUserAccountAndOrderId(
+		userAccount: string,
+		orderId: string
+	): string {
+		return `${userAccount}-${orderId}`;
 	}
 
 	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
@@ -418,6 +428,30 @@ export class FillerBot implements Bot {
 					// raw event data, this is expected
 					successCount++;
 					nextIsFillRecord = false;
+				} else if (log.includes('Err filling order id')) {
+					const match = log.match(
+						new RegExp(
+							'.*Err filling order id ([0-9]+) for user ([a-zA-Z0-9]+)'
+						)
+					);
+					if (match !== null) {
+						const orderId = match[1];
+						const userAcc = match[2];
+						const extractedSig = this.getFillSignatureFromUserAccountAndOrderId(
+							userAcc,
+							orderId
+						);
+						this.throttledNodes.set(extractedSig, Date.now());
+
+						const filledNode = nodesFilled[ixIdx];
+						const assocNodeSig = this.getNodeToFillSignature(filledNode);
+						logger.warn(
+							`Throttling node due to fill error. extractedSig: ${extractedSig}, assocNodeSig: ${assocNodeSig}, assocNodeIdx: ${ixIdx}`
+						);
+						nextIsFillRecord = false;
+					} else {
+						logger.error(`Failed to find erroneous fill via regex: ${log}`);
+					}
 				} else {
 					const filledNode = nodesFilled[ixIdx];
 					logger.error(`how parse log?: ${log}`);
@@ -426,11 +460,6 @@ export class FillerBot implements Bot {
 							filledNode.node.order.orderId
 						}`
 					);
-					// don't throttle the node for errors we can't handle
-					// this.throttledNodes.set(
-					// 	this.getNodeToFillSignature(filledNode),
-					// 	Date.now()
-					// );
 					nextIsFillRecord = false;
 				}
 
