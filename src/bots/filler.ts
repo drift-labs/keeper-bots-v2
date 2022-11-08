@@ -158,16 +158,6 @@ export class FillerBot implements Bot {
 
 		const oraclePriceData =
 			this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
-		const oracleIsValid = isOracleValid(
-			market.amm,
-			oraclePriceData,
-			this.clearingHouse.getStateAccount().oracleGuardRails,
-			this.slotSubscriber.getSlot()
-		);
-		if (!oracleIsValid) {
-			logger.error(`Oracle is not valid for market ${marketIndex}`);
-			return [];
-		}
 
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
@@ -287,6 +277,20 @@ export class FillerBot implements Bot {
 				).toString()}`
 			);
 			return false;
+		}
+
+		// if making with vAMM, ensure valid oracle
+		if (!nodeToFill.makerNode) {
+			const oracleIsValid = isOracleValid(
+				(nodeToFill.node.market as PerpMarketAccount).amm,
+				oraclePriceData,
+				this.clearingHouse.getStateAccount().oracleGuardRails,
+				this.slotSubscriber.getSlot()
+			);
+			if (!oracleIsValid) {
+				logger.error(`Oracle is not valid for market ${marketIndex}`);
+				return false;
+			}
 		}
 
 		return true;
