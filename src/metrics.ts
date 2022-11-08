@@ -620,9 +620,15 @@ export class Metrics {
 	) {
 		await this.fillableOrdersSeenLock.runExclusive(async () => {
 			if (isVariant(marketType, 'perp')) {
-				this.fillablePerpOrdersSeenByMarket.set(marketIndex, fillableOrders);
+				this.fillablePerpOrdersSeenByMarket.set(
+					marketIndex,
+					this.fillablePerpOrdersSeenByMarket.get(marketIndex) + fillableOrders
+				);
 			} else if (isVariant(marketType, 'spot')) {
-				this.fillableSpotOrdersSeenByMarket.set(marketIndex, fillableOrders);
+				this.fillableSpotOrdersSeenByMarket.set(
+					marketIndex,
+					this.fillableSpotOrdersSeenByMarket.get(marketIndex) + fillableOrders
+				);
 			}
 		});
 	}

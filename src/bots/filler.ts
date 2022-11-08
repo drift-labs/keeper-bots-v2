@@ -22,7 +22,7 @@ import {
 	isOrderExpired,
 	getVariant,
 } from '@drift-labs/sdk';
-import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
+import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
@@ -562,6 +562,11 @@ export class FillerBot implements Bot {
 				break;
 			}
 
+			this.throttledNodes.set(
+				this.getNodeToFillSignature(nodeToFill),
+				Date.now()
+			);
+
 			// first estimate new tx size with this additional ix and new accounts
 			const ixKeys = ix.keys.map((key) => key.pubkey);
 			const newAccounts = ixKeys
@@ -628,47 +633,54 @@ export class FillerBot implements Bot {
 		);
 
 		const txStart = Date.now();
-		try {
-			const resp = await this.clearingHouse.txSender.send(
-				tx,
-				[],
-				this.clearingHouse.opts
-			);
-			txSig = resp.txSig;
-			const duration = Date.now() - txStart;
-			logger.info(`sent tx: ${txSig}, took: ${duration}ms`);
-			this.metrics?.recordRpcDuration(
-				this.clearingHouse.connection.rpcEndpoint,
-				'send',
-				duration,
-				false,
-				this.name
-			);
+		this.clearingHouse.txSender
+			.send(tx, [], this.clearingHouse.opts)
+			.then((resp: TxSigAndSlot) => {
+				txSig = resp.txSig;
+				const duration = Date.now() - txStart;
+				logger.info(`sent tx: ${txSig}, took: ${duration}ms`);
+				this.metrics?.recordRpcDuration(
+					this.clearingHouse.connection.rpcEndpoint,
+					'send',
+					duration,
+					false,
+					this.name
+				);
 
-			const parseLogsStart = Date.now();
-			await this.processBulkFillTxLogs(nodesSent, txSig);
-			const processBulkFillLogsDuration = Date.now() - parseLogsStart;
-			logger.info(`parse logs took ${processBulkFillLogsDuration}ms`);
-			this.metrics?.recordRpcDuration(
-				this.clearingHouse.connection.rpcEndpoint,
-				'processLogs',
-				processBulkFillLogsDuration,
-				false,
-				this.name
-			);
+				const parseLogsStart = Date.now();
+				this.processBulkFillTxLogs(nodesSent, txSig)
+					.then(() => {
+						const processBulkFillLogsDuration = Date.now() - parseLogsStart;
+						logger.info(`parse logs took ${processBulkFillLogsDuration}ms`);
+						this.metrics?.recordRpcDuration(
+							this.clearingHouse.connection.rpcEndpoint,
+							'processLogs',
+							processBulkFillLogsDuration,
+							false,
+							this.name
+						);
 
-			this.metrics?.recordFilledOrder(
-				this.clearingHouse.provider.wallet.publicKey,
-				this.name,
-				nodesSent.length
-			);
-		} catch (e) {
-			const start = Date.now();
-			logger.error(`Failed to send packed tx (error above):`);
-			const simError = e as SendTransactionError;
-			this.handleTransactionLogs(nodesSent, simError.logs);
-			logger.error(`Handle sim error tx logs took: ${Date.now() - start}ms`);
-		}
+						this.metrics?.recordFilledOrder(
+							this.clearingHouse.provider.wallet.publicKey,
+							this.name,
+							nodesSent.length
+						);
+					})
+					.catch((e) => {
+						console.error(e);
+						logger.error(`Failed to process fill tx logs (error above):`);
+					});
+			})
+			.catch((e) => {
+				const start = Date.now();
+				console.error(e);
+				logger.error(`Failed to send packed tx (error above):`);
+				const simError = e as SendTransactionError;
+				this.handleTransactionLogs(nodesSent, simError.logs);
+				logger.error(
+					`Failed to send tx, sim error tx logs took: ${Date.now() - start}ms`
+				);
+			});
 
 		return [txSig, lastIdxFilled];
 	}
@@ -721,16 +733,10 @@ export class FillerBot implements Bot {
 				// fill the perp nodes
 				let filledNodeCount = 0;
 				while (filledNodeCount < filteredNodes.length) {
-					const resp = await promiseTimeout(
-						this.tryBulkFillPerpNodes(filteredNodes.slice(filledNodeCount)),
-						30000
+					const resp = await this.tryBulkFillPerpNodes(
+						filteredNodes.slice(filledNodeCount)
 					);
-
-					if (resp === null) {
-						logger.error(`Timeout tryFill, took ${Date.now() - startTime}ms`);
-					} else {
-						filledNodeCount += resp[1] + 1;
-					}
+					filledNodeCount += resp[1] + 1;
 				}
 
 				ran = true;
@@ -746,13 +752,15 @@ export class FillerBot implements Bot {
 		} finally {
 			if (ran) {
 				const duration = Date.now() - startTime;
-				this.metrics?.recordRpcDuration(
-					this.clearingHouse.connection.rpcEndpoint,
-					'tryFill',
-					duration,
-					false,
-					this.name
-				);
+
+				// need another histogram size for tryFill
+				// this.metrics?.recordRpcDuration(
+				// 	this.clearingHouse.connection.rpcEndpoint,
+				// 	'tryFill',
+				// 	duration,
+				// 	false,
+				// 	this.name
+				// );
 				logger.debug(`tryFill done, took ${duration}ms`);
 
 				await this.watchdogTimerMutex.runExclusive(async () => {
