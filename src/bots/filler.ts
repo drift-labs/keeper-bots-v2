@@ -793,7 +793,7 @@ export class FillerBot implements Bot {
 				// 	false,
 				// 	this.name
 				// );
-				logger.debug(`tryFill done, took ${duration}ms`);
+				logger.info(`tryFill done, took ${duration}ms`);
 
 				await this.watchdogTimerMutex.runExclusive(async () => {
 					this.watchdogTimerLastPatTime = Date.now();
