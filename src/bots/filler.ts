@@ -43,7 +43,7 @@ const CU_PER_FILL = 200_000; // CU cost for a successful fill
 const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
-const FILL_ORDER_BACKOFF = 10000;
+const FILL_ORDER_BACKOFF = 1000;
 const dlobMutexError = new Error('dlobMutex timeout');
 
 export class FillerBot implements Bot {
@@ -422,14 +422,15 @@ export class FillerBot implements Bot {
 					const filledNode = nodesFilled[ixIdx];
 					logger.error(`how parse log?: ${log}`);
 					logger.error(
-						` assoc order, throttling: ${filledNode.node.userAccount.toString()}, ${
+						` assoc order: ${filledNode.node.userAccount.toString()}, ${
 							filledNode.node.order.orderId
 						}`
 					);
-					this.throttledNodes.set(
-						this.getNodeToFillSignature(filledNode),
-						Date.now()
-					);
+					// don't throttle the node for errors we can't handle
+					// this.throttledNodes.set(
+					// 	this.getNodeToFillSignature(filledNode),
+					// 	Date.now()
+					// );
 					nextIsFillRecord = false;
 				}
 
