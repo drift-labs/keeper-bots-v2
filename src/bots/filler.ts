@@ -43,16 +43,17 @@ const CU_PER_FILL = 200_000; // CU cost for a successful fill
 const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
-const FILL_ORDER_BACKOFF = 1000;
+const FILL_ORDER_THROTTLE_BACKOFF = 5000; // the time to wait before trying to fill a throttled (error filling) node
+const FILL_ORDER_COOLDOWN_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
 const dlobMutexError = new Error('dlobMutex timeout');
 
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 3000;
+	public readonly defaultIntervalMs: number = 2000;
 
 	private driftEnv: DriftEnv;
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 
 	private dlobMutex = withTimeout(
@@ -80,14 +81,14 @@ export class FillerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		env: DriftEnv,
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
-		this.clearingHouse = clearingHouse;
+		this.driftClient = driftClient;
 		this.slotSubscriber = slotSubscriber;
 		this.metrics = metrics;
 		this.driftEnv = env;
@@ -99,14 +100,14 @@ export class FillerBot implements Bot {
 		const initPromises: Array<Promise<any>> = [];
 
 		this.userMap = new UserMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userMap.fetchAllUsers());
 
 		this.userStatsMap = new UserStatsMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
@@ -158,7 +159,7 @@ export class FillerBot implements Bot {
 		const marketIndex = market.marketIndex;
 
 		const oraclePriceData =
-			this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
+			this.driftClient.getOracleDataForPerpMarket(marketIndex);
 
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
@@ -169,7 +170,7 @@ export class FillerBot implements Bot {
 				marketIndex,
 				vBid,
 				vAsk,
-				this.slotSubscriber.getSlot(),
+				oraclePriceData.slot.toNumber(),
 				Date.now() / 1000,
 				MarketType.PERP,
 				oraclePriceData
@@ -211,32 +212,35 @@ export class FillerBot implements Bot {
 			return false;
 		}
 
-		if (this.fillingNodes.has(this.getNodeToFillSignature(nodeToFill))) {
-			return false;
+		const now = Date.now();
+		const nodeToFillSignature = this.getNodeToFillSignature(nodeToFill);
+		if (this.fillingNodes.has(nodeToFillSignature)) {
+			const timeStartedToFillNode = this.fillingNodes.get(nodeToFillSignature);
+			if (timeStartedToFillNode + FILL_ORDER_COOLDOWN_BACKOFF > now) {
+				// still cooling down on this node, filter it out
+				return false;
+			}
 		}
 
-		if (this.throttledNodes.has(this.getNodeToFillSignature(nodeToFill))) {
-			const lastFillAttempt = this.throttledNodes.get(
-				this.getNodeToFillSignature(nodeToFill)
-			);
-			const now = Date.now();
-			if (lastFillAttempt + FILL_ORDER_BACKOFF > now) {
+		if (this.throttledNodes.has(nodeToFillSignature)) {
+			const lastFillAttempt = this.throttledNodes.get(nodeToFillSignature);
+			if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > now) {
 				logger.warn(
 					`skipping node (throttled, retry in ${
-						lastFillAttempt + FILL_ORDER_BACKOFF - now
+						lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF - now
 					}ms) on market ${nodeToFill.node.order.marketIndex} for user ${
 						nodeToFill.node.userAccount
 					}-${nodeToFill.node.order.orderId}`
 				);
 				return false;
 			} else {
-				this.throttledNodes.delete(this.getNodeToFillSignature(nodeToFill));
+				this.throttledNodes.delete(nodeToFillSignature);
 			}
 		}
 
 		const marketIndex = nodeToFill.node.market.marketIndex;
 		const oraclePriceData =
-			this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
+			this.driftClient.getOracleDataForPerpMarket(marketIndex);
 
 		// return early to fill if order is expired
 		if (isOrderExpired(nodeToFill.node.order, Date.now() / 1000)) {
@@ -253,7 +257,7 @@ export class FillerBot implements Bot {
 				nodeToFill.node.order,
 				nodeToFill.node.market as PerpMarketAccount,
 				oraclePriceData,
-				this.slotSubscriber.getSlot(),
+				oraclePriceData.slot.toNumber(),
 				Date.now() / 1000
 			)
 		) {
@@ -269,7 +273,7 @@ export class FillerBot implements Bot {
 					nodeToFill.node.order,
 					nodeToFill.node.market as PerpMarketAccount,
 					oraclePriceData,
-					this.slotSubscriber.getSlot(),
+					oraclePriceData.slot.toNumber(),
 					Date.now() / 1000
 				)}`
 			);
@@ -278,7 +282,7 @@ export class FillerBot implements Bot {
 					nodeToFill.node.order,
 					nodeToFill.node.market as PerpMarketAccount,
 					oraclePriceData,
-					this.slotSubscriber.getSlot()
+					oraclePriceData.slot.toNumber()
 				).toString()}`
 			);
 			return false;
@@ -289,8 +293,8 @@ export class FillerBot implements Bot {
 			const oracleIsValid = isOracleValid(
 				(nodeToFill.node.market as PerpMarketAccount).amm,
 				oraclePriceData,
-				this.clearingHouse.getStateAccount().oracleGuardRails,
-				this.slotSubscriber.getSlot()
+				this.driftClient.getStateAccount().oracleGuardRails,
+				oraclePriceData.slot.toNumber() // should use slot subscriber here?
 			);
 			if (!oracleIsValid) {
 				logger.error(`Oracle is not valid for market ${marketIndex}`);
@@ -497,7 +501,7 @@ export class FillerBot implements Bot {
 		let attempts = 0;
 		while (tx === null && attempts < 10) {
 			logger.info(`waiting for ${txSig} to be confirmed`);
-			tx = await this.clearingHouse.connection.getTransaction(txSig, {
+			tx = await this.driftClient.connection.getTransaction(txSig, {
 				commitment: 'confirmed',
 			});
 			attempts++;
@@ -514,7 +518,7 @@ export class FillerBot implements Bot {
 			tx.meta.logMessages
 		);
 		this.metrics?.recordFilledOrder(
-			this.clearingHouse.provider.wallet.publicKey,
+			this.driftClient.provider.wallet.publicKey,
 			this.name,
 			successCount
 		);
@@ -548,7 +552,7 @@ export class FillerBot implements Bot {
 		let runningCUUsed = 0;
 
 		const uniqueAccounts = new Set<string>();
-		uniqueAccounts.add(this.clearingHouse.provider.wallet.publicKey.toString()); // fee payer goes first
+		uniqueAccounts.add(this.driftClient.provider.wallet.publicKey.toString()); // fee payer goes first
 
 		// first ix is compute budget
 		const computeBudgetIx = ComputeBudgetProgram.requestUnits({
@@ -579,12 +583,19 @@ export class FillerBot implements Bot {
 		const nodesSent: Array<NodeToFill> = [];
 		let idxUsed = 0;
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
+			const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(
+				nodeToFill.node.order.marketIndex
+			);
 			logger.info(
 				`filling perp node ${idx}, marketIdx: ${
 					nodeToFill.node.order.marketIndex
 				}: ${nodeToFill.node.userAccount.toString()}, ${
 					nodeToFill.node.order.orderId
-				}, orderType: ${getVariant(nodeToFill.node.order.orderType)}`
+				}, orderType: ${getVariant(
+					nodeToFill.node.order.orderType
+				)},\ndriftClient.oraclePrice.slot: ${oraclePriceData.slot.toNumber()}\nslotSub.currSlot: ${
+					this.slotSubscriber.currentSlot
+				}\nslotSub.getSlot: ${this.slotSubscriber.getSlot()}`
 			);
 
 			const { makerInfo, chUser, referrerInfo, marketType } =
@@ -594,7 +605,7 @@ export class FillerBot implements Bot {
 				throw new Error('expected perp market type');
 			}
 
-			const ix = await this.clearingHouse.getFillPerpOrderIx(
+			const ix = await this.driftClient.getFillPerpOrderIx(
 				chUser.getUserAccountPublicKey(),
 				chUser.getUserAccount(),
 				nodeToFill.node.order,
@@ -679,14 +690,14 @@ export class FillerBot implements Bot {
 		);
 
 		const txStart = Date.now();
-		this.clearingHouse.txSender
-			.send(tx, [], this.clearingHouse.opts)
+		this.driftClient.txSender
+			.send(tx, [], this.driftClient.opts)
 			.then((resp: TxSigAndSlot) => {
 				txSig = resp.txSig;
 				const duration = Date.now() - txStart;
 				logger.info(`sent tx: ${txSig}, took: ${duration}ms`);
 				this.metrics?.recordRpcDuration(
-					this.clearingHouse.connection.rpcEndpoint,
+					this.driftClient.connection.rpcEndpoint,
 					'send',
 					duration,
 					false,
@@ -699,7 +710,7 @@ export class FillerBot implements Bot {
 						const processBulkFillLogsDuration = Date.now() - parseLogsStart;
 						logger.info(`parse logs took ${processBulkFillLogsDuration}ms`);
 						this.metrics?.recordRpcDuration(
-							this.clearingHouse.connection.rpcEndpoint,
+							this.driftClient.connection.rpcEndpoint,
 							'processLogs',
 							processBulkFillLogsDuration,
 							false,
@@ -707,7 +718,7 @@ export class FillerBot implements Bot {
 						);
 
 						this.metrics?.recordFilledOrder(
-							this.clearingHouse.provider.wallet.publicKey,
+							this.driftClient.provider.wallet.publicKey,
 							this.name,
 							nodesSent.length
 						);
@@ -747,9 +758,9 @@ export class FillerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB(
-						this.clearingHouse.getPerpMarketAccounts(),
-						this.clearingHouse.getSpotMarketAccounts(), // TODO: new sdk - remove this
-						this.clearingHouse.getStateAccount(),
+						this.driftClient.getPerpMarketAccounts(),
+						this.driftClient.getSpotMarketAccounts(),
+						this.driftClient.getStateAccount(),
 						this.userMap,
 						true
 					);
@@ -758,7 +769,7 @@ export class FillerBot implements Bot {
 
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];
-				for (const market of this.clearingHouse.getPerpMarketAccounts()) {
+				for (const market of this.driftClient.getPerpMarketAccounts()) {
 					fillableNodes = fillableNodes.concat(
 						await this.getPerpFillableNodesForMarket(market)
 					);
