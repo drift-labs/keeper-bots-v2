@@ -21,6 +21,9 @@ import {
 	MarketType,
 	isOrderExpired,
 	getVariant,
+	PRICE_PRECISION,
+	convertToNumber,
+	BASE_PRECISION,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -480,6 +483,50 @@ export class FillerBot implements Bot {
 			} else if (this.isLogFillOrder(log)) {
 				nextIsFillRecord = true;
 				ixIdx++;
+
+				const nodeFilled = nodesFilled[ixIdx];
+				if (nodeFilled.makerNode) {
+					logger.info(
+						`Found filled tx: taker: ${nodeFilled.node.userAccount.toBase58()}-${
+							nodeFilled.node.order.orderId
+						} ${convertToNumber(
+							nodeFilled.node.order.baseAssetAmountFilled,
+							BASE_PRECISION
+						)}/${convertToNumber(
+							nodeFilled.node.order.baseAssetAmount,
+							BASE_PRECISION
+						)} @ ${convertToNumber(
+							nodeFilled.node.order.price,
+							PRICE_PRECISION
+						)}\nmaker: ${nodeFilled.makerNode.userAccount.toBase58()}-${
+							nodeFilled.makerNode.order.orderId
+						} ${convertToNumber(
+							nodeFilled.makerNode.order.baseAssetAmountFilled,
+							BASE_PRECISION
+						)}/${convertToNumber(
+							nodeFilled.makerNode.order.baseAssetAmount,
+							BASE_PRECISION
+						)} @ ${convertToNumber(
+							nodeFilled.makerNode.order.price,
+							PRICE_PRECISION
+						)}`
+					);
+				} else {
+					logger.info(
+						`Found filled tx: taker: ${nodeFilled.node.userAccount.toBase58()}-${
+							nodeFilled.node.order.orderId
+						} ${convertToNumber(
+							nodeFilled.node.order.baseAssetAmountFilled,
+							BASE_PRECISION
+						)}/${convertToNumber(
+							nodeFilled.node.order.baseAssetAmount,
+							BASE_PRECISION
+						)} @ ${convertToNumber(
+							nodeFilled.node.order.price,
+							PRICE_PRECISION
+						)}\nmaker: vAMM`
+					);
+				}
 			}
 		}
 
@@ -593,10 +640,52 @@ export class FillerBot implements Bot {
 					nodeToFill.node.order.orderId
 				}, orderType: ${getVariant(
 					nodeToFill.node.order.orderType
-				)},\ndriftClient.oraclePrice.slot: ${oraclePriceData.slot.toNumber()}\nslotSub.currSlot: ${
+				)}, \ndriftClient.oraclePrice.slot: ${oraclePriceData.slot.toNumber()}\nslotSub.currSlot: ${
 					this.slotSubscriber.currentSlot
 				}\nslotSub.getSlot: ${this.slotSubscriber.getSlot()}`
 			);
+			if (nodeToFill.makerNode) {
+				logger.info(
+					`filling taker: ${nodeToFill.node.userAccount.toBase58()}-${
+						nodeToFill.node.order.orderId
+					} ${convertToNumber(
+						nodeToFill.node.order.baseAssetAmountFilled,
+						BASE_PRECISION
+					)}/${convertToNumber(
+						nodeToFill.node.order.baseAssetAmount,
+						BASE_PRECISION
+					)} @ ${convertToNumber(
+						nodeToFill.node.order.price,
+						PRICE_PRECISION
+					)}\nmaker: ${nodeToFill.makerNode.userAccount.toBase58()}-${
+						nodeToFill.makerNode.order.orderId
+					} ${convertToNumber(
+						nodeToFill.makerNode.order.baseAssetAmountFilled,
+						BASE_PRECISION
+					)}/${convertToNumber(
+						nodeToFill.makerNode.order.baseAssetAmount,
+						BASE_PRECISION
+					)} @ ${convertToNumber(
+						nodeToFill.makerNode.order.price,
+						PRICE_PRECISION
+					)}`
+				);
+			} else {
+				logger.info(
+					`filling taker: ${nodeToFill.node.userAccount.toBase58()}-${
+						nodeToFill.node.order.orderId
+					} ${convertToNumber(
+						nodeToFill.node.order.baseAssetAmountFilled,
+						BASE_PRECISION
+					)}/${convertToNumber(
+						nodeToFill.node.order.baseAssetAmount,
+						BASE_PRECISION
+					)} @ ${convertToNumber(
+						nodeToFill.node.order.price,
+						PRICE_PRECISION
+					)}\nmaker: vAMM`
+				);
+			}
 
 			const { makerInfo, chUser, referrerInfo, marketType } =
 				await this.getNodeFillInfo(nodeToFill);
