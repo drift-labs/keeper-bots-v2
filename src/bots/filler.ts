@@ -24,6 +24,8 @@ import {
 	convertToNumber,
 	BASE_PRECISION,
 	QUOTE_PRECISION,
+	WrappedEvent,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -75,6 +77,7 @@ enum METRIC_TYPES {
 	mutex_busy = 'mutex_busy',
 	attempted_fills = 'attempted_fills',
 	successful_fills = 'successful_fills',
+	observed_fills_count = 'observed_fills_count',
 }
 
 export class FillerBot implements Bot {
@@ -123,6 +126,7 @@ export class FillerBot implements Bot {
 	private mutexBusyCounter: Counter;
 	private attemptedFillsCounter: Counter;
 	private successfulFillsCounter: Counter;
+	private observedFillsCountCounter: Counter;
 
 	constructor(
 		name: string,
@@ -235,6 +239,12 @@ export class FillerBot implements Bot {
 				description: 'Count of fills we attempted',
 			}
 		);
+		this.observedFillsCountCounter = this.meter.createCounter(
+			METRIC_TYPES.observed_fills_count,
+			{
+				description: 'Count of fills observed in the market',
+			}
+		);
 
 		this.sdkCallDurationHistogram = this.meter.createHistogram(
 			METRIC_TYPES.sdk_call_duration_histogram,
@@ -338,6 +348,17 @@ export class FillerBot implements Bot {
 			await this.userStatsMap.mustGet(
 				(record as NewUserRecord).user.toString()
 			);
+		} else if (record.eventType === 'OrderActionRecord') {
+			record = record as WrappedEvent<'OrderActionRecord'>;
+			if (getVariant(record.action) === 'fill') {
+				const marketType = getVariant(record.marketType);
+				if (marketType === 'perp') {
+					this.observedFillsCountCounter.add(1, {
+						market:
+							PerpMarkets[this.runtimeSpec.driftEnv][record.marketIndex].symbol,
+					});
+				}
+			}
 		}
 	}
 
