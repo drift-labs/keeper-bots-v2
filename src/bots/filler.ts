@@ -1,5 +1,4 @@
 import {
-	DriftEnv,
 	NewUserRecord,
 	OrderRecord,
 	User,
@@ -24,6 +23,7 @@ import {
 	PRICE_PRECISION,
 	convertToNumber,
 	BASE_PRECISION,
+	QUOTE_PRECISION,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -37,9 +37,24 @@ import {
 	ComputeBudgetProgram,
 } from '@solana/web3.js';
 
+import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
+import {
+	ExplicitBucketHistogramAggregation,
+	InstrumentType,
+	MeterProvider,
+	View,
+} from '@opentelemetry/sdk-metrics-base';
+import {
+	Meter,
+	ObservableGauge,
+	Counter,
+	BatchObservableResult,
+	Histogram,
+} from '@opentelemetry/api-metrics';
+
 import { logger } from '../logger';
 import { Bot } from '../types';
-import { Metrics } from '../metrics';
+import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 
 const MAX_TX_PACK_SIZE = 900; //1232;
 const CU_PER_FILL = 200_000; // CU cost for a successful fill
@@ -50,12 +65,23 @@ const FILL_ORDER_THROTTLE_BACKOFF = 5000; // the time to wait before trying to f
 const FILL_ORDER_COOLDOWN_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
 const dlobMutexError = new Error('dlobMutex timeout');
 
+enum METRIC_TYPES {
+	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
+	try_fill_duration_histogram = 'try_fill_duration_histogram',
+	runtime_specs = 'runtime_specs',
+	total_collateral = 'total_collateral',
+	last_try_fill_time = 'last_try_fill_time',
+	unrealized_pnl = 'unrealized_pnl',
+	mutex_busy = 'mutex_busy',
+	attempted_fills = 'attempted_fills',
+	successful_fills = 'successful_fills',
+}
+
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 2000;
 
-	private driftEnv: DriftEnv;
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 
@@ -75,26 +101,189 @@ export class FillerBot implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private metrics: Metrics | undefined;
 	private throttledNodes = new Map<string, number>();
 	private fillingNodes = new Map<string, number>();
 	private useBurstCULimit = false;
 	private fillTxSinceBurstCU = 0;
+
+	// metrics
+	private metricsInitialized = false;
+	private metricsPort: number | undefined;
+	private meter: Meter;
+	private exporter: PrometheusExporter;
+	private bootTimeMs: number;
+
+	private runtimeSpecsGauge: ObservableGauge;
+	private runtimeSpec: RuntimeSpec;
+	private sdkCallDurationHistogram: Histogram;
+	private tryFillDurationHistogram: Histogram;
+	private lastTryFillTimeGauge: ObservableGauge;
+	private totalCollateralGauge: ObservableGauge;
+	private unrealizedPnLGauge: ObservableGauge;
+	private mutexBusyCounter: Counter;
+	private attemptedFillsCounter: Counter;
+	private successfulFillsCounter: Counter;
 
 	constructor(
 		name: string,
 		dryRun: boolean,
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
-		env: DriftEnv,
-		metrics?: Metrics | undefined
+		runtimeSpec: RuntimeSpec,
+		metricsPort?: number | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.driftClient = driftClient;
 		this.slotSubscriber = slotSubscriber;
-		this.metrics = metrics;
-		this.driftEnv = env;
+		this.runtimeSpec = runtimeSpec;
+
+		this.metricsPort = metricsPort;
+		if (this.metricsPort) {
+			this.initializeMetrics();
+		}
+	}
+
+	private initializeMetrics() {
+		if (this.metricsInitialized) {
+			logger.error('Tried to initilaize metrics multiple times');
+			return;
+		}
+		this.metricsInitialized = true;
+
+		const { endpoint: defaultEndpoint } = PrometheusExporter.DEFAULT_OPTIONS;
+		this.exporter = new PrometheusExporter(
+			{
+				port: this.metricsPort,
+				endpoint: defaultEndpoint,
+			},
+			() => {
+				logger.info(
+					`prometheus scrape endpoint started: http://localhost:${this.metricsPort}${defaultEndpoint}`
+				);
+			}
+		);
+		const meterName = this.name;
+		const meterProvider = new MeterProvider({
+			views: [
+				new View({
+					instrumentName: METRIC_TYPES.sdk_call_duration_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: meterName,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(20), (_, i) => 0 + i * 100),
+						true
+					),
+				}),
+				new View({
+					instrumentName: METRIC_TYPES.try_fill_duration_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: meterName,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(20), (_, i) => 0 + i * 5),
+						true
+					),
+				}),
+			],
+		});
+
+		meterProvider.addMetricReader(this.exporter);
+		this.meter = meterProvider.getMeter(meterName);
+
+		this.bootTimeMs = Date.now();
+
+		this.runtimeSpecsGauge = this.meter.createObservableGauge(
+			METRIC_TYPES.runtime_specs,
+			{
+				description: 'Runtime sepcification of this program',
+			}
+		);
+		this.runtimeSpecsGauge.addCallback((obs) => {
+			obs.observe(this.bootTimeMs, this.runtimeSpec);
+		});
+		this.totalCollateralGauge = this.meter.createObservableGauge(
+			METRIC_TYPES.total_collateral,
+			{
+				description: 'Total collateral of the account',
+			}
+		);
+		this.lastTryFillTimeGauge = this.meter.createObservableGauge(
+			METRIC_TYPES.last_try_fill_time,
+			{
+				description: 'Last time that fill was attempted',
+			}
+		);
+		this.unrealizedPnLGauge = this.meter.createObservableGauge(
+			METRIC_TYPES.unrealized_pnl,
+			{
+				description: 'The account unrealized PnL',
+			}
+		);
+
+		this.mutexBusyCounter = this.meter.createCounter(METRIC_TYPES.mutex_busy, {
+			description: 'Count of times the mutex was busy',
+		});
+		this.successfulFillsCounter = this.meter.createCounter(
+			METRIC_TYPES.successful_fills,
+			{
+				description: 'Count of fills that we successfully landed',
+			}
+		);
+		this.attemptedFillsCounter = this.meter.createCounter(
+			METRIC_TYPES.attempted_fills,
+			{
+				description: 'Count of fills we attempted',
+			}
+		);
+
+		this.sdkCallDurationHistogram = this.meter.createHistogram(
+			METRIC_TYPES.sdk_call_duration_histogram,
+			{
+				description: 'Distribution of sdk method calls',
+				unit: 'ms',
+			}
+		);
+		this.tryFillDurationHistogram = this.meter.createHistogram(
+			METRIC_TYPES.try_fill_duration_histogram,
+			{
+				description: 'Distribution of tryFills',
+				unit: 'ms',
+			}
+		);
+
+		this.lastTryFillTimeGauge.addCallback(async (obs) => {
+			await this.watchdogTimerMutex.runExclusive(async () => {
+				const user = this.driftClient.getUser();
+				obs.observe(
+					this.watchdogTimerLastPatTime,
+					metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					)
+				);
+			});
+		});
+
+		this.meter.addBatchObservableCallback(
+			async (batchObservableResult: BatchObservableResult) => {
+				for (const user of this.driftClient.getUsers()) {
+					const userAccount = user.getUserAccount();
+
+					batchObservableResult.observe(
+						this.totalCollateralGauge,
+						convertToNumber(user.getTotalCollateral(), QUOTE_PRECISION),
+						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
+					);
+
+					batchObservableResult.observe(
+						this.unrealizedPnLGauge,
+						convertToNumber(user.getUnrealizedPNL(), QUOTE_PRECISION),
+						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
+					);
+				}
+			},
+			[this.totalCollateralGauge, this.unrealizedPnLGauge]
+		);
 	}
 
 	public async init() {
@@ -543,7 +732,7 @@ export class FillerBot implements Bot {
 	private async processBulkFillTxLogs(
 		nodesFilled: Array<NodeToFill>,
 		txSig: TransactionSignature
-	) {
+	): Promise<number> {
 		let tx: TransactionResponse | null = null;
 		let attempts = 0;
 		while (tx === null && attempts < 10) {
@@ -557,18 +746,10 @@ export class FillerBot implements Bot {
 
 		if (tx === null) {
 			logger.error(`tx ${txSig} not found`);
-			return;
+			return 0;
 		}
 
-		const successCount = this.handleTransactionLogs(
-			nodesFilled,
-			tx.meta.logMessages
-		);
-		this.metrics?.recordFilledOrder(
-			this.driftClient.provider.wallet.publicKey,
-			this.name,
-			successCount
-		);
+		return this.handleTransactionLogs(nodesFilled, tx.meta.logMessages);
 	}
 
 	private removeFillingNodes(nodes: Array<NodeToFill>) {
@@ -582,7 +763,6 @@ export class FillerBot implements Bot {
 	): Promise<[TransactionSignature, number]> {
 		const tx = new Transaction();
 		let txSig = '';
-		let lastIdxFilled = 0;
 
 		/**
 		 * At all times, the running Tx size is:
@@ -630,23 +810,16 @@ export class FillerBot implements Bot {
 		const nodesSent: Array<NodeToFill> = [];
 		let idxUsed = 0;
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
-			const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(
-				nodeToFill.node.order.marketIndex
-			);
 			logger.info(
 				`filling perp node ${idx}, marketIdx: ${
 					nodeToFill.node.order.marketIndex
 				}: ${nodeToFill.node.userAccount.toString()}, ${
 					nodeToFill.node.order.orderId
-				}, orderType: ${getVariant(
-					nodeToFill.node.order.orderType
-				)}, \ndriftClient.oraclePrice.slot: ${oraclePriceData.slot.toNumber()}\nslotSub.currSlot: ${
-					this.slotSubscriber.currentSlot
-				}\nslotSub.getSlot: ${this.slotSubscriber.getSlot()}`
+				}, orderType: ${getVariant(nodeToFill.node.order.orderType)}`
 			);
 			if (nodeToFill.makerNode) {
 				logger.info(
-					`filling taker: ${nodeToFill.node.userAccount.toBase58()}-${
+					`filling\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
 						nodeToFill.node.order.orderId
 					} ${convertToNumber(
 						nodeToFill.node.order.baseAssetAmountFilled,
@@ -672,7 +845,7 @@ export class FillerBot implements Bot {
 				);
 			} else {
 				logger.info(
-					`filling taker: ${nodeToFill.node.userAccount.toBase58()}-${
+					`filling\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
 						nodeToFill.node.order.orderId
 					} ${convertToNumber(
 						nodeToFill.node.order.baseAssetAmountFilled,
@@ -755,19 +928,12 @@ export class FillerBot implements Bot {
 			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
 			idxUsed++;
 			nodesSent.push(nodeToFill);
-			lastIdxFilled = idx;
-
-			this.metrics?.recordFillableOrdersSeen(
-				nodeToFill.node.order.marketIndex,
-				marketType,
-				1
-			);
 		}
 
 		logger.debug(`txPacker took ${Date.now() - txPackerStart}ms`);
 
 		if (nodesSent.length === 0) {
-			return [txSig, -1];
+			return [txSig, 0];
 		}
 
 		logger.info(
@@ -785,31 +951,32 @@ export class FillerBot implements Bot {
 				txSig = resp.txSig;
 				const duration = Date.now() - txStart;
 				logger.info(`sent tx: ${txSig}, took: ${duration}ms`);
-				this.metrics?.recordRpcDuration(
-					this.driftClient.connection.rpcEndpoint,
-					'send',
-					duration,
-					false,
-					this.name
-				);
+
+				const user = this.driftClient.getUser();
+				this.sdkCallDurationHistogram.record(duration, {
+					...metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					),
+					method: 'sendTx',
+				});
 
 				const parseLogsStart = Date.now();
 				this.processBulkFillTxLogs(nodesSent, txSig)
-					.then(() => {
+					.then((successfulFills) => {
 						const processBulkFillLogsDuration = Date.now() - parseLogsStart;
-						logger.info(`parse logs took ${processBulkFillLogsDuration}ms`);
-						this.metrics?.recordRpcDuration(
-							this.driftClient.connection.rpcEndpoint,
-							'processLogs',
-							processBulkFillLogsDuration,
-							false,
-							this.name
+						logger.info(
+							`parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}`
 						);
 
-						this.metrics?.recordFilledOrder(
-							this.driftClient.provider.wallet.publicKey,
-							this.name,
-							nodesSent.length
+						// record successful fills
+						const user = this.driftClient.getUser();
+						this.successfulFillsCounter.add(
+							successfulFills,
+							metricAttrFromUserAccount(
+								user.userAccountPublicKey,
+								user.getUserAccount()
+							)
 						);
 					})
 					.catch((e) => {
@@ -833,7 +1000,7 @@ export class FillerBot implements Bot {
 				this.removeFillingNodes(nodesToFill);
 			});
 
-		return [txSig, lastIdxFilled];
+		return [txSig, nodesSent.length];
 	}
 
 	private async tryFill() {
@@ -884,17 +1051,34 @@ export class FillerBot implements Bot {
 				// fill the perp nodes
 				let filledNodeCount = 0;
 				while (filledNodeCount < filteredNodes.length) {
-					const resp = await this.tryBulkFillPerpNodes(
+					const [_tx, attemptedFills] = await this.tryBulkFillPerpNodes(
 						filteredNodes.slice(filledNodeCount)
 					);
-					filledNodeCount += resp[1] + 1;
+					filledNodeCount += attemptedFills;
+
+					// record fill attempts
+					const user = this.driftClient.getUser();
+					this.attemptedFillsCounter.add(
+						attemptedFills,
+						metricAttrFromUserAccount(
+							user.userAccountPublicKey,
+							user.getUserAccount()
+						)
+					);
 				}
 
 				ran = true;
 			});
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
-				this.metrics?.recordMutexBusy(this.name);
+				const user = this.driftClient.getUser();
+				this.mutexBusyCounter.add(
+					1,
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
 			} else if (e === dlobMutexError) {
 				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
@@ -903,16 +1087,15 @@ export class FillerBot implements Bot {
 		} finally {
 			if (ran) {
 				const duration = Date.now() - startTime;
-
-				// need another histogram size for tryFill
-				// this.metrics?.recordRpcDuration(
-				// 	this.clearingHouse.connection.rpcEndpoint,
-				// 	'tryFill',
-				// 	duration,
-				// 	false,
-				// 	this.name
-				// );
-				logger.info(`tryFill done, took ${duration}ms`);
+				const user = this.driftClient.getUser();
+				this.tryFillDurationHistogram.record(duration, {
+					...metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					),
+					method: 'sendTx',
+				});
+				logger.debug(`tryFill done, took ${duration}ms`);
 
 				await this.watchdogTimerMutex.runExclusive(async () => {
 					this.watchdogTimerLastPatTime = Date.now();

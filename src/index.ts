@@ -47,14 +47,19 @@ import {
 	getOrCreateAssociatedTokenAccount,
 	TOKEN_FAUCET_PROGRAM_ID,
 } from './utils';
+import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
+const commitHash = process.env.COMMIT;
 //@ts-ignore
 const sdkConfig = initialize({ env: process.env.ENV });
 
 const stateCommitment: Commitment = 'confirmed';
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
+const metricsPort =
+	process.env.METRICS_PORT ||
+	PrometheusExporter.DEFAULT_OPTIONS.port.toString();
 
 program
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
@@ -440,8 +445,14 @@ const runBot = async () => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				driftEnv,
-				metrics
+				{
+					rpcEndpoint: endpoint,
+					commit: commitHash,
+					driftEnv: driftEnv,
+					driftPid: clearingHousePublicKey.toBase58(),
+					walletAuthority: wallet.publicKey.toBase58(),
+				},
+				parseInt(metricsPort)
 			)
 		);
 	}
