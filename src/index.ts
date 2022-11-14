@@ -47,14 +47,19 @@ import {
 	getOrCreateAssociatedTokenAccount,
 	TOKEN_FAUCET_PROGRAM_ID,
 } from './utils';
+import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
+const commitHash = process.env.COMMIT;
 //@ts-ignore
 const sdkConfig = initialize({ env: process.env.ENV });
 
 const stateCommitment: Commitment = 'confirmed';
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
+const metricsPort =
+	process.env.METRICS_PORT ||
+	PrometheusExporter.DEFAULT_OPTIONS.port.toString();
 
 program
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
@@ -231,6 +236,7 @@ const runBot = async () => {
 		stateCommitment,
 		1000
 	);
+	let lastBulkAccountLoaderSlot = bulkAccountLoader.mostRecentSlot;
 	const clearingHouse = new DriftClient({
 		connection,
 		wallet,
@@ -440,8 +446,14 @@ const runBot = async () => {
 				!!opts.dry,
 				clearingHouse,
 				slotSubscriber,
-				driftEnv,
-				metrics
+				{
+					rpcEndpoint: endpoint,
+					commit: commitHash,
+					driftEnv: driftEnv,
+					driftPid: clearingHousePublicKey.toBase58(),
+					walletAuthority: wallet.publicKey.toBase58(),
+				},
+				parseInt(metricsPort)
 			)
 		);
 	}
@@ -533,21 +545,34 @@ const runBot = async () => {
 					}
 				}
 				// check if a slot was received recently
-				let healthySlot = false;
+				let healthySlotSubscriber = false;
 				await lastSlotReceivedMutex.runExclusive(async () => {
-					healthySlot = lastSlotReceived > lastHealthCheckSlot;
+					healthySlotSubscriber = lastSlotReceived > lastHealthCheckSlot;
 					logger.debug(
-						`Health check: lastSlotReceived: ${lastSlotReceived}, lastHealthCheckSlot: ${lastHealthCheckSlot}, healthySlot: ${healthySlot}`
+						`Health check: lastSlotReceived: ${lastSlotReceived}, lastHealthCheckSlot: ${lastHealthCheckSlot}, healthySlot: ${healthySlotSubscriber}`
 					);
-					if (healthySlot) {
+					if (healthySlotSubscriber) {
 						lastHealthCheckSlot = lastSlotReceived;
 					}
 				});
-				if (!healthySlot) {
+				if (!healthySlotSubscriber) {
 					res.writeHead(500);
 					logger.error(`SlotSubscriber is not healthy`);
 					res.end(`SlotSubscriber is not healthy`);
 					return;
+				}
+
+				if (bulkAccountLoader) {
+					// we expect health checks to happen at a rate slower than the BulkAccountLoader's polling frequency
+					if (bulkAccountLoader.mostRecentSlot === lastBulkAccountLoaderSlot) {
+						res.writeHead(500);
+						res.end(`bulkAccountLoader.mostRecentSlot is not healthy`);
+						logger.error(
+							`Health check failed due to stale bulkAccountLoader.mostRecentSlot`
+						);
+						return;
+					}
+					lastBulkAccountLoaderSlot = bulkAccountLoader.mostRecentSlot;
 				}
 
 				// check all bots if they're live

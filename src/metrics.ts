@@ -28,11 +28,32 @@ import {
 	LiquidationRecord,
 	isVariant,
 	MarketType,
+	UserAccount,
 } from '@drift-labs/sdk';
 
 import { Mutex } from 'async-mutex';
 
 const driftEnv = process.env.DRIFT_ENV || 'devnet';
+
+export type RuntimeSpec = {
+	rpcEndpoint: string;
+	driftEnv: string;
+	commit: string;
+	driftPid: string;
+	walletAuthority: string;
+};
+
+export function metricAttrFromUserAccount(
+	userAccountKey: PublicKey,
+	ua: UserAccount
+): any {
+	return {
+		subaccount_id: ua.subAccountId,
+		public_key: userAccountKey.toBase58(),
+		authority: ua.authority.toBase58(),
+		delegate: ua.delegate.toBase58(),
+	};
+}
 
 export class Metrics {
 	private exporter: PrometheusExporter;
@@ -620,9 +641,15 @@ export class Metrics {
 	) {
 		await this.fillableOrdersSeenLock.runExclusive(async () => {
 			if (isVariant(marketType, 'perp')) {
-				this.fillablePerpOrdersSeenByMarket.set(marketIndex, fillableOrders);
+				this.fillablePerpOrdersSeenByMarket.set(
+					marketIndex,
+					this.fillablePerpOrdersSeenByMarket.get(marketIndex) + fillableOrders
+				);
 			} else if (isVariant(marketType, 'spot')) {
-				this.fillableSpotOrdersSeenByMarket.set(marketIndex, fillableOrders);
+				this.fillableSpotOrdersSeenByMarket.set(
+					marketIndex,
+					this.fillableSpotOrdersSeenByMarket.get(marketIndex) + fillableOrders
+				);
 			}
 		});
 	}
