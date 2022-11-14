@@ -1,6 +1,4 @@
 import {
-	NewUserRecord,
-	OrderRecord,
 	User,
 	ReferrerInfo,
 	isOracleValid,
@@ -27,12 +25,6 @@ import {
 	WrappedEvent,
 	PerpMarkets,
 	OrderActionRecord,
-	DepositRecord,
-	FundingPaymentRecord,
-	LiquidationRecord,
-	SettlePnlRecord,
-	LPRecord,
-	InsuranceFundStakeRecord,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -366,52 +358,12 @@ export class FillerBot implements Bot {
 	}
 
 	public async trigger(record: WrappedEvent<any>) {
-		if (record.eventType === 'DepositRecord') {
-			const depositRecord = record as DepositRecord;
-			await this.userMap.mustGet(depositRecord.user.toString());
-			await this.userStatsMap.mustGet(depositRecord.userAuthority.toString());
-		} else if (record.eventType === 'FundingPaymentRecord') {
-			const fundingPaymentRecord = record as FundingPaymentRecord;
-			await this.userMap.mustGet(fundingPaymentRecord.user.toString());
-			await this.userStatsMap.mustGet(
-				fundingPaymentRecord.userAuthority.toString()
-			);
-		} else if (record.eventType === 'LiquidationRecord') {
-			const fundingPaymentRecord = record as LiquidationRecord;
-
-			const user = await this.userMap.mustGet(
-				fundingPaymentRecord.user.toString()
-			);
-			await this.userStatsMap.mustGet(
-				user.getUserAccount().authority.toString()
-			);
-
-			const liquidatorUser = await this.userMap.mustGet(
-				fundingPaymentRecord.liquidator.toString()
-			);
-			await this.userStatsMap.mustGet(
-				liquidatorUser.getUserAccount().authority.toString()
-			);
-		} else if (record.eventType === 'OrderRecord') {
-			const orderRecord = record as OrderRecord;
-			await this.userMap.updateWithOrderRecord(orderRecord);
-			await this.userStatsMap.updateWithOrderRecord(orderRecord, this.userMap);
+		await this.userMap.updateWithEventRecord(record);
+		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		if (record.eventType === 'OrderRecord') {
 			await this.tryFill();
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
-
-			if (actionRecord.taker) {
-				const taker = await this.userMap.mustGet(actionRecord.taker.toString());
-				await this.userStatsMap.mustGet(
-					taker.getUserAccount().authority.toString()
-				);
-			}
-			if (actionRecord.maker) {
-				const maker = await this.userMap.mustGet(actionRecord.maker.toString());
-				await this.userStatsMap.mustGet(
-					maker.getUserAccount().authority.toString()
-				);
-			}
 
 			if (getVariant(actionRecord.action) === 'fill') {
 				const marketType = getVariant(actionRecord.marketType);
@@ -423,27 +375,6 @@ export class FillerBot implements Bot {
 					});
 				}
 			}
-		} else if (record.eventType === 'SettlePnlRecord') {
-			const settlePnlRecord = record as SettlePnlRecord;
-			const user = await this.userMap.mustGet(settlePnlRecord.user.toString());
-			await this.userStatsMap.mustGet(
-				user.getUserAccount().authority.toString()
-			);
-		} else if (record.eventType === 'NewUserRecord') {
-			const newUserRecord = record as NewUserRecord;
-
-			await this.userMap.mustGet(newUserRecord.user.toString());
-			await this.userStatsMap.mustGet(newUserRecord.userAuthority.toString());
-		} else if (record.eventType === 'LPRecord') {
-			const lpRecord = record as LPRecord;
-
-			const user = await this.userMap.mustGet(lpRecord.user.toString());
-			await this.userStatsMap.mustGet(
-				user.getUserAccount().authority.toString()
-			);
-		} else if (record.eventType === 'InsuranceFundStakeRecord') {
-			const ifStakeRecord = record as InsuranceFundStakeRecord;
-			await this.userStatsMap.mustGet(ifStakeRecord.userAuthority.toString());
 		}
 	}
 

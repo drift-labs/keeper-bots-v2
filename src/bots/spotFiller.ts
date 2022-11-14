@@ -1,7 +1,5 @@
 import {
 	DriftEnv,
-	NewUserRecord,
-	OrderRecord,
 	User,
 	ReferrerInfo,
 	DriftClient,
@@ -164,18 +162,10 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public async trigger(record: any) {
+		await this.userMap.updateWithEventRecord(record);
+		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
 		if (record.eventType === 'OrderRecord') {
-			await this.userMap.updateWithOrderRecord(record as OrderRecord);
-			await this.userStatsMap.updateWithOrderRecord(
-				record as OrderRecord,
-				this.userMap
-			);
 			await this.trySpotFill();
-		} else if (record.eventType === 'NewUserRecord') {
-			await this.userMap.mustGet((record as NewUserRecord).user.toString());
-			await this.userStatsMap.mustGet(
-				(record as NewUserRecord).user.toString()
-			);
 		}
 	}
 
