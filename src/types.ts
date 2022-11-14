@@ -1,4 +1,4 @@
-import { DLOB } from '@drift-labs/sdk';
+import { DLOB, WrappedEvent } from '@drift-labs/sdk';
 
 export const constants = {
 	devnet: {
@@ -29,7 +29,7 @@ export interface Bot {
 	/**
 	 * Trigger the bot to run a step, used instead of polling
 	 */
-	trigger: (record: any) => Promise<void>;
+	trigger: (record: WrappedEvent<any>) => Promise<void>;
 
 	/**
 	 * Returns the bot's DLOB
