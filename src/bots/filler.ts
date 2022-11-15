@@ -4,7 +4,6 @@ import {
 	isOracleValid,
 	DriftClient,
 	PerpMarketAccount,
-	SlotSubscriber,
 	calculateAskPrice,
 	calculateBidPrice,
 	MakerInfo,
@@ -87,7 +86,6 @@ export class FillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 2000;
 
 	private driftClient: DriftClient;
-	private slotSubscriber: SlotSubscriber;
 
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -135,14 +133,12 @@ export class FillerBot implements Bot {
 		name: string,
 		dryRun: boolean,
 		driftClient: DriftClient,
-		slotSubscriber: SlotSubscriber,
 		runtimeSpec: RuntimeSpec,
 		metricsPort?: number | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.driftClient = driftClient;
-		this.slotSubscriber = slotSubscriber;
 		this.runtimeSpec = runtimeSpec;
 
 		this.metricsPort = metricsPort;
@@ -1125,13 +1121,13 @@ export class FillerBot implements Bot {
 			if (ran) {
 				const duration = Date.now() - startTime;
 				const user = this.driftClient.getUser();
-				this.tryFillDurationHistogram.record(duration, {
-					...metricAttrFromUserAccount(
+				this.tryFillDurationHistogram.record(
+					duration,
+					metricAttrFromUserAccount(
 						user.getUserAccountPublicKey(),
 						user.getUserAccount()
-					),
-					method: 'sendTx',
-				});
+					)
+				);
 				logger.debug(`tryFill done, took ${duration}ms`);
 
 				await this.watchdogTimerMutex.runExclusive(async () => {
