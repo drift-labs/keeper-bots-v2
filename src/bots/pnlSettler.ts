@@ -13,6 +13,7 @@ import {
 	NewUserRecord,
 	OrderRecord,
 	UserMap,
+	ZERO,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -151,6 +152,10 @@ export class PnlSettlerBot implements Bot {
 				const userAccount = user.getUserAccount();
 
 				for (const settleePosition of userAccount.perpPositions) {
+					if (settleePosition.quoteAssetAmount.eq(ZERO) && settleePosition.baseAssetAmount.eq(ZERO)) {
+						continue;
+					}
+
 					const marketIndexNum = settleePosition.marketIndex;
 					const unsettledPnl = calculateClaimablePnl(
 						perpMarketAndOracleData[marketIndexNum].marketAccount,
@@ -160,7 +165,8 @@ export class PnlSettlerBot implements Bot {
 					);
 
 					// only settle for $10 or more negative pnl
-					if (unsettledPnl.gt(MIN_PNL_TO_SETTLE)) {
+					if (unsettledPnl.gt(MIN_PNL_TO_SETTLE) && !settleePosition.baseAssetAmount.eq(ZERO))
+					{
 						continue;
 					}
 
@@ -237,6 +243,33 @@ export class PnlSettlerBot implements Bot {
 						});
 				}
 			});
+
+			for (let i = 0; i < this.spotMarkets.length; i++) {
+				const spotIf = spotMarketAndOracleData[i].marketAccount.insuranceFund;
+				if (spotIf.revenueSettlePeriod.eq(ZERO)) {
+					continue;
+				}
+				const currentTs = Date.now();
+				if (
+					spotIf.lastRevenueSettleTs
+						.add(spotIf.revenueSettlePeriod)
+						.lte(new BN(currentTs))
+				) {
+					this.clearingHouse
+						.settleRevenueToInsuranceFund(i)
+						.then((txSig) => {
+							logger.info(
+								`IF revenue settled successfully on marketIndex=${i}. TxSig: ${txSig}`
+							);
+						})
+						.catch((err) => {
+							const errorCode = getErrorCode(err);
+							logger.error(
+								`Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
+							);
+						});
+				}
+			}
 		} catch (e) {
 			console.error(e);
 		} finally {
