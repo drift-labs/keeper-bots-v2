@@ -152,7 +152,10 @@ export class PnlSettlerBot implements Bot {
 				const userAccount = user.getUserAccount();
 
 				for (const settleePosition of userAccount.perpPositions) {
-					if (settleePosition.quoteAssetAmount.eq(ZERO) && settleePosition.baseAssetAmount.eq(ZERO)) {
+					if (
+						settleePosition.quoteAssetAmount.eq(ZERO) &&
+						settleePosition.baseAssetAmount.eq(ZERO)
+					) {
 						continue;
 					}
 
@@ -165,8 +168,10 @@ export class PnlSettlerBot implements Bot {
 					);
 
 					// only settle for $10 or more negative pnl
-					if (unsettledPnl.gt(MIN_PNL_TO_SETTLE) && !settleePosition.baseAssetAmount.eq(ZERO))
-					{
+					if (
+						unsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
+						!settleePosition.baseAssetAmount.eq(ZERO)
+					) {
 						continue;
 					}
 
@@ -249,12 +254,24 @@ export class PnlSettlerBot implements Bot {
 				if (spotIf.revenueSettlePeriod.eq(ZERO)) {
 					continue;
 				}
-				const currentTs = Date.now();
+				const currentTs = Date.now() / 1000;
 				if (
 					spotIf.lastRevenueSettleTs
 						.add(spotIf.revenueSettlePeriod)
 						.lte(new BN(currentTs))
 				) {
+					logger.info(
+						spotIf.lastRevenueSettleTs.toString() +
+							' and ' +
+							spotIf.revenueSettlePeriod.toString()
+					);
+					logger.info(
+						spotIf.lastRevenueSettleTs
+							.add(spotIf.revenueSettlePeriod)
+							.toString() +
+							' < ' +
+							currentTs.toString()
+					);
 					this.clearingHouse
 						.settleRevenueToInsuranceFund(i)
 						.then((txSig) => {
