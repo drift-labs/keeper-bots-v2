@@ -51,10 +51,10 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/sdk@2.0.11":
-  version "2.0.11"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.0.11.tgz#d26f94f3d88bc97907ec207dbdc73da25aa5ae98"
-  integrity sha512-XH8wuZTlsMMys0xV8/M2dHGvaJQijD/h9xz1w9G/UVvcoB4w/CY+wlJEefwbT1IZyIQB/Qvbb22VjIRVu9GBAw==
+"@drift-labs/sdk@2.0.13":
+  version "2.0.13"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.0.13.tgz#d6bed4a1c0775a5b6f533d78eca829fd36e9b993"
+  integrity sha512-hFoLJ8epznTmtmoDMd7OfugFFSpPghkUNY+hhC/TPnBhQp8EUyuogfnasRBlwn+vesahwo35bsKtiCqEmvZPxA==
   dependencies:
     "@project-serum/anchor" "0.25.0-beta.1"
     "@project-serum/serum" "^0.13.38"
