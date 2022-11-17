@@ -446,6 +446,7 @@ const runBot = async () => {
 			new FillerBot(
 				'filler',
 				!!opts.dry,
+				bulkAccountLoader,
 				clearingHouse,
 				{
 					rpcEndpoint: endpoint,
@@ -463,6 +464,7 @@ const runBot = async () => {
 			new SpotFillerBot(
 				'spotFiller',
 				!!opts.dry,
+				bulkAccountLoader,
 				clearingHouse,
 				{
 					rpcEndpoint: endpoint,

@@ -19,6 +19,7 @@ import {
 	OrderActionRecord,
 	getVariant,
 	SpotMarkets,
+	BulkAccountLoader,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -51,6 +52,7 @@ const THROTTLED_NODE_SIZE_TO_PRUNE = 10;
  * Time to wait before trying a node again
  */
 const FILL_ORDER_BACKOFF = 10000;
+const USER_MAP_RESYNC_COOLDOWN_SLOTS = 10;
 
 const dlobMutexError = new Error('dlobMutex timeout');
 
@@ -74,6 +76,7 @@ export class SpotFillerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 1000;
 
+	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
 
 	private dlobMutex = withTimeout(
@@ -93,6 +96,9 @@ export class SpotFillerBot implements Bot {
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
+
+	private lastSlotReyncUserMapsMutex = new Mutex();
+	private lastSlotResyncUserMaps = 0;
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
@@ -119,12 +125,14 @@ export class SpotFillerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
+		bulkAccountLoader: BulkAccountLoader | undefined,
 		clearingHouse: DriftClient,
 		runtimeSpec: RuntimeSpec,
 		metricsPort?: number | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
+		this.bulkAccountLoader = bulkAccountLoader;
 		this.driftClient = clearingHouse;
 		this.runtimeSpec = runtimeSpec;
 
@@ -347,6 +355,8 @@ export class SpotFillerBot implements Bot {
 	public async trigger(record: any) {
 		await this.userMap.updateWithEventRecord(record);
 		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		await this.resyncUserMapsIfRequired();
+
 		if (record.eventType === 'OrderRecord') {
 			await this.trySpotFill();
 		} else if (record.eventType === 'OrderActionRecord') {
@@ -367,6 +377,55 @@ export class SpotFillerBot implements Bot {
 
 	public viewDlob(): DLOB {
 		return this.dlob;
+	}
+
+	private async resyncUserMapsIfRequired() {
+		const stateAccount = this.driftClient.getStateAccount();
+		const resyncRequired =
+			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber() ||
+			this.userStatsMap.size() !== stateAccount.numberOfAuthorities.toNumber();
+
+		if (resyncRequired) {
+			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
+				let doResync = false;
+				if (!this.bulkAccountLoader) {
+					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
+					doResync = true;
+				} else {
+					const nextResyncSlot =
+						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
+					if (this.bulkAccountLoader.mostRecentSlot <= nextResyncSlot) {
+						logger.info(
+							`Resyncing UserMaps in cooldown, ${
+								nextResyncSlot - this.bulkAccountLoader.mostRecentSlot
+							} more slots to go`
+						);
+						return;
+					} else {
+						logger.info(`Resyncing UserMaps`);
+						doResync = true;
+						this.lastSlotResyncUserMaps = this.bulkAccountLoader.mostRecentSlot;
+					}
+				}
+
+				if (doResync) {
+					const initPromises: Array<Promise<any>> = [];
+					this.userMap = new UserMap(
+						this.driftClient,
+						this.driftClient.userAccountSubscriptionConfig
+					);
+					initPromises.push(this.userMap.fetchAllUsers());
+
+					this.userStatsMap = new UserStatsMap(
+						this.driftClient,
+						this.driftClient.userAccountSubscriptionConfig
+					);
+					initPromises.push(this.userStatsMap.fetchAllUserStats());
+
+					await Promise.all(initPromises);
+				}
+			});
+		}
 	}
 
 	private async getSpotFillableNodesForMarket(

@@ -24,6 +24,7 @@ import {
 	WrappedEvent,
 	PerpMarkets,
 	OrderActionRecord,
+	BulkAccountLoader,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -63,6 +64,7 @@ const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 5000; // the time to wait before trying to fill a throttled (error filling) node
 const FILL_ORDER_COOLDOWN_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
+const USER_MAP_RESYNC_COOLDOWN_SLOTS = 10;
 const dlobMutexError = new Error('dlobMutex timeout');
 
 enum METRIC_TYPES {
@@ -85,6 +87,7 @@ export class FillerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 2000;
 
+	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
 
 	private dlobMutex = withTimeout(
@@ -101,6 +104,9 @@ export class FillerBot implements Bot {
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
+
+	private lastSlotReyncUserMapsMutex = new Mutex();
+	private lastSlotResyncUserMaps = 0;
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
@@ -132,12 +138,14 @@ export class FillerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
+		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
 		metricsPort?: number | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
+		this.bulkAccountLoader = bulkAccountLoader;
 		this.driftClient = driftClient;
 		this.runtimeSpec = runtimeSpec;
 
@@ -356,6 +364,8 @@ export class FillerBot implements Bot {
 	public async trigger(record: WrappedEvent<any>) {
 		await this.userMap.updateWithEventRecord(record);
 		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		await this.resyncUserMapsIfRequired();
+
 		if (record.eventType === 'OrderRecord') {
 			await this.tryFill();
 		} else if (record.eventType === 'OrderActionRecord') {
@@ -376,6 +386,58 @@ export class FillerBot implements Bot {
 
 	public viewDlob(): DLOB {
 		return this.dlob;
+	}
+
+	/**
+	 * Checks that userMap and userStatsMap are up in sync with , if not, signal that we should update them next block.
+	 */
+	private async resyncUserMapsIfRequired() {
+		const stateAccount = this.driftClient.getStateAccount();
+		const resyncRequired =
+			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber() ||
+			this.userStatsMap.size() !== stateAccount.numberOfAuthorities.toNumber();
+
+		if (resyncRequired) {
+			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
+				let doResync = false;
+				if (!this.bulkAccountLoader) {
+					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
+					doResync = true;
+				} else {
+					const nextResyncSlot =
+						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
+					if (this.bulkAccountLoader.mostRecentSlot <= nextResyncSlot) {
+						logger.info(
+							`Resyncing UserMaps in cooldown, ${
+								nextResyncSlot - this.bulkAccountLoader.mostRecentSlot
+							} more slots to go`
+						);
+						return;
+					} else {
+						logger.info(`Resyncing UserMaps`);
+						doResync = true;
+						this.lastSlotResyncUserMaps = this.bulkAccountLoader.mostRecentSlot;
+					}
+				}
+
+				if (doResync) {
+					const initPromises: Array<Promise<any>> = [];
+					this.userMap = new UserMap(
+						this.driftClient,
+						this.driftClient.userAccountSubscriptionConfig
+					);
+					initPromises.push(this.userMap.fetchAllUsers());
+
+					this.userStatsMap = new UserStatsMap(
+						this.driftClient,
+						this.driftClient.userAccountSubscriptionConfig
+					);
+					initPromises.push(this.userStatsMap.fetchAllUserStats());
+
+					await Promise.all(initPromises);
+				}
+			});
+		}
 	}
 
 	private async getPerpFillableNodesForMarket(
