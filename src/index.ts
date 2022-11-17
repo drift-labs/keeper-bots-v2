@@ -38,7 +38,7 @@ import { FillerBot } from './bots/filler';
 import { SpotFillerBot } from './bots/spotFiller';
 import { TriggerBot } from './bots/trigger';
 import { JitMakerBot } from './bots/jitMaker';
-import { PerpLiquidatorBot } from './bots/liquidator';
+import { LiquidatorBot } from './bots/liquidator';
 import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { Metrics } from './metrics';
@@ -501,7 +501,20 @@ const runBot = async () => {
 	}
 	if (opts.liquidator) {
 		bots.push(
-			new PerpLiquidatorBot('liquidator', !!opts.dry, clearingHouse, metrics)
+			new LiquidatorBot(
+				'liquidator',
+				!!opts.dry,
+				bulkAccountLoader,
+				clearingHouse,
+				{
+					rpcEndpoint: endpoint,
+					commit: commitHash,
+					driftEnv: driftEnv,
+					driftPid: clearingHousePublicKey.toBase58(),
+					walletAuthority: wallet.publicKey.toBase58(),
+				},
+				parseInt(metricsPort.toString())
+			)
 		);
 	}
 	if (opts.floatingMaker) {
