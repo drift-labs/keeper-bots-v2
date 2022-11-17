@@ -129,6 +129,8 @@ export function getWallet(): Wallet {
 
 const endpoint = process.env.ENDPOINT;
 logger.info(`RPC endpoint: ${endpoint}`);
+logger.info(`DriftEnv:     ${driftEnv}`);
+logger.info(`Commit:       ${commitHash}`);
 
 function sleep(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
@@ -445,7 +447,6 @@ const runBot = async () => {
 				'filler',
 				!!opts.dry,
 				clearingHouse,
-				slotSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -463,9 +464,14 @@ const runBot = async () => {
 				'spotFiller',
 				!!opts.dry,
 				clearingHouse,
-				slotSubscriber,
-				driftEnv,
-				metrics
+				{
+					rpcEndpoint: endpoint,
+					commit: commitHash,
+					driftEnv: driftEnv,
+					driftPid: clearingHousePublicKey.toBase58(),
+					walletAuthority: wallet.publicKey.toBase58(),
+				},
+				parseInt(metricsPort)
 			)
 		);
 	}
