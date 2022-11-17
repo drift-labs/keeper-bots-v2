@@ -410,12 +410,14 @@ export class SpotFillerBot implements Bot {
 
 				if (doResync) {
 					const initPromises: Array<Promise<any>> = [];
+					delete this.userMap;
 					this.userMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
 					);
 					initPromises.push(this.userMap.fetchAllUsers());
 
+					delete this.userStatsMap;
 					this.userStatsMap = new UserStatsMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
