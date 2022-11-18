@@ -20,6 +20,7 @@ import {
 	getVariant,
 	SpotMarkets,
 	BulkAccountLoader,
+	WrappedEvent,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -353,12 +354,8 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public async trigger(record: any) {
-		await this.userMap.updateWithEventRecord(record);
-		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
-		await this.resyncUserMapsIfRequired();
-
 		if (record.eventType === 'OrderRecord') {
-			await this.trySpotFill();
+			await this.trySpotFill(record);
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
 
@@ -388,6 +385,7 @@ export class SpotFillerBot implements Bot {
 		if (resyncRequired) {
 			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
 				let doResync = false;
+				const start = Date.now();
 				if (!this.bulkAccountLoader) {
 					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
 					doResync = true;
@@ -425,6 +423,7 @@ export class SpotFillerBot implements Bot {
 					initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 					await Promise.all(initPromises);
+					logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
 				}
 			});
 		}
@@ -584,7 +583,7 @@ export class SpotFillerBot implements Bot {
 			});
 	}
 
-	private async trySpotFill() {
+	private async trySpotFill(record?: WrappedEvent<any>) {
 		const startTime = Date.now();
 		let ran = false;
 
@@ -604,6 +603,12 @@ export class SpotFillerBot implements Bot {
 					);
 					await this.dlob.init();
 				});
+
+				if (record) {
+					await this.userMap.updateWithEventRecord(record);
+					await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+				}
+				await this.resyncUserMapsIfRequired();
 
 				if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
 					for (const [key, value] of this.throttledNodes.entries()) {

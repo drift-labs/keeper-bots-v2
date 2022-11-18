@@ -356,7 +356,6 @@ export class LiquidatorBot implements Bot {
 
 	public async trigger(record: WrappedEvent<any>) {
 		await this.userMap.updateWithEventRecord(record);
-		await this.resyncUserMapsIfRequired();
 	}
 
 	/**
@@ -370,6 +369,7 @@ export class LiquidatorBot implements Bot {
 		if (resyncRequired) {
 			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
 				let doResync = false;
+				const start = Date.now();
 				if (!this.bulkAccountLoader) {
 					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
 					doResync = true;
@@ -397,6 +397,7 @@ export class LiquidatorBot implements Bot {
 						this.driftClient.userAccountSubscriptionConfig
 					);
 					await this.userMap.fetchAllUsers();
+					logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
 				}
 			});
 		}
@@ -800,6 +801,8 @@ export class LiquidatorBot implements Bot {
 		const start = Date.now();
 		let ran = false;
 		try {
+			await this.resyncUserMapsIfRequired();
+
 			for (const user of this.userMap.values()) {
 				const userAcc = user.getUserAccount();
 				const auth = userAcc.authority.toBase58();

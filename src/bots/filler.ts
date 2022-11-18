@@ -345,7 +345,6 @@ export class FillerBot implements Bot {
 	public async reset() {}
 
 	public async startIntervalLoop(intervalMs: number) {
-		// await this.tryFill();
 		const intervalId = setInterval(this.tryFill.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
 
@@ -362,12 +361,8 @@ export class FillerBot implements Bot {
 	}
 
 	public async trigger(record: WrappedEvent<any>) {
-		await this.userMap.updateWithEventRecord(record);
-		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
-		await this.resyncUserMapsIfRequired();
-
 		if (record.eventType === 'OrderRecord') {
-			await this.tryFill();
+			await this.tryFill(record);
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
 
@@ -400,6 +395,7 @@ export class FillerBot implements Bot {
 		if (resyncRequired) {
 			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
 				let doResync = false;
+				const start = Date.now();
 				if (!this.bulkAccountLoader) {
 					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
 					doResync = true;
@@ -437,6 +433,7 @@ export class FillerBot implements Bot {
 					initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 					await Promise.all(initPromises);
+					logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
 				}
 			});
 		}
@@ -1100,7 +1097,7 @@ export class FillerBot implements Bot {
 		return [txSig, nodesSent.length];
 	}
 
-	private async tryFill() {
+	private async tryFill(record?: WrappedEvent<any>) {
 		const startTime = Date.now();
 		let ran = false;
 		try {
@@ -1119,6 +1116,12 @@ export class FillerBot implements Bot {
 					);
 					await this.dlob.init();
 				});
+
+				if (record) {
+					await this.userMap.updateWithEventRecord(record);
+					await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+				}
+				await this.resyncUserMapsIfRequired();
 
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];
