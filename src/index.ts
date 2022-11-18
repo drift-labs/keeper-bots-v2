@@ -239,7 +239,7 @@ const runBot = async () => {
 		1000
 	);
 	let lastBulkAccountLoaderSlot = bulkAccountLoader.mostRecentSlot;
-	const clearingHouse = new DriftClient({
+	const driftClient = new DriftClient({
 		connection,
 		wallet,
 		programID: clearingHousePublicKey,
@@ -251,22 +251,18 @@ const runBot = async () => {
 		userStats: true,
 	});
 
-	const eventSubscriber = new EventSubscriber(
-		connection,
-		clearingHouse.program,
-		{
-			maxTx: 8192,
-			maxEventsPerType: 8192,
-			orderBy: 'blockchain',
-			orderDir: 'desc',
-			commitment: stateCommitment,
-			logProviderConfig: {
-				type: 'polling',
-				frequency: 1000,
-				// type: 'websocket',
-			},
-		}
-	);
+	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {
+		maxTx: 8192,
+		maxEventsPerType: 8192,
+		orderBy: 'blockchain',
+		orderDir: 'desc',
+		commitment: stateCommitment,
+		logProviderConfig: {
+			type: 'polling',
+			frequency: 1000,
+			// type: 'websocket',
+		},
+	});
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
 	const lastSlotReceivedMutex = new Mutex();
@@ -276,7 +272,7 @@ const runBot = async () => {
 
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	logger.info(
-		`DriftClient ProgramId: ${clearingHouse.program.programId.toBase58()}`
+		`DriftClient ProgramId: ${driftClient.program.programId.toBase58()}`
 	);
 	logger.info(`Wallet pubkey: ${wallet.publicKey.toBase58()}`);
 	logger.info(` . SOL balance: ${lamportsBalance / 10 ** 9}`);
@@ -293,8 +289,8 @@ const runBot = async () => {
 		logger.info(`Failed to load USDC token account: ${e}`);
 	}
 
-	await clearingHouse.subscribe();
-	clearingHouse.eventEmitter.on('error', (e) => {
+	await driftClient.subscribe();
+	driftClient.eventEmitter.on('error', (e) => {
 		logger.info('clearing house error');
 		logger.error(e);
 	});
@@ -307,11 +303,11 @@ const runBot = async () => {
 		});
 	});
 
-	if (!(await clearingHouse.getUser().exists())) {
+	if (!(await driftClient.getUser().exists())) {
 		logger.error(`User for ${wallet.publicKey} does not exist`);
 		if (opts.initUser) {
 			logger.info(`Creating User for ${wallet.publicKey}`);
-			const [txSig] = await clearingHouse.initializeUserAccount();
+			const [txSig] = await driftClient.initializeUserAccount();
 			logger.info(`Initialized user account in transaction: ${txSig}`);
 		} else {
 			throw new Error("Run with '--init-user' flag to initialize a User");
@@ -319,57 +315,57 @@ const runBot = async () => {
 	}
 
 	// subscribe will fail if there is no clearing house user
-	const clearingHouseUser = clearingHouse.getUser();
+	const driftUser = driftClient.getUser();
 	while (
-		!(await clearingHouse.subscribe()) ||
-		!(await clearingHouseUser.subscribe()) ||
+		!(await driftClient.subscribe()) ||
+		!(await driftUser.subscribe()) ||
 		!eventSubscriber.subscribe()
 	) {
 		logger.info('waiting to subscribe to DriftClient and User');
 		await sleep(1000);
 	}
 	logger.info(
-		`User PublicKey: ${clearingHouseUser.getUserAccountPublicKey().toBase58()}`
+		`User PublicKey: ${driftUser.getUserAccountPublicKey().toBase58()}`
 	);
-	await clearingHouse.fetchAccounts();
-	await clearingHouse.getUser().fetchAccounts();
+	await driftClient.fetchAccounts();
+	await driftClient.getUser().fetchAccounts();
 
 	let metrics: Metrics | undefined = undefined;
 	if (opts.metrics) {
-		metrics = new Metrics(clearingHouse, parseInt(opts?.metrics));
+		metrics = new Metrics(driftClient, parseInt(opts?.metrics));
 		await metrics.init();
 	}
 
-	printUserAccountStats(clearingHouseUser);
+	printUserAccountStats(driftUser);
 	if (opts.closeOpenPositions) {
 		logger.info(`Closing open perp positions`);
 		let closedPerps = 0;
-		for await (const p of clearingHouseUser.getUserAccount().perpPositions) {
+		for await (const p of driftUser.getUserAccount().perpPositions) {
 			if (p.baseAssetAmount.isZero()) {
 				logger.info(`no position on market: ${p.marketIndex}`);
 				continue;
 			}
 			logger.info(`closing position on ${p.marketIndex}`);
-			logger.info(` . ${await clearingHouse.closePosition(p.marketIndex)}`);
+			logger.info(` . ${await driftClient.closePosition(p.marketIndex)}`);
 			closedPerps++;
 		}
 		console.log(`Closed ${closedPerps} spot positions`);
 
 		let closedSpots = 0;
-		for await (const p of clearingHouseUser.getUserAccount().spotPositions) {
+		for await (const p of driftUser.getUserAccount().spotPositions) {
 			if (p.scaledBalance.isZero()) {
 				logger.info(`no position on market: ${p.marketIndex}`);
 				continue;
 			}
 			logger.info(`closing position on ${p.marketIndex}`);
-			logger.info(` . ${await clearingHouse.closePosition(p.marketIndex)}`);
+			logger.info(` . ${await driftClient.closePosition(p.marketIndex)}`);
 			closedSpots++;
 		}
 		console.log(`Closed ${closedSpots} spot positions`);
 	}
 
 	// check that user has collateral
-	const freeCollateral = clearingHouseUser.getFreeCollateral();
+	const freeCollateral = driftUser.getFreeCollateral();
 	if (freeCollateral.isZero() && opts.jitMaker && !opts.forceDeposit) {
 		throw new Error(
 			`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
@@ -409,7 +405,7 @@ const runBot = async () => {
 			await tokenFaucet.mintToUser(ata, amount);
 		}
 
-		const tx = await clearingHouse.deposit(
+		const tx = await driftClient.deposit(
 			amount,
 			0, // USDC bank
 			ata
@@ -422,7 +418,7 @@ const runBot = async () => {
 	// print user orders
 	logger.info('');
 	const ordersToCancel: Array<number> = [];
-	for (const order of clearingHouseUser.getUserAccount().orders) {
+	for (const order of driftUser.getUserAccount().orders) {
 		if (order.baseAssetAmount.isZero()) {
 			continue;
 		}
@@ -431,11 +427,11 @@ const runBot = async () => {
 	if (opts.cancelOpenOrders) {
 		for (const order of ordersToCancel) {
 			logger.info(`Cancelling open order ${order.toString()}`);
-			await clearingHouse.cancelOrder(order);
+			await driftClient.cancelOrder(order);
 		}
 	}
 
-	printOpenPositions(clearingHouseUser);
+	printOpenPositions(driftUser);
 
 	/*
 	 * Start bots depending on flags enabled
@@ -447,7 +443,7 @@ const runBot = async () => {
 				'filler',
 				!!opts.dry,
 				bulkAccountLoader,
-				clearingHouse,
+				driftClient,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -465,7 +461,7 @@ const runBot = async () => {
 				'spotFiller',
 				!!opts.dry,
 				bulkAccountLoader,
-				clearingHouse,
+				driftClient,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -482,7 +478,7 @@ const runBot = async () => {
 			new TriggerBot(
 				'trigger',
 				!!opts.dry,
-				clearingHouse,
+				driftClient,
 				slotSubscriber,
 				metrics
 			)
@@ -493,7 +489,7 @@ const runBot = async () => {
 			new JitMakerBot(
 				'JitMaker',
 				!!opts.dry,
-				clearingHouse,
+				driftClient,
 				slotSubscriber,
 				metrics
 			)
@@ -505,7 +501,7 @@ const runBot = async () => {
 				'liquidator',
 				!!opts.dry,
 				bulkAccountLoader,
-				clearingHouse,
+				driftClient,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -522,7 +518,7 @@ const runBot = async () => {
 			new FloatingPerpMakerBot(
 				'floatingMaker',
 				!!opts.dry,
-				clearingHouse,
+				driftClient,
 				slotSubscriber,
 				metrics
 			)
@@ -534,7 +530,7 @@ const runBot = async () => {
 			new PnlSettlerBot(
 				'pnlSettler',
 				!!opts.dry,
-				clearingHouse,
+				driftClient,
 				PerpMarkets[driftEnv],
 				SpotMarkets[driftEnv],
 				metrics
