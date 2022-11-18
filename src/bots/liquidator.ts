@@ -376,7 +376,7 @@ export class LiquidatorBot implements Bot {
 				} else {
 					const nextResyncSlot =
 						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
-					if (this.bulkAccountLoader.mostRecentSlot <= nextResyncSlot) {
+					if (nextResyncSlot >= this.bulkAccountLoader.mostRecentSlot) {
 						logger.info(
 							`Resyncing UserMaps in cooldown, ${
 								nextResyncSlot - this.bulkAccountLoader.mostRecentSlot
