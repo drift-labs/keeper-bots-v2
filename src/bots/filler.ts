@@ -424,6 +424,7 @@ export class FillerBot implements Bot {
 						this.driftClient.userAccountSubscriptionConfig
 					);
 					initPromises.push(this.userMap.fetchAllUsers());
+					logger.info(`UserMaps resyned in ${Date.now() - start}ms`);
 
 					delete this.userStatsMap;
 					this.userStatsMap = new UserStatsMap(

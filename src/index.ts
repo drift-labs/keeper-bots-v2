@@ -48,6 +48,7 @@ import {
 	TOKEN_FAUCET_PROGRAM_ID,
 } from './utils';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
+import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 
 require('dotenv').config();
 const driftEnv = process.env.ENV as DriftEnv;
@@ -117,10 +118,15 @@ export function getWallet(): Wallet {
 			JSON.parse(fs.readFileSync(privateKey).toString())
 		);
 	} else {
-		logger.info(`loading private key as comma separated numbers`);
-		loadedKey = Uint8Array.from(
-			privateKey.split(',').map((val) => Number(val))
-		);
+		if (privateKey.includes(',')) {
+			logger.info(`Trying to load private key as comma separated numbers`);
+			loadedKey = Uint8Array.from(
+				privateKey.split(',').map((val) => Number(val))
+			);
+		} else {
+			logger.info(`Trying to load private key as base58 string`);
+			loadedKey = new Uint8Array(bs58.decode(privateKey));
+		}
 	}
 
 	const keypair = Keypair.fromSecretKey(Uint8Array.from(loadedKey));
