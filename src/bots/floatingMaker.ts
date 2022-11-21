@@ -148,7 +148,7 @@ export class FloatingPerpMakerBot implements Bot {
 
 		// zeor out the open orders
 		for (const market of PerpMarkets[driftEnv]) {
-			this.agentState.openOrders.set(market.marketIndex.toNumber(), []);
+			this.agentState.openOrders.set(market.marketIndex, []);
 		}
 
 		this.clearingHouse.getUserAccount().orders.map((o) => {
@@ -236,11 +236,11 @@ export class FloatingPerpMakerBot implements Bot {
 			const biasDenom = new BN(100);
 
 			const oracleBidSpread = oracle.price.sub(vBid);
-			const tx0 = await this.clearingHouse.placeSpotOrder({
+			const tx0 = await this.clearingHouse.placePerpOrder({
 				marketIndex: marketIndex,
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.LONG,
-				baseAssetAmount: BASE_PRECISION.mul(new BN(100)),
+				baseAssetAmount: BASE_PRECISION.mul(new BN(1)),
 				oraclePriceOffset: oracleBidSpread
 					.mul(biasNum)
 					.div(biasDenom)
@@ -250,11 +250,11 @@ export class FloatingPerpMakerBot implements Bot {
 			console.log(`${this.name} placing long: ${tx0}`);
 
 			const oracleAskSpread = vAsk.sub(oracle.price);
-			const tx1 = await this.clearingHouse.placeSpotOrder({
+			const tx1 = await this.clearingHouse.placePerpOrder({
 				marketIndex: marketIndex,
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.SHORT,
-				baseAssetAmount: BASE_PRECISION.mul(new BN(100)),
+				baseAssetAmount: BASE_PRECISION.mul(new BN(1)),
 				oraclePriceOffset: oracleAskSpread
 					.mul(biasNum)
 					.div(biasDenom)
