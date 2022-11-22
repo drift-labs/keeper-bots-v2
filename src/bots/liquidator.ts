@@ -49,7 +49,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 
-const USER_MAP_RESYNC_COOLDOWN_SLOTS = 10;
+const USER_MAP_RESYNC_COOLDOWN_SLOTS = 300;
 
 function calculateSpotTokenAmountToLiquidate(
 	clearingHouse: DriftClient,
@@ -377,11 +377,13 @@ export class LiquidatorBot implements Bot {
 					const nextResyncSlot =
 						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
 					if (nextResyncSlot >= this.bulkAccountLoader.mostRecentSlot) {
-						logger.info(
-							`Resyncing UserMaps in cooldown, ${
-								nextResyncSlot - this.bulkAccountLoader.mostRecentSlot
-							} more slots to go`
-						);
+						const slotsRemaining =
+							nextResyncSlot - this.bulkAccountLoader.mostRecentSlot;
+						if (slotsRemaining % 10 === 0) {
+							logger.info(
+								`Resyncing UserMaps in cooldown, ${slotsRemaining} more slots to go`
+							);
+						}
 						return;
 					} else {
 						logger.info(`Resyncing UserMaps`);
@@ -391,13 +393,20 @@ export class LiquidatorBot implements Bot {
 				}
 
 				if (doResync) {
-					delete this.userMap;
-					this.userMap = new UserMap(
+					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
 					);
-					await this.userMap.fetchAllUsers();
-					logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
+					newUserMap
+						.fetchAllUsers()
+						.then(() => {
+							delete this.userMap;
+							this.userMap = newUserMap;
+						})
+						.finally(() => {
+							logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
+						});
+					logger.warn('continuing liquidator');
 				}
 			});
 		}

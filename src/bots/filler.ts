@@ -64,7 +64,7 @@ const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 5000; // the time to wait before trying to fill a throttled (error filling) node
 const FILL_ORDER_COOLDOWN_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
-const USER_MAP_RESYNC_COOLDOWN_SLOTS = 10;
+const USER_MAP_RESYNC_COOLDOWN_SLOTS = 300;
 const dlobMutexError = new Error('dlobMutex timeout');
 
 enum METRIC_TYPES {
@@ -361,8 +361,11 @@ export class FillerBot implements Bot {
 	}
 
 	public async trigger(record: WrappedEvent<any>) {
+		await this.userMap.updateWithEventRecord(record);
+		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+
 		if (record.eventType === 'OrderRecord') {
-			await this.tryFill(record);
+			await this.tryFill();
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
 
@@ -403,11 +406,13 @@ export class FillerBot implements Bot {
 					const nextResyncSlot =
 						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
 					if (nextResyncSlot >= this.bulkAccountLoader.mostRecentSlot) {
-						logger.info(
-							`Resyncing UserMaps in cooldown, ${
-								nextResyncSlot - this.bulkAccountLoader.mostRecentSlot
-							} more slots to go`
-						);
+						const slotsRemaining =
+							nextResyncSlot - this.bulkAccountLoader.mostRecentSlot;
+						if (slotsRemaining % 10 === 0) {
+							logger.info(
+								`Resyncing UserMaps in cooldown, ${slotsRemaining} more slots to go`
+							);
+						}
 						return;
 					} else {
 						logger.info(`Resyncing UserMaps`);
@@ -417,24 +422,28 @@ export class FillerBot implements Bot {
 				}
 
 				if (doResync) {
-					const initPromises: Array<Promise<any>> = [];
-					delete this.userMap;
-					this.userMap = new UserMap(
+					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
 					);
-					initPromises.push(this.userMap.fetchAllUsers());
-					logger.info(`UserMaps resyned in ${Date.now() - start}ms`);
-
-					delete this.userStatsMap;
-					this.userStatsMap = new UserStatsMap(
+					const newUserStatsMap = new UserStatsMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
 					);
-					initPromises.push(this.userStatsMap.fetchAllUserStats());
-
-					await Promise.all(initPromises);
-					logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
+					newUserMap.fetchAllUsers().then(() => {
+						newUserStatsMap
+							.fetchAllUserStats()
+							.then(() => {
+								delete this.userMap;
+								delete this.userStatsMap;
+								this.userMap = newUserMap;
+								this.userStatsMap = newUserStatsMap;
+							})
+							.finally(() => {
+								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
+							});
+					});
+					logger.warn('continuing filler');
 				}
 			});
 		}
@@ -1098,7 +1107,7 @@ export class FillerBot implements Bot {
 		return [txSig, nodesSent.length];
 	}
 
-	private async tryFill(record?: WrappedEvent<any>) {
+	private async tryFill() {
 		const startTime = Date.now();
 		let ran = false;
 		try {
@@ -1118,10 +1127,6 @@ export class FillerBot implements Bot {
 					await this.dlob.init();
 				});
 
-				if (record) {
-					await this.userMap.updateWithEventRecord(record);
-					await this.userStatsMap.updateWithEventRecord(record, this.userMap);
-				}
 				await this.resyncUserMapsIfRequired();
 
 				// 1) get all fillable nodes

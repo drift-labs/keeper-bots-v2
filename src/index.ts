@@ -484,6 +484,7 @@ const runBot = async () => {
 			new TriggerBot(
 				'trigger',
 				!!opts.dry,
+				bulkAccountLoader,
 				driftClient,
 				slotSubscriber,
 				metrics

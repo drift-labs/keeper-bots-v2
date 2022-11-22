@@ -20,7 +20,6 @@ import {
 	getVariant,
 	SpotMarkets,
 	BulkAccountLoader,
-	WrappedEvent,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -53,7 +52,7 @@ const THROTTLED_NODE_SIZE_TO_PRUNE = 10;
  * Time to wait before trying a node again
  */
 const FILL_ORDER_BACKOFF = 10000;
-const USER_MAP_RESYNC_COOLDOWN_SLOTS = 10;
+const USER_MAP_RESYNC_COOLDOWN_SLOTS = 300;
 
 const dlobMutexError = new Error('dlobMutex timeout');
 
@@ -354,8 +353,11 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public async trigger(record: any) {
+		await this.userMap.updateWithEventRecord(record);
+		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+
 		if (record.eventType === 'OrderRecord') {
-			await this.trySpotFill(record);
+			await this.trySpotFill();
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
 
@@ -393,11 +395,13 @@ export class SpotFillerBot implements Bot {
 					const nextResyncSlot =
 						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
 					if (nextResyncSlot >= this.bulkAccountLoader.mostRecentSlot) {
-						logger.info(
-							`Resyncing UserMaps in cooldown, ${
-								nextResyncSlot - this.bulkAccountLoader.mostRecentSlot
-							} more slots to go`
-						);
+						const slotsRemaining =
+							nextResyncSlot - this.bulkAccountLoader.mostRecentSlot;
+						if (slotsRemaining % 10 === 0) {
+							logger.info(
+								`Resyncing UserMaps in cooldown, ${slotsRemaining} more slots to go`
+							);
+						}
 						return;
 					} else {
 						logger.info(`Resyncing UserMaps`);
@@ -407,23 +411,28 @@ export class SpotFillerBot implements Bot {
 				}
 
 				if (doResync) {
-					const initPromises: Array<Promise<any>> = [];
-					delete this.userMap;
-					this.userMap = new UserMap(
+					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
 					);
-					initPromises.push(this.userMap.fetchAllUsers());
-
-					delete this.userStatsMap;
-					this.userStatsMap = new UserStatsMap(
+					const newUserStatsMap = new UserStatsMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
 					);
-					initPromises.push(this.userStatsMap.fetchAllUserStats());
-
-					await Promise.all(initPromises);
-					logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
+					newUserMap.fetchAllUsers().then(() => {
+						newUserStatsMap
+							.fetchAllUserStats()
+							.then(() => {
+								delete this.userMap;
+								delete this.userStatsMap;
+								this.userMap = newUserMap;
+								this.userStatsMap = newUserStatsMap;
+							})
+							.finally(() => {
+								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
+							});
+					});
+					logger.warn('continuing spotfiller');
 				}
 			});
 		}
@@ -583,7 +592,7 @@ export class SpotFillerBot implements Bot {
 			});
 	}
 
-	private async trySpotFill(record?: WrappedEvent<any>) {
+	private async trySpotFill() {
 		const startTime = Date.now();
 		let ran = false;
 
@@ -604,10 +613,6 @@ export class SpotFillerBot implements Bot {
 					await this.dlob.init();
 				});
 
-				if (record) {
-					await this.userMap.updateWithEventRecord(record);
-					await this.userStatsMap.updateWithEventRecord(record, this.userMap);
-				}
 				await this.resyncUserMapsIfRequired();
 
 				if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
