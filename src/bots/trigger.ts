@@ -153,7 +153,6 @@ export class TriggerBot implements Bot {
 						.finally(() => {
 							logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
 						});
-					logger.warn('continuing liquidator');
 				}
 			});
 		}

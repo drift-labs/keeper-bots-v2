@@ -52,19 +52,19 @@ import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 300;
 
 function calculateSpotTokenAmountToLiquidate(
-	clearingHouse: DriftClient,
+	driftClient: DriftClient,
 	liquidatorUser: User,
 	liquidateePosition: SpotPosition,
 	MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL: BN,
 	MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM: BN
 ): BN {
-	const spotMarket = clearingHouse.getSpotMarketAccount(
+	const spotMarket = driftClient.getSpotMarketAccount(
 		liquidateePosition.marketIndex
 	);
 
 	const tokenPrecision = new BN(10 ** spotMarket.decimals);
 
-	const oraclePrice = clearingHouse.getOracleDataForSpotMarket(
+	const oraclePrice = driftClient.getOracleDataForSpotMarket(
 		liquidateePosition.marketIndex
 	).price;
 	const collateralToSpend = liquidatorUser
@@ -92,7 +92,7 @@ function calculateSpotTokenAmountToLiquidate(
 }
 
 function findBestSpotPosition(
-	clearingHouse: DriftClient,
+	driftClient: DriftClient,
 	liquidatorUser: User,
 	spotPositions: SpotPosition[],
 	isBorrow: boolean,
@@ -116,9 +116,9 @@ function findBestSpotPosition(
 			continue;
 		}
 
-		const spotMarket = clearingHouse.getSpotMarketAccount(position.marketIndex);
+		const spotMarket = driftClient.getSpotMarketAccount(position.marketIndex);
 		const tokenAmount = calculateSpotTokenAmountToLiquidate(
-			clearingHouse,
+			driftClient,
 			liquidatorUser,
 			position,
 			positionTakerOverPctNumerator,
@@ -406,7 +406,6 @@ export class LiquidatorBot implements Bot {
 						.finally(() => {
 							logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
 						});
-					logger.warn('continuing liquidator');
 				}
 			});
 		}

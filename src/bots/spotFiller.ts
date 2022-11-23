@@ -432,7 +432,6 @@ export class SpotFillerBot implements Bot {
 								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
 							});
 					});
-					logger.warn('continuing spotfiller');
 				}
 			});
 		}

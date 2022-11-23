@@ -363,6 +363,7 @@ export class FillerBot implements Bot {
 	public async trigger(record: WrappedEvent<any>) {
 		await this.userMap.updateWithEventRecord(record);
 		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		logger.info(`filler seen record: ${record.eventType}`);
 
 		if (record.eventType === 'OrderRecord') {
 			await this.tryFill();
@@ -443,7 +444,6 @@ export class FillerBot implements Bot {
 								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
 							});
 					});
-					logger.warn('continuing filler');
 				}
 			});
 		}
