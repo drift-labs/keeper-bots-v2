@@ -25,6 +25,7 @@ import {
 	PerpMarkets,
 	OrderActionRecord,
 	BulkAccountLoader,
+	SlotSubscriber,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -87,6 +88,7 @@ export class FillerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 2000;
 
+	private slotSubscriber: SlotSubscriber;
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
 
@@ -138,6 +140,7 @@ export class FillerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
+		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
@@ -145,6 +148,7 @@ export class FillerBot implements Bot {
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
+		this.slotSubscriber = slotSubscriber;
 		this.bulkAccountLoader = bulkAccountLoader;
 		this.driftClient = driftClient;
 		this.runtimeSpec = runtimeSpec;
@@ -466,7 +470,7 @@ export class FillerBot implements Bot {
 				marketIndex,
 				vBid,
 				vAsk,
-				oraclePriceData.slot.toNumber(),
+				this.slotSubscriber.currentSlot,
 				Date.now() / 1000,
 				MarketType.PERP,
 				oraclePriceData
@@ -553,7 +557,7 @@ export class FillerBot implements Bot {
 				nodeToFill.node.order,
 				nodeToFill.node.market as PerpMarketAccount,
 				oraclePriceData,
-				oraclePriceData.slot.toNumber(),
+				this.slotSubscriber.currentSlot,
 				Date.now() / 1000
 			)
 		) {
@@ -569,7 +573,7 @@ export class FillerBot implements Bot {
 					nodeToFill.node.order,
 					nodeToFill.node.market as PerpMarketAccount,
 					oraclePriceData,
-					oraclePriceData.slot.toNumber(),
+					this.slotSubscriber.currentSlot,
 					Date.now() / 1000
 				)}`
 			);
@@ -578,7 +582,7 @@ export class FillerBot implements Bot {
 					nodeToFill.node.order,
 					nodeToFill.node.market as PerpMarketAccount,
 					oraclePriceData,
-					oraclePriceData.slot.toNumber()
+					this.slotSubscriber.currentSlot
 				).toString()}`
 			);
 			return false;
@@ -590,7 +594,7 @@ export class FillerBot implements Bot {
 				(nodeToFill.node.market as PerpMarketAccount).amm,
 				oraclePriceData,
 				this.driftClient.getStateAccount().oracleGuardRails,
-				oraclePriceData.slot.toNumber() // should use slot subscriber here?
+				this.slotSubscriber.currentSlot
 			);
 			if (!oracleIsValid) {
 				logger.error(`Oracle is not valid for market ${marketIndex}`);

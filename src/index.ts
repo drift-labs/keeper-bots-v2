@@ -448,6 +448,7 @@ const runBot = async () => {
 			new FillerBot(
 				'filler',
 				!!opts.dry,
+				slotSubscriber,
 				bulkAccountLoader,
 				driftClient,
 				{
