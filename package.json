@@ -17,6 +17,7 @@
 		"async": "^3.2.2",
 		"async-mutex": "0.3.2",
 		"aws-sdk": "^2.1062.0",
+		"axios": "^1.1.3",
 		"commander": "^9.4.0",
 		"dotenv": "^10.0.0",
 		"typescript": "4.5.4",

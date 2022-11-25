@@ -57,6 +57,7 @@ import {
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
+import { webhookMessage } from '../webhook';
 
 const MAX_TX_PACK_SIZE = 900; //1232;
 const CU_PER_FILL = 200_000; // CU cost for a successful fill
@@ -1076,6 +1077,10 @@ export class FillerBot implements Bot {
 						logger.info(
 							`parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}`
 						);
+						if(successfulFills > 0){
+							webhookMessage(`FILLER: :white_check_mark: orders filled for users, parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}` );
+						}
+							
 
 						// record successful fills
 						const user = this.driftClient.getUser();
