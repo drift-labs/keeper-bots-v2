@@ -51,7 +51,7 @@ import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 
 require('dotenv').config();
-const driftEnv = process.env.ENV as DriftEnv;
+const driftEnv = (process.env.ENV || 'devnet') as DriftEnv;
 const commitHash = process.env.COMMIT;
 //@ts-ignore
 const sdkConfig = initialize({ env: process.env.ENV });
@@ -286,7 +286,7 @@ const runBot = async () => {
 	try {
 		const tokenAccount = await getOrCreateAssociatedTokenAccount(
 			connection,
-			new PublicKey(constants.devnet.USDCMint),
+			new PublicKey(constants[driftEnv].USDCMint),
 			wallet
 		);
 		const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
