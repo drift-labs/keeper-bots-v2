@@ -17,6 +17,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { getErrorCode } from '../error';
 import { Metrics } from '../metrics';
+import { webhookMessage } from '../webhook';
 
 const dlobMutexError = new Error('dlobMutex timeout');
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 200;
@@ -203,6 +204,8 @@ export class TriggerBot implements Bot {
 							`Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.info(`Tx: ${txSig}`);
+						webhookMessage( `TRIGGER: :gear: Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}` );
+						webhookMessage( `TRIGGER: :gear: Tx: ${txSig}`);
 					})
 					.catch((error) => {
 						const errorCode = getErrorCode(error);
@@ -269,6 +272,8 @@ export class TriggerBot implements Bot {
 							`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.info(`Tx: ${txSig}`);
+						webhookMessage( `TRIGGER: :gear: Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}` );
+						webhookMessage( `TRIGGER: :gear: Tx: ${txSig}`);
 					})
 					.catch((error) => {
 						const errorCode = getErrorCode(error);
