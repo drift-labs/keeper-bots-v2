@@ -373,6 +373,9 @@ export class FillerBot implements Bot {
 			await this.tryFill();
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
+			logger.info(
+				`OrderRecordAction.action: ${getVariant(actionRecord.action)}`
+			);
 
 			if (getVariant(actionRecord.action) === 'fill') {
 				const marketType = getVariant(actionRecord.marketType);
