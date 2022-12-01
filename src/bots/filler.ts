@@ -479,7 +479,7 @@ export class FillerBot implements Bot {
 				MarketType.PERP,
 				oraclePriceData,
 				this.driftClient.getStateAccount(),
-				this.driftClient.getPerpMarketAccount(marketIndex),
+				this.driftClient.getPerpMarketAccount(marketIndex)
 			);
 		});
 
@@ -561,7 +561,9 @@ export class FillerBot implements Bot {
 			isVariant(nodeToFill.node.order.marketType, 'perp') &&
 			!isFillableByVAMM(
 				nodeToFill.node.order,
-				this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex),
+				this.driftClient.getPerpMarketAccount(
+					nodeToFill.node.order.marketIndex
+				),
 				oraclePriceData,
 				this.slotSubscriber.currentSlot,
 				Date.now() / 1000
@@ -577,7 +579,9 @@ export class FillerBot implements Bot {
 			logger.warn(
 				` . is not fillable by vamm: ${!isFillableByVAMM(
 					nodeToFill.node.order,
-					this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex),
+					this.driftClient.getPerpMarketAccount(
+						nodeToFill.node.order.marketIndex
+					),
 					oraclePriceData,
 					this.slotSubscriber.currentSlot,
 					Date.now() / 1000
@@ -586,7 +590,9 @@ export class FillerBot implements Bot {
 			logger.warn(
 				` .     calculateBaseAssetAmountForAmmToFulfill: ${calculateBaseAssetAmountForAmmToFulfill(
 					nodeToFill.node.order,
-					this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex),
+					this.driftClient.getPerpMarketAccount(
+						nodeToFill.node.order.marketIndex
+					),
 					oraclePriceData,
 					this.slotSubscriber.currentSlot
 				).toString()}`
@@ -597,7 +603,8 @@ export class FillerBot implements Bot {
 		// if making with vAMM, ensure valid oracle
 		if (!nodeToFill.makerNode) {
 			const oracleIsValid = isOracleValid(
-				this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex).amm,
+				this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex)
+					.amm,
 				oraclePriceData,
 				this.driftClient.getStateAccount().oracleGuardRails,
 				this.slotSubscriber.currentSlot

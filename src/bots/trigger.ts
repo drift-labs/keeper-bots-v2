@@ -173,7 +173,7 @@ export class TriggerBot implements Bot {
 					this.slotSubscriber.getSlot(),
 					oraclePriceData.price,
 					MarketType.PERP,
-					this.driftClient.getStateAccount(),
+					this.driftClient.getStateAccount()
 				);
 			});
 
@@ -246,7 +246,7 @@ export class TriggerBot implements Bot {
 					this.slotSubscriber.getSlot(),
 					oraclePriceData.price,
 					MarketType.SPOT,
-					this.driftClient.getStateAccount(),
+					this.driftClient.getStateAccount()
 				);
 			});
 
