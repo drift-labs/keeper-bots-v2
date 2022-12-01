@@ -172,7 +172,8 @@ export class TriggerBot implements Bot {
 					marketIndex,
 					this.slotSubscriber.getSlot(),
 					oraclePriceData.price,
-					MarketType.PERP
+					MarketType.PERP,
+					this.driftClient.getStateAccount(),
 				);
 			});
 
@@ -242,7 +243,8 @@ export class TriggerBot implements Bot {
 					marketIndex,
 					this.slotSubscriber.getSlot(),
 					oraclePriceData.price,
-					MarketType.SPOT
+					MarketType.SPOT,
+					this.driftClient.getStateAccount(),
 				);
 			});
 
@@ -307,14 +309,8 @@ export class TriggerBot implements Bot {
 						this.dlob.clear();
 						delete this.dlob;
 					}
-					this.dlob = new DLOB(
-						this.driftClient.getPerpMarketAccounts(),
-						this.driftClient.getSpotMarketAccounts(),
-						this.driftClient.getStateAccount(),
-						this.userMap,
-						true
-					);
-					await this.dlob.init();
+					this.dlob = new DLOB();
+					await this.dlob.initFromUserMap(this.userMap);
 				});
 
 				await this.resyncUserMapsIfRequired();

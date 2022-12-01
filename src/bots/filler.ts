@@ -477,7 +477,9 @@ export class FillerBot implements Bot {
 				this.slotSubscriber.currentSlot,
 				Date.now() / 1000,
 				MarketType.PERP,
-				oraclePriceData
+				oraclePriceData,
+				this.driftClient.getStateAccount(),
+				this.driftClient.getPerpMarketAccount(marketIndex),
 			);
 		});
 
@@ -542,7 +544,7 @@ export class FillerBot implements Bot {
 			}
 		}
 
-		const marketIndex = nodeToFill.node.market.marketIndex;
+		const marketIndex = nodeToFill.node.order.marketIndex;
 		const oraclePriceData =
 			this.driftClient.getOracleDataForPerpMarket(marketIndex);
 
@@ -559,7 +561,7 @@ export class FillerBot implements Bot {
 			isVariant(nodeToFill.node.order.marketType, 'perp') &&
 			!isFillableByVAMM(
 				nodeToFill.node.order,
-				nodeToFill.node.market as PerpMarketAccount,
+				this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex),
 				oraclePriceData,
 				this.slotSubscriber.currentSlot,
 				Date.now() / 1000
@@ -575,7 +577,7 @@ export class FillerBot implements Bot {
 			logger.warn(
 				` . is not fillable by vamm: ${!isFillableByVAMM(
 					nodeToFill.node.order,
-					nodeToFill.node.market as PerpMarketAccount,
+					this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex),
 					oraclePriceData,
 					this.slotSubscriber.currentSlot,
 					Date.now() / 1000
@@ -584,7 +586,7 @@ export class FillerBot implements Bot {
 			logger.warn(
 				` .     calculateBaseAssetAmountForAmmToFulfill: ${calculateBaseAssetAmountForAmmToFulfill(
 					nodeToFill.node.order,
-					nodeToFill.node.market as PerpMarketAccount,
+					this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex),
 					oraclePriceData,
 					this.slotSubscriber.currentSlot
 				).toString()}`
@@ -595,7 +597,7 @@ export class FillerBot implements Bot {
 		// if making with vAMM, ensure valid oracle
 		if (!nodeToFill.makerNode) {
 			const oracleIsValid = isOracleValid(
-				(nodeToFill.node.market as PerpMarketAccount).amm,
+				this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex).amm,
 				oraclePriceData,
 				this.driftClient.getStateAccount().oracleGuardRails,
 				this.slotSubscriber.currentSlot
@@ -1129,14 +1131,8 @@ export class FillerBot implements Bot {
 						this.dlob.clear();
 						delete this.dlob;
 					}
-					this.dlob = new DLOB(
-						this.driftClient.getPerpMarketAccounts(),
-						this.driftClient.getSpotMarketAccounts(),
-						this.driftClient.getStateAccount(),
-						this.userMap,
-						true
-					);
-					await this.dlob.init();
+					this.dlob = new DLOB();
+					await this.dlob.initFromUserMap(this.userMap);
 				});
 
 				await this.resyncUserMapsIfRequired();

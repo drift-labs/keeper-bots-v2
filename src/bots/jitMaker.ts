@@ -143,14 +143,8 @@ export class JitMakerBot implements Bot {
 		);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
-		this.dlob = new DLOB(
-			this.clearingHouse.getPerpMarketAccounts(),
-			this.clearingHouse.getSpotMarketAccounts(),
-			this.clearingHouse.getStateAccount(),
-			this.userMap,
-			true
-		);
-		initPromises.push(this.dlob.init());
+		this.dlob = new DLOB();
+		initPromises.push(this.dlob.initFromUserMap(this.userMap));
 
 		this.agentState = {
 			stateType: new Map<number, StateType>(),
@@ -455,7 +449,7 @@ export class JitMakerBot implements Bot {
 			);
 
 			// calculate jit maker order params
-			const orderMarketIdx = nodeToFill.node.market.marketIndex;
+			const orderMarketIdx = nodeToFill.node.order.marketIndex;
 			const orderDirection = nodeToFill.node.order.direction;
 			const jitMakerDirection = isVariant(orderDirection, 'long')
 				? PositionDirection.SHORT
@@ -615,14 +609,8 @@ export class JitMakerBot implements Bot {
 						this.dlob.clear();
 						delete this.dlob;
 					}
-					this.dlob = new DLOB(
-						this.clearingHouse.getPerpMarketAccounts(),
-						this.clearingHouse.getSpotMarketAccounts(),
-						this.clearingHouse.getStateAccount(),
-						this.userMap,
-						true
-					);
-					await this.dlob.init();
+					this.dlob = new DLOB();
+					await this.dlob.initFromUserMap(this.userMap);
 				});
 
 				await Promise.all(

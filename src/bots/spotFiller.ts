@@ -460,7 +460,9 @@ export class SpotFillerBot implements Bot {
 				oraclePriceData.slot.toNumber(),
 				Date.now() / 1000,
 				MarketType.SPOT,
-				oraclePriceData
+				oraclePriceData,
+				this.driftClient.getStateAccount(),
+				this.driftClient.getSpotMarketAccount(market.marketIndex)
 			);
 		});
 
@@ -602,14 +604,8 @@ export class SpotFillerBot implements Bot {
 						this.dlob.clear();
 						delete this.dlob;
 					}
-					this.dlob = new DLOB(
-						this.driftClient.getPerpMarketAccounts(), // TODO: new sdk - remove this
-						this.driftClient.getSpotMarketAccounts(),
-						this.driftClient.getStateAccount(),
-						this.userMap,
-						true
-					);
-					await this.dlob.init();
+					this.dlob = new DLOB();
+					await this.dlob.initFromUserMap(this.userMap);
 				});
 
 				await this.resyncUserMapsIfRequired();
