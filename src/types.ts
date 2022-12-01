@@ -1,7 +1,7 @@
 import { DLOB, WrappedEvent } from '@drift-labs/sdk';
 
 export const constants = {
-	'devnet': {
+	devnet: {
 		USDCMint: '8zGuJQqwhZafTah7Uc7Z4tXRnguqkn5KLFAP8oV6PHe2',
 	},
 	'mainnet-beta': {

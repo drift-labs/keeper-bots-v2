@@ -756,7 +756,9 @@ export class LiquidatorBot implements Bot {
 			logger.info(
 				`Resolving perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx}`
 			);
-			webhookMessage(`Resolving perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx}`);
+			webhookMessage(
+				`Resolving perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx}`
+			);
 			const start = Date.now();
 			this.driftClient
 				.resolvePerpBankruptcy(userKey, userAcc, perpIdx)
@@ -785,7 +787,9 @@ export class LiquidatorBot implements Bot {
 			logger.info(
 				`Resolving spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx}`
 			);
-			webhookMessage(`Resolving spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx}`);
+			webhookMessage(
+				`Resolving spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx}`
+			);
 			const start = Date.now();
 			this.driftClient
 				.resolveSpotBankruptcy(userKey, userAcc, spotIdx)
@@ -948,7 +952,9 @@ export class LiquidatorBot implements Bot {
 									logger.error(
 										`Error liquidating auth: ${auth}, user: ${userKey}`
 									);
-									webhookMessage(`LIQ: :x: Error liquidating auth: ${auth}, user: ${userKey}`);
+									webhookMessage(
+										`LIQ: :x: Error liquidating auth: ${auth}, user: ${userKey}`
+									);
 									console.error(e);
 								})
 								.finally(() => {

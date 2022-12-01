@@ -1082,10 +1082,11 @@ export class FillerBot implements Bot {
 						logger.info(
 							`parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}`
 						);
-						if(successfulFills > 0){
-							webhookMessage(`FILLER: :white_check_mark: orders filled for users, parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}` );
+						if (successfulFills > 0) {
+							webhookMessage(
+								`FILLER: :white_check_mark: orders filled for users, parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}`
+							);
 						}
-							
 
 						// record successful fills
 						const user = this.driftClient.getUser();

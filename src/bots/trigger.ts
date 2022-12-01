@@ -204,8 +204,10 @@ export class TriggerBot implements Bot {
 							`Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.info(`Tx: ${txSig}`);
-						webhookMessage( `TRIGGER: :gear: Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}` );
-						webhookMessage( `TRIGGER: :gear: Tx: ${txSig}`);
+						webhookMessage(
+							`TRIGGER: :gear: Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
+						);
+						webhookMessage(`TRIGGER: :gear: Tx: ${txSig}`);
 					})
 					.catch((error) => {
 						const errorCode = getErrorCode(error);
@@ -273,8 +275,10 @@ export class TriggerBot implements Bot {
 							`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.info(`Tx: ${txSig}`);
-						webhookMessage( `TRIGGER: :gear: Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}` );
-						webhookMessage( `TRIGGER: :gear: Tx: ${txSig}`);
+						webhookMessage(
+							`TRIGGER: :gear: Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
+						);
+						webhookMessage(`TRIGGER: :gear: Tx: ${txSig}`);
 					})
 					.catch((error) => {
 						const errorCode = getErrorCode(error);
