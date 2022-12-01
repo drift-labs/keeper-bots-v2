@@ -26,6 +26,7 @@ import {
 	OrderActionRecord,
 	BulkAccountLoader,
 	SlotSubscriber,
+	OrderRecord,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -371,7 +372,7 @@ export class FillerBot implements Bot {
 		logger.info(`filler seen record: ${record.eventType}`);
 
 		if (record.eventType === 'OrderRecord') {
-			await this.tryFill();
+			await this.tryFill(record as OrderRecord);
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
 			logger.info(
@@ -1129,7 +1130,7 @@ export class FillerBot implements Bot {
 		return [txSig, nodesSent.length];
 	}
 
-	private async tryFill() {
+	private async tryFill(orderRecord?: OrderRecord) {
 		const startTime = Date.now();
 		let ran = false;
 		try {
@@ -1141,6 +1142,9 @@ export class FillerBot implements Bot {
 					}
 					this.dlob = new DLOB();
 					await this.dlob.initFromUserMap(this.userMap);
+					if (orderRecord) {
+						this.dlob.insertOrder(orderRecord.order, orderRecord.user);
+					}
 				});
 
 				await this.resyncUserMapsIfRequired();
