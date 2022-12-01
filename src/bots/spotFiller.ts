@@ -20,6 +20,7 @@ import {
 	getVariant,
 	SpotMarkets,
 	BulkAccountLoader,
+	OrderRecord,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -336,7 +337,6 @@ export class SpotFillerBot implements Bot {
 	public async reset() {}
 
 	public async startIntervalLoop(intervalMs: number) {
-		// await this.tryFill();
 		const intervalId = setInterval(this.trySpotFill.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
 
@@ -357,7 +357,7 @@ export class SpotFillerBot implements Bot {
 		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
 
 		if (record.eventType === 'OrderRecord') {
-			await this.trySpotFill();
+			await this.trySpotFill(record as OrderRecord);
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
 
@@ -593,7 +593,7 @@ export class SpotFillerBot implements Bot {
 			});
 	}
 
-	private async trySpotFill() {
+	private async trySpotFill(orderRecord?: OrderRecord) {
 		const startTime = Date.now();
 		let ran = false;
 
@@ -606,6 +606,9 @@ export class SpotFillerBot implements Bot {
 					}
 					this.dlob = new DLOB();
 					await this.dlob.initFromUserMap(this.userMap);
+					if (orderRecord) {
+						this.dlob.insertOrder(orderRecord.order, orderRecord.user);
+					}
 				});
 
 				await this.resyncUserMapsIfRequired();
