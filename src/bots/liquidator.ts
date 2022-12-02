@@ -383,6 +383,7 @@ export class LiquidatorBot implements Bot {
 		}
 
 		await this.userMap.fetchAllUsers();
+		await webhookMessage(`[${this.name}]: started`);
 	}
 
 	public async reset() {
