@@ -21,6 +21,7 @@ import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { Metrics } from '../metrics';
+import { webhookMessage } from '../webhook';
 
 type SettlePnlIxParams = {
 	users: {
@@ -245,6 +246,9 @@ export class PnlSettlerBot implements Bot {
 							logger.error(
 								`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
 							);
+							webhookMessage(
+								`[${this.name}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
+							);
 						});
 				}
 			});
@@ -284,11 +288,15 @@ export class PnlSettlerBot implements Bot {
 							logger.error(
 								`Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
 							);
+							webhookMessage(
+								`[${this.name}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
+							);
 						});
 				}
 			}
 		} catch (e) {
 			console.error(e);
+			webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}`);
 		} finally {
 			logger.info('Settle PNLs finished');
 			await this.watchdogTimerMutex.runExclusive(async () => {

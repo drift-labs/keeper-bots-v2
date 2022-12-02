@@ -48,7 +48,6 @@ import {
 	TOKEN_FAUCET_PROGRAM_ID,
 } from './utils';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
-import { webhookMessage } from './webhook';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 
 require('dotenv').config();
@@ -551,7 +550,6 @@ const runBot = async () => {
 	await Promise.all(bots.map((bot) => bot.init()));
 
 	logger.info(`starting bots`);
-	webhookMessage(`starting bots`);
 	await Promise.all(
 		bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
 	);

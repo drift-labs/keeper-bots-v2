@@ -205,9 +205,10 @@ export class TriggerBot implements Bot {
 						);
 						logger.info(`Tx: ${txSig}`);
 						webhookMessage(
-							`TRIGGER: :gear: Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
+							`[${
+								this.name
+							}]: :gear: Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}, tx: ${txSig}`
 						);
-						webhookMessage(`TRIGGER: :gear: Tx: ${txSig}`);
 					})
 					.catch((error) => {
 						const errorCode = getErrorCode(error);
@@ -222,6 +223,11 @@ export class TriggerBot implements Bot {
 							`Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.error(error);
+						webhookMessage(
+							`[${
+								this.name
+							}]: :x: Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
+						);
 					});
 			}
 		} catch (e) {
@@ -229,6 +235,7 @@ export class TriggerBot implements Bot {
 				`Unexpected error for market ${marketIndex.toString()} during triggers`
 			);
 			console.error(e);
+			webhookMessage(`[${this.name}]: :x: Uncaught error:\n${e}`);
 		}
 	}
 
@@ -276,9 +283,10 @@ export class TriggerBot implements Bot {
 						);
 						logger.info(`Tx: ${txSig}`);
 						webhookMessage(
-							`TRIGGER: :gear: Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
+							`[${
+								this.name
+							}]: :gear: Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}, tx: ${txSig}`
 						);
-						webhookMessage(`TRIGGER: :gear: Tx: ${txSig}`);
 					})
 					.catch((error) => {
 						const errorCode = getErrorCode(error);
@@ -293,6 +301,11 @@ export class TriggerBot implements Bot {
 							`Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.error(error);
+						webhookMessage(
+							`[${
+								this.name
+							}]: :x: Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
+						);
 					});
 			}
 		} catch (e) {
@@ -335,6 +348,9 @@ export class TriggerBot implements Bot {
 			} else if (e === dlobMutexError) {
 				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
+				webhookMessage(
+					`[${this.name}]: :x: Uncaught error in main loop:\n${e}`
+				);
 				throw e;
 			}
 		} finally {

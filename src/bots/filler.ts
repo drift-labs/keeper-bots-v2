@@ -346,6 +346,7 @@ export class FillerBot implements Bot {
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		await Promise.all(initPromises);
+		await webhookMessage(`[${this.name}]: started`);
 	}
 
 	public async reset() {}
@@ -1090,11 +1091,6 @@ export class FillerBot implements Bot {
 						logger.info(
 							`parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}`
 						);
-						if (successfulFills > 0) {
-							webhookMessage(
-								`FILLER: :white_check_mark: orders filled for users, parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}`
-							);
-						}
 
 						// record successful fills
 						const user = this.driftClient.getUser();
@@ -1109,6 +1105,9 @@ export class FillerBot implements Bot {
 					.catch((e) => {
 						console.error(e);
 						logger.error(`Failed to process fill tx logs (error above):`);
+						webhookMessage(
+							`[${this.name}]: :x: error processing fill tx logs:\n${e}`
+						);
 					});
 			})
 			.catch((e) => {
@@ -1121,6 +1120,7 @@ export class FillerBot implements Bot {
 					logger.error(
 						`Failed to send tx, sim error tx logs took: ${Date.now() - start}ms`
 					);
+					webhookMessage(`[${this.name}]: :x: error simulating tx:\n${e}`);
 				}
 			})
 			.finally(() => {
@@ -1208,6 +1208,7 @@ export class FillerBot implements Bot {
 			} else if (e === dlobMutexError) {
 				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
+				webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}`);
 				throw e;
 			}
 		} finally {

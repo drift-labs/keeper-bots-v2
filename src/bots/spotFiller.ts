@@ -43,6 +43,7 @@ import {
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
+import { webhookMessage } from '../webhook';
 
 /**
  * Size of throttled nodes to get to before pruning the map
@@ -332,6 +333,7 @@ export class SpotFillerBot implements Bot {
 		}
 
 		await Promise.all(initPromises);
+		await webhookMessage(`[${this.name}]: started`);
 	}
 
 	public async reset() {}
@@ -587,6 +589,9 @@ export class SpotFillerBot implements Bot {
 			.catch((e) => {
 				console.error(e);
 				logger.error(`Failed to fill spot order`);
+				webhookMessage(
+					`[${this.name}]: :x: error trying to fill spot orders:\n${e}`
+				);
 			})
 			.finally(() => {
 				this.unthrottleNode(nodeSignature);
@@ -661,6 +666,9 @@ export class SpotFillerBot implements Bot {
 				} else {
 					console.log('some other error...');
 					console.error(e);
+					webhookMessage(
+						`[${this.name}]: :x: error trying to run main loop:\n${e}`
+					);
 				}
 			})
 			.finally(async () => {
