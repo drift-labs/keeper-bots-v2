@@ -42,7 +42,8 @@ import { LiquidatorBot } from './bots/liquidator';
 import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { Metrics } from './metrics';
-import { PnlSettlerBot } from './bots/pnlSettler';
+import { IFRevenueSettlerBot } from './bots/ifRevenueSettler';
+import { UserPnlSettlerBot } from './bots/userPnlSettler';
 import {
 	getOrCreateAssociatedTokenAccount,
 	TOKEN_FAUCET_PROGRAM_ID,
@@ -74,7 +75,8 @@ program
 	.option('--jit-maker', 'Enable JIT auction maker bot')
 	.option('--floating-maker', 'Enable floating maker bot')
 	.option('--liquidator', 'Enable liquidator bot')
-	.option('--pnl-settler', 'Enable PnL settler bot')
+	.option('--if-revenue-settler', 'Enable Insurance Fund PnL settler bot')
+	.option('--user-pnl-settler', 'Enable User PnL settler bot')
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option('--close-open-positions', 'close all open positions')
 	.option('--test-liveness', 'Purposefully fail liveness test after 1 minute')
@@ -104,7 +106,8 @@ FillerBot enabled: ${!!opts.filler},\n\
 SpotFillerBot enabled: ${!!opts.spotFiller},\n\
 TriggerBot enabled: ${!!opts.trigger},\n\
 JitMakerBot enabled: ${!!opts.jitMaker},\n\
-PnlSettler enabled: ${!!opts.pnlSettler},\n\
+IFRevenueSettler enabled: ${!!opts.ifRevenueSettler},\n\
+userPnlSettler enabled: ${!!opts.userPnlSettler},\n\
 `);
 
 export function getWallet(): Wallet {
@@ -537,15 +540,26 @@ const runBot = async () => {
 		);
 	}
 
-	if (opts.pnlSettler) {
+	if (opts.userPnlSettler) {
 		bots.push(
-			new PnlSettlerBot(
-				'pnlSettler',
+			new UserPnlSettlerBot(
+				'userPnlSettler',
 				!!opts.dry,
 				driftClient,
 				PerpMarkets[driftEnv],
 				SpotMarkets[driftEnv],
 				metrics
+			)
+		);
+	}
+
+	if (opts.ifRevenueSettler) {
+		bots.push(
+			new IFRevenueSettlerBot(
+				'ifRevenueSettler',
+				!!opts.dry,
+				driftClient,
+				SpotMarkets[driftEnv]
 			)
 		);
 	}

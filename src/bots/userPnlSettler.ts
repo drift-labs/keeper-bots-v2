@@ -34,7 +34,7 @@ type SettlePnlIxParams = {
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 const SETTLE_USER_CHUNKS = 2;
 
-export class PnlSettlerBot implements Bot {
+export class UserPnlSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 600000;
@@ -248,49 +248,6 @@ export class PnlSettlerBot implements Bot {
 						);
 						webhookMessage(
 							`[${this.name}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
-						);
-					}
-				}
-			}
-
-			for (let i = 0; i < this.spotMarkets.length; i++) {
-				const spotIf = spotMarketAndOracleData[i].marketAccount.insuranceFund;
-				if (spotIf.revenueSettlePeriod.eq(ZERO)) {
-					continue;
-				}
-				const currentTs = Date.now() / 1000;
-				if (
-					spotIf.lastRevenueSettleTs
-						.add(spotIf.revenueSettlePeriod)
-						.lte(new BN(currentTs))
-				) {
-					logger.info(
-						spotIf.lastRevenueSettleTs.toString() +
-							' and ' +
-							spotIf.revenueSettlePeriod.toString()
-					);
-					logger.info(
-						spotIf.lastRevenueSettleTs
-							.add(spotIf.revenueSettlePeriod)
-							.toString() +
-							' < ' +
-							currentTs.toString()
-					);
-
-					try {
-						const txSig = await this.driftClient.settleRevenueToInsuranceFund(
-							i
-						);
-						logger.info(
-							`IF revenue settled successfully on marketIndex=${i}. TxSig: ${txSig}`
-						);
-					} catch (err) {
-						const errorCode = getErrorCode(err);
-						logger.error(
-							`Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
-						);
-						webhookMessage(
-							`[${this.name}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
 						);
 					}
 				}
