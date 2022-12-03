@@ -90,6 +90,10 @@ program
 		).env('KEEPER_PRIVATE_KEY')
 	)
 	.option('--debug', 'Enable debug logging')
+	.option(
+		'--run-once',
+		'Exit after running bot loops once (only for supported bots)'
+	)
 	.parse();
 
 const opts = program.opts();
@@ -621,11 +625,15 @@ const runBot = async () => {
 		})
 		.listen(healthCheckPort);
 	logger.info(`Health check server listening on port ${healthCheckPort}`);
+
+	if (opts.runOnce) {
+		process.exit(0);
+	}
 };
 
 async function recursiveTryCatch(f: () => void) {
 	try {
-		await f();
+		f();
 	} catch (e) {
 		console.error(e);
 		for (const bot of bots) {

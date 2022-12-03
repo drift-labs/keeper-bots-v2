@@ -39,7 +39,7 @@ export class PnlSettlerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 600000;
 
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private perpMarkets: PerpMarketConfig[];
@@ -59,7 +59,7 @@ export class PnlSettlerBot implements Bot {
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
-		this.clearingHouse = clearingHouse;
+		this.driftClient = clearingHouse;
 		this.perpMarkets = perpMarkets;
 		this.spotMarkets = spotMarkets;
 		this.metrics = metrics;
@@ -69,8 +69,8 @@ export class PnlSettlerBot implements Bot {
 		logger.info(`${this.name} initing`);
 		// initialize userMap instance
 		this.userMap = new UserMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		await this.userMap.fetchAllUsers();
 	}
@@ -83,11 +83,10 @@ export class PnlSettlerBot implements Bot {
 		delete this.userMap;
 	}
 
-	public async startIntervalLoop(intervalMs: number): Promise<void> {
+	public async startIntervalLoop(_intervalMs: number): Promise<void> {
 		logger.info(`${this.name} Bot started!`);
-		this.trySettlePnl();
-		const intervalId = setInterval(this.trySettlePnl.bind(this), intervalMs);
-		this.intervalIds.push(intervalId);
+		await this.trySettlePnl();
+		// we don't want to run this repeatedly
 	}
 
 	public async healthCheck(): Promise<boolean> {
@@ -128,20 +127,20 @@ export class PnlSettlerBot implements Bot {
 
 			this.perpMarkets.forEach((market) => {
 				perpMarketAndOracleData[market.marketIndex] = {
-					marketAccount: this.clearingHouse.getPerpMarketAccount(
+					marketAccount: this.driftClient.getPerpMarketAccount(
 						market.marketIndex
 					),
-					oraclePriceData: this.clearingHouse.getOracleDataForPerpMarket(
+					oraclePriceData: this.driftClient.getOracleDataForPerpMarket(
 						market.marketIndex
 					),
 				};
 			});
 			this.spotMarkets.forEach((market) => {
 				spotMarketAndOracleData[market.marketIndex] = {
-					marketAccount: this.clearingHouse.getSpotMarketAccount(
+					marketAccount: this.driftClient.getSpotMarketAccount(
 						market.marketIndex
 					),
-					oraclePriceData: this.clearingHouse.getOracleDataForSpotMarket(
+					oraclePriceData: this.driftClient.getOracleDataForSpotMarket(
 						market.marketIndex
 					),
 				};
@@ -209,7 +208,7 @@ export class PnlSettlerBot implements Bot {
 				}
 			}
 
-			usersToSettle.forEach((params) => {
+			for (const params of usersToSettle) {
 				const marketStr = this.perpMarkets.find(
 					(mkt) => mkt.marketIndex === params.marketIndex
 				).symbol;
@@ -224,34 +223,35 @@ export class PnlSettlerBot implements Bot {
 
 				for (let i = 0; i < params.users.length; i += SETTLE_USER_CHUNKS) {
 					const usersChunk = params.users.slice(i, i + SETTLE_USER_CHUNKS);
-					this.clearingHouse
-						.settlePNLs(usersChunk, params.marketIndex)
-						.then((txSig) => {
-							logger.info(
-								`PNL settled successfully on ${marketStr}. TxSig: ${txSig}`
-							);
-							this.metrics?.recordSettlePnl(
-								usersChunk.length,
-								params.marketIndex,
-								this.name
-							);
-						})
-						.catch((err) => {
-							const errorCode = getErrorCode(err);
-							this.metrics?.recordErrorCode(
-								errorCode,
-								this.clearingHouse.provider.wallet.publicKey,
-								this.name
-							);
-							logger.error(
-								`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
-							);
-							webhookMessage(
-								`[${this.name}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
-							);
-						});
+					try {
+						const txSig = await this.driftClient.settlePNLs(
+							usersChunk,
+							params.marketIndex
+						);
+						logger.info(
+							`PNL settled successfully on ${marketStr}. TxSig: ${txSig}`
+						);
+						this.metrics?.recordSettlePnl(
+							usersChunk.length,
+							params.marketIndex,
+							this.name
+						);
+					} catch (err) {
+						const errorCode = getErrorCode(err);
+						this.metrics?.recordErrorCode(
+							errorCode,
+							this.driftClient.provider.wallet.publicKey,
+							this.name
+						);
+						logger.error(
+							`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
+						);
+						webhookMessage(
+							`[${this.name}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
+						);
+					}
 				}
-			});
+			}
 
 			for (let i = 0; i < this.spotMarkets.length; i++) {
 				const spotIf = spotMarketAndOracleData[i].marketAccount.insuranceFund;
@@ -276,22 +276,23 @@ export class PnlSettlerBot implements Bot {
 							' < ' +
 							currentTs.toString()
 					);
-					this.clearingHouse
-						.settleRevenueToInsuranceFund(i)
-						.then((txSig) => {
-							logger.info(
-								`IF revenue settled successfully on marketIndex=${i}. TxSig: ${txSig}`
-							);
-						})
-						.catch((err) => {
-							const errorCode = getErrorCode(err);
-							logger.error(
-								`Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
-							);
-							webhookMessage(
-								`[${this.name}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
-							);
-						});
+
+					try {
+						const txSig = await this.driftClient.settleRevenueToInsuranceFund(
+							i
+						);
+						logger.info(
+							`IF revenue settled successfully on marketIndex=${i}. TxSig: ${txSig}`
+						);
+					} catch (err) {
+						const errorCode = getErrorCode(err);
+						logger.error(
+							`Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
+						);
+						webhookMessage(
+							`[${this.name}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
+						);
+					}
 				}
 			}
 		} catch (e) {
