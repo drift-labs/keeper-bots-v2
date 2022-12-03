@@ -235,7 +235,7 @@ export class TriggerBot implements Bot {
 				`Unexpected error for market ${marketIndex.toString()} during triggers`
 			);
 			console.error(e);
-			webhookMessage(`[${this.name}]: :x: Uncaught error:\n${e}`);
+			webhookMessage(`[${this.name}]: :x: Uncaught error:\n${e}\n${e.stack}`);
 		}
 	}
 
@@ -349,7 +349,7 @@ export class TriggerBot implements Bot {
 				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
 				webhookMessage(
-					`[${this.name}]: :x: Uncaught error in main loop:\n${e}`
+					`[${this.name}]: :x: Uncaught error in main loop:\n${e}\n${e.stack}`
 				);
 				throw e;
 			}
