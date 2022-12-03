@@ -51,3 +51,4 @@
 		"lint:fix": "eslint . --ext ts --fix"
 	}
 }
+
