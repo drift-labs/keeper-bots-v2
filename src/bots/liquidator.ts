@@ -1055,7 +1055,7 @@ export class LiquidatorBot implements Bot {
 			ran = true;
 		} catch (e) {
 			console.error(e);
-			webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}`);
+			webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}\n${e.stack}`);
 		} finally {
 			if (ran) {
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);

@@ -1208,7 +1208,7 @@ export class FillerBot implements Bot {
 			} else if (e === dlobMutexError) {
 				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
-				webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}`);
+				webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}\n${e.stack}`);
 				throw e;
 			}
 		} finally {

@@ -254,7 +254,7 @@ export class UserPnlSettlerBot implements Bot {
 			}
 		} catch (e) {
 			console.error(e);
-			webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}`);
+			webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}\n${e.stack}`);
 		} finally {
 			logger.info('Settle PNLs finished');
 			await this.watchdogTimerMutex.runExclusive(async () => {
