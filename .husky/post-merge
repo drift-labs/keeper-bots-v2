@@ -23,8 +23,3 @@ then
 else
 	echo "skipping drift-labs/sdk package version test for branch $BRANCH"
 fi
-
-
-yarn prettify
-yarn lint
-yarn build
