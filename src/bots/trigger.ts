@@ -227,8 +227,8 @@ export class TriggerBot implements Bot {
 							`[${
 								this.name
 							}]: :x: Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-								error.stack ? error.stack : error.message
-							}`
+								error.logs ? (error.logs as Array<string>).join('\n') : ''
+							}\n${error.stack ? error.stack : error.message}`
 						);
 					});
 			}

@@ -130,7 +130,7 @@ export class IFRevenueSettlerBot implements Bot {
 							`[${
 								this.name
 							}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}:\n${
-								err.logs || ''
+								err.logs ? (err.logs as Array<string>).join('\n') : ''
 							}\n${err.stack ? err.stack : err.message}`
 						);
 					}

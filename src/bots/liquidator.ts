@@ -208,7 +208,9 @@ async function liqPerpPnl(
 							this.name
 						}]: :x: error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
 							liquidateePosition.marketIndex
-						} :\n${e.stack ? e.stack : e.message}`
+						}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
+							e.stack ? e.stack : e.message
+						}`
 					);
 				})
 				.finally(() => {
@@ -254,7 +256,9 @@ async function liqPerpPnl(
 						this.name
 					}]: :x: error in liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
 						liquidateePosition.marketIndex
-					} :\n${e.stack ? e.stack : e.message}`
+					}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
+						e.stack ? e.stack : e.message
+					}`
 				);
 			})
 			.finally(() => {
@@ -984,8 +988,8 @@ export class LiquidatorBot implements Bot {
 									`[${
 										this.name
 									}]: :x: Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}:\n${
-										e.stack ? e.stack : e.message
-									}`
+										e.logs ? (e.logs as Array<string>).join('\n') : ''
+									}\n${e.stack ? e.stack : e.message}`
 								);
 							})
 							.finally(() => {
@@ -1063,7 +1067,9 @@ export class LiquidatorBot implements Bot {
 											this.name
 										}]: :x: Error liquidating auth: ${auth}, user: ${userKey} on market ${
 											liquidateePosition.marketIndex
-										}\n${e.stack || e}}`
+										}\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
+											e.stack || e
+										}}`
 									);
 								})
 								.finally(() => {

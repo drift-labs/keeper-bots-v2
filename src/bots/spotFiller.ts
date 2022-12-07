@@ -591,8 +591,8 @@ export class SpotFillerBot implements Bot {
 				logger.error(`Failed to fill spot order`);
 				webhookMessage(
 					`[${this.name}]: :x: error trying to fill spot orders:\n${
-						e.stack ? e.stack : e.message
-					}`
+						e.logs ? (e.logs as Array<string>).join('\n') : ''
+					}\n${e.stack ? e.stack : e.message}`
 				);
 			})
 			.finally(() => {

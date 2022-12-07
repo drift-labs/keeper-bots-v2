@@ -1124,8 +1124,8 @@ export class FillerBot implements Bot {
 					);
 					webhookMessage(
 						`[${this.name}]: :x: error simulating tx:\n${
-							e.stack ? e.stack : e.message
-						}`
+							simError.logs ? simError.logs.join('\n') : ''
+						}\n${e.stack || e}`
 					);
 				}
 			})
