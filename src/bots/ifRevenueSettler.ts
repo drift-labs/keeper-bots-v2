@@ -125,19 +125,21 @@ export class IFRevenueSettlerBot implements Bot {
 						logger.error(
 							`Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
 						);
-						webhookMessage(
+						await webhookMessage(
 							`[${
 								this.name
-							}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${
-								err.message
-							}\n${err.stack ? err.stack : err.message}`
+							}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}:\n${
+								err.stack ? err.stack : err.message
+							}`
 						);
 					}
 				}
 			}
 		} catch (e) {
 			console.error(e);
-			webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}\n${e.stack}`);
+			await webhookMessage(
+				`[${this.name}]: :x: uncaught error:\n${e.stack ? e.stack : e.message}`
+			);
 		} finally {
 			logger.info('Settle IF Revenues finished');
 			await this.watchdogTimerMutex.runExclusive(async () => {

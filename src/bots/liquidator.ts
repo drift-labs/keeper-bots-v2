@@ -674,10 +674,10 @@ export class LiquidatorBot implements Bot {
 							);
 						})
 						.catch((e) => {
-							logger.error(e);
 							logger.error(
 								`Error trying to close spot position for market ${position.marketIndex}`
 							);
+							console.error(e);
 							webhookMessage(
 								`[${
 									this.name
@@ -1059,7 +1059,11 @@ export class LiquidatorBot implements Bot {
 									);
 									console.error(e);
 									webhookMessage(
-										`[${this.name}]: :x: Error liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePosition.marketIndex}`
+										`[${
+											this.name
+										}]: :x: Error liquidating auth: ${auth}, user: ${userKey} on market ${
+											liquidateePosition.marketIndex
+										}\n${e.stack || e}}`
 									);
 								})
 								.finally(() => {
