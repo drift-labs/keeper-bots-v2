@@ -126,7 +126,11 @@ export class IFRevenueSettlerBot implements Bot {
 							`Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
 						);
 						webhookMessage(
-							`[${this.name}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
+							`[${
+								this.name
+							}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${
+								err.message
+							}\n${err.stack ? err.stack : err.message}`
 						);
 					}
 				}

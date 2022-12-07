@@ -590,7 +590,9 @@ export class SpotFillerBot implements Bot {
 				console.error(e);
 				logger.error(`Failed to fill spot order`);
 				webhookMessage(
-					`[${this.name}]: :x: error trying to fill spot orders:\n${e}`
+					`[${this.name}]: :x: error trying to fill spot orders:\n${
+						e.stack ? e.stack : e.message
+					}`
 				);
 			})
 			.finally(() => {
@@ -667,7 +669,9 @@ export class SpotFillerBot implements Bot {
 					console.log('some other error...');
 					console.error(e);
 					webhookMessage(
-						`[${this.name}]: :x: error trying to run main loop:\n${e}`
+						`[${this.name}]: :x: error trying to run main loop:\n${
+							e.stack ? e.stack : e.message
+						}`
 					);
 				}
 			})

@@ -208,7 +208,7 @@ async function liqPerpPnl(
 							this.name
 						}]: :x: error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
 							liquidateePosition.marketIndex
-						} :\n${e}`
+						} :\n${e.stack ? e.stack : e.message}`
 					);
 				})
 				.finally(() => {
@@ -254,7 +254,7 @@ async function liqPerpPnl(
 						this.name
 					}]: :x: error in liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
 						liquidateePosition.marketIndex
-					} :\n${e}`
+					} :\n${e.stack ? e.stack : e.message}`
 				);
 			})
 			.finally(() => {
@@ -547,7 +547,9 @@ export class LiquidatorBot implements Bot {
 								`Error trying to close perp position for market ${position.marketIndex}`
 							);
 							webhookMessage(
-								`[${this.name}]: :x: error in placePerpOrder\n: ${e}`
+								`[${this.name}]: :x: error in placePerpOrder\n:${
+									e.stack ? e.stack : e.message
+								}`
 							);
 						})
 						.then(() => {
@@ -574,7 +576,9 @@ export class LiquidatorBot implements Bot {
 								`Error trying to settle negative perp pnl for market ${position.marketIndex}`
 							);
 							webhookMessage(
-								`[${this.name}]: :x: error in settlePNL for negative pnl\n: ${e}`
+								`[${this.name}]: :x: error in settlePNL for negative pnl\n:${
+									e.stack ? e.stack : e.message
+								}`
 							);
 						})
 						.finally(() => {
@@ -607,7 +611,9 @@ export class LiquidatorBot implements Bot {
 									`Error trying to settle positive perp pnl for market ${position.marketIndex}`
 								);
 								webhookMessage(
-									`[${this.name}]: :x: error in settlePNL for positive pnl\n: ${e}`
+									`[${this.name}]: :x: error in settlePNL for positive pnl\n:${
+										e.stack ? e.stack : e.message
+									}`
 								);
 							})
 							.finally(() => {
@@ -673,7 +679,11 @@ export class LiquidatorBot implements Bot {
 								`Error trying to close spot position for market ${position.marketIndex}`
 							);
 							webhookMessage(
-								`[${this.name}]: :x: error trying to close spot position on market ${position.marketIndex}\n: ${e}`
+								`[${
+									this.name
+								}]: :x: error trying to close spot position on market ${
+									position.marketIndex
+								}\n:${e.stack ? e.stack : e.message}`
 							);
 						})
 						.finally(() => {
@@ -704,7 +714,11 @@ export class LiquidatorBot implements Bot {
 								`Error trying to close spot position for market ${position.marketIndex}`
 							);
 							webhookMessage(
-								`[${this.name}]: :x: error trying to close spot position on market ${position.marketIndex}\n: ${e}`
+								`[${
+									this.name
+								}]: :x: error trying to close spot position on market ${
+									position.marketIndex
+								}\n:${e.stack ? e.stack : e.message}`
 							);
 						})
 						.finally(() => {
@@ -834,7 +848,9 @@ export class LiquidatorBot implements Bot {
 					webhookMessage(
 						`[${
 							this.name
-						}]: :x: Error resolvePerpBankruptcy for ${userKey.toBase58()}, auth: ${userAcc.authority.toBase58()}\n: ${e}`
+						}]: :x: Error resolvePerpBankruptcy for ${userKey.toBase58()}, auth: ${userAcc.authority.toBase58()}\n:${
+							e.stack ? e.stack : e.message
+						}`
 					);
 				})
 				.finally(() => {
@@ -874,7 +890,9 @@ export class LiquidatorBot implements Bot {
 					webhookMessage(
 						`[${
 							this.name
-						}]: :x: Error resolveSpotBankruptcy for ${userKey.toBase58()}, auth: ${userAcc.authority.toBase58()}\n: ${e}`
+						}]: :x: Error resolveSpotBankruptcy for ${userKey.toBase58()}, auth: ${userAcc.authority.toBase58()}:\n${
+							e.stack ? e.stack : e.message
+						}`
 					);
 				})
 				.finally(() => {
@@ -965,7 +983,9 @@ export class LiquidatorBot implements Bot {
 								webhookMessage(
 									`[${
 										this.name
-									}]: :x: Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}\n: ${e}`
+									}]: :x: Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}:\n${
+										e.stack ? e.stack : e.message
+									}`
 								);
 							})
 							.finally(() => {
@@ -1055,7 +1075,9 @@ export class LiquidatorBot implements Bot {
 			ran = true;
 		} catch (e) {
 			console.error(e);
-			webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}\n${e.stack}`);
+			webhookMessage(
+				`[${this.name}]: :x: uncaught error:\n${e.stack ? e.stack : e.message}`
+			);
 		} finally {
 			if (ran) {
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);

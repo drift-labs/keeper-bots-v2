@@ -226,7 +226,9 @@ export class TriggerBot implements Bot {
 						webhookMessage(
 							`[${
 								this.name
-							}]: :x: Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
+							}]: :x: Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+								error.stack ? error.stack : error.message
+							}`
 						);
 					});
 			}
@@ -235,7 +237,9 @@ export class TriggerBot implements Bot {
 				`Unexpected error for market ${marketIndex.toString()} during triggers`
 			);
 			console.error(e);
-			webhookMessage(`[${this.name}]: :x: Uncaught error:\n${e}\n${e.stack}`);
+			webhookMessage(
+				`[${this.name}]: :x: Uncaught error:\n${e.stack ? e.stack : e.message}}`
+			);
 		}
 	}
 
@@ -304,7 +308,9 @@ export class TriggerBot implements Bot {
 						webhookMessage(
 							`[${
 								this.name
-							}]: :x: Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
+							}]: :x: Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+								error.stack ? error.stack : error.message
+							}`
 						);
 					});
 			}
@@ -349,7 +355,9 @@ export class TriggerBot implements Bot {
 				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
 				webhookMessage(
-					`[${this.name}]: :x: Uncaught error in main loop:\n${e}\n${e.stack}`
+					`[${this.name}]: :x: Uncaught error in main loop:\n${
+						e.stack ? e.stack : e.message
+					}`
 				);
 				throw e;
 			}

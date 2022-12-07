@@ -247,14 +247,20 @@ export class UserPnlSettlerBot implements Bot {
 							`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
 						);
 						webhookMessage(
-							`[${this.name}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
+							`[${
+								this.name
+							}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}:\n${
+								err.stack ? err.stack : err.message
+							}`
 						);
 					}
 				}
 			}
 		} catch (e) {
 			console.error(e);
-			webhookMessage(`[${this.name}]: :x: uncaught error:\n${e}\n${e.stack}`);
+			webhookMessage(
+				`[${this.name}]: :x: uncaught error:\n${e.stack ? e.stack : e.messaage}`
+			);
 		} finally {
 			logger.info('Settle PNLs finished');
 			await this.watchdogTimerMutex.runExclusive(async () => {
