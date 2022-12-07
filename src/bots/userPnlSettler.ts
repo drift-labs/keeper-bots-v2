@@ -246,12 +246,13 @@ export class UserPnlSettlerBot implements Bot {
 						logger.error(
 							`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
 						);
+						console.error(err);
 						await webhookMessage(
 							`[${
 								this.name
 							}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}:\n${
-								err.stack ? err.stack : err.message
-							}`
+								err.logs || ''
+							}\n${err.stack ? err.stack : err.message}`
 						);
 					}
 				}
