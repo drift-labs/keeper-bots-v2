@@ -1158,12 +1158,22 @@ export class FillerBot implements Bot {
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];
 				for (const market of this.driftClient.getPerpMarketAccounts()) {
-					fillableNodes = fillableNodes.concat(
-						await this.getPerpFillableNodesForMarket(market)
-					);
-					logger.debug(
-						`got ${fillableNodes.length} fillable nodes on market ${market.marketIndex}`
-					);
+					try {
+						fillableNodes = fillableNodes.concat(
+							await this.getPerpFillableNodesForMarket(market)
+						);
+						logger.debug(
+							`got ${fillableNodes.length} fillable nodes on market ${market.marketIndex}`
+						);
+					} catch (e) {
+						console.error(e);
+						webhookMessage(
+							`[${this.name}]: :x: Failed to get fillable nodes for market ${
+								market.marketIndex
+							}:\n${e.stack ? e.stack : e.message}`
+						);
+						continue;
+					}
 				}
 
 				// filter out nodes that we know cannot be filled
