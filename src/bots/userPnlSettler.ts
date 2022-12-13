@@ -181,7 +181,7 @@ export class UserPnlSettlerBot implements Bot {
 							perpMarketAndOracleData[marketIndexNum].marketAccount,
 							spotMarketAndOracleData[0].marketAccount,
 							perpMarketAndOracleData[marketIndexNum].oraclePriceData,
-						);
+						).mul(new BN(-1));
 
 						if (pnlImbalance.lte(ZERO)) {
 							logger.warn(
