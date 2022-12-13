@@ -14,7 +14,7 @@ import {
 	OrderRecord,
 	UserMap,
 	ZERO,
-	calculateNetUserPnlImbalance,
+	calculateNetUserPnlImbalance, convertToNumber,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -187,7 +187,7 @@ export class UserPnlSettlerBot implements Bot {
 							logger.warn(
 								`Want to settle positive PnL for user ${user
 									.getUserAccountPublicKey()
-									.toBase58()}, but there is a pnl imbalance`
+									.toBase58()} in market ${marketIndexNum}, but there is a pnl imbalance (${convertToNumber(pnlImbalance, QUOTE_PRECISION)})`
 							);
 							continue;
 						}
