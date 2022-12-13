@@ -14,6 +14,7 @@ import {
 	OrderRecord,
 	UserMap,
 	ZERO,
+	calculateNetUserPnlImbalance, convertToNumber,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -173,6 +174,23 @@ export class UserPnlSettlerBot implements Bot {
 						!settleePosition.baseAssetAmount.eq(ZERO)
 					) {
 						continue;
+					}
+
+					if (unsettledPnl.gt(ZERO)) {
+						const pnlImbalance = calculateNetUserPnlImbalance(
+							perpMarketAndOracleData[marketIndexNum].marketAccount,
+							spotMarketAndOracleData[0].marketAccount,
+							perpMarketAndOracleData[marketIndexNum].oraclePriceData,
+						).mul(new BN(-1));
+
+						if (pnlImbalance.lte(ZERO)) {
+							logger.warn(
+								`Want to settle positive PnL for user ${user
+									.getUserAccountPublicKey()
+									.toBase58()} in market ${marketIndexNum}, but there is a pnl imbalance (${convertToNumber(pnlImbalance, QUOTE_PRECISION)})`
+							);
+							continue;
+						}
 					}
 
 					// only settle user pnl if they have enough collateral

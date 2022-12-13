@@ -5,7 +5,7 @@
 	"main": "lib/index.js",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@drift-labs/sdk": "2.2.1",
+		"@drift-labs/sdk": "2.3.0-beta.0",
 		"@opentelemetry/api": "^1.1.0",
 		"@opentelemetry/auto-instrumentations-node": "^0.31.1",
 		"@opentelemetry/exporter-prometheus": "^0.31.0",
@@ -44,7 +44,7 @@
 		"dev:trigger": "ts-node src/index.ts --trigger --metrics 9464",
 		"dev:jitmaker": "ts-node src/index.ts --jit-maker --metrics 9464",
 		"dev:liquidator": "ts-node src/index.ts --liquidator --metrics 9464",
-		"dev:pnlsettler": "ts-node src/index.ts --pnl-settler --metrics 9464",
+		"dev:pnlsettler": "ts-node src/index.ts --user-pnl-settler --metrics 9464",
 		"prettify": "prettier --check './src/**/*.ts'",
 		"prettify:fix": "prettier --write './src/**/*.ts'",
 		"lint": "eslint . --ext ts --quiet",
