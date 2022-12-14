@@ -10,6 +10,7 @@ import {
 	UserMap,
 	MarketType,
 	BulkAccountLoader,
+	getOrderSignature,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -21,6 +22,7 @@ import { webhookMessage } from '../webhook';
 
 const dlobMutexError = new Error('dlobMutex timeout');
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 200;
+const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
 export class TriggerBot implements Bot {
 	public readonly name: string;
@@ -36,6 +38,7 @@ export class TriggerBot implements Bot {
 		dlobMutexError
 	);
 	private dlob: DLOB;
+	private triggeringNodes = new Map<string, number>();
 	private periodicTaskMutex = new Mutex();
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
@@ -178,11 +181,28 @@ export class TriggerBot implements Bot {
 			});
 
 			for (const nodeToTrigger of nodesToTrigger) {
+				const now = Date.now();
+				const nodeToFillSignature =
+					this.getNodeToTriggerSignature(nodeToTrigger);
+				const timeStartedToTriggerNode =
+					this.triggeringNodes.get(nodeToFillSignature);
+				if (timeStartedToTriggerNode) {
+					if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
+						logger.warn(
+							`triggering node ${nodeToFillSignature} too soon (${
+								now - timeStartedToTriggerNode
+							}ms since last trigger), skipping`
+						);
+						continue;
+					}
+				}
+
 				if (nodeToTrigger.node.haveTrigger) {
 					continue;
 				}
-
 				nodeToTrigger.node.haveTrigger = true;
+
+				this.triggeringNodes.set(nodeToFillSignature, Date.now());
 
 				logger.info(
 					`trying to trigger perp order on market ${
@@ -230,6 +250,9 @@ export class TriggerBot implements Bot {
 								error.logs ? (error.logs as Array<string>).join('\n') : ''
 							}\n${error.stack ? error.stack : error.message}`
 						);
+					})
+					.finally(() => {
+						this.removeTriggeringNodes([nodeToTrigger]);
 					});
 			}
 		} catch (e) {
@@ -319,6 +342,16 @@ export class TriggerBot implements Bot {
 				`Unexpected error for spot market ${marketIndex.toString()} during triggers`
 			);
 			console.error(e);
+		}
+	}
+
+	private getNodeToTriggerSignature(node: NodeToTrigger): string {
+		return getOrderSignature(node.node.order.orderId, node.node.userAccount);
+	}
+
+	private removeTriggeringNodes(nodes: Array<NodeToTrigger>) {
+		for (const node of nodes) {
+			this.triggeringNodes.delete(this.getNodeToTriggerSignature(node));
 		}
 	}
 
