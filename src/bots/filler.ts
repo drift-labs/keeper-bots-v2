@@ -81,7 +81,7 @@ enum METRIC_TYPES {
 	attempted_fills = 'attempted_fills',
 	successful_fills = 'successful_fills',
 	observed_fills_count = 'observed_fills_count',
-	tx_sim_count = 'tx_sim_count',
+	tx_sim_error_count = 'tx_sim_error_count',
 	user_map_user_account_keys = 'user_map_user_account_keys',
 	user_stats_map_authority_keys = 'user_stats_map_authority_keys',
 }
@@ -261,7 +261,7 @@ export class FillerBot implements Bot {
 			}
 		);
 		this.txSimErrorCounter = this.meter.createCounter(
-			METRIC_TYPES.tx_sim_count,
+			METRIC_TYPES.tx_sim_error_count,
 			{
 				description: 'Count of errors from simulating transactions',
 			}
