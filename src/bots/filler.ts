@@ -81,6 +81,7 @@ enum METRIC_TYPES {
 	attempted_fills = 'attempted_fills',
 	successful_fills = 'successful_fills',
 	observed_fills_count = 'observed_fills_count',
+	tx_sim_count = 'tx_sim_count',
 	user_map_user_account_keys = 'user_map_user_account_keys',
 	user_stats_map_authority_keys = 'user_stats_map_authority_keys',
 }
@@ -136,6 +137,7 @@ export class FillerBot implements Bot {
 	private attemptedFillsCounter: Counter;
 	private successfulFillsCounter: Counter;
 	private observedFillsCountCounter: Counter;
+	private txSimErrorCounter: Counter;
 	private userMapUserAccountKeysGauge: ObservableGauge;
 	private userStatsMapAuthorityKeysGauge: ObservableGauge;
 
@@ -256,6 +258,12 @@ export class FillerBot implements Bot {
 			METRIC_TYPES.observed_fills_count,
 			{
 				description: 'Count of fills observed in the market',
+			}
+		);
+		this.txSimErrorCounter = this.meter.createCounter(
+			METRIC_TYPES.tx_sim_count,
+			{
+				description: 'Count of errors from simulating transactions',
 			}
 		);
 		this.userMapUserAccountKeysGauge = this.meter.createObservableGauge(
@@ -1117,6 +1125,7 @@ export class FillerBot implements Bot {
 				logger.error(`Failed to send packed tx (error above):`);
 				const simError = e as SendTransactionError;
 				if (simError.logs) {
+					this.txSimErrorCounter.add(1);
 					const start = Date.now();
 					this.handleTransactionLogs(nodesSent, simError.logs);
 					logger.error(
