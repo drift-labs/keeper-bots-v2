@@ -1124,7 +1124,7 @@ export class FillerBot implements Bot {
 				console.error(e);
 				logger.error(`Failed to send packed tx (error above):`);
 				const simError = e as SendTransactionError;
-				if (simError.logs) {
+				if (simError.logs && simError.logs.length > 0) {
 					this.txSimErrorCounter.add(1);
 					const start = Date.now();
 					this.handleTransactionLogs(nodesSent, simError.logs);
