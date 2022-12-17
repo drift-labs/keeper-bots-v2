@@ -715,8 +715,90 @@ export class FillerBot implements Bot {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
-	private isLogFillOrder(log: string): boolean {
-		return log.includes('Instruction: FillPerpOrder');
+	private isIxLog(log: string): boolean {
+		const match = log.match(new RegExp('Program log: Instruction:'));
+
+		return match !== null;
+	}
+
+	private isEndIxLog(log: string): boolean {
+		const match = log.match(
+			new RegExp(
+				`Program ${this.driftClient.program.programId.toBase58()} consumed ([0-9]+) of ([0-9]+) compute units`
+			)
+		);
+
+		return match !== null;
+	}
+
+	private isFillIxLog(log: string): boolean {
+		const match = log.match(
+			new RegExp('Program log: Instruction: Fill(.*)Order')
+		);
+
+		return match !== null;
+	}
+
+	private isOrderDoesNotExistLog(log: string): number | null {
+		const match = log.match(new RegExp('.*Order does not exist ([0-9]+)'));
+
+		if (!match) {
+			return null;
+		}
+
+		return parseInt(match[1]);
+	}
+
+	private isMakerOrderDoesNotExistLog(log: string): number | null {
+		const match = log.match(new RegExp('.*Maker has no order id ([0-9]+)'));
+
+		if (!match) {
+			return null;
+		}
+
+		return parseInt(match[1]);
+	}
+
+	private isMakerFallbackLog(log: string): number | null {
+		const match = log.match(
+			new RegExp('.*Using fallback maker order id ([0-9]+)')
+		);
+
+		if (!match) {
+			return null;
+		}
+
+		return parseInt(match[1]);
+	}
+
+	private isMakerBreachedMaintenanceMarginLog(log: string): boolean {
+		const match = log.match(
+			new RegExp('.*maker breached maintenance requirements.*')
+		);
+
+		return match !== null;
+	}
+
+	private isErrFillingLog(log: string): [string, string] | null {
+		const match = log.match(
+			new RegExp('.*Err filling order id ([0-9]+) for user ([a-zA-Z0-9]+)')
+		);
+
+		if (!match) {
+			return null;
+		}
+
+		return [match[1], match[2]];
+	}
+
+	private isErrStaleOracle(log: string): boolean {
+		const match = log.match(new RegExp('.*Invalid Oracle: Stale.*'));
+
+		if (!match) {
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
@@ -731,7 +813,9 @@ export class FillerBot implements Bot {
 		nodesFilled: Array<NodeToFill>,
 		logs: string[]
 	): number {
-		let nextIsFillRecord = false;
+		let _remove_nextIsFillRecord = false;
+		let inFillIx = false;
+		let errorThisFillIx = false;
 		let ixIdx = -1; // skip ComputeBudgetProgram
 		let successCount = 0;
 		let burstedCU = false;
@@ -747,23 +831,226 @@ export class FillerBot implements Bot {
 				this.useBurstCULimit = true;
 				this.fillTxSinceBurstCU = 0;
 				burstedCU = true;
+				continue;
 			}
 
-			if (nextIsFillRecord) {
+			if (this.isEndIxLog(log)) {
+				if (!errorThisFillIx) {
+					successCount++;
+				}
+
+				inFillIx = false;
+				errorThisFillIx = false;
+				continue;
+			}
+
+			if (this.isIxLog(log)) {
+				if (this.isFillIxLog(log)) {
+					_remove_nextIsFillRecord = true;
+					inFillIx = true;
+					errorThisFillIx = false;
+					ixIdx++;
+
+					// can also print this from parsing the log record in upcoming
+					const nodeFilled = nodesFilled[ixIdx];
+					if (nodeFilled.makerNode) {
+						logger.info(
+							`Processing tx log for assoc node ${ixIdx}:\ntaker: ${nodeFilled.node.userAccount.toBase58()}-${
+								nodeFilled.node.order.orderId
+							} ${convertToNumber(
+								nodeFilled.node.order.baseAssetAmountFilled,
+								BASE_PRECISION
+							)}/${convertToNumber(
+								nodeFilled.node.order.baseAssetAmount,
+								BASE_PRECISION
+							)} @ ${convertToNumber(
+								nodeFilled.node.order.price,
+								PRICE_PRECISION
+							)}\nmaker: ${nodeFilled.makerNode.userAccount.toBase58()}-${
+								nodeFilled.makerNode.order.orderId
+							} ${convertToNumber(
+								nodeFilled.makerNode.order.baseAssetAmountFilled,
+								BASE_PRECISION
+							)}/${convertToNumber(
+								nodeFilled.makerNode.order.baseAssetAmount,
+								BASE_PRECISION
+							)} @ ${convertToNumber(
+								nodeFilled.makerNode.order.price,
+								PRICE_PRECISION
+							)}`
+						);
+					} else {
+						logger.info(
+							`Processing tx log for assoc node ${ixIdx}:\ntaker: ${nodeFilled.node.userAccount.toBase58()}-${
+								nodeFilled.node.order.orderId
+							} ${convertToNumber(
+								nodeFilled.node.order.baseAssetAmountFilled,
+								BASE_PRECISION
+							)}/${convertToNumber(
+								nodeFilled.node.order.baseAssetAmount,
+								BASE_PRECISION
+							)} @ ${convertToNumber(
+								nodeFilled.node.order.price,
+								PRICE_PRECISION
+							)}\nmaker: vAMM`
+						);
+					}
+				} else {
+					_remove_nextIsFillRecord = false;
+					inFillIx = false;
+				}
+				continue;
+			}
+
+			if (!inFillIx) {
+				// this is not a log for a fill instruction
+				continue;
+			}
+
+			// try to handle the log line
+			const orderIdDoesNotExist = this.isOrderDoesNotExistLog(log);
+			if (orderIdDoesNotExist) {
+				const filledNode = nodesFilled[ixIdx];
+				logger.error(
+					`assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount.toString()}, ${
+						filledNode.node.order.orderId
+					}; does not exist (filled by someone else); ${log}`
+				);
+				this.throttledNodes.delete(this.getNodeToFillSignature(filledNode));
+				errorThisFillIx = true;
+				continue;
+			}
+
+			const makerOrderIdDoesNotExist = this.isMakerOrderDoesNotExistLog(log);
+			if (makerOrderIdDoesNotExist) {
+				const filledNode = nodesFilled[ixIdx];
+				if (!filledNode.makerNode) {
+					logger.error(
+						`Got maker DNE error, but don't have a maker node: ${log}, ${ixIdx}\n${JSON.stringify(
+							filledNode,
+							null,
+							2
+						)}`
+					);
+					continue;
+				}
+				const makerNodeSignature =
+					this.getFillSignatureFromUserAccountAndOrderId(
+						filledNode.makerNode.userAccount.toString(),
+						filledNode.makerNode.order.orderId.toString()
+					);
+				logger.error(
+					`maker assoc node (ixIdx: ${ixIdx}): ${filledNode.makerNode.userAccount.toString()}, ${
+						filledNode.makerNode.order.orderId
+					}; does not exist; throttling: ${makerNodeSignature}; ${log}`
+				);
+				this.throttledNodes.set(makerNodeSignature, Date.now());
+				continue;
+			}
+
+			const makerFallbackOrderId = this.isMakerFallbackLog(log);
+			if (makerFallbackOrderId) {
+				const filledNode = nodesFilled[ixIdx];
+				if (!filledNode.makerNode) {
+					logger.error(
+						`Got maker fallback log, but don't have a maker node: ${log}, ${ixIdx}\n${JSON.stringify(
+							filledNode,
+							null,
+							2
+						)}`
+					);
+					continue;
+				}
+				const makerNodeSignature =
+					this.getFillSignatureFromUserAccountAndOrderId(
+						filledNode.makerNode.userAccount.toString(),
+						makerFallbackOrderId.toString()
+					);
+				logger.error(
+					`maker fallback order assoc node (ixIdx: ${ixIdx}): ${filledNode.makerNode.userAccount.toString()}, ${
+						filledNode.makerNode.order.orderId
+					}; throttling ${makerNodeSignature}; ${log}`
+				);
+				this.throttledNodes.set(makerNodeSignature, Date.now());
+				continue;
+			}
+
+			const makerBreachedMaintenanceMargin =
+				this.isMakerBreachedMaintenanceMarginLog(log);
+			if (makerBreachedMaintenanceMargin) {
+				const filledNode = nodesFilled[ixIdx];
+				if (!filledNode.makerNode) {
+					logger.error(
+						`Got maker breached maint. margin log, but don't have a maker node: ${log}, ${ixIdx}\n${JSON.stringify(
+							filledNode,
+							null,
+							2
+						)}`
+					);
+					continue;
+				}
+				const makerNodeSignature =
+					this.getFillSignatureFromUserAccountAndOrderId(
+						filledNode.makerNode.userAccount.toString(),
+						makerFallbackOrderId.toString()
+					);
+				logger.error(
+					`maker breach maint. margin, assoc node (ixIdx: ${ixIdx}): ${filledNode.makerNode.userAccount.toString()}, ${
+						filledNode.makerNode.order.orderId
+					}; (throttling ${makerNodeSignature}); ${log}`
+				);
+				this.throttledNodes.set(makerNodeSignature, Date.now());
+				errorThisFillIx = true;
+				continue;
+			}
+
+			const errFillingLog = this.isErrFillingLog(log);
+			if (errFillingLog) {
+				const orderId = errFillingLog[0];
+				const userAcc = errFillingLog[1];
+				const extractedSig = this.getFillSignatureFromUserAccountAndOrderId(
+					userAcc,
+					orderId
+				);
+				this.throttledNodes.set(extractedSig, Date.now());
+
+				const filledNode = nodesFilled[ixIdx];
+				const assocNodeSig = this.getNodeToFillSignature(filledNode);
+				logger.warn(
+					`Throttling node due to fill error. extractedSig: ${extractedSig}, assocNodeSig: ${assocNodeSig}, assocNodeIdx: ${ixIdx}`
+				);
+				errorThisFillIx = true;
+				continue;
+			}
+
+			if (this.isErrStaleOracle(log)) {
+				logger.error(`Stale oracle error: ${log}`);
+				errorThisFillIx = true;
+				continue;
+			}
+
+			// probably some anchor log
+			if (log.length > 100) {
+				errorThisFillIx = true;
+				continue;
+			}
+
+			///////old can remove
+			if (_remove_nextIsFillRecord) {
 				if (log.includes('Order does not exist')) {
 					const filledNode = nodesFilled[ixIdx];
 					logger.error(
-						`   assoc order: ${filledNode.node.userAccount.toString()}, ${
+						`   assoc node: ${filledNode.node.userAccount.toString()}, ${
 							filledNode.node.order.orderId
 						}`
 					);
 					logger.error(` ${log}, ixIdx: ${ixIdx}`);
 					this.throttledNodes.delete(this.getNodeToFillSignature(filledNode));
-					nextIsFillRecord = false;
+					_remove_nextIsFillRecord = false;
 				} else if (log.includes('data')) {
 					// raw event data, this is expected
 					successCount++;
-					nextIsFillRecord = false;
+					_remove_nextIsFillRecord = false;
 				} else if (log.includes('Err filling order id')) {
 					const match = log.match(
 						new RegExp(
@@ -784,7 +1071,7 @@ export class FillerBot implements Bot {
 						logger.warn(
 							`Throttling node due to fill error. extractedSig: ${extractedSig}, assocNodeSig: ${assocNodeSig}, assocNodeIdx: ${ixIdx}`
 						);
-						nextIsFillRecord = false;
+						_remove_nextIsFillRecord = false;
 					} else {
 						logger.error(`Failed to find erroneous fill via regex: ${log}`);
 					}
@@ -792,61 +1079,17 @@ export class FillerBot implements Bot {
 					const filledNode = nodesFilled[ixIdx];
 					logger.error(`how parse log?: ${log}`);
 					logger.error(
-						` assoc order: ${filledNode.node.userAccount.toString()}, ${
+						` assoc node: ${filledNode.node.userAccount.toString()}, ${
 							filledNode.node.order.orderId
 						}`
 					);
-					nextIsFillRecord = false;
+					_remove_nextIsFillRecord = false;
 				}
 
 				// nextIsFillRecord = false;
-			} else if (this.isLogFillOrder(log)) {
-				nextIsFillRecord = true;
+			} else if (this.isFillIxLog(log)) {
+				_remove_nextIsFillRecord = true;
 				ixIdx++;
-
-				const nodeFilled = nodesFilled[ixIdx];
-				if (nodeFilled.makerNode) {
-					logger.info(
-						`Found filled tx:\ntaker: ${nodeFilled.node.userAccount.toBase58()}-${
-							nodeFilled.node.order.orderId
-						} ${convertToNumber(
-							nodeFilled.node.order.baseAssetAmountFilled,
-							BASE_PRECISION
-						)}/${convertToNumber(
-							nodeFilled.node.order.baseAssetAmount,
-							BASE_PRECISION
-						)} @ ${convertToNumber(
-							nodeFilled.node.order.price,
-							PRICE_PRECISION
-						)}\nmaker: ${nodeFilled.makerNode.userAccount.toBase58()}-${
-							nodeFilled.makerNode.order.orderId
-						} ${convertToNumber(
-							nodeFilled.makerNode.order.baseAssetAmountFilled,
-							BASE_PRECISION
-						)}/${convertToNumber(
-							nodeFilled.makerNode.order.baseAssetAmount,
-							BASE_PRECISION
-						)} @ ${convertToNumber(
-							nodeFilled.makerNode.order.price,
-							PRICE_PRECISION
-						)}`
-					);
-				} else {
-					logger.info(
-						`Found filled tx:\ntaker: ${nodeFilled.node.userAccount.toBase58()}-${
-							nodeFilled.node.order.orderId
-						} ${convertToNumber(
-							nodeFilled.node.order.baseAssetAmountFilled,
-							BASE_PRECISION
-						)}/${convertToNumber(
-							nodeFilled.node.order.baseAssetAmount,
-							BASE_PRECISION
-						)} @ ${convertToNumber(
-							nodeFilled.node.order.price,
-							PRICE_PRECISION
-						)}\nmaker: vAMM`
-					);
-				}
 			}
 		}
 
