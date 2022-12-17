@@ -779,6 +779,14 @@ export class FillerBot implements Bot {
 		return match !== null;
 	}
 
+	private isTakerBreachedMaintenanceMarginLog(log: string): boolean {
+		const match = log.match(
+			new RegExp('.*taker breached maintenance requirements.*')
+		);
+
+		return match !== null;
+	}
+
 	private isErrFillingLog(log: string): [string, string] | null {
 		const match = log.match(
 			new RegExp('.*Err filling order id ([0-9]+) for user ([a-zA-Z0-9]+)')
@@ -1000,6 +1008,25 @@ export class FillerBot implements Bot {
 					}; (throttling ${makerNodeSignature}); ${log}`
 				);
 				this.throttledNodes.set(makerNodeSignature, Date.now());
+				errorThisFillIx = true;
+				continue;
+			}
+
+			const takerBreachedMaintenanceMargin =
+				this.isTakerBreachedMaintenanceMarginLog(log);
+			if (takerBreachedMaintenanceMargin) {
+				const filledNode = nodesFilled[ixIdx];
+				const takerNodeSignature =
+					this.getFillSignatureFromUserAccountAndOrderId(
+						filledNode.node.userAccount.toString(),
+						filledNode.node.order.orderId.toString()
+					);
+				logger.error(
+					`taker breach maint. margin, assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount.toString()}, ${
+						filledNode.node.order.orderId
+					}; (throttling ${takerNodeSignature}); ${log}`
+				);
+				this.throttledNodes.set(takerNodeSignature, Date.now());
 				errorThisFillIx = true;
 				continue;
 			}
