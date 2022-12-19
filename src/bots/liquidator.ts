@@ -413,7 +413,7 @@ export class LiquidatorBot implements Bot {
 		if (resyncRequired) {
 			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
 				let doResync = false;
-				const start = Date.now();
+				const _start = Date.now();
 				if (!this.bulkAccountLoader) {
 					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
 					doResync = true;
@@ -437,6 +437,8 @@ export class LiquidatorBot implements Bot {
 				}
 
 				if (doResync) {
+					logger.warn(`Need to UserMaps, marking as unhealthy`);
+					/*
 					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
@@ -448,8 +450,9 @@ export class LiquidatorBot implements Bot {
 							this.userMap = newUserMap;
 						})
 						.finally(() => {
-							logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
+							logger.info(`UserMaps resynced in ${Date.now() - _start}ms`);
 						});
+					*/
 				}
 			});
 		}
@@ -486,6 +489,13 @@ export class LiquidatorBot implements Bot {
 			healthy =
 				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
 		});
+
+		const stateAccount = this.driftClient.getStateAccount();
+		const userMapResyncRequired =
+			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber();
+
+		healthy = healthy && !userMapResyncRequired;
+
 		return healthy;
 	}
 

@@ -372,6 +372,14 @@ export class FillerBot implements Bot {
 			healthy =
 				this.watchdogTimerLastPatTime > Date.now() - 5 * this.defaultIntervalMs;
 		});
+
+		const stateAccount = this.driftClient.getStateAccount();
+		const userMapResyncRequired =
+			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber() ||
+			this.userStatsMap.size() !== stateAccount.numberOfAuthorities.toNumber();
+
+		healthy = healthy && !userMapResyncRequired;
+
 		return healthy;
 	}
 
@@ -417,7 +425,7 @@ export class FillerBot implements Bot {
 		if (resyncRequired) {
 			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
 				let doResync = false;
-				const start = Date.now();
+				const _start = Date.now();
 				if (!this.bulkAccountLoader) {
 					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
 					doResync = true;
@@ -441,6 +449,8 @@ export class FillerBot implements Bot {
 				}
 
 				if (doResync) {
+					logger.warn(`Need to resync UserMaps - marking as unhealthy`);
+					/*
 					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
@@ -459,9 +469,10 @@ export class FillerBot implements Bot {
 								this.userStatsMap = newUserStatsMap;
 							})
 							.finally(() => {
-								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
+								logger.info(`UserMaps resynced in ${Date.now() - _start}ms`);
 							});
 					});
+					*/
 				}
 			});
 		}
@@ -1060,63 +1071,6 @@ export class FillerBot implements Bot {
 			if (log.length > 100) {
 				errorThisFillIx = true;
 				continue;
-			}
-
-			///////old can remove
-			if (_remove_nextIsFillRecord) {
-				if (log.includes('Order does not exist')) {
-					const filledNode = nodesFilled[ixIdx];
-					logger.error(
-						`   assoc node: ${filledNode.node.userAccount.toString()}, ${
-							filledNode.node.order.orderId
-						}`
-					);
-					logger.error(` ${log}, ixIdx: ${ixIdx}`);
-					this.throttledNodes.delete(this.getNodeToFillSignature(filledNode));
-					_remove_nextIsFillRecord = false;
-				} else if (log.includes('data')) {
-					// raw event data, this is expected
-					successCount++;
-					_remove_nextIsFillRecord = false;
-				} else if (log.includes('Err filling order id')) {
-					const match = log.match(
-						new RegExp(
-							'.*Err filling order id ([0-9]+) for user ([a-zA-Z0-9]+)'
-						)
-					);
-					if (match !== null) {
-						const orderId = match[1];
-						const userAcc = match[2];
-						const extractedSig = this.getFillSignatureFromUserAccountAndOrderId(
-							userAcc,
-							orderId
-						);
-						this.throttledNodes.set(extractedSig, Date.now());
-
-						const filledNode = nodesFilled[ixIdx];
-						const assocNodeSig = this.getNodeToFillSignature(filledNode);
-						logger.warn(
-							`Throttling node due to fill error. extractedSig: ${extractedSig}, assocNodeSig: ${assocNodeSig}, assocNodeIdx: ${ixIdx}`
-						);
-						_remove_nextIsFillRecord = false;
-					} else {
-						logger.error(`Failed to find erroneous fill via regex: ${log}`);
-					}
-				} else {
-					const filledNode = nodesFilled[ixIdx];
-					logger.error(`how parse log?: ${log}`);
-					logger.error(
-						` assoc node: ${filledNode.node.userAccount.toString()}, ${
-							filledNode.node.order.orderId
-						}`
-					);
-					_remove_nextIsFillRecord = false;
-				}
-
-				// nextIsFillRecord = false;
-			} else if (this.isFillIxLog(log)) {
-				_remove_nextIsFillRecord = true;
-				ixIdx++;
 			}
 		}
 
