@@ -1093,6 +1093,14 @@ export class LiquidatorBot implements Bot {
 								});
 						}
 					}
+				} else if (isVariant(userAcc.status, 'beingLiquidated')) {
+					// no-op to clear user of beingLiquidated status
+					this.driftClient.liquidatePerp(
+						user.userAccountPublicKey,
+						user.getUserAccount(),
+						0,
+						ZERO
+					);
 				}
 			}
 			await this.derisk();
