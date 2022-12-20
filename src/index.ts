@@ -252,11 +252,20 @@ const runBot = async () => {
 		1000
 	);
 	let lastBulkAccountLoaderSlot = bulkAccountLoader.mostRecentSlot;
+
+	// const bulkAccountLoader = undefined;
+	// let lastBulkAccountLoaderSlot = undefined;
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
 		programID: clearingHousePublicKey,
+		perpMarketIndexes: PerpMarkets[driftEnv].map((mkt) => mkt.marketIndex),
+		spotMarketIndexes: SpotMarkets[driftEnv].map((mkt) => mkt.marketIndex),
+		oracleInfos: PerpMarkets[driftEnv].map((mkt) => {
+			return { publicKey: mkt.oracle, source: mkt.oracleSource };
+		}),
 		accountSubscription: {
+			// type: 'websocket'
 			type: 'polling',
 			accountLoader: bulkAccountLoader,
 		},
@@ -329,9 +338,11 @@ const runBot = async () => {
 
 	// subscribe will fail if there is no clearing house user
 	const driftUser = driftClient.getUser();
+	const driftUserStats = driftClient.getUserStats();
 	while (
 		!(await driftClient.subscribe()) ||
 		!(await driftUser.subscribe()) ||
+		!(await driftUserStats.subscribe()) ||
 		!eventSubscriber.subscribe()
 	) {
 		logger.info('waiting to subscribe to DriftClient and User');
@@ -607,7 +618,10 @@ const runBot = async () => {
 
 				if (bulkAccountLoader) {
 					// we expect health checks to happen at a rate slower than the BulkAccountLoader's polling frequency
-					if (bulkAccountLoader.mostRecentSlot === lastBulkAccountLoaderSlot) {
+					if (
+						lastBulkAccountLoaderSlot &&
+						bulkAccountLoader.mostRecentSlot === lastBulkAccountLoaderSlot
+					) {
 						res.writeHead(500);
 						res.end(`bulkAccountLoader.mostRecentSlot is not healthy`);
 						logger.error(
