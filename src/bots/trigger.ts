@@ -127,7 +127,7 @@ export class TriggerBot implements Bot {
 		if (resyncRequired) {
 			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
 				let doResync = false;
-				const _start = Date.now();
+				const start = Date.now();
 				if (!this.bulkAccountLoader) {
 					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
 					doResync = true;
@@ -152,21 +152,22 @@ export class TriggerBot implements Bot {
 
 				if (doResync) {
 					logger.warn(`Need to resync UserMaps, marking as unhealthy`);
-					/*
 					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
 					);
 					newUserMap
 						.fetchAllUsers()
-						.then(() => {
+						.then(async () => {
+							for (const user of this.userMap.values()) {
+								await user.unsubscribe();
+							}
 							delete this.userMap;
 							this.userMap = newUserMap;
 						})
 						.finally(() => {
-							logger.info(`UserMaps resynced in ${Date.now() - _start}ms`);
+							logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
 						});
-					*/
 				}
 			});
 		}

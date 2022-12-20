@@ -425,7 +425,7 @@ export class FillerBot implements Bot {
 		if (resyncRequired) {
 			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
 				let doResync = false;
-				const _start = Date.now();
+				const start = Date.now();
 				if (!this.bulkAccountLoader) {
 					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
 					doResync = true;
@@ -449,8 +449,6 @@ export class FillerBot implements Bot {
 				}
 
 				if (doResync) {
-					logger.warn(`Need to resync UserMaps - marking as unhealthy`);
-					/*
 					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
@@ -462,17 +460,23 @@ export class FillerBot implements Bot {
 					newUserMap.fetchAllUsers().then(() => {
 						newUserStatsMap
 							.fetchAllUserStats()
-							.then(() => {
+							.then(async () => {
+								for (const user of this.userMap.values()) {
+									await user.unsubscribe();
+								}
+								for (const user of this.userStatsMap.values()) {
+									await user.unsubscribe();
+								}
 								delete this.userMap;
 								delete this.userStatsMap;
+
 								this.userMap = newUserMap;
 								this.userStatsMap = newUserStatsMap;
 							})
 							.finally(() => {
-								logger.info(`UserMaps resynced in ${Date.now() - _start}ms`);
+								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
 							});
 					});
-					*/
 				}
 			});
 		}

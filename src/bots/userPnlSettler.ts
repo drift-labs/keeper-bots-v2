@@ -82,6 +82,9 @@ export class UserPnlSettlerBot implements Bot {
 			clearInterval(intervalId);
 		}
 		this.intervalIds = [];
+		for (const user of this.userMap.values()) {
+			await user.unsubscribe();
+		}
 		delete this.userMap;
 	}
 
