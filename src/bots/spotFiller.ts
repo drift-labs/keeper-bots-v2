@@ -54,7 +54,7 @@ const THROTTLED_NODE_SIZE_TO_PRUNE = 10;
  * Time to wait before trying a node again
  */
 const FILL_ORDER_BACKOFF = 10000;
-const USER_MAP_RESYNC_COOLDOWN_SLOTS = 300;
+const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 
 const dlobMutexError = new Error('dlobMutex timeout');
 
@@ -421,14 +421,13 @@ export class SpotFillerBot implements Bot {
 						}
 						return;
 					} else {
-						logger.info(`Resyncing UserMaps`);
 						doResync = true;
 						this.lastSlotResyncUserMaps = this.bulkAccountLoader.mostRecentSlot;
 					}
 				}
 
 				if (doResync) {
-					logger.warn(`Need to resync UserMaps, marking as unhealthy`);
+					logger.info(`Resyncing UserMap`);
 					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
@@ -637,8 +636,8 @@ export class SpotFillerBot implements Bot {
 		const startTime = Date.now();
 		let ran = false;
 
-		await tryAcquire(this.periodicTaskMutex)
-			.runExclusive(async () => {
+		try {
+			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
 					if (this.dlob) {
 						this.dlob.clear();
@@ -687,46 +686,45 @@ export class SpotFillerBot implements Bot {
 				);
 
 				ran = true;
-			})
-			.catch((e) => {
-				if (e === E_ALREADY_LOCKED) {
-					const user = this.driftClient.getUser();
-					this.mutexBusyCounter.add(
-						1,
-						metricAttrFromUserAccount(
-							user.getUserAccountPublicKey(),
-							user.getUserAccount()
-						)
-					);
-				} else if (e === dlobMutexError) {
-					logger.error(`${this.name} dlobMutexError timeout`);
-				} else {
-					console.log('some other error...');
-					console.error(e);
-					webhookMessage(
-						`[${this.name}]: :x: error trying to run main loop:\n${
-							e.stack ? e.stack : e.message
-						}`
-					);
-				}
-			})
-			.finally(async () => {
-				if (ran) {
-					const duration = Date.now() - startTime;
-					const user = this.driftClient.getUser();
-					this.tryFillDurationHistogram.record(
-						duration,
-						metricAttrFromUserAccount(
-							user.getUserAccountPublicKey(),
-							user.getUserAccount()
-						)
-					);
-					logger.debug(`trySpotFill done, took ${duration}ms`);
-
-					await this.watchdogTimerMutex.runExclusive(async () => {
-						this.watchdogTimerLastPatTime = Date.now();
-					});
-				}
 			});
+		} catch (e) {
+			if (e === E_ALREADY_LOCKED) {
+				const user = this.driftClient.getUser();
+				this.mutexBusyCounter.add(
+					1,
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
+			} else if (e === dlobMutexError) {
+				logger.error(`${this.name} dlobMutexError timeout`);
+			} else {
+				console.log('some other error...');
+				console.error(e);
+				webhookMessage(
+					`[${this.name}]: :x: error trying to run main loop:\n${
+						e.stack ? e.stack : e.message
+					}`
+				);
+			}
+		} finally {
+			if (ran) {
+				const duration = Date.now() - startTime;
+				const user = this.driftClient.getUser();
+				this.tryFillDurationHistogram.record(
+					duration,
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
+				logger.debug(`trySpotFill done, took ${duration}ms`);
+
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
+			}
+		}
 	}
 }

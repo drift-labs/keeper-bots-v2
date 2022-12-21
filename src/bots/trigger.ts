@@ -143,14 +143,13 @@ export class TriggerBot implements Bot {
 						}
 						return;
 					} else {
-						logger.info(`Resyncing UserMaps`);
 						doResync = true;
 						this.lastSlotResyncUserMaps = this.bulkAccountLoader.mostRecentSlot;
 					}
 				}
 
 				if (doResync) {
-					logger.warn(`Need to resync UserMaps, marking as unhealthy`);
+					logger.info(`Resyncing UserMap`);
 					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig

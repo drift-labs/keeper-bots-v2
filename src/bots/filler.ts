@@ -444,14 +444,13 @@ export class FillerBot implements Bot {
 						}
 						return;
 					} else {
-						logger.info(`Resyncing UserMaps`);
 						doResync = true;
 						this.lastSlotResyncUserMaps = this.bulkAccountLoader.mostRecentSlot;
 					}
 				}
 
 				if (doResync) {
-					logger.info(`doing resync`);
+					logger.info(`Resyncing UserMap`);
 					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
