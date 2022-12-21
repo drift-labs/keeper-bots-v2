@@ -21,6 +21,9 @@ import {
 	SpotMarkets,
 	BulkAccountLoader,
 	OrderRecord,
+	convertToNumber,
+	BASE_PRECISION,
+	PRICE_PRECISION,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -586,6 +589,50 @@ export class SpotFillerBot implements Bot {
 
 		if (!isVariant(marketType, 'spot')) {
 			throw new Error('expected spot market type');
+		}
+
+		// TODO: confirm if order.baseAssetAmount can use BASE_PRECISION for spot order
+		if (nodeToFill.makerNode) {
+			logger.info(
+				`filling spot node:\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
+					nodeToFill.node.order.orderId
+				} ${convertToNumber(
+					nodeToFill.node.order.baseAssetAmountFilled,
+					BASE_PRECISION
+				)}/${convertToNumber(
+					nodeToFill.node.order.baseAssetAmount,
+					BASE_PRECISION
+				)} @ ${convertToNumber(
+					nodeToFill.node.order.price,
+					PRICE_PRECISION
+				)}\nmaker: ${nodeToFill.makerNode.userAccount.toBase58()}-${
+					nodeToFill.makerNode.order.orderId
+				} ${convertToNumber(
+					nodeToFill.makerNode.order.baseAssetAmountFilled,
+					BASE_PRECISION
+				)}/${convertToNumber(
+					nodeToFill.makerNode.order.baseAssetAmount,
+					BASE_PRECISION
+				)} @ ${convertToNumber(
+					nodeToFill.makerNode.order.price,
+					PRICE_PRECISION
+				)}`
+			);
+		} else {
+			logger.info(
+				`filling spot node\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
+					nodeToFill.node.order.orderId
+				} ${convertToNumber(
+					nodeToFill.node.order.baseAssetAmountFilled,
+					BASE_PRECISION
+				)}/${convertToNumber(
+					nodeToFill.node.order.baseAssetAmount,
+					BASE_PRECISION
+				)} @ ${convertToNumber(
+					nodeToFill.node.order.price,
+					PRICE_PRECISION
+				)}\nmaker: OpenBook`
+			);
 		}
 
 		let serumFulfillmentConfig: SerumV3FulfillmentConfigAccount = undefined;

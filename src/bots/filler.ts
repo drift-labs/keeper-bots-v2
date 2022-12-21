@@ -846,7 +846,6 @@ export class FillerBot implements Bot {
 		nodesFilled: Array<NodeToFill>,
 		logs: string[]
 	): number {
-		let _remove_nextIsFillRecord = false;
 		let inFillIx = false;
 		let errorThisFillIx = false;
 		let ixIdx = -1; // skip ComputeBudgetProgram
@@ -879,7 +878,6 @@ export class FillerBot implements Bot {
 
 			if (this.isIxLog(log)) {
 				if (this.isFillIxLog(log)) {
-					_remove_nextIsFillRecord = true;
 					inFillIx = true;
 					errorThisFillIx = false;
 					ixIdx++;
@@ -929,7 +927,6 @@ export class FillerBot implements Bot {
 						);
 					}
 				} else {
-					_remove_nextIsFillRecord = false;
 					inFillIx = false;
 				}
 				continue;
