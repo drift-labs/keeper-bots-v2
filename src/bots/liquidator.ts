@@ -942,8 +942,6 @@ export class LiquidatorBot implements Bot {
 		try {
 			await this.resyncUserMapsIfRequired();
 
-			// TODO: this
-
 			await this.userMapMutex.runExclusive(async () => {
 				for (const user of this.userMap.values()) {
 					const userAcc = user.getUserAccount();
@@ -1115,18 +1113,6 @@ export class LiquidatorBot implements Bot {
 								this.name
 							}]: user stuck in beingLiquidated status, clearing it for ${user.userAccountPublicKey.toBase58()}`
 						);
-						const colat = user.getTotalCollateral('Maintenance');
-						const maintMarg = user.getMaintenanceMarginRequirement(
-							new BN(
-								this.driftClient.getStateAccount().liquidationMarginBufferRatio
-							)
-						);
-						console.log(` . Colat: ${colat.toString()}`);
-						console.log(` . Maint: ${maintMarg.toString()}`);
-						console.log(` . can liq: ${colat.lt(maintMarg) ? 'yes' : 'no'}`);
-						console.log(` . canLiq: ${user.canBeLiquidated()}`);
-						console.log(` . beingLiq: ${user.isBeingLiquidated()}`);
-						// console.log(` . totalMaintLiability: ${user.getSpotLiabilityValue(('Maintenance').toString()}`);
 						this.driftClient.liquidatePerp(
 							user.userAccountPublicKey,
 							user.getUserAccount(),
@@ -1134,14 +1120,6 @@ export class LiquidatorBot implements Bot {
 							ZERO
 						);
 					}
-				} else if (isVariant(userAcc.status, 'beingLiquidated')) {
-					// no-op to clear user of beingLiquidated status
-					this.driftClient.liquidatePerp(
-						user.userAccountPublicKey,
-						user.getUserAccount(),
-						0,
-						ZERO
-					);
 				}
 			});
 			await this.derisk();
