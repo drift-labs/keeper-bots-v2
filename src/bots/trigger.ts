@@ -2,15 +2,14 @@ import {
 	DriftClient,
 	PerpMarketAccount,
 	SpotMarketAccount,
-	OrderRecord,
 	SlotSubscriber,
-	NewUserRecord,
 	DLOB,
 	NodeToTrigger,
 	UserMap,
 	MarketType,
 	BulkAccountLoader,
 	getOrderSignature,
+	User,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -21,7 +20,7 @@ import { Metrics } from '../metrics';
 import { webhookMessage } from '../webhook';
 
 const dlobMutexError = new Error('dlobMutex timeout');
-const USER_MAP_RESYNC_COOLDOWN_SLOTS = 200;
+const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
 export class TriggerBot implements Bot {
@@ -41,8 +40,10 @@ export class TriggerBot implements Bot {
 	private triggeringNodes = new Map<string, number>();
 	private periodicTaskMutex = new Mutex();
 	private intervalIds: Array<NodeJS.Timer> = [];
+	private userMapMutex = new Mutex();
 	private userMap: UserMap;
 	private metrics: Metrics | undefined;
+	private bootTimeMs = Date.now();
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -69,11 +70,13 @@ export class TriggerBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 		// initialize userMap instance
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
-		);
-		await this.userMap.fetchAllUsers();
+		await this.userMapMutex.runExclusive(async () => {
+			this.userMap = new UserMap(
+				this.driftClient,
+				this.driftClient.userAccountSubscriptionConfig
+			);
+			await this.userMap.fetchAllUsers();
+		});
 	}
 
 	public async reset() {}
@@ -103,13 +106,9 @@ export class TriggerBot implements Bot {
 	}
 
 	public async trigger(record: any): Promise<void> {
-		await this.userMap.updateWithEventRecord(record);
-		if (record.eventType === 'OrderRecord') {
-			await this.userMap.updateWithOrderRecord(record as OrderRecord);
-			this.tryTrigger();
-		} else if (record.eventType === 'NewUserRecord') {
-			await this.userMap.mustGet((record as NewUserRecord).user.toString());
-		}
+		await this.userMapMutex.runExclusive(async () => {
+			await this.userMap.updateWithEventRecord(record);
+		});
 	}
 
 	public viewDlob(): DLOB {
@@ -144,14 +143,13 @@ export class TriggerBot implements Bot {
 						}
 						return;
 					} else {
-						logger.info(`Resyncing UserMaps`);
 						doResync = true;
 						this.lastSlotResyncUserMaps = this.bulkAccountLoader.mostRecentSlot;
 					}
 				}
 
 				if (doResync) {
-					logger.warn(`Need to resync UserMaps, marking as unhealthy`);
+					logger.info(`Resyncing UserMap`);
 					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
@@ -159,11 +157,13 @@ export class TriggerBot implements Bot {
 					newUserMap
 						.fetchAllUsers()
 						.then(async () => {
-							for (const user of this.userMap.values()) {
-								await user.unsubscribe();
-							}
-							delete this.userMap;
-							this.userMap = newUserMap;
+							await this.userMapMutex.runExclusive(async () => {
+								for (const user of this.userMap.values()) {
+									await user.unsubscribe();
+								}
+								delete this.userMap;
+								this.userMap = newUserMap;
+							});
 						})
 						.finally(() => {
 							logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
@@ -221,9 +221,12 @@ export class TriggerBot implements Bot {
 					} (account: ${nodeToTrigger.node.userAccount.toString()}) perp order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
-				const user = await this.userMap.mustGet(
-					nodeToTrigger.node.userAccount.toString()
-				);
+				let user: User;
+				await this.userMapMutex.runExclusive(async () => {
+					user = await this.userMap.mustGet(
+						nodeToTrigger.node.userAccount.toString()
+					);
+				});
 				this.driftClient
 					.triggerOrder(
 						nodeToTrigger.node.userAccount,
@@ -306,9 +309,12 @@ export class TriggerBot implements Bot {
 					`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) spot order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
-				const user = await this.userMap.mustGet(
-					nodeToTrigger.node.userAccount.toString()
-				);
+				let user: User;
+				await this.userMapMutex.runExclusive(async () => {
+					user = await this.userMap.mustGet(
+						nodeToTrigger.node.userAccount.toString()
+					);
+				});
 				this.driftClient
 					.triggerOrder(
 						nodeToTrigger.node.userAccount,
@@ -377,7 +383,9 @@ export class TriggerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB();
-					await this.dlob.initFromUserMap(this.userMap);
+					await this.userMapMutex.runExclusive(async () => {
+						await this.dlob.initFromUserMap(this.userMap);
+					});
 				});
 
 				await this.resyncUserMapsIfRequired();

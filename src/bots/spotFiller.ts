@@ -21,6 +21,9 @@ import {
 	SpotMarkets,
 	BulkAccountLoader,
 	OrderRecord,
+	convertToNumber,
+	BASE_PRECISION,
+	PRICE_PRECISION,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -54,7 +57,7 @@ const THROTTLED_NODE_SIZE_TO_PRUNE = 10;
  * Time to wait before trying a node again
  */
 const FILL_ORDER_BACKOFF = 10000;
-const USER_MAP_RESYNC_COOLDOWN_SLOTS = 300;
+const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 
 const dlobMutexError = new Error('dlobMutex timeout');
 
@@ -88,6 +91,7 @@ export class SpotFillerBot implements Bot {
 	);
 	private dlob: DLOB;
 
+	private userMapMutex = new Mutex();
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
 
@@ -288,17 +292,21 @@ export class SpotFillerBot implements Bot {
 
 		const initPromises: Array<Promise<any>> = [];
 
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
-		);
-		initPromises.push(this.userMap.fetchAllUsers());
+		initPromises.push(
+			this.userMapMutex.runExclusive(async () => {
+				this.userMap = new UserMap(
+					this.driftClient,
+					this.driftClient.userAccountSubscriptionConfig
+				);
+				this.userStatsMap = new UserStatsMap(
+					this.driftClient,
+					this.driftClient.userAccountSubscriptionConfig
+				);
 
-		this.userStatsMap = new UserStatsMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
+				await this.userMap.fetchAllUsers();
+				await this.userStatsMap.fetchAllUserStats();
+			})
 		);
-		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
 		for (const spotMarketConfig of config.SPOT_MARKETS) {
@@ -363,8 +371,10 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public async trigger(record: any) {
-		await this.userMap.updateWithEventRecord(record);
-		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		await this.userMapMutex.runExclusive(async () => {
+			await this.userMap.updateWithEventRecord(record);
+			await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		});
 
 		if (record.eventType === 'OrderRecord') {
 			await this.trySpotFill(record as OrderRecord);
@@ -414,14 +424,13 @@ export class SpotFillerBot implements Bot {
 						}
 						return;
 					} else {
-						logger.info(`Resyncing UserMaps`);
 						doResync = true;
 						this.lastSlotResyncUserMaps = this.bulkAccountLoader.mostRecentSlot;
 					}
 				}
 
 				if (doResync) {
-					logger.warn(`Need to resync UserMaps, marking as unhealthy`);
+					logger.info(`Resyncing UserMap`);
 					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
@@ -434,16 +443,20 @@ export class SpotFillerBot implements Bot {
 						newUserStatsMap
 							.fetchAllUserStats()
 							.then(async () => {
-								for (const user of this.userMap.values()) {
-									await user.unsubscribe();
-								}
-								for (const user of this.userStatsMap.values()) {
-									await user.unsubscribe();
-								}
-								delete this.userMap;
-								delete this.userStatsMap;
-								this.userMap = newUserMap;
-								this.userStatsMap = newUserStatsMap;
+								await this.dlobMutex.runExclusive(async () => {
+									await this.userMapMutex.runExclusive(async () => {
+										for (const user of this.userMap.values()) {
+											await user.unsubscribe();
+										}
+										for (const user of this.userStatsMap.values()) {
+											await user.unsubscribe();
+										}
+										delete this.userMap;
+										delete this.userStatsMap;
+										this.userMap = newUserMap;
+										this.userStatsMap = newUserStatsMap;
+									});
+								});
 							})
 							.finally(() => {
 								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
@@ -500,30 +513,37 @@ export class SpotFillerBot implements Bot {
 		marketType: MarketType;
 	}> {
 		let makerInfo: MakerInfo | undefined;
-		if (nodeToFill.makerNode) {
-			const makerUserAccount = (
-				await this.userMap.mustGet(nodeToFill.makerNode.userAccount.toString())
-			).getUserAccount();
-			const makerAuthority = makerUserAccount.authority;
-			const makerUserStats = (
-				await this.userStatsMap.mustGet(makerAuthority.toString())
-			).userStatsAccountPublicKey;
-			makerInfo = {
-				maker: nodeToFill.makerNode.userAccount,
-				makerUserAccount: makerUserAccount,
-				order: nodeToFill.makerNode.order,
-				makerStats: makerUserStats,
-			};
-		}
+		let chUser: User;
+		let referrerInfo: ReferrerInfo;
 
-		const chUser = await this.userMap.mustGet(
-			nodeToFill.node.userAccount.toString()
-		);
-		const referrerInfo = (
-			await this.userStatsMap.mustGet(
-				chUser.getUserAccount().authority.toString()
-			)
-		).getReferrerInfo();
+		await tryAcquire(this.userMapMutex).runExclusive(async () => {
+			if (nodeToFill.makerNode) {
+				const makerUserAccount = (
+					await this.userMap.mustGet(
+						nodeToFill.makerNode.userAccount.toString()
+					)
+				).getUserAccount();
+				const makerAuthority = makerUserAccount.authority;
+				const makerUserStats = (
+					await this.userStatsMap.mustGet(makerAuthority.toString())
+				).userStatsAccountPublicKey;
+				makerInfo = {
+					maker: nodeToFill.makerNode.userAccount,
+					makerUserAccount: makerUserAccount,
+					order: nodeToFill.makerNode.order,
+					makerStats: makerUserStats,
+				};
+			}
+
+			chUser = await this.userMap.mustGet(
+				nodeToFill.node.userAccount.toString()
+			);
+			referrerInfo = (
+				await this.userStatsMap.mustGet(
+					chUser.getUserAccount().authority.toString()
+				)
+			).getReferrerInfo();
+		});
 
 		return Promise.resolve({
 			makerInfo,
@@ -569,6 +589,50 @@ export class SpotFillerBot implements Bot {
 
 		if (!isVariant(marketType, 'spot')) {
 			throw new Error('expected spot market type');
+		}
+
+		// TODO: confirm if order.baseAssetAmount can use BASE_PRECISION for spot order
+		if (nodeToFill.makerNode) {
+			logger.info(
+				`filling spot node:\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
+					nodeToFill.node.order.orderId
+				} ${convertToNumber(
+					nodeToFill.node.order.baseAssetAmountFilled,
+					BASE_PRECISION
+				)}/${convertToNumber(
+					nodeToFill.node.order.baseAssetAmount,
+					BASE_PRECISION
+				)} @ ${convertToNumber(
+					nodeToFill.node.order.price,
+					PRICE_PRECISION
+				)}\nmaker: ${nodeToFill.makerNode.userAccount.toBase58()}-${
+					nodeToFill.makerNode.order.orderId
+				} ${convertToNumber(
+					nodeToFill.makerNode.order.baseAssetAmountFilled,
+					BASE_PRECISION
+				)}/${convertToNumber(
+					nodeToFill.makerNode.order.baseAssetAmount,
+					BASE_PRECISION
+				)} @ ${convertToNumber(
+					nodeToFill.makerNode.order.price,
+					PRICE_PRECISION
+				)}`
+			);
+		} else {
+			logger.info(
+				`filling spot node\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
+					nodeToFill.node.order.orderId
+				} ${convertToNumber(
+					nodeToFill.node.order.baseAssetAmountFilled,
+					BASE_PRECISION
+				)}/${convertToNumber(
+					nodeToFill.node.order.baseAssetAmount,
+					BASE_PRECISION
+				)} @ ${convertToNumber(
+					nodeToFill.node.order.price,
+					PRICE_PRECISION
+				)}\nmaker: OpenBook`
+			);
 		}
 
 		let serumFulfillmentConfig: SerumV3FulfillmentConfigAccount = undefined;
@@ -619,15 +683,17 @@ export class SpotFillerBot implements Bot {
 		const startTime = Date.now();
 		let ran = false;
 
-		await tryAcquire(this.periodicTaskMutex)
-			.runExclusive(async () => {
+		try {
+			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
 					if (this.dlob) {
 						this.dlob.clear();
 						delete this.dlob;
 					}
 					this.dlob = new DLOB();
-					await this.dlob.initFromUserMap(this.userMap);
+					await tryAcquire(this.userMapMutex).runExclusive(async () => {
+						await this.dlob.initFromUserMap(this.userMap);
+					});
 					if (orderRecord) {
 						this.dlob.insertOrder(orderRecord.order, orderRecord.user);
 					}
@@ -667,46 +733,45 @@ export class SpotFillerBot implements Bot {
 				);
 
 				ran = true;
-			})
-			.catch((e) => {
-				if (e === E_ALREADY_LOCKED) {
-					const user = this.driftClient.getUser();
-					this.mutexBusyCounter.add(
-						1,
-						metricAttrFromUserAccount(
-							user.getUserAccountPublicKey(),
-							user.getUserAccount()
-						)
-					);
-				} else if (e === dlobMutexError) {
-					logger.error(`${this.name} dlobMutexError timeout`);
-				} else {
-					console.log('some other error...');
-					console.error(e);
-					webhookMessage(
-						`[${this.name}]: :x: error trying to run main loop:\n${
-							e.stack ? e.stack : e.message
-						}`
-					);
-				}
-			})
-			.finally(async () => {
-				if (ran) {
-					const duration = Date.now() - startTime;
-					const user = this.driftClient.getUser();
-					this.tryFillDurationHistogram.record(
-						duration,
-						metricAttrFromUserAccount(
-							user.getUserAccountPublicKey(),
-							user.getUserAccount()
-						)
-					);
-					logger.debug(`trySpotFill done, took ${duration}ms`);
-
-					await this.watchdogTimerMutex.runExclusive(async () => {
-						this.watchdogTimerLastPatTime = Date.now();
-					});
-				}
 			});
+		} catch (e) {
+			if (e === E_ALREADY_LOCKED) {
+				const user = this.driftClient.getUser();
+				this.mutexBusyCounter.add(
+					1,
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
+			} else if (e === dlobMutexError) {
+				logger.error(`${this.name} dlobMutexError timeout`);
+			} else {
+				console.log('some other error...');
+				console.error(e);
+				webhookMessage(
+					`[${this.name}]: :x: error trying to run main loop:\n${
+						e.stack ? e.stack : e.message
+					}`
+				);
+			}
+		} finally {
+			if (ran) {
+				const duration = Date.now() - startTime;
+				const user = this.driftClient.getUser();
+				this.tryFillDurationHistogram.record(
+					duration,
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
+				logger.debug(`trySpotFill done, took ${duration}ms`);
+
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
+			}
+		}
 	}
 }
