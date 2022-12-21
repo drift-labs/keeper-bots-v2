@@ -67,7 +67,7 @@ const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 5000; // the time to wait before trying to fill a throttled (error filling) node
 const FILL_ORDER_COOLDOWN_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
-const USER_MAP_RESYNC_COOLDOWN_SLOTS = 300;
+const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 const dlobMutexError = new Error('dlobMutex timeout');
 
 enum METRIC_TYPES {
@@ -102,6 +102,7 @@ export class FillerBot implements Bot {
 	);
 	private dlob: DLOB;
 
+	private userMapMutex = new Mutex();
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
 
@@ -339,21 +340,20 @@ export class FillerBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 
-		const initPromises: Array<Promise<any>> = [];
+		await this.userMapMutex.runExclusive(async () => {
+			this.userMap = new UserMap(
+				this.driftClient,
+				this.driftClient.userAccountSubscriptionConfig
+			);
+			this.userStatsMap = new UserStatsMap(
+				this.driftClient,
+				this.driftClient.userAccountSubscriptionConfig
+			);
 
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
-		);
-		initPromises.push(this.userMap.fetchAllUsers());
+			await this.userMap.fetchAllUsers();
+			await this.userStatsMap.fetchAllUserStats();
+		});
 
-		this.userStatsMap = new UserStatsMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
-		);
-		initPromises.push(this.userStatsMap.fetchAllUserStats());
-
-		await Promise.all(initPromises);
 		await webhookMessage(`[${this.name}]: started`);
 	}
 
@@ -384,8 +384,10 @@ export class FillerBot implements Bot {
 	}
 
 	public async trigger(record: WrappedEvent<any>) {
-		await this.userMap.updateWithEventRecord(record);
-		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		await this.userMapMutex.runExclusive(async () => {
+			await this.userMap.updateWithEventRecord(record);
+			await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		});
 		logger.info(`filler seen record: ${record.eventType}`);
 
 		if (record.eventType === 'OrderRecord') {
@@ -449,6 +451,7 @@ export class FillerBot implements Bot {
 				}
 
 				if (doResync) {
+					logger.info(`doing resync`);
 					const newUserMap = new UserMap(
 						this.driftClient,
 						this.driftClient.userAccountSubscriptionConfig
@@ -461,17 +464,19 @@ export class FillerBot implements Bot {
 						newUserStatsMap
 							.fetchAllUserStats()
 							.then(async () => {
-								for (const user of this.userMap.values()) {
-									await user.unsubscribe();
-								}
-								for (const user of this.userStatsMap.values()) {
-									await user.unsubscribe();
-								}
-								delete this.userMap;
-								delete this.userStatsMap;
+								await this.userMapMutex.runExclusive(async () => {
+									for (const user of this.userMap.values()) {
+										await user.unsubscribe();
+									}
+									for (const user of this.userStatsMap.values()) {
+										await user.unsubscribe();
+									}
+									delete this.userMap;
+									delete this.userStatsMap;
 
-								this.userMap = newUserMap;
-								this.userStatsMap = newUserStatsMap;
+									this.userMap = newUserMap;
+									this.userStatsMap = newUserStatsMap;
+								});
 							})
 							.finally(() => {
 								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
@@ -650,30 +655,36 @@ export class FillerBot implements Bot {
 		marketType: MarketType;
 	}> {
 		let makerInfo: MakerInfo | undefined;
-		if (nodeToFill.makerNode) {
-			const makerUserAccount = (
-				await this.userMap.mustGet(nodeToFill.makerNode.userAccount.toString())
-			).getUserAccount();
-			const makerAuthority = makerUserAccount.authority;
-			const makerUserStats = (
-				await this.userStatsMap.mustGet(makerAuthority.toString())
-			).userStatsAccountPublicKey;
-			makerInfo = {
-				maker: nodeToFill.makerNode.userAccount,
-				makerUserAccount: makerUserAccount,
-				order: nodeToFill.makerNode.order,
-				makerStats: makerUserStats,
-			};
-		}
+		let chUser: User;
+		let referrerInfo: ReferrerInfo;
+		await tryAcquire(this.userMapMutex).runExclusive(async () => {
+			if (nodeToFill.makerNode) {
+				const makerUserAccount = (
+					await this.userMap.mustGet(
+						nodeToFill.makerNode.userAccount.toString()
+					)
+				).getUserAccount();
+				const makerAuthority = makerUserAccount.authority;
+				const makerUserStats = (
+					await this.userStatsMap.mustGet(makerAuthority.toString())
+				).userStatsAccountPublicKey;
+				makerInfo = {
+					maker: nodeToFill.makerNode.userAccount,
+					makerUserAccount: makerUserAccount,
+					order: nodeToFill.makerNode.order,
+					makerStats: makerUserStats,
+				};
+			}
 
-		const chUser = await this.userMap.mustGet(
-			nodeToFill.node.userAccount.toString()
-		);
-		const referrerInfo = (
-			await this.userStatsMap.mustGet(
-				chUser.getUserAccount().authority.toString()
-			)
-		).getReferrerInfo();
+			chUser = await this.userMap.mustGet(
+				nodeToFill.node.userAccount.toString()
+			);
+			referrerInfo = (
+				await this.userStatsMap.mustGet(
+					chUser.getUserAccount().authority.toString()
+				)
+			).getReferrerInfo();
+		});
 
 		return Promise.resolve({
 			makerInfo,
@@ -1384,7 +1395,9 @@ export class FillerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB();
-					await this.dlob.initFromUserMap(this.userMap);
+					await tryAcquire(this.userMapMutex).runExclusive(async () => {
+						await this.dlob.initFromUserMap(this.userMap);
+					});
 					if (orderRecord) {
 						this.dlob.insertOrder(orderRecord.order, orderRecord.user);
 					}

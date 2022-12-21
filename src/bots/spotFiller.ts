@@ -88,6 +88,7 @@ export class SpotFillerBot implements Bot {
 	);
 	private dlob: DLOB;
 
+	private userMapMutex = new Mutex();
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
 
@@ -288,17 +289,21 @@ export class SpotFillerBot implements Bot {
 
 		const initPromises: Array<Promise<any>> = [];
 
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
-		);
-		initPromises.push(this.userMap.fetchAllUsers());
+		initPromises.push(
+			this.userMapMutex.runExclusive(async () => {
+				this.userMap = new UserMap(
+					this.driftClient,
+					this.driftClient.userAccountSubscriptionConfig
+				);
+				this.userStatsMap = new UserStatsMap(
+					this.driftClient,
+					this.driftClient.userAccountSubscriptionConfig
+				);
 
-		this.userStatsMap = new UserStatsMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
+				await this.userMap.fetchAllUsers();
+				await this.userStatsMap.fetchAllUserStats();
+			})
 		);
-		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
 		for (const spotMarketConfig of config.SPOT_MARKETS) {
@@ -363,8 +368,10 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public async trigger(record: any) {
-		await this.userMap.updateWithEventRecord(record);
-		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		await this.userMapMutex.runExclusive(async () => {
+			await this.userMap.updateWithEventRecord(record);
+			await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		});
 
 		if (record.eventType === 'OrderRecord') {
 			await this.trySpotFill(record as OrderRecord);
@@ -434,16 +441,20 @@ export class SpotFillerBot implements Bot {
 						newUserStatsMap
 							.fetchAllUserStats()
 							.then(async () => {
-								for (const user of this.userMap.values()) {
-									await user.unsubscribe();
-								}
-								for (const user of this.userStatsMap.values()) {
-									await user.unsubscribe();
-								}
-								delete this.userMap;
-								delete this.userStatsMap;
-								this.userMap = newUserMap;
-								this.userStatsMap = newUserStatsMap;
+								await this.dlobMutex.runExclusive(async () => {
+									await this.userMapMutex.runExclusive(async () => {
+										for (const user of this.userMap.values()) {
+											await user.unsubscribe();
+										}
+										for (const user of this.userStatsMap.values()) {
+											await user.unsubscribe();
+										}
+										delete this.userMap;
+										delete this.userStatsMap;
+										this.userMap = newUserMap;
+										this.userStatsMap = newUserStatsMap;
+									});
+								});
 							})
 							.finally(() => {
 								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
@@ -500,30 +511,37 @@ export class SpotFillerBot implements Bot {
 		marketType: MarketType;
 	}> {
 		let makerInfo: MakerInfo | undefined;
-		if (nodeToFill.makerNode) {
-			const makerUserAccount = (
-				await this.userMap.mustGet(nodeToFill.makerNode.userAccount.toString())
-			).getUserAccount();
-			const makerAuthority = makerUserAccount.authority;
-			const makerUserStats = (
-				await this.userStatsMap.mustGet(makerAuthority.toString())
-			).userStatsAccountPublicKey;
-			makerInfo = {
-				maker: nodeToFill.makerNode.userAccount,
-				makerUserAccount: makerUserAccount,
-				order: nodeToFill.makerNode.order,
-				makerStats: makerUserStats,
-			};
-		}
+		let chUser: User;
+		let referrerInfo: ReferrerInfo;
 
-		const chUser = await this.userMap.mustGet(
-			nodeToFill.node.userAccount.toString()
-		);
-		const referrerInfo = (
-			await this.userStatsMap.mustGet(
-				chUser.getUserAccount().authority.toString()
-			)
-		).getReferrerInfo();
+		await tryAcquire(this.userMapMutex).runExclusive(async () => {
+			if (nodeToFill.makerNode) {
+				const makerUserAccount = (
+					await this.userMap.mustGet(
+						nodeToFill.makerNode.userAccount.toString()
+					)
+				).getUserAccount();
+				const makerAuthority = makerUserAccount.authority;
+				const makerUserStats = (
+					await this.userStatsMap.mustGet(makerAuthority.toString())
+				).userStatsAccountPublicKey;
+				makerInfo = {
+					maker: nodeToFill.makerNode.userAccount,
+					makerUserAccount: makerUserAccount,
+					order: nodeToFill.makerNode.order,
+					makerStats: makerUserStats,
+				};
+			}
+
+			chUser = await this.userMap.mustGet(
+				nodeToFill.node.userAccount.toString()
+			);
+			referrerInfo = (
+				await this.userStatsMap.mustGet(
+					chUser.getUserAccount().authority.toString()
+				)
+			).getReferrerInfo();
+		});
 
 		return Promise.resolve({
 			makerInfo,
@@ -627,7 +645,9 @@ export class SpotFillerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB();
-					await this.dlob.initFromUserMap(this.userMap);
+					await tryAcquire(this.userMapMutex).runExclusive(async () => {
+						await this.dlob.initFromUserMap(this.userMap);
+					});
 					if (orderRecord) {
 						this.dlob.insertOrder(orderRecord.order, orderRecord.user);
 					}
