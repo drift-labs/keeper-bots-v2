@@ -65,7 +65,7 @@ const CU_PER_FILL = 200_000; // CU cost for a successful fill
 const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
-const FILL_ORDER_THROTTLE_BACKOFF = 5000; // the time to wait before trying to fill a throttled (error filling) node
+const FILL_ORDER_THROTTLE_BACKOFF = 10000; // the time to wait before trying to fill a throttled (error filling) node again
 const FILL_ORDER_COOLDOWN_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 const dlobMutexError = new Error('dlobMutex timeout');
@@ -842,10 +842,10 @@ export class FillerBot implements Bot {
 	 *
 	 * @returns number of nodes successfully filled
 	 */
-	private handleTransactionLogs(
+	private async handleTransactionLogs(
 		nodesFilled: Array<NodeToFill>,
 		logs: string[]
-	): number {
+	): Promise<number> {
 		let inFillIx = false;
 		let errorThisFillIx = false;
 		let ixIdx = -1; // skip ComputeBudgetProgram
@@ -1046,10 +1046,21 @@ export class FillerBot implements Bot {
 				logger.error(
 					`taker breach maint. margin, assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount.toString()}, ${
 						filledNode.node.order.orderId
-					}; (throttling ${takerNodeSignature}); ${log}`
+					}; (throttling ${takerNodeSignature} and force cancelling orders); ${log}`
 				);
 				this.throttledNodes.set(takerNodeSignature, Date.now());
 				errorThisFillIx = true;
+
+				const txSig = await this.driftClient.forceCancelOrders(
+					filledNode.node.userAccount,
+					(
+						await this.userMap.mustGet(filledNode.node.userAccount.toString())
+					).getUserAccount()
+				);
+				logger.info(
+					`Force cancelled orders for user ${filledNode.node.userAccount.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
+				);
+
 				continue;
 			}
 
@@ -1355,14 +1366,14 @@ export class FillerBot implements Bot {
 						);
 					});
 			})
-			.catch((e) => {
+			.catch(async (e) => {
 				console.error(e);
 				logger.error(`Failed to send packed tx (error above):`);
 				const simError = e as SendTransactionError;
 				if (simError.logs && simError.logs.length > 0) {
 					this.txSimErrorCounter.add(1);
 					const start = Date.now();
-					this.handleTransactionLogs(nodesSent, simError.logs);
+					await this.handleTransactionLogs(nodesSent, simError.logs);
 					logger.error(
 						`Failed to send tx, sim error tx logs took: ${Date.now() - start}ms`
 					);
