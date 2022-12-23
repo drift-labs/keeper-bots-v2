@@ -371,12 +371,24 @@ export class FillerBot implements Bot {
 		await this.watchdogTimerMutex.runExclusive(async () => {
 			healthy =
 				this.watchdogTimerLastPatTime > Date.now() - 5 * this.defaultIntervalMs;
+			if (!healthy) {
+				logger.warn(
+					`watchdog timer last pat time ${this.watchdogTimerLastPatTime} is too old`
+				);
+			}
 		});
 
 		const stateAccount = this.driftClient.getStateAccount();
 		const userMapResyncRequired =
 			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber() ||
 			this.userStatsMap.size() !== stateAccount.numberOfAuthorities.toNumber();
+		if (userMapResyncRequired) {
+			logger.warn(
+				`${
+					this.name
+				} user map resync required, userMap size: ${this.userMap.size()}, stateAccount.numberOfSubAccounts: ${stateAccount.numberOfSubAccounts.toNumber()}, userStatsMap size: ${this.userStatsMap.size()}, stateAccount.numberOfAuthorities: ${stateAccount.numberOfAuthorities.toNumber()}`
+			);
+		}
 
 		healthy = healthy && !userMapResyncRequired;
 

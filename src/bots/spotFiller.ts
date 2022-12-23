@@ -358,6 +358,9 @@ export class SpotFillerBot implements Bot {
 		await this.watchdogTimerMutex.runExclusive(async () => {
 			healthy =
 				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+			if (!healthy) {
+				logger.warn(`${this.name} watchdog timer expired`);
+			}
 		});
 
 		const stateAccount = this.driftClient.getStateAccount();
@@ -365,6 +368,13 @@ export class SpotFillerBot implements Bot {
 			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber() ||
 			this.userStatsMap.size() !== stateAccount.numberOfAuthorities.toNumber();
 
+		if (userMapResyncRequired) {
+			logger.warn(
+				`${
+					this.name
+				} user map resync required, userMap size: ${this.userMap.size()}, stateAccount.numberOfSubAccounts: ${stateAccount.numberOfSubAccounts.toNumber()}, userStatsMap size: ${this.userStatsMap.size()}, stateAccount.numberOfAuthorities: ${stateAccount.numberOfAuthorities.toNumber()}`
+			);
+		}
 		healthy = healthy && !userMapResyncRequired;
 
 		return healthy;
@@ -443,19 +453,17 @@ export class SpotFillerBot implements Bot {
 						newUserStatsMap
 							.fetchAllUserStats()
 							.then(async () => {
-								await this.dlobMutex.runExclusive(async () => {
-									await this.userMapMutex.runExclusive(async () => {
-										for (const user of this.userMap.values()) {
-											await user.unsubscribe();
-										}
-										for (const user of this.userStatsMap.values()) {
-											await user.unsubscribe();
-										}
-										delete this.userMap;
-										delete this.userStatsMap;
-										this.userMap = newUserMap;
-										this.userStatsMap = newUserStatsMap;
-									});
+								await this.userMapMutex.runExclusive(async () => {
+									for (const user of this.userMap.values()) {
+										await user.unsubscribe();
+									}
+									for (const user of this.userStatsMap.values()) {
+										await user.unsubscribe();
+									}
+									delete this.userMap;
+									delete this.userStatsMap;
+									this.userMap = newUserMap;
+									this.userStatsMap = newUserStatsMap;
 								});
 							})
 							.finally(() => {
