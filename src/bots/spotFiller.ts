@@ -369,7 +369,11 @@ export class SpotFillerBot implements Bot {
 			this.userStatsMap.size() !== stateAccount.numberOfAuthorities.toNumber();
 
 		if (userMapResyncRequired) {
-			logger.warn(`${this.name} user map resync required`);
+			logger.warn(
+				`${
+					this.name
+				} user map resync required, userMap size: ${this.userMap.size()}, stateAccount.numberOfSubAccounts: ${stateAccount.numberOfSubAccounts.toNumber()}, userStatsMap size: ${this.userStatsMap.size()}, stateAccount.numberOfAuthorities: ${stateAccount.numberOfAuthorities.toNumber()}`
+			);
 		}
 		healthy = healthy && !userMapResyncRequired;
 
@@ -449,19 +453,17 @@ export class SpotFillerBot implements Bot {
 						newUserStatsMap
 							.fetchAllUserStats()
 							.then(async () => {
-								await this.dlobMutex.runExclusive(async () => {
-									await this.userMapMutex.runExclusive(async () => {
-										for (const user of this.userMap.values()) {
-											await user.unsubscribe();
-										}
-										for (const user of this.userStatsMap.values()) {
-											await user.unsubscribe();
-										}
-										delete this.userMap;
-										delete this.userStatsMap;
-										this.userMap = newUserMap;
-										this.userStatsMap = newUserStatsMap;
-									});
+								await this.userMapMutex.runExclusive(async () => {
+									for (const user of this.userMap.values()) {
+										await user.unsubscribe();
+									}
+									for (const user of this.userStatsMap.values()) {
+										await user.unsubscribe();
+									}
+									delete this.userMap;
+									delete this.userStatsMap;
+									this.userMap = newUserMap;
+									this.userStatsMap = newUserStatsMap;
 								});
 							})
 							.finally(() => {
