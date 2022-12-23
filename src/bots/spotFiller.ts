@@ -358,6 +358,9 @@ export class SpotFillerBot implements Bot {
 		await this.watchdogTimerMutex.runExclusive(async () => {
 			healthy =
 				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+			if (!healthy) {
+				logger.warn(`${this.name} watchdog timer expired`);
+			}
 		});
 
 		const stateAccount = this.driftClient.getStateAccount();
@@ -365,6 +368,9 @@ export class SpotFillerBot implements Bot {
 			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber() ||
 			this.userStatsMap.size() !== stateAccount.numberOfAuthorities.toNumber();
 
+		if (userMapResyncRequired) {
+			logger.warn(`${this.name} user map resync required`);
+		}
 		healthy = healthy && !userMapResyncRequired;
 
 		return healthy;
