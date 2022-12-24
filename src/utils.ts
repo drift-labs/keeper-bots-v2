@@ -4,7 +4,12 @@ import {
 	TOKEN_PROGRAM_ID,
 	ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
-import { Connection, PublicKey, Transaction } from '@solana/web3.js';
+import {
+	Connection,
+	PublicKey,
+	Transaction,
+	GetTransactionConfig,
+} from '@solana/web3.js';
 
 // devnet only
 export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
@@ -36,7 +41,15 @@ export async function getOrCreateAssociatedTokenAccount(
 			)
 		);
 		const txSig = await connection.sendTransaction(tx, [wallet.payer]);
-		await connection.confirmTransaction(txSig, 'confirmed');
+		const latestBlock = await connection.getLatestBlockhash();
+		await connection.confirmTransaction(
+			{
+				signature: txSig,
+				blockhash: latestBlock.blockhash,
+				lastValidBlockHeight: latestBlock.lastValidBlockHeight,
+			},
+			'confirmed'
+		);
 	}
 
 	return associatedTokenAccount;
