@@ -28,6 +28,7 @@ import {
 	WrappedEvent,
 	PositionDirection,
 	BulkAccountLoader,
+	Wallet
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -49,6 +50,14 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
+
+import {
+	flashRepayReserveLiquidityInstruction,
+	flashBorrowReserveLiquidityInstruction,
+	SOLEND_PRODUCTION_PROGRAM_ID,
+	SolendMarket
+} from '@solendprotocol/solend-sdk';
+import { PublicKey, Transaction } from '@solana/web3.js';
 
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 
@@ -226,14 +235,37 @@ async function liqPerpPnl(
 		}
 	} else {
 		const start = Date.now();
-		driftClient
-			.liquidatePerpPnlForDeposit(
+		let reserve = this.market.reserves.find(
+			(res) => res.config.liquidityToken.symbol === "USDC"
+		); 
+		await (driftClient.txSender.send(new Transaction()
+		// this probably works
+		.add(flashBorrowReserveLiquidityInstruction(
+			depositAmountToLiq,
+			new PublicKey(reserve.config.liquidityAddress),
+			this.driftClient.getUser().getAssociatedTokenAddress(),
+			new PublicKey(reserve.config.address),
+			new PublicKey(this.market.config.address),
+			SOLEND_PRODUCTION_PROGRAM_ID
+		)).add( await driftClient
+			.getLiquidatePerpPnlForDepositIx(
 				user.userAccountPublicKey,
 				user.getUserAccount(),
 				liquidateePosition.marketIndex,
 				depositMarketIndextoLiq,
 				depositAmountToLiq
-			)
+			)).add(flashRepayReserveLiquidityInstruction(
+				depositAmountToLiq,
+				0,
+				this.driftClient.getUser().getAssociatedTokenAddress(),
+				new PublicKey(reserve.config.liquidityAddress),
+				new PublicKey(reserve.config.liquidityFeeReceiverAddress),
+				this.driftClient.getUser().getAssociatedTokenAddress(),
+				new PublicKey(reserve.config.address),
+				new PublicKey(this.market.config.address),
+				this.driftClient.getUserAccountPublicKey(),
+				SOLEND_PRODUCTION_PROGRAM_ID
+			))))
 			.then((tx) => {
 				logger.info(
 					`did liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
@@ -295,6 +327,7 @@ enum METRIC_TYPES {
  * The bot will immediately market sell any of its open positions if SELL_OPEN_POSITIONS is true.
  */
 export class LiquidatorBot implements Bot {
+	private market: SolendMarket;
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 5000;
@@ -473,6 +506,11 @@ export class LiquidatorBot implements Bot {
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
+		this.market = await SolendMarket.initialize(
+			this.driftClient.connection,
+			"production", 
+			"7RCz8wb6WXxUhAigok9ttgrVgDFFFbibcirECzWSBauM"// this is much more lucrative on a flashloan protocol with cheaper flashloans, like risk.lol or whatever successor
+		);
 		this.tryLiquidate();
 		const intervalId = setInterval(this.tryLiquidate.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);

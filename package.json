@@ -13,6 +13,7 @@
 		"@project-serum/anchor": "^0.19.1-beta.1",
 		"@project-serum/serum": "^0.13.65",
 		"@solana/web3.js": "^1.22.0",
+		"@solendprotocol/solend-sdk": "^0.6.9",
 		"@types/bn.js": "^5.1.0",
 		"async": "^3.2.2",
 		"async-mutex": "0.3.2",
@@ -43,7 +44,7 @@
 		"dev:filler": "ts-node src/index.ts --filler --metrics 9464",
 		"dev:trigger": "ts-node src/index.ts --trigger --metrics 9464",
 		"dev:jitmaker": "ts-node src/index.ts --jit-maker --metrics 9464",
-		"dev:liquidator": "ts-node src/index.ts --liquidator --metrics 9464",
+		"dev:liquidator": "ts-node src/index.ts --liquidator --metrics 9465",
 		"dev:pnlsettler": "ts-node src/index.ts --user-pnl-settler --metrics 9464",
 		"prettify": "prettier --check './src/**/*.ts'",
 		"prettify:fix": "prettier --write './src/**/*.ts'",
@@ -51,4 +52,3 @@
 		"lint:fix": "eslint . --ext ts --fix"
 	}
 }
-
