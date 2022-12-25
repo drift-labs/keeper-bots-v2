@@ -28,7 +28,6 @@ import {
 	WrappedEvent,
 	PositionDirection,
 	BulkAccountLoader,
-	Wallet
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -55,7 +54,7 @@ import {
 	flashRepayReserveLiquidityInstruction,
 	flashBorrowReserveLiquidityInstruction,
 	SOLEND_PRODUCTION_PROGRAM_ID,
-	SolendMarket
+	SolendMarket,
 } from '@solendprotocol/solend-sdk';
 import { PublicKey, Transaction } from '@solana/web3.js';
 
@@ -235,37 +234,48 @@ async function liqPerpPnl(
 		}
 	} else {
 		const start = Date.now();
-		let reserve = this.market.reserves.find(
-			(res) => res.config.liquidityToken.symbol === "USDC"
-		); 
-		await (driftClient.txSender.send(new Transaction()
-		// this probably works
-		.add(flashBorrowReserveLiquidityInstruction(
-			depositAmountToLiq,
-			new PublicKey(reserve.config.liquidityAddress),
-			this.driftClient.getUser().getAssociatedTokenAddress(),
-			new PublicKey(reserve.config.address),
-			new PublicKey(this.market.config.address),
-			SOLEND_PRODUCTION_PROGRAM_ID
-		)).add( await driftClient
-			.getLiquidatePerpPnlForDepositIx(
-				user.userAccountPublicKey,
-				user.getUserAccount(),
-				liquidateePosition.marketIndex,
-				depositMarketIndextoLiq,
-				depositAmountToLiq
-			)).add(flashRepayReserveLiquidityInstruction(
-				depositAmountToLiq,
-				0,
-				this.driftClient.getUser().getAssociatedTokenAddress(),
-				new PublicKey(reserve.config.liquidityAddress),
-				new PublicKey(reserve.config.liquidityFeeReceiverAddress),
-				this.driftClient.getUser().getAssociatedTokenAddress(),
-				new PublicKey(reserve.config.address),
-				new PublicKey(this.market.config.address),
-				this.driftClient.getUserAccountPublicKey(),
-				SOLEND_PRODUCTION_PROGRAM_ID
-			))))
+		const reserve = this.market.reserves.find(
+			(res) => res.config.liquidityToken.symbol === 'USDC'
+		);
+		await driftClient.txSender
+			.send(
+				new Transaction()
+					// this probably works
+					// and now; magik
+					.add(
+						flashBorrowReserveLiquidityInstruction(
+							depositAmountToLiq,
+							new PublicKey(reserve.config.liquidityAddress),
+							this.driftClient.getUser().getAssociatedTokenAddress(),
+							new PublicKey(reserve.config.address),
+							new PublicKey(this.market.config.address),
+							SOLEND_PRODUCTION_PROGRAM_ID
+						)
+					)
+					.add(
+						await driftClient.getLiquidatePerpPnlForDepositIx(
+							user.userAccountPublicKey,
+							user.getUserAccount(),
+							liquidateePosition.marketIndex,
+							depositMarketIndextoLiq,
+							depositAmountToLiq
+						)
+					)
+					.add(
+						flashRepayReserveLiquidityInstruction(
+							depositAmountToLiq,
+							0,
+							this.driftClient.getUser().getAssociatedTokenAddress(),
+							new PublicKey(reserve.config.liquidityAddress),
+							new PublicKey(reserve.config.liquidityFeeReceiverAddress),
+							this.driftClient.getUser().getAssociatedTokenAddress(),
+							new PublicKey(reserve.config.address),
+							new PublicKey(this.market.config.address),
+							this.driftClient.getUserAccountPublicKey(),
+							SOLEND_PRODUCTION_PROGRAM_ID
+						)
+					)
+			)
 			.then((tx) => {
 				logger.info(
 					`did liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
@@ -365,7 +375,7 @@ export class LiquidatorBot implements Bot {
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
 	 */
-	private MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL = new BN(50);
+	private MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL = new BN(50000000000); //prepare for magik
 	private MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM = new BN(100);
 
 	/**
@@ -508,8 +518,8 @@ export class LiquidatorBot implements Bot {
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		this.market = await SolendMarket.initialize(
 			this.driftClient.connection,
-			"production", 
-			"7RCz8wb6WXxUhAigok9ttgrVgDFFFbibcirECzWSBauM"// this is much more lucrative on a flashloan protocol with cheaper flashloans, like risk.lol or whatever successor
+			'production',
+			'7RCz8wb6WXxUhAigok9ttgrVgDFFFbibcirECzWSBauM' // this is much more lucrative on a flashloan protocol with cheaper flashloans, like risk.lol or whatever successor
 		);
 		this.tryLiquidate();
 		const intervalId = setInterval(this.tryLiquidate.bind(this), intervalMs);
