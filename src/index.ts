@@ -28,6 +28,7 @@ import {
 	BASE_PRECISION,
 	getSignedTokenAmount,
 	TokenFaucet,
+	DriftClientSubscriptionConfig,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -95,6 +96,10 @@ program
 	.option(
 		'--run-once',
 		'Exit after running bot loops once (only for supported bots)'
+	)
+	.option(
+		'--websocket',
+		'Use websocket instead of RPC polling for account updates'
 	)
 	.parse();
 
@@ -246,15 +251,25 @@ const runBot = async () => {
 
 	const connection = new Connection(endpoint, stateCommitment);
 
-	const bulkAccountLoader = new BulkAccountLoader(
-		connection,
-		stateCommitment,
-		1000
-	);
-	let lastBulkAccountLoaderSlot = bulkAccountLoader.mostRecentSlot;
+	let bulkAccountLoader: BulkAccountLoader | undefined;
+	let lastBulkAccountLoaderSlot: number | undefined;
+	let accountSubscription: DriftClientSubscriptionConfig = {
+		type: 'websocket',
+	};
 
-	// const bulkAccountLoader = undefined;
-	// let lastBulkAccountLoaderSlot = undefined;
+	if (!opts.websocket) {
+		bulkAccountLoader = new BulkAccountLoader(
+			connection,
+			stateCommitment,
+			1000
+		);
+		lastBulkAccountLoaderSlot = bulkAccountLoader.mostRecentSlot;
+		accountSubscription = {
+			type: 'polling',
+			accountLoader: bulkAccountLoader,
+		};
+	}
+
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
@@ -264,11 +279,7 @@ const runBot = async () => {
 		oracleInfos: PerpMarkets[driftEnv].map((mkt) => {
 			return { publicKey: mkt.oracle, source: mkt.oracleSource };
 		}),
-		accountSubscription: {
-			// type: 'websocket'
-			type: 'polling',
-			accountLoader: bulkAccountLoader,
-		},
+		accountSubscription,
 		env: driftEnv,
 		userStats: true,
 	});

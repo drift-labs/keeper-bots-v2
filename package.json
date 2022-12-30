@@ -39,7 +39,7 @@
 		"clean": "rm -rf lib",
 		"start": "node lib/index.js",
 		"dev": "ts-node src/index.ts",
-		"dev:inspect": "yarn build && node --inspect ./lib/index.js",
+		"dev:inspect": "node --inspect-brk --require ts-node/register",
 		"dev:filler": "ts-node src/index.ts --filler --metrics 9464",
 		"dev:trigger": "ts-node src/index.ts --trigger --metrics 9464",
 		"dev:jitmaker": "ts-node src/index.ts --jit-maker --metrics 9464",
@@ -51,4 +51,3 @@
 		"lint:fix": "eslint . --ext ts --fix"
 	}
 }
-

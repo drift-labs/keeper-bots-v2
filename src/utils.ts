@@ -4,12 +4,7 @@ import {
 	TOKEN_PROGRAM_ID,
 	ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
-import {
-	Connection,
-	PublicKey,
-	Transaction,
-	GetTransactionConfig,
-} from '@solana/web3.js';
+import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 
 // devnet only
 export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(

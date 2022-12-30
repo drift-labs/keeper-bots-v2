@@ -79,7 +79,7 @@ enum METRIC_TYPES {
 export class SpotFillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 1000;
+	public readonly defaultIntervalMs: number = 2000;
 
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
@@ -136,6 +136,11 @@ export class SpotFillerBot implements Bot {
 		runtimeSpec: RuntimeSpec,
 		metricsPort?: number | undefined
 	) {
+		if (!bulkAccountLoader) {
+			throw new Error(
+				'SpotFiller only works in polling mode (cannot run with --websocket flag) bulkAccountLoader is required'
+			);
+		}
 		this.name = name;
 		this.dryRun = dryRun;
 		this.bulkAccountLoader = bulkAccountLoader;
@@ -357,7 +362,7 @@ export class SpotFillerBot implements Bot {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
 			healthy =
-				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+				this.watchdogTimerLastPatTime > Date.now() - 5 * this.defaultIntervalMs;
 			if (!healthy) {
 				logger.warn(`${this.name} watchdog timer expired`);
 			}
@@ -674,8 +679,8 @@ export class SpotFillerBot implements Bot {
 				});
 			})
 			.catch((e) => {
+				logger.error(`Failed to fill spot order:`);
 				console.error(e);
-				logger.error(`Failed to fill spot order`);
 				webhookMessage(
 					`[${this.name}]: :x: error trying to fill spot orders:\n${
 						e.logs ? (e.logs as Array<string>).join('\n') : ''
@@ -755,7 +760,7 @@ export class SpotFillerBot implements Bot {
 			} else if (e === dlobMutexError) {
 				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
-				console.log('some other error...');
+				logger.error('some other error:');
 				console.error(e);
 				webhookMessage(
 					`[${this.name}]: :x: error trying to run main loop:\n${
