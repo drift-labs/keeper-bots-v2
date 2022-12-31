@@ -261,7 +261,7 @@ const runBot = async () => {
 		bulkAccountLoader = new BulkAccountLoader(
 			connection,
 			stateCommitment,
-			1000
+			2000
 		);
 		lastBulkAccountLoaderSlot = bulkAccountLoader.mostRecentSlot;
 		accountSubscription = {
@@ -609,6 +609,17 @@ const runBot = async () => {
 						return;
 					}
 				}
+
+				if (opts.websocket) {
+					/* @ts-ignore */
+					if (!driftClient.connection._rpcWebSocketConnected) {
+						logger.error(`Connection rpc websocket disconnected`);
+						res.writeHead(500);
+						res.end(`Connection rpc websocket disconnected`);
+						return;
+					}
+				}
+
 				// check if a slot was received recently
 				let healthySlotSubscriber = false;
 				await lastSlotReceivedMutex.runExclusive(async () => {

@@ -89,7 +89,7 @@ enum METRIC_TYPES {
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 2000;
+	public readonly defaultIntervalMs: number = 3000;
 
 	private slotSubscriber: SlotSubscriber;
 	private bulkAccountLoader: BulkAccountLoader | undefined;
@@ -400,7 +400,9 @@ export class FillerBot implements Bot {
 			await this.userMap.updateWithEventRecord(record);
 			await this.userStatsMap.updateWithEventRecord(record, this.userMap);
 		});
-		logger.info(`filler seen record: ${record.eventType}`);
+		logger.info(
+			`filler seen record (slot: ${record.slot}): ${record.eventType}`
+		);
 
 		if (record.eventType === 'OrderRecord') {
 			await this.tryFill(record as OrderRecord);
