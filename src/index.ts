@@ -29,6 +29,7 @@ import {
 	getSignedTokenAmount,
 	TokenFaucet,
 	DriftClientSubscriptionConfig,
+	LogProviderConfig,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -256,6 +257,9 @@ const runBot = async () => {
 	let accountSubscription: DriftClientSubscriptionConfig = {
 		type: 'websocket',
 	};
+	let logProviderConfig: LogProviderConfig = {
+		type: 'websocket',
+	};
 
 	if (!opts.websocket) {
 		bulkAccountLoader = new BulkAccountLoader(
@@ -267,6 +271,11 @@ const runBot = async () => {
 		accountSubscription = {
 			type: 'polling',
 			accountLoader: bulkAccountLoader,
+		};
+
+		logProviderConfig = {
+			type: 'polling',
+			frequency: 1000,
 		};
 	}
 
@@ -290,11 +299,7 @@ const runBot = async () => {
 		orderBy: 'blockchain',
 		orderDir: 'desc',
 		commitment: stateCommitment,
-		logProviderConfig: {
-			type: 'polling',
-			frequency: 1000,
-			// type: 'websocket',
-		},
+		logProviderConfig,
 	});
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
