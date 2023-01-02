@@ -29,7 +29,13 @@ import {
 	OrderRecord,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
-import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
+import {
+	Mutex,
+	tryAcquire,
+	withTimeout,
+	E_ALREADY_LOCKED,
+	MutexInterface,
+} from 'async-mutex';
 
 import {
 	SendTransactionError,
@@ -89,17 +95,14 @@ enum METRIC_TYPES {
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 6000;
+	public readonly defaultIntervalMs: number = 5000;
 
 	private slotSubscriber: SlotSubscriber;
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
+	private pollingIntervalMs: number;
 
-	private dlobMutex = withTimeout(
-		new Mutex(),
-		10 * this.defaultIntervalMs,
-		dlobMutexError
-	);
+	private dlobMutex: MutexInterface;
 	private dlob: DLOB;
 
 	private userMapMutex = new Mutex();
@@ -149,7 +152,8 @@ export class FillerBot implements Bot {
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
-		metricsPort?: number | undefined
+		pollingIntervalMs?: number,
+		metricsPort?: number
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
@@ -157,6 +161,15 @@ export class FillerBot implements Bot {
 		this.bulkAccountLoader = bulkAccountLoader;
 		this.driftClient = driftClient;
 		this.runtimeSpec = runtimeSpec;
+		if (!pollingIntervalMs) {
+			pollingIntervalMs = this.defaultIntervalMs;
+		}
+		this.pollingIntervalMs = pollingIntervalMs;
+		this.dlobMutex = withTimeout(
+			new Mutex(),
+			10 * this.pollingIntervalMs,
+			dlobMutexError
+		);
 
 		this.metricsPort = metricsPort;
 		if (this.metricsPort) {
@@ -359,8 +372,11 @@ export class FillerBot implements Bot {
 
 	public async reset() {}
 
-	public async startIntervalLoop(intervalMs: number) {
-		const intervalId = setInterval(this.tryFill.bind(this), intervalMs);
+	public async startIntervalLoop(_intervalMs: number) {
+		const intervalId = setInterval(
+			this.tryFill.bind(this),
+			this.pollingIntervalMs
+		);
 		this.intervalIds.push(intervalId);
 
 		logger.info(`${this.name} Bot started!`);
@@ -370,7 +386,7 @@ export class FillerBot implements Bot {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
 			healthy =
-				this.watchdogTimerLastPatTime > Date.now() - 5 * this.defaultIntervalMs;
+				this.watchdogTimerLastPatTime > Date.now() - 5 * this.pollingIntervalMs;
 			if (!healthy) {
 				logger.warn(
 					`watchdog timer last pat time ${this.watchdogTimerLastPatTime} is too old`

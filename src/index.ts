@@ -74,6 +74,11 @@ const eventSubscriberPollingInterval = process.env
 	? parseInt(process.env.EVENT_SUBSCRIBER_POLLING_INTERVAL)
 	: 5000;
 
+// TODO: do these bot specific configs better
+const fillerPollingInterval = process.env.FILLER_POLLING_INTERVAL
+	? parseInt(process.env.FILLER_POLLING_INTERVAL)
+	: 6000;
+
 program
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
 	.option(
@@ -508,7 +513,8 @@ const runBot = async () => {
 					driftPid: clearingHousePublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				parseInt(metricsPort)
+				parseInt(metricsPort),
+				fillerPollingInterval
 			)
 		);
 	}
@@ -526,7 +532,8 @@ const runBot = async () => {
 					driftPid: clearingHousePublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				parseInt(metricsPort)
+				parseInt(metricsPort),
+				fillerPollingInterval
 			)
 		);
 	}

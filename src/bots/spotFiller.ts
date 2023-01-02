@@ -25,7 +25,13 @@ import {
 	BASE_PRECISION,
 	PRICE_PRECISION,
 } from '@drift-labs/sdk';
-import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
+import {
+	Mutex,
+	tryAcquire,
+	withTimeout,
+	E_ALREADY_LOCKED,
+	MutexInterface,
+} from 'async-mutex';
 
 import { PublicKey } from '@solana/web3.js';
 
@@ -79,16 +85,13 @@ enum METRIC_TYPES {
 export class SpotFillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 2000;
+	public readonly defaultIntervalMs: number = 5000;
 
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
+	private pollingIntervalMs: number;
 
-	private dlobMutex = withTimeout(
-		new Mutex(),
-		10 * this.defaultIntervalMs,
-		dlobMutexError
-	);
+	private dlobMutex: MutexInterface;
 	private dlob: DLOB;
 
 	private userMapMutex = new Mutex();
@@ -134,7 +137,8 @@ export class SpotFillerBot implements Bot {
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		clearingHouse: DriftClient,
 		runtimeSpec: RuntimeSpec,
-		metricsPort?: number | undefined
+		pollingIntervalMs?: number,
+		metricsPort?: number
 	) {
 		if (!bulkAccountLoader) {
 			throw new Error(
@@ -151,6 +155,16 @@ export class SpotFillerBot implements Bot {
 			clearingHouse
 		);
 		this.serumSubscribers = new Map<number, SerumSubscriber>();
+
+		if (!pollingIntervalMs) {
+			pollingIntervalMs = this.defaultIntervalMs;
+		}
+		this.pollingIntervalMs = pollingIntervalMs;
+		this.dlobMutex = withTimeout(
+			new Mutex(),
+			10 * this.pollingIntervalMs,
+			dlobMutexError
+		);
 
 		this.metricsPort = metricsPort;
 		if (this.metricsPort) {
@@ -351,8 +365,11 @@ export class SpotFillerBot implements Bot {
 
 	public async reset() {}
 
-	public async startIntervalLoop(intervalMs: number) {
-		const intervalId = setInterval(this.trySpotFill.bind(this), intervalMs);
+	public async startIntervalLoop(_intervalMs: number) {
+		const intervalId = setInterval(
+			this.trySpotFill.bind(this),
+			this.pollingIntervalMs
+		);
 		this.intervalIds.push(intervalId);
 
 		logger.info(`${this.name} Bot started!`);
@@ -362,7 +379,7 @@ export class SpotFillerBot implements Bot {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
 			healthy =
-				this.watchdogTimerLastPatTime > Date.now() - 5 * this.defaultIntervalMs;
+				this.watchdogTimerLastPatTime > Date.now() - 5 * this.pollingIntervalMs;
 			if (!healthy) {
 				logger.warn(`${this.name} watchdog timer expired`);
 			}
