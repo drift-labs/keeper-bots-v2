@@ -89,7 +89,7 @@ enum METRIC_TYPES {
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 3000;
+	public readonly defaultIntervalMs: number = 6000;
 
 	private slotSubscriber: SlotSubscriber;
 	private bulkAccountLoader: BulkAccountLoader | undefined;

@@ -65,6 +65,15 @@ const metricsPort =
 	process.env.METRICS_PORT ||
 	PrometheusExporter.DEFAULT_OPTIONS.port.toString();
 
+const bulkAccountLoaderPollingInterval = process.env
+	.BULK_ACCOUNT_LOADER_POLLING_INTERVAL
+	? parseInt(process.env.BULK_ACCOUNT_LOADER_POLLING_INTERVAL)
+	: 5000;
+const eventSubscriberPollingInterval = process.env
+	.EVENT_SUBSCRIBER_POLLING_INTERVAL
+	? parseInt(process.env.EVENT_SUBSCRIBER_POLLING_INTERVAL)
+	: 5000;
+
 program
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
 	.option(
@@ -115,6 +124,13 @@ JitMakerBot enabled: ${!!opts.jitMaker},\n\
 IFRevenueSettler enabled: ${!!opts.ifRevenueSettler},\n\
 userPnlSettler enabled: ${!!opts.userPnlSettler},\n\
 `);
+
+logger.info(
+	`BulkAccountLoader polling interval: ${bulkAccountLoaderPollingInterval}ms`
+);
+logger.info(
+	`EventSubscriber polling interval:   ${eventSubscriberPollingInterval}ms`
+);
 
 export function getWallet(): Wallet {
 	const privateKey = process.env.KEEPER_PRIVATE_KEY;
@@ -265,7 +281,7 @@ const runBot = async () => {
 		bulkAccountLoader = new BulkAccountLoader(
 			connection,
 			stateCommitment,
-			2000
+			bulkAccountLoaderPollingInterval
 		);
 		lastBulkAccountLoaderSlot = bulkAccountLoader.mostRecentSlot;
 		accountSubscription = {
@@ -275,7 +291,7 @@ const runBot = async () => {
 
 		logProviderConfig = {
 			type: 'polling',
-			frequency: 1000,
+			frequency: eventSubscriberPollingInterval,
 		};
 	}
 
