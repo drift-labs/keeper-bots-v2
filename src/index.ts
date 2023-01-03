@@ -513,8 +513,8 @@ const runBot = async () => {
 					driftPid: clearingHousePublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				parseInt(metricsPort),
-				fillerPollingInterval
+				fillerPollingInterval,
+				parseInt(metricsPort)
 			)
 		);
 	}
@@ -532,8 +532,8 @@ const runBot = async () => {
 					driftPid: clearingHousePublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				parseInt(metricsPort),
-				fillerPollingInterval
+				fillerPollingInterval,
+				parseInt(metricsPort)
 			)
 		);
 	}
