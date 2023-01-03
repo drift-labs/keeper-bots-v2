@@ -29,13 +29,7 @@ import {
 	OrderRecord,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
-import {
-	Mutex,
-	tryAcquire,
-	withTimeout,
-	E_ALREADY_LOCKED,
-	MutexInterface,
-} from 'async-mutex';
+import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
 	SendTransactionError,
@@ -95,14 +89,18 @@ enum METRIC_TYPES {
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 5000;
+	public readonly defaultIntervalMs: number = 6000;
 
 	private slotSubscriber: SlotSubscriber;
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
 	private pollingIntervalMs: number;
 
-	private dlobMutex: MutexInterface;
+	private dlobMutex = withTimeout(
+		new Mutex(),
+		2 * this.defaultIntervalMs,
+		dlobMutexError
+	);
 	private dlob: DLOB;
 
 	private userMapMutex = new Mutex();
@@ -165,11 +163,6 @@ export class FillerBot implements Bot {
 			pollingIntervalMs = this.defaultIntervalMs;
 		}
 		this.pollingIntervalMs = pollingIntervalMs;
-		this.dlobMutex = withTimeout(
-			new Mutex(),
-			10 * this.pollingIntervalMs,
-			dlobMutexError
-		);
 
 		this.metricsPort = metricsPort;
 		if (this.metricsPort) {
@@ -412,22 +405,22 @@ export class FillerBot implements Bot {
 	}
 
 	public async trigger(record: WrappedEvent<any>) {
-		await this.userMapMutex.runExclusive(async () => {
-			await this.userMap.updateWithEventRecord(record);
-			await this.userStatsMap.updateWithEventRecord(record, this.userMap);
-		});
 		logger.info(
 			`filler seen record (slot: ${record.slot}): ${record.eventType}`
 		);
+		if (record.order) {
+			logger.info(` . ${record.user} - ${record.order.orderId}`);
+		}
+		// potentially a race here, but the lock is really slow :/
+		// await this.userMapMutex.runExclusive(async () => {
+		await this.userMap.updateWithEventRecord(record);
+		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		// });
 
 		if (record.eventType === 'OrderRecord') {
 			await this.tryFill(record as OrderRecord);
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
-			logger.info(
-				`OrderRecordAction.action: ${getVariant(actionRecord.action)}`
-			);
-
 			if (getVariant(actionRecord.action) === 'fill') {
 				const marketType = getVariant(actionRecord.marketType);
 				if (marketType === 'perp') {
