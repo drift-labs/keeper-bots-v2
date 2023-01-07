@@ -169,7 +169,9 @@ export function getWallet(): Wallet {
 }
 
 const endpoint = process.env.ENDPOINT;
+const wsEndpoint = process.env.WS_ENDPOINT;
 logger.info(`RPC endpoint: ${endpoint}`);
+logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`DriftEnv:     ${driftEnv}`);
 logger.info(`Commit:       ${commitHash}`);
 
@@ -272,7 +274,10 @@ const runBot = async () => {
 	const wallet = getWallet();
 	const clearingHousePublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
 
-	const connection = new Connection(endpoint, stateCommitment);
+	const connection = new Connection(endpoint, {
+		wsEndpoint: wsEndpoint,
+		commitment: stateCommitment,
+	});
 
 	let bulkAccountLoader: BulkAccountLoader | undefined;
 	let lastBulkAccountLoaderSlot: number | undefined;
@@ -310,6 +315,11 @@ const runBot = async () => {
 		oracleInfos: PerpMarkets[driftEnv].map((mkt) => {
 			return { publicKey: mkt.oracle, source: mkt.oracleSource };
 		}),
+		opts: {
+			commitment: stateCommitment,
+			skipPreflight: false,
+			preflightCommitment: stateCommitment,
+		},
 		accountSubscription,
 		env: driftEnv,
 		userStats: true,
