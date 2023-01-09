@@ -46,7 +46,7 @@ jobs:
         run: yarn lint
   
   yarn-build:
-    name: Run eslint
+    name: Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
