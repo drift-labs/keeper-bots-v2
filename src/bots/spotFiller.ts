@@ -24,6 +24,7 @@ import {
 	convertToNumber,
 	BASE_PRECISION,
 	PRICE_PRECISION,
+	WrappedEvent,
 } from '@drift-labs/sdk';
 import {
 	Mutex,
@@ -402,11 +403,16 @@ export class SpotFillerBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(record: any) {
-		await this.userMapMutex.runExclusive(async () => {
-			await this.userMap.updateWithEventRecord(record);
-			await this.userStatsMap.updateWithEventRecord(record, this.userMap);
-		});
+	public async trigger(record: WrappedEvent<any>) {
+		logger.info(
+			`Spot filler seen record (slot: ${record.slot}): ${record.eventType}`
+		);
+
+		// potentially a race here, but the lock is really slow :/
+		// await this.userMapMutex.runExclusive(async () => {
+		await this.userMap.updateWithEventRecord(record);
+		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+		// });
 
 		if (record.eventType === 'OrderRecord') {
 			await this.trySpotFill(record as OrderRecord);
@@ -766,6 +772,7 @@ export class SpotFillerBot implements Bot {
 			});
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
+				console.log('busy');
 				const user = this.driftClient.getUser();
 				this.mutexBusyCounter.add(
 					1,

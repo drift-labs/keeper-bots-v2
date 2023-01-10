@@ -78,6 +78,7 @@ const eventSubscriberPollingInterval = process.env
 const fillerPollingInterval = process.env.FILLER_POLLING_INTERVAL
 	? parseInt(process.env.FILLER_POLLING_INTERVAL)
 	: 6000;
+const botId = process.env.BOT_ID;
 
 program
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
@@ -168,7 +169,9 @@ export function getWallet(): Wallet {
 }
 
 const endpoint = process.env.ENDPOINT;
+const wsEndpoint = process.env.WS_ENDPOINT;
 logger.info(`RPC endpoint: ${endpoint}`);
+logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`DriftEnv:     ${driftEnv}`);
 logger.info(`Commit:       ${commitHash}`);
 
@@ -271,7 +274,10 @@ const runBot = async () => {
 	const wallet = getWallet();
 	const clearingHousePublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
 
-	const connection = new Connection(endpoint, stateCommitment);
+	const connection = new Connection(endpoint, {
+		wsEndpoint: wsEndpoint,
+		commitment: stateCommitment,
+	});
 
 	let bulkAccountLoader: BulkAccountLoader | undefined;
 	let lastBulkAccountLoaderSlot: number | undefined;
@@ -309,6 +315,11 @@ const runBot = async () => {
 		oracleInfos: PerpMarkets[driftEnv].map((mkt) => {
 			return { publicKey: mkt.oracle, source: mkt.oracleSource };
 		}),
+		opts: {
+			commitment: stateCommitment,
+			skipPreflight: false,
+			preflightCommitment: stateCommitment,
+		},
 		accountSubscription,
 		env: driftEnv,
 		userStats: true,
@@ -501,7 +512,7 @@ const runBot = async () => {
 	if (opts.filler) {
 		bots.push(
 			new FillerBot(
-				'filler',
+				botId ? `filler-${botId}` : 'filler',
 				!!opts.dry,
 				slotSubscriber,
 				bulkAccountLoader,
@@ -521,7 +532,7 @@ const runBot = async () => {
 	if (opts.spotFiller) {
 		bots.push(
 			new SpotFillerBot(
-				'spotFiller',
+				botId ? `spotFiller-${botId}` : 'spotFiller',
 				!!opts.dry,
 				bulkAccountLoader,
 				driftClient,
@@ -540,7 +551,7 @@ const runBot = async () => {
 	if (opts.trigger) {
 		bots.push(
 			new TriggerBot(
-				'trigger',
+				botId ? `trigger-${botId}` : 'trigger',
 				!!opts.dry,
 				bulkAccountLoader,
 				driftClient,
@@ -552,7 +563,7 @@ const runBot = async () => {
 	if (opts.jitMaker) {
 		bots.push(
 			new JitMakerBot(
-				'JitMaker',
+				botId ? `JitMaker-${botId}` : 'JitMaker',
 				!!opts.dry,
 				driftClient,
 				slotSubscriber,
@@ -563,7 +574,7 @@ const runBot = async () => {
 	if (opts.liquidator) {
 		bots.push(
 			new LiquidatorBot(
-				'liquidator',
+				botId ? `liquidator-${botId}` : 'liquidator',
 				!!opts.dry,
 				bulkAccountLoader,
 				driftClient,
@@ -581,7 +592,7 @@ const runBot = async () => {
 	if (opts.floatingMaker) {
 		bots.push(
 			new FloatingPerpMakerBot(
-				'floatingMaker',
+				botId ? `floatingMaker-${botId}` : 'floatingMaker',
 				!!opts.dry,
 				driftClient,
 				slotSubscriber,
@@ -593,7 +604,7 @@ const runBot = async () => {
 	if (opts.userPnlSettler) {
 		bots.push(
 			new UserPnlSettlerBot(
-				'userPnlSettler',
+				botId ? `userPnlSettler-${botId}` : 'userPnlSettler',
 				!!opts.dry,
 				driftClient,
 				PerpMarkets[driftEnv],
@@ -606,7 +617,7 @@ const runBot = async () => {
 	if (opts.ifRevenueSettler) {
 		bots.push(
 			new IFRevenueSettlerBot(
-				'ifRevenueSettler',
+				botId ? `ifRevenueSettler-${botId}` : 'ifRevenueSettler',
 				!!opts.dry,
 				driftClient,
 				SpotMarkets[driftEnv]
