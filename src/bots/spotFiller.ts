@@ -772,7 +772,6 @@ export class SpotFillerBot implements Bot {
 			});
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
-				console.log('busy');
 				const user = this.driftClient.getUser();
 				this.mutexBusyCounter.add(
 					1,
