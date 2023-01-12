@@ -15,7 +15,7 @@ import {
 	UserMap,
 	ZERO,
 	calculateNetUserPnlImbalance,
-	convertToNumber,
+	convertToNumber, isOracleValid,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -54,14 +54,14 @@ export class UserPnlSettlerBot implements Bot {
 	constructor(
 		name: string,
 		dryRun: boolean,
-		clearingHouse: DriftClient,
+		driftClient: DriftClient,
 		perpMarkets: PerpMarketConfig[],
 		spotMarkets: SpotMarketConfig[],
 		metrics?: Metrics | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
-		this.driftClient = clearingHouse;
+		this.driftClient = driftClient;
 		this.perpMarkets = perpMarkets;
 		this.spotMarkets = spotMarkets;
 		this.metrics = metrics;
@@ -151,6 +151,24 @@ export class UserPnlSettlerBot implements Bot {
 				};
 			});
 
+			const slot = await this.driftClient.connection.getSlot();
+
+			const validOracleMarketMap = new Map<number, boolean>();
+			this.perpMarkets.forEach((market) => {
+				const oracleValid = isOracleValid(
+					perpMarketAndOracleData[market.marketIndex].marketAccount.amm,
+					perpMarketAndOracleData[market.marketIndex].oraclePriceData,
+					this.driftClient.getStateAccount().oracleGuardRails,
+					slot,
+				);
+
+				if (!oracleValid) {
+					logger.warn(`Oracle for market ${market.marketIndex} is not valid`);
+				}
+
+				validOracleMarketMap.set(market.marketIndex, oracleValid);
+			});
+
 			const usersToSettle: SettlePnlIxParams[] = [];
 
 			for (const user of this.userMap.values()) {
@@ -165,6 +183,12 @@ export class UserPnlSettlerBot implements Bot {
 					}
 
 					const marketIndexNum = settleePosition.marketIndex;
+
+					const oracleValid = validOracleMarketMap.get(marketIndexNum);
+					if (!oracleValid) {
+						continue;
+					}
+
 					const unsettledPnl = calculateClaimablePnl(
 						perpMarketAndOracleData[marketIndexNum].marketAccount,
 						spotMarketAndOracleData[0].marketAccount, // always liquidating the USDC spot market
