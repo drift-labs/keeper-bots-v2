@@ -15,7 +15,8 @@ import {
 	UserMap,
 	ZERO,
 	calculateNetUserPnlImbalance,
-	convertToNumber, isOracleValid,
+	convertToNumber,
+	isOracleValid,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -164,7 +165,7 @@ export class UserPnlSettlerBot implements Bot {
 					perpMarketAndOracleData[market.marketIndex].marketAccount.amm,
 					perpMarketAndOracleData[market.marketIndex].oraclePriceData,
 					this.driftClient.getStateAccount().oracleGuardRails,
-					slot,
+					slot
 				);
 
 				if (!oracleValid) {
