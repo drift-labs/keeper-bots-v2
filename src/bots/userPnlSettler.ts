@@ -36,6 +36,11 @@ type SettlePnlIxParams = {
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 const SETTLE_USER_CHUNKS = 2;
 
+const errorCodesToSuppress = [
+	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
+	6035, // Error Code: InvalidOracle. Error Number: 6035. Error Message: InvalidOracle.
+];
+
 export class UserPnlSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
@@ -296,13 +301,15 @@ export class UserPnlSettlerBot implements Bot {
 							`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
 						);
 						console.error(err);
-						await webhookMessage(
-							`[${
-								this.name
-							}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}:\n${
-								err.logs ? (err.logs as Array<string>).join('\n') : ''
-							}\n${err.stack ? err.stack : err.message}`
-						);
+						if (!errorCodesToSuppress.includes(errorCode)) {
+							await webhookMessage(
+								`[${
+									this.name
+								}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}:\n${
+									err.logs ? (err.logs as Array<string>).join('\n') : ''
+								}\n${err.stack ? err.stack : err.message}`
+							);
+						}
 					}
 				}
 			}
