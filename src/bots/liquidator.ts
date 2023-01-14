@@ -49,7 +49,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
-import { getErrorCode } from 'src/error';
+import { getErrorCode } from '../error';
 
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 
