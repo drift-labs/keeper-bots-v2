@@ -49,8 +49,13 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
+import { getErrorCode } from 'src/error';
 
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
+
+const errorCodesToSuppress = [
+	6004, // Error Number: 6004. Error Message: Sufficient collateral.
+];
 
 function calculateSpotTokenAmountToLiquidate(
 	driftClient: DriftClient,
@@ -203,15 +208,18 @@ async function liqPerpPnl(
 						'Error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex} '
 					);
 					logger.error(e);
-					webhookMessage(
-						`[${
-							this.name
-						}]: :x: error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
-							liquidateePosition.marketIndex
-						}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
-							e.stack ? e.stack : e.message
-						}`
-					);
+					const errorCode = getErrorCode(e);
+					if (!errorCodesToSuppress.includes(errorCode)) {
+						webhookMessage(
+							`[${
+								this.name
+							}]: :x: error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
+							}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
+								e.stack ? e.stack : e.message
+							}`
+						);
+					}
 				})
 				.finally(() => {
 					sdkCallDurationHistogram.record(Date.now() - start, {
@@ -251,15 +259,18 @@ async function liqPerpPnl(
 			.catch((e) => {
 				console.error(e);
 				logger.error('Error in liquidatePerpPnlForDeposit');
-				webhookMessage(
-					`[${
-						this.name
-					}]: :x: error in liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
-						liquidateePosition.marketIndex
-					}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
-						e.stack ? e.stack : e.message
-					}`
-				);
+				const errorCode = getErrorCode(e);
+				if (!errorCodesToSuppress.includes(errorCode)) {
+					webhookMessage(
+						`[${
+							this.name
+						}]: :x: error in liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+							liquidateePosition.marketIndex
+						}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
+							e.stack ? e.stack : e.message
+						}`
+					);
+				}
 			})
 			.finally(() => {
 				sdkCallDurationHistogram.record(Date.now() - start, {
@@ -1011,13 +1022,16 @@ export class LiquidatorBot implements Bot {
 										`Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}`
 									);
 									logger.error(e);
-									webhookMessage(
-										`[${
-											this.name
-										}]: :x: Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}:\n${
-											e.logs ? (e.logs as Array<string>).join('\n') : ''
-										}\n${e.stack ? e.stack : e.message}`
-									);
+									const errorCode = getErrorCode(e);
+									if (!errorCodesToSuppress.includes(errorCode)) {
+										webhookMessage(
+											`[${
+												this.name
+											}]: :x: Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}:\n${
+												e.logs ? (e.logs as Array<string>).join('\n') : ''
+											}\n${e.stack ? e.stack : e.message}`
+										);
+									}
 								})
 								.finally(() => {
 									this.sdkCallDurationHistogram.record(Date.now() - start, {
