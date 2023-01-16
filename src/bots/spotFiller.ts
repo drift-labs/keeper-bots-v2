@@ -54,6 +54,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
+import { getErrorCode } from '../error';
 
 /**
  * Size of throttled nodes to get to before pruning the map
@@ -67,6 +68,10 @@ const FILL_ORDER_BACKOFF = 10000;
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 
 const dlobMutexError = new Error('dlobMutex timeout');
+
+const errorCodesToSuppress = [
+	6061, // Error Number: 6061. Error Message: Order does not exist.
+];
 
 enum METRIC_TYPES {
 	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
@@ -404,9 +409,9 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public async trigger(record: WrappedEvent<any>) {
-		logger.info(
-			`Spot filler seen record (slot: ${record.slot}): ${record.eventType}`
-		);
+		// logger.info(
+		// 	`Spot filler seen record (slot: ${record.slot}): ${record.eventType}`
+		// );
 
 		// potentially a race here, but the lock is really slow :/
 		// await this.userMapMutex.runExclusive(async () => {
@@ -415,7 +420,11 @@ export class SpotFillerBot implements Bot {
 		// });
 
 		if (record.eventType === 'OrderRecord') {
-			await this.trySpotFill(record as OrderRecord);
+			const orderRecord = record as OrderRecord;
+			const marketType = getVariant(orderRecord.order.marketType);
+			if (marketType === 'spot') {
+				await this.trySpotFill(orderRecord);
+			}
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
 
@@ -704,11 +713,15 @@ export class SpotFillerBot implements Bot {
 			.catch((e) => {
 				logger.error(`Failed to fill spot order:`);
 				console.error(e);
-				webhookMessage(
-					`[${this.name}]: :x: error trying to fill spot orders:\n${
-						e.logs ? (e.logs as Array<string>).join('\n') : ''
-					}\n${e.stack ? e.stack : e.message}`
-				);
+
+				const errorCode = getErrorCode(e);
+				if (!errorCodesToSuppress.includes(errorCode)) {
+					webhookMessage(
+						`[${this.name}]: :x: error trying to fill spot orders:\n${
+							e.logs ? (e.logs as Array<string>).join('\n') : ''
+						}\n${e.stack ? e.stack : e.message}`
+					);
+				}
 			})
 			.finally(() => {
 				this.unthrottleNode(nodeSignature);
@@ -772,7 +785,6 @@ export class SpotFillerBot implements Bot {
 			});
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
-				console.log('busy');
 				const user = this.driftClient.getUser();
 				this.mutexBusyCounter.add(
 					1,

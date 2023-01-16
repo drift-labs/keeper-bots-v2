@@ -29,7 +29,7 @@ import {
 	PositionDirection,
 	BulkAccountLoader,
 } from '@drift-labs/sdk';
-import { Mutex } from 'async-mutex';
+import { E_ALREADY_LOCKED, Mutex, tryAcquire } from 'async-mutex';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import {
@@ -49,8 +49,13 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
+import { getErrorCode } from '../error';
 
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
+
+const errorCodesToSuppress = [
+	6004, // Error Number: 6004. Error Message: Sufficient collateral.
+];
 
 function calculateSpotTokenAmountToLiquidate(
 	driftClient: DriftClient,
@@ -203,15 +208,18 @@ async function liqPerpPnl(
 						'Error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex} '
 					);
 					logger.error(e);
-					webhookMessage(
-						`[${
-							this.name
-						}]: :x: error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
-							liquidateePosition.marketIndex
-						}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
-							e.stack ? e.stack : e.message
-						}`
-					);
+					const errorCode = getErrorCode(e);
+					if (!errorCodesToSuppress.includes(errorCode)) {
+						webhookMessage(
+							`[${
+								this.name
+							}]: :x: error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
+							}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
+								e.stack ? e.stack : e.message
+							}`
+						);
+					}
 				})
 				.finally(() => {
 					sdkCallDurationHistogram.record(Date.now() - start, {
@@ -251,15 +259,18 @@ async function liqPerpPnl(
 			.catch((e) => {
 				console.error(e);
 				logger.error('Error in liquidatePerpPnlForDeposit');
-				webhookMessage(
-					`[${
-						this.name
-					}]: :x: error in liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
-						liquidateePosition.marketIndex
-					}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
-						e.stack ? e.stack : e.message
-					}`
-				);
+				const errorCode = getErrorCode(e);
+				if (!errorCodesToSuppress.includes(errorCode)) {
+					webhookMessage(
+						`[${
+							this.name
+						}]: :x: error in liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+							liquidateePosition.marketIndex
+						}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
+							e.stack ? e.stack : e.message
+						}`
+					);
+				}
 			})
 			.finally(() => {
 				sdkCallDurationHistogram.record(Date.now() - start, {
@@ -409,9 +420,10 @@ export class LiquidatorBot implements Bot {
 	}
 
 	public async trigger(record: WrappedEvent<any>) {
-		await this.userMapMutex.runExclusive(async () => {
-			await this.userMap.updateWithEventRecord(record);
-		});
+		// potentially a race here, but the lock is really slow :/
+		// await this.userMapMutex.runExclusive(async () => {
+		await this.userMap.updateWithEventRecord(record);
+		// });
 	}
 
 	/**
@@ -423,6 +435,9 @@ export class LiquidatorBot implements Bot {
 			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber();
 
 		if (resyncRequired) {
+			logger.info(
+				`this.userMap.size() (${this.userMap.size()}) !== stateAccount.numberOfSubAccounts.toNumber() (${stateAccount.numberOfSubAccounts.toNumber()})`
+			);
 			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
 				let doResync = false;
 				const start = Date.now();
@@ -509,6 +524,12 @@ export class LiquidatorBot implements Bot {
 			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber();
 
 		healthy = healthy && !userMapResyncRequired;
+
+		if (!healthy) {
+			logger.error(
+				`Bot ${this.name} is unhealthy, userMapResyncRequired: ${userMapResyncRequired}`
+			);
+		}
 
 		return healthy;
 	}
@@ -942,7 +963,13 @@ export class LiquidatorBot implements Bot {
 		try {
 			await this.resyncUserMapsIfRequired();
 
-			await this.userMapMutex.runExclusive(async () => {
+			const startWaitfForUserMapMutex = Date.now();
+			await tryAcquire(this.userMapMutex).runExclusive(async () => {
+				logger.debug(
+					`userMapMutex acquire took: ${
+						Date.now() - startWaitfForUserMapMutex
+					}ms`
+				);
 				for (const user of this.userMap.values()) {
 					const userAcc = user.getUserAccount();
 					const auth = userAcc.authority.toBase58();
@@ -1011,13 +1038,16 @@ export class LiquidatorBot implements Bot {
 										`Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}`
 									);
 									logger.error(e);
-									webhookMessage(
-										`[${
-											this.name
-										}]: :x: Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}:\n${
-											e.logs ? (e.logs as Array<string>).join('\n') : ''
-										}\n${e.stack ? e.stack : e.message}`
-									);
+									const errorCode = getErrorCode(e);
+									if (!errorCodesToSuppress.includes(errorCode)) {
+										webhookMessage(
+											`[${
+												this.name
+											}]: :x: Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}:\n${
+												e.logs ? (e.logs as Array<string>).join('\n') : ''
+											}\n${e.stack ? e.stack : e.message}`
+										);
+									}
 								})
 								.finally(() => {
 									this.sdkCallDurationHistogram.record(Date.now() - start, {
@@ -1122,13 +1152,22 @@ export class LiquidatorBot implements Bot {
 					}
 				}
 			});
+
+			const startDerisk = Date.now();
 			await this.derisk();
+			logger.debug(`derisk took ${Date.now() - startDerisk}ms`);
 			ran = true;
 		} catch (e) {
-			console.error(e);
-			webhookMessage(
-				`[${this.name}]: :x: uncaught error:\n${e.stack ? e.stack : e.message}`
-			);
+			if (e === E_ALREADY_LOCKED) {
+				console.error("mutex already locked, can't run");
+			} else {
+				console.error(e);
+				webhookMessage(
+					`[${this.name}]: :x: uncaught error:\n${
+						e.stack ? e.stack : e.message
+					}`
+				);
+			}
 		} finally {
 			if (ran) {
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
