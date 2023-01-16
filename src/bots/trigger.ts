@@ -106,9 +106,10 @@ export class TriggerBot implements Bot {
 	}
 
 	public async trigger(record: any): Promise<void> {
-		await this.userMapMutex.runExclusive(async () => {
-			await this.userMap.updateWithEventRecord(record);
-		});
+		// potentially a race here, but the lock is really slow :/
+		// await this.userMapMutex.runExclusive(async () => {
+		await this.userMap.updateWithEventRecord(record);
+		// });
 	}
 
 	public viewDlob(): DLOB {
