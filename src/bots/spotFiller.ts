@@ -409,9 +409,9 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public async trigger(record: WrappedEvent<any>) {
-		logger.info(
-			`Spot filler seen record (slot: ${record.slot}): ${record.eventType}`
-		);
+		// logger.info(
+		// 	`Spot filler seen record (slot: ${record.slot}): ${record.eventType}`
+		// );
 
 		// potentially a race here, but the lock is really slow :/
 		// await this.userMapMutex.runExclusive(async () => {
@@ -420,7 +420,11 @@ export class SpotFillerBot implements Bot {
 		// });
 
 		if (record.eventType === 'OrderRecord') {
-			await this.trySpotFill(record as OrderRecord);
+			const orderRecord = record as OrderRecord;
+			const marketType = getVariant(orderRecord.order.marketType);
+			if (marketType === 'spot') {
+				await this.trySpotFill(orderRecord);
+			}
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
 

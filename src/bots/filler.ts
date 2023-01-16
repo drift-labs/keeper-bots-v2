@@ -418,7 +418,11 @@ export class FillerBot implements Bot {
 		// });
 
 		if (record.eventType === 'OrderRecord') {
-			await this.tryFill(record as OrderRecord);
+			const orderRecord = record as OrderRecord;
+			const marketType = getVariant(orderRecord.order.marketType);
+			if (marketType === 'perp') {
+				await this.tryFill(orderRecord);
+			}
 		} else if (record.eventType === 'OrderActionRecord') {
 			const actionRecord = record as OrderActionRecord;
 			if (getVariant(actionRecord.action) === 'fill') {
