@@ -671,7 +671,7 @@ const runBot = async () => {
 					}
 				});
 				if (!healthySlotSubscriber) {
-					res.writeHead(500);
+					res.writeHead(501);
 					logger.error(`SlotSubscriber is not healthy`);
 					res.end(`SlotSubscriber is not healthy`);
 					return;
@@ -683,7 +683,7 @@ const runBot = async () => {
 						lastBulkAccountLoaderSlot &&
 						bulkAccountLoader.mostRecentSlot === lastBulkAccountLoaderSlot
 					) {
-						res.writeHead(500);
+						res.writeHead(502);
 						res.end(`bulkAccountLoader.mostRecentSlot is not healthy`);
 						logger.error(
 							`Health check failed due to stale bulkAccountLoader.mostRecentSlot`
@@ -698,7 +698,7 @@ const runBot = async () => {
 					const healthCheck = await promiseTimeout(bot.healthCheck(), 1000);
 					if (!healthCheck) {
 						logger.error(`Health check failed for bot ${bot.name}`);
-						res.writeHead(500);
+						res.writeHead(503);
 						res.end(`Bot ${bot.name} is not healthy`);
 						return;
 					}

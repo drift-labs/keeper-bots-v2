@@ -405,11 +405,11 @@ export class FillerBot implements Bot {
 	}
 
 	public async trigger(record: WrappedEvent<any>) {
-		logger.info(
+		logger.debug(
 			`filler seen record (slot: ${record.slot}): ${record.eventType}`
 		);
 		if (record.order) {
-			logger.info(` . ${record.user} - ${record.order.orderId}`);
+			logger.debug(` . ${record.user} - ${record.order.orderId}`);
 		}
 		// potentially a race here, but the lock is really slow :/
 		// await this.userMapMutex.runExclusive(async () => {
