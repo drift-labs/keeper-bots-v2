@@ -168,7 +168,9 @@ async function liqPerpPnl(
 			perpMarketAccount,
 			usdcAccount,
 			liquidateePosition,
-			undefined
+			this.driftClient.getOracleDataForPerpMarket(
+				liquidateePosition.marketIndex
+			)
 		);
 
 		let frac = new BN(100000000);
@@ -191,21 +193,23 @@ async function liqPerpPnl(
 				)
 				.then((tx) => {
 					logger.info(
-						`liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
+						`liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
 							liquidateePosition.marketIndex
 						} tx: ${tx}`
 					);
 					webhookMessage(
 						`[${
 							this.name
-						}]: liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
+						}]: liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
 							liquidateePosition.marketIndex
 						} tx: ${tx}`
 					);
 				})
 				.catch((e) => {
 					logger.error(
-						'Error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex} '
+						`Error in liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+							liquidateePosition.marketIndex
+						}`
 					);
 					logger.error(e);
 					const errorCode = getErrorCode(e);
@@ -264,7 +268,7 @@ async function liqPerpPnl(
 					webhookMessage(
 						`[${
 							this.name
-						}]: :x: error in liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+						}]: :x: error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
 							liquidateePosition.marketIndex
 						}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
 							e.stack ? e.stack : e.message
@@ -702,9 +706,6 @@ export class LiquidatorBot implements Bot {
 					continue;
 				}
 
-				const serumFulfillmentConfig = this.serumFulfillmentConfigMap.map.get(
-					position.marketIndex
-				);
 				if (isVariant(position.balanceType, 'deposit')) {
 					const start = Date.now();
 					this.driftClient
@@ -714,7 +715,7 @@ export class LiquidatorBot implements Bot {
 								direction: PositionDirection.SHORT,
 								baseAssetAmount: standardizedTokenAmount,
 								reduceOnly: true,
-							}),
+							})
 						)
 						.then((tx) => {
 							logger.info(
@@ -748,7 +749,7 @@ export class LiquidatorBot implements Bot {
 								direction: PositionDirection.LONG,
 								baseAssetAmount: standardizedTokenAmount,
 								reduceOnly: true,
-							}),
+							})
 						)
 						.then((tx) => {
 							logger.info(
@@ -976,9 +977,11 @@ export class LiquidatorBot implements Bot {
 					if (isVariant(userAcc.status, 'bankrupt')) {
 						await this.tryResolveBankruptUser(user);
 					} else if (user.canBeLiquidated()) {
-						logger.info(`liquidating ${auth}: ${userKey}...`);
+						logger.info(
+							`liquidating auth: ${auth}, userAccount: ${userKey}...`
+						);
 						webhookMessage(
-							`[${this.name}]: liquidating ${auth}: ${userKey} ...`
+							`[${this.name}]: liquidating auth: ${auth}: userAccount: ${userKey} ...`
 						);
 
 						const liquidatorUser = this.driftClient.getUser();
@@ -1033,7 +1036,7 @@ export class LiquidatorBot implements Bot {
 								})
 								.catch((e) => {
 									logger.error(
-										`Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}`
+										`Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}`
 									);
 									logger.error(e);
 									const errorCode = getErrorCode(e);
@@ -1041,7 +1044,7 @@ export class LiquidatorBot implements Bot {
 										webhookMessage(
 											`[${
 												this.name
-											}]: :x: Error in liquidateSpot for user ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}:\n${
+											}]: :x: Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}:\n${
 												e.logs ? (e.logs as Array<string>).join('\n') : ''
 											}\n${e.stack ? e.stack : e.message}`
 										);
