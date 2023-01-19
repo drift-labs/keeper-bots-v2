@@ -708,14 +708,13 @@ export class LiquidatorBot implements Bot {
 				if (isVariant(position.balanceType, 'deposit')) {
 					const start = Date.now();
 					this.driftClient
-						.placeAndTakeSpotOrder(
+						.placeSpotOrder(
 							getMarketOrderParams({
 								marketIndex: position.marketIndex,
 								direction: PositionDirection.SHORT,
 								baseAssetAmount: standardizedTokenAmount,
 								reduceOnly: true,
 							}),
-							serumFulfillmentConfig
 						)
 						.then((tx) => {
 							logger.info(
@@ -743,14 +742,13 @@ export class LiquidatorBot implements Bot {
 				} else {
 					const start = Date.now();
 					this.driftClient
-						.placeAndTakeSpotOrder(
+						.placeSpotOrder(
 							getMarketOrderParams({
 								marketIndex: position.marketIndex,
 								direction: PositionDirection.LONG,
 								baseAssetAmount: standardizedTokenAmount,
 								reduceOnly: true,
 							}),
-							serumFulfillmentConfig
 						)
 						.then((tx) => {
 							logger.info(
