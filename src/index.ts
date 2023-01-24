@@ -608,8 +608,7 @@ const runBot = async () => {
 				!!opts.dry,
 				driftClient,
 				PerpMarkets[driftEnv],
-				SpotMarkets[driftEnv],
-				metrics
+				SpotMarkets[driftEnv]
 			)
 		);
 	}

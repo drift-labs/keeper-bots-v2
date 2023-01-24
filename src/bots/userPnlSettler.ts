@@ -23,7 +23,6 @@ import { Mutex } from 'async-mutex';
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
-import { Metrics } from '../metrics';
 import { webhookMessage } from '../webhook';
 
 type SettlePnlIxParams = {
@@ -52,7 +51,6 @@ export class UserPnlSettlerBot implements Bot {
 	private userMap: UserMap;
 	private perpMarkets: PerpMarketConfig[];
 	private spotMarkets: SpotMarketConfig[];
-	private metrics: Metrics | undefined;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -62,15 +60,13 @@ export class UserPnlSettlerBot implements Bot {
 		dryRun: boolean,
 		driftClient: DriftClient,
 		perpMarkets: PerpMarketConfig[],
-		spotMarkets: SpotMarketConfig[],
-		metrics?: Metrics | undefined
+		spotMarkets: SpotMarketConfig[]
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
 		this.driftClient = driftClient;
 		this.perpMarkets = perpMarkets;
 		this.spotMarkets = spotMarkets;
-		this.metrics = metrics;
 	}
 
 	public async init() {
@@ -276,28 +272,15 @@ export class UserPnlSettlerBot implements Bot {
 					throw new Error('Dry run - not sending settle pnl tx');
 				}
 
+				const settlePnlPromises = new Array<Promise<string>>();
 				for (let i = 0; i < params.users.length; i += SETTLE_USER_CHUNKS) {
 					const usersChunk = params.users.slice(i, i + SETTLE_USER_CHUNKS);
 					try {
-						const txSig = await this.driftClient.settlePNLs(
-							usersChunk,
-							params.marketIndex
-						);
-						logger.info(
-							`PNL settled successfully on ${marketStr}. TxSig: ${txSig}`
-						);
-						this.metrics?.recordSettlePnl(
-							usersChunk.length,
-							params.marketIndex,
-							this.name
+						settlePnlPromises.push(
+							this.driftClient.settlePNLs(usersChunk, params.marketIndex)
 						);
 					} catch (err) {
 						const errorCode = getErrorCode(err);
-						this.metrics?.recordErrorCode(
-							errorCode,
-							this.driftClient.provider.wallet.publicKey,
-							this.name
-						);
 						logger.error(
 							`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
 						);
@@ -312,6 +295,10 @@ export class UserPnlSettlerBot implements Bot {
 							);
 						}
 					}
+				}
+				const txs = await Promise.all(settlePnlPromises);
+				for (const tx of txs) {
+					logger.info(`Settle PNL tx: ${tx}`);
 				}
 			}
 		} catch (e) {
