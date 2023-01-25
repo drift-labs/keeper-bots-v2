@@ -847,7 +847,10 @@ export class SpotFillerBot implements Bot {
 				console.error(e);
 
 				const errorCode = getErrorCode(e);
-				if (!errorCodesToSuppress.includes(errorCode)) {
+				if (
+					!errorCodesToSuppress.includes(errorCode) &&
+					!(e as Error).message.includes('Transaction was not confirmed')
+				) {
 					webhookMessage(
 						`[${this.name}]: :x: error trying to fill spot orders:\n${
 							e.logs ? (e.logs as Array<string>).join('\n') : ''

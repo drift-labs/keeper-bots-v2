@@ -323,6 +323,10 @@ const runBot = async () => {
 		accountSubscription,
 		env: driftEnv,
 		userStats: true,
+		txSenderConfig: {
+			type: 'retry',
+			timeout: 5000,
+		},
 	});
 
 	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {

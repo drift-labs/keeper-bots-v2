@@ -303,9 +303,13 @@ export class UserPnlSettlerBot implements Bot {
 			}
 		} catch (e) {
 			console.error(e);
-			await webhookMessage(
-				`[${this.name}]: :x: uncaught error:\n${e.stack ? e.stack : e.messaage}`
-			);
+			if (!(e as Error).message.includes('Transaction was not confirmed')) {
+				await webhookMessage(
+					`[${this.name}]: :x: uncaught error:\n${
+						e.stack ? e.stack : e.messaage
+					}`
+				);
+			}
 		} finally {
 			logger.info('Settle PNLs finished');
 			await this.watchdogTimerMutex.runExclusive(async () => {
