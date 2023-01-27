@@ -1077,11 +1077,9 @@ export class SpotFillerBot implements Bot {
 					)
 				);
 
-				await Promise.all(
-					fillableNodes.map(async (spotNodeToFill) => {
-						await this.tryFillSpotNode(spotNodeToFill);
-					})
-				);
+				for (const nodeToFill of fillableNodes) {
+					this.tryFillSpotNode(nodeToFill);
+				}
 
 				ran = true;
 			});
