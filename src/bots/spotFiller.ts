@@ -34,7 +34,7 @@ import {
 	MutexInterface,
 } from 'async-mutex';
 
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, TransactionResponse } from '@solana/web3.js';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import {
@@ -80,7 +80,7 @@ const maxPriorityFee = 10000;
 const dlobMutexError = new Error('dlobMutex timeout');
 
 const errorCodesToSuppress = [
-	6061, // Error Number: 6061. Error Message: Order does not exist.
+	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
 ];
 
 enum METRIC_TYPES {
@@ -714,6 +714,178 @@ export class SpotFillerBot implements Bot {
 		}
 	}
 
+	private async sleep(ms: number) {
+		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
+
+	private isIxLog(log: string): boolean {
+		const match = log.match(new RegExp('Program log: Instruction:'));
+
+		return match !== null;
+	}
+
+	private isEndIxLog(log: string): boolean {
+		const match = log.match(
+			new RegExp(
+				`Program ${this.driftClient.program.programId.toBase58()} consumed ([0-9]+) of ([0-9]+) compute units`
+			)
+		);
+
+		return match !== null;
+	}
+
+	private isFillIxLog(log: string): boolean {
+		const match = log.match(
+			new RegExp('Program log: Instruction: Fill(.*)Order')
+		);
+
+		return match !== null;
+	}
+
+	private isOrderDoesNotExistLog(log: string): number | null {
+		const match = log.match(new RegExp('.*Order does not exist ([0-9]+)'));
+
+		if (!match) {
+			return null;
+		}
+
+		return parseInt(match[1]);
+	}
+
+	/**
+	 * Iterates through a tx's logs and handles it appropriately 3e.g. throttling users, updating metrics, etc.)
+	 *
+	 * @param nodesFilled nodes that we sent a transaction to fill
+	 * @param logs logs from tx.meta.logMessages or this.clearingHouse.program._events._eventParser.parseLogs
+	 *
+	 * @returns number of nodes successfully filled
+	 */
+	private async handleTransactionLogs(
+		nodeFilled: NodeToFill,
+		logs: string[]
+	): Promise<number> {
+		let inFillIx = false;
+		let errorThisFillIx = false;
+		let successCount = 0;
+		for (const log of logs) {
+			if (log === null) {
+				logger.error(`log is null`);
+				continue;
+			}
+
+			if (this.isEndIxLog(log)) {
+				if (!errorThisFillIx) {
+					this.successfulFillsCounter.add(1, {
+						market:
+							SpotMarkets[this.runtimeSpec.driftEnv][
+								nodeFilled.node.order.marketIndex
+							].symbol,
+					});
+					successCount++;
+				}
+
+				inFillIx = false;
+				errorThisFillIx = false;
+				continue;
+			}
+
+			if (this.isIxLog(log)) {
+				if (this.isFillIxLog(log)) {
+					inFillIx = true;
+					errorThisFillIx = false;
+
+					// can also print this from parsing the log record in upcoming
+					if (nodeFilled.makerNode) {
+						logger.info(
+							`Processing spot fill tx log:\ntaker: ${nodeFilled.node.userAccount.toBase58()}-${
+								nodeFilled.node.order.orderId
+							} ${convertToNumber(
+								nodeFilled.node.order.baseAssetAmountFilled,
+								BASE_PRECISION
+							)}/${convertToNumber(
+								nodeFilled.node.order.baseAssetAmount,
+								BASE_PRECISION
+							)} @ ${convertToNumber(
+								nodeFilled.node.order.price,
+								PRICE_PRECISION
+							)}\nmaker: ${nodeFilled.makerNode.userAccount.toBase58()}-${
+								nodeFilled.makerNode.order.orderId
+							} ${convertToNumber(
+								nodeFilled.makerNode.order.baseAssetAmountFilled,
+								BASE_PRECISION
+							)}/${convertToNumber(
+								nodeFilled.makerNode.order.baseAssetAmount,
+								BASE_PRECISION
+							)} @ ${convertToNumber(
+								nodeFilled.makerNode.order.price,
+								PRICE_PRECISION
+							)}`
+						);
+					} else {
+						logger.info(
+							`Processing spot fill tx log:\ntaker: ${nodeFilled.node.userAccount.toBase58()}-${
+								nodeFilled.node.order.orderId
+							} ${convertToNumber(
+								nodeFilled.node.order.baseAssetAmountFilled,
+								BASE_PRECISION
+							)}/${convertToNumber(
+								nodeFilled.node.order.baseAssetAmount,
+								BASE_PRECISION
+							)} @ ${convertToNumber(
+								nodeFilled.node.order.price,
+								PRICE_PRECISION
+							)}\nmaker: vAMM`
+						);
+					}
+				} else {
+					inFillIx = false;
+				}
+				continue;
+			}
+
+			if (!inFillIx) {
+				// this is not a log for a fill instruction
+				continue;
+			}
+
+			// try to handle the log line
+			const orderIdDoesNotExist = this.isOrderDoesNotExistLog(log);
+			if (orderIdDoesNotExist) {
+				logger.error(
+					`spot node filled: ${nodeFilled.node.userAccount.toString()}, ${
+						nodeFilled.node.order.orderId
+					}; does not exist (filled by someone else); ${log}`
+				);
+				this.throttledNodes.delete(this.getNodeToFillSignature(nodeFilled));
+				errorThisFillIx = true;
+				continue;
+			}
+		}
+
+		return successCount;
+	}
+
+	private async processBulkFillTxLogs(nodeToFill: NodeToFill, txSig: string) {
+		let tx: TransactionResponse | null = null;
+		let attempts = 0;
+		while (tx === null && attempts < 10) {
+			logger.info(`waiting for ${txSig} to be confirmed`);
+			tx = await this.driftClient.connection.getTransaction(txSig, {
+				commitment: 'confirmed',
+			});
+			attempts++;
+			// sleep 1s
+			await this.sleep(1000);
+		}
+
+		if (tx === null) {
+			logger.error(`tx ${txSig} not found`);
+			return 0;
+		}
+
+		return this.handleTransactionLogs(nodeToFill, tx.meta.logMessages);
+	}
+
 	private async tryFillSpotNode(nodeToFill: NodeToFill) {
 		const nodeSignature = this.getNodeToFillSignature(nodeToFill);
 		if (this.nodeIsThrottled(nodeSignature)) {
@@ -812,7 +984,7 @@ export class SpotFillerBot implements Bot {
 					computeUnitsPrice,
 				}
 			)
-			.then((txSig) => {
+			.then(async (txSig) => {
 				logger.info(`Filled spot order ${nodeSignature}, TX: ${txSig}`);
 
 				const pendingTxs = this.decPendingTransactions(
@@ -829,13 +1001,8 @@ export class SpotFillerBot implements Bot {
 					),
 					method: 'fillSpotOrder',
 				});
-				// TODO: should parse the tx logs and determine if we were really successful
-				this.successfulFillsCounter.add(1, {
-					market:
-						SpotMarkets[this.runtimeSpec.driftEnv][
-							nodeToFill.node.order.marketIndex
-						].symbol,
-				});
+
+				await this.processBulkFillTxLogs(nodeToFill, txSig);
 			})
 			.catch((e) => {
 				const pendingTxs = this.decPendingTransactions(
