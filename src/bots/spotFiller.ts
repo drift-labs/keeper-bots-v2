@@ -611,34 +611,40 @@ export class SpotFillerBot implements Bot {
 		let chUser: User;
 		let referrerInfo: ReferrerInfo;
 
-		await tryAcquire(this.userMapMutex).runExclusive(async () => {
-			if (nodeToFill.makerNode) {
-				const makerUserAccount = (
-					await this.userMap.mustGet(
-						nodeToFill.makerNode.userAccount.toString()
-					)
-				).getUserAccount();
-				const makerAuthority = makerUserAccount.authority;
-				const makerUserStats = (
-					await this.userStatsMap.mustGet(makerAuthority.toString())
-				).userStatsAccountPublicKey;
-				makerInfo = {
-					maker: nodeToFill.makerNode.userAccount,
-					makerUserAccount: makerUserAccount,
-					order: nodeToFill.makerNode.order,
-					makerStats: makerUserStats,
-				};
-			}
+		try {
+			await this.userMapMutex.runExclusive(async () => {
+				if (nodeToFill.makerNode) {
+					const makerUserAccount = (
+						await this.userMap.mustGet(
+							nodeToFill.makerNode.userAccount.toString()
+						)
+					).getUserAccount();
+					const makerAuthority = makerUserAccount.authority;
+					const makerUserStats = (
+						await this.userStatsMap.mustGet(makerAuthority.toString())
+					).userStatsAccountPublicKey;
+					makerInfo = {
+						maker: nodeToFill.makerNode.userAccount,
+						makerUserAccount: makerUserAccount,
+						order: nodeToFill.makerNode.order,
+						makerStats: makerUserStats,
+					};
+				}
 
-			chUser = await this.userMap.mustGet(
-				nodeToFill.node.userAccount.toString()
-			);
-			referrerInfo = (
-				await this.userStatsMap.mustGet(
-					chUser.getUserAccount().authority.toString()
-				)
-			).getReferrerInfo();
-		});
+				chUser = await this.userMap.mustGet(
+					nodeToFill.node.userAccount.toString()
+				);
+				referrerInfo = (
+					await this.userStatsMap.mustGet(
+						chUser.getUserAccount().authority.toString()
+					)
+				).getReferrerInfo();
+			});
+		} catch (e) {
+			if (e != E_ALREADY_LOCKED) {
+				throw new Error(`Error locking userMapMutex to fill node: ${e}`);
+			}
+		}
 
 		return Promise.resolve({
 			makerInfo,
@@ -1042,9 +1048,15 @@ export class SpotFillerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB();
-					await tryAcquire(this.userMapMutex).runExclusive(async () => {
-						await this.dlob.initFromUserMap(this.userMap);
-					});
+					try {
+						await tryAcquire(this.userMapMutex).runExclusive(async () => {
+							await this.dlob.initFromUserMap(this.userMap);
+						});
+					} catch (e) {
+						if (e != E_ALREADY_LOCKED) {
+							throw new Error(`Failed to init DLOB from usermap: ${e}`);
+						}
+					}
 					if (orderRecord) {
 						this.dlob.insertOrder(orderRecord.order, orderRecord.user);
 					}
