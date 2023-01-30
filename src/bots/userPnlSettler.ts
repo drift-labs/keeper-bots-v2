@@ -301,14 +301,28 @@ export class UserPnlSettlerBot implements Bot {
 					logger.info(`Settle PNL tx: ${tx}`);
 				}
 			}
-		} catch (e) {
-			console.error(e);
-			if (!(e as Error).message.includes('Transaction was not confirmed')) {
-				await webhookMessage(
-					`[${this.name}]: :x: uncaught error:\n${
-						e.stack ? e.stack : e.messaage
-					}`
-				);
+		} catch (err) {
+			console.error(err);
+			if (
+				!(err as Error).message.includes('Transaction was not confirmed') &&
+				!(err as Error).message.includes('Blockhash not found')
+			) {
+				const errorCode = getErrorCode(err);
+				if (!errorCodesToSuppress.includes(errorCode)) {
+					await webhookMessage(
+						`[${
+							this.name
+						}]: :x: Uncaught error: Error code: ${errorCode} while settling pnls:\n${
+							err.logs ? (err.logs as Array<string>).join('\n') : ''
+						}\n${err.stack ? err.stack : err.message}`
+					);
+				} else {
+					await webhookMessage(
+						`[${this.name}]: :x: uncaught error:\n${
+							err.stack ? err.stack : err.messaage
+						}`
+					);
+				}
 			}
 		} finally {
 			logger.info('Settle PNLs finished');
