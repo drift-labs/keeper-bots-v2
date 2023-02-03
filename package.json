@@ -49,5 +49,8 @@
 		"prettify:fix": "prettier --write './src/**/*.ts'",
 		"lint": "eslint . --ext ts --quiet",
 		"lint:fix": "eslint . --ext ts --fix"
+	},
+	"engines": {
+		"node": ">=16"
 	}
 }
