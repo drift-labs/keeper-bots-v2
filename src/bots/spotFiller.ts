@@ -840,7 +840,7 @@ export class SpotFillerBot implements Bot {
 							)} @ ${convertToNumber(
 								nodeFilled.node.order.price,
 								PRICE_PRECISION
-							)}\nmaker: vAMM`
+							)}\nmaker: OpenBook`
 						);
 					}
 				} else {
