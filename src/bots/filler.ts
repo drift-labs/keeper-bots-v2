@@ -59,6 +59,18 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
+import {
+	isEndIxLog,
+	isErrFillingLog,
+	isErrStaleOracle,
+	isFillIxLog,
+	isIxLog,
+	isMakerBreachedMaintenanceMarginLog,
+	isMakerFallbackLog,
+	isMakerOrderDoesNotExistLog,
+	isOrderDoesNotExistLog,
+	isTakerBreachedMaintenanceMarginLog,
+} from './common/txLogParse';
 
 const MAX_TX_PACK_SIZE = 900; //1232;
 const CU_PER_FILL = 200_000; // CU cost for a successful fill
@@ -767,100 +779,6 @@ export class FillerBot implements Bot {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
-	private isIxLog(log: string): boolean {
-		const match = log.match(new RegExp('Program log: Instruction:'));
-
-		return match !== null;
-	}
-
-	private isEndIxLog(log: string): boolean {
-		const match = log.match(
-			new RegExp(
-				`Program ${this.driftClient.program.programId.toBase58()} consumed ([0-9]+) of ([0-9]+) compute units`
-			)
-		);
-
-		return match !== null;
-	}
-
-	private isFillIxLog(log: string): boolean {
-		const match = log.match(
-			new RegExp('Program log: Instruction: Fill(.*)Order')
-		);
-
-		return match !== null;
-	}
-
-	private isOrderDoesNotExistLog(log: string): number | null {
-		const match = log.match(new RegExp('.*Order does not exist ([0-9]+)'));
-
-		if (!match) {
-			return null;
-		}
-
-		return parseInt(match[1]);
-	}
-
-	private isMakerOrderDoesNotExistLog(log: string): number | null {
-		const match = log.match(new RegExp('.*Maker has no order id ([0-9]+)'));
-
-		if (!match) {
-			return null;
-		}
-
-		return parseInt(match[1]);
-	}
-
-	private isMakerFallbackLog(log: string): number | null {
-		const match = log.match(
-			new RegExp('.*Using fallback maker order id ([0-9]+)')
-		);
-
-		if (!match) {
-			return null;
-		}
-
-		return parseInt(match[1]);
-	}
-
-	private isMakerBreachedMaintenanceMarginLog(log: string): boolean {
-		const match = log.match(
-			new RegExp('.*maker breached maintenance requirements.*')
-		);
-
-		return match !== null;
-	}
-
-	private isTakerBreachedMaintenanceMarginLog(log: string): boolean {
-		const match = log.match(
-			new RegExp('.*taker breached maintenance requirements.*')
-		);
-
-		return match !== null;
-	}
-
-	private isErrFillingLog(log: string): [string, string] | null {
-		const match = log.match(
-			new RegExp('.*Err filling order id ([0-9]+) for user ([a-zA-Z0-9]+)')
-		);
-
-		if (!match) {
-			return null;
-		}
-
-		return [match[1], match[2]];
-	}
-
-	private isErrStaleOracle(log: string): boolean {
-		const match = log.match(new RegExp('.*Invalid Oracle: Stale.*'));
-
-		if (!match) {
-			return false;
-		}
-
-		return true;
-	}
-
 	/**
 	 * Iterates through a tx's logs and handles it appropriately 3e.g. throttling users, updating metrics, etc.)
 	 *
@@ -893,7 +811,7 @@ export class FillerBot implements Bot {
 				continue;
 			}
 
-			if (this.isEndIxLog(log)) {
+			if (isEndIxLog(log)) {
 				if (!errorThisFillIx) {
 					successCount++;
 				}
@@ -903,8 +821,8 @@ export class FillerBot implements Bot {
 				continue;
 			}
 
-			if (this.isIxLog(log)) {
-				if (this.isFillIxLog(log)) {
+			if (isIxLog(log)) {
+				if (isFillIxLog(log)) {
 					inFillIx = true;
 					errorThisFillIx = false;
 					ixIdx++;
@@ -965,7 +883,7 @@ export class FillerBot implements Bot {
 			}
 
 			// try to handle the log line
-			const orderIdDoesNotExist = this.isOrderDoesNotExistLog(log);
+			const orderIdDoesNotExist = isOrderDoesNotExistLog(log);
 			if (orderIdDoesNotExist) {
 				const filledNode = nodesFilled[ixIdx];
 				logger.error(
@@ -978,7 +896,7 @@ export class FillerBot implements Bot {
 				continue;
 			}
 
-			const makerOrderIdDoesNotExist = this.isMakerOrderDoesNotExistLog(log);
+			const makerOrderIdDoesNotExist = isMakerOrderDoesNotExistLog(log);
 			if (makerOrderIdDoesNotExist) {
 				const filledNode = nodesFilled[ixIdx];
 				if (!filledNode.makerNode) {
@@ -1005,7 +923,7 @@ export class FillerBot implements Bot {
 				continue;
 			}
 
-			const makerFallbackOrderId = this.isMakerFallbackLog(log);
+			const makerFallbackOrderId = isMakerFallbackLog(log);
 			if (makerFallbackOrderId) {
 				const filledNode = nodesFilled[ixIdx];
 				if (!filledNode.makerNode) {
@@ -1033,7 +951,7 @@ export class FillerBot implements Bot {
 			}
 
 			const makerBreachedMaintenanceMargin =
-				this.isMakerBreachedMaintenanceMarginLog(log);
+				isMakerBreachedMaintenanceMarginLog(log);
 			if (makerBreachedMaintenanceMargin) {
 				const filledNode = nodesFilled[ixIdx];
 				if (!filledNode.makerNode) {
@@ -1097,7 +1015,7 @@ export class FillerBot implements Bot {
 			}
 
 			const takerBreachedMaintenanceMargin =
-				this.isTakerBreachedMaintenanceMarginLog(log);
+				isTakerBreachedMaintenanceMarginLog(log);
 			if (takerBreachedMaintenanceMargin) {
 				const filledNode = nodesFilled[ixIdx];
 				const takerNodeSignature =
@@ -1149,7 +1067,7 @@ export class FillerBot implements Bot {
 				continue;
 			}
 
-			const errFillingLog = this.isErrFillingLog(log);
+			const errFillingLog = isErrFillingLog(log);
 			if (errFillingLog) {
 				const orderId = errFillingLog[0];
 				const userAcc = errFillingLog[1];
@@ -1168,7 +1086,7 @@ export class FillerBot implements Bot {
 				continue;
 			}
 
-			if (this.isErrStaleOracle(log)) {
+			if (isErrStaleOracle(log)) {
 				logger.error(`Stale oracle error: ${log}`);
 				errorThisFillIx = true;
 				continue;
