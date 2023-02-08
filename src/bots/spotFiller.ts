@@ -34,7 +34,12 @@ import {
 	MutexInterface,
 } from 'async-mutex';
 
-import { PublicKey, TransactionResponse } from '@solana/web3.js';
+import {
+	ComputeBudgetProgram,
+	PublicKey,
+	Transaction,
+	TransactionResponse,
+} from '@solana/web3.js';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import {
@@ -55,6 +60,14 @@ import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { getErrorCode } from '../error';
+import {
+	isEndIxLog,
+	isFillIxLog,
+	isIxLog,
+	isMakerBreachedMaintenanceMarginLog,
+	isOrderDoesNotExistLog,
+	isTakerBreachedMaintenanceMarginLog,
+} from './common/txLogParse';
 
 /**
  * Size of throttled nodes to get to before pruning the map
@@ -724,38 +737,11 @@ export class SpotFillerBot implements Bot {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
-	private isIxLog(log: string): boolean {
-		const match = log.match(new RegExp('Program log: Instruction:'));
-
-		return match !== null;
-	}
-
-	private isEndIxLog(log: string): boolean {
-		const match = log.match(
-			new RegExp(
-				`Program ${this.driftClient.program.programId.toBase58()} consumed ([0-9]+) of ([0-9]+) compute units`
-			)
-		);
-
-		return match !== null;
-	}
-
-	private isFillIxLog(log: string): boolean {
-		const match = log.match(
-			new RegExp('Program log: Instruction: Fill(.*)Order')
-		);
-
-		return match !== null;
-	}
-
-	private isOrderDoesNotExistLog(log: string): number | null {
-		const match = log.match(new RegExp('.*Order does not exist ([0-9]+)'));
-
-		if (!match) {
-			return null;
-		}
-
-		return parseInt(match[1]);
+	private getFillSignatureFromUserAccountAndOrderId(
+		userAccount: string,
+		orderId: string
+	): string {
+		return `${userAccount}-${orderId}`;
 	}
 
 	/**
@@ -779,7 +765,7 @@ export class SpotFillerBot implements Bot {
 				continue;
 			}
 
-			if (this.isEndIxLog(log)) {
+			if (isEndIxLog(log)) {
 				if (!errorThisFillIx) {
 					this.successfulFillsCounter.add(1, {
 						market:
@@ -795,8 +781,8 @@ export class SpotFillerBot implements Bot {
 				continue;
 			}
 
-			if (this.isIxLog(log)) {
-				if (this.isFillIxLog(log)) {
+			if (isIxLog(log)) {
+				if (isFillIxLog(log)) {
 					inFillIx = true;
 					errorThisFillIx = false;
 
@@ -855,7 +841,7 @@ export class SpotFillerBot implements Bot {
 			}
 
 			// try to handle the log line
-			const orderIdDoesNotExist = this.isOrderDoesNotExistLog(log);
+			const orderIdDoesNotExist = isOrderDoesNotExistLog(log);
 			if (orderIdDoesNotExist) {
 				logger.error(
 					`spot node filled: ${nodeFilled.node.userAccount.toString()}, ${
@@ -864,6 +850,121 @@ export class SpotFillerBot implements Bot {
 				);
 				this.throttledNodes.delete(this.getNodeToFillSignature(nodeFilled));
 				errorThisFillIx = true;
+				continue;
+			}
+
+			const makerBreachedMaintenanceMargin =
+				isMakerBreachedMaintenanceMarginLog(log);
+			if (makerBreachedMaintenanceMargin) {
+				if (!nodeFilled.makerNode) {
+					logger.error(
+						`Got maker breached maint. margin log, but don't have a maker node: ${log}\n${JSON.stringify(
+							nodeFilled,
+							null,
+							2
+						)}`
+					);
+					continue;
+				}
+				const makerNodeSignature =
+					this.getFillSignatureFromUserAccountAndOrderId(
+						nodeFilled.makerNode.userAccount.toString(),
+						nodeFilled.makerNode.order.orderId.toString()
+					);
+				logger.error(
+					`maker breach maint. margin, assoc node: ${nodeFilled.makerNode.userAccount.toString()}, ${
+						nodeFilled.makerNode.order.orderId
+					}; (throttling ${makerNodeSignature}); ${log}`
+				);
+				this.throttledNodes.set(makerNodeSignature, Date.now());
+				errorThisFillIx = true;
+
+				const tx = new Transaction();
+				tx.add(
+					ComputeBudgetProgram.requestUnits({
+						units: 1_000_000,
+						additionalFee: 0,
+					})
+				);
+				tx.add(
+					await this.driftClient.getForceCancelOrdersIx(
+						nodeFilled.makerNode.userAccount,
+						(
+							await this.userMap.mustGet(
+								nodeFilled.makerNode.userAccount.toString()
+							)
+						).getUserAccount()
+					)
+				);
+				this.driftClient.txSender
+					.send(tx, [], this.driftClient.opts)
+					.then((txSig) => {
+						logger.info(
+							`Force cancelled orders for maker ${nodeFilled.makerNode.userAccount.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
+						);
+					})
+					.catch((e) => {
+						console.error(e);
+						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
+						webhookMessage(
+							`[${this.name}]: :x: error processing fill tx logs:\n${
+								e.stack ? e.stack : e.message
+							}`
+						);
+					});
+
+				continue;
+			}
+
+			const takerBreachedMaintenanceMargin =
+				isTakerBreachedMaintenanceMarginLog(log);
+			if (takerBreachedMaintenanceMargin) {
+				const takerNodeSignature =
+					this.getFillSignatureFromUserAccountAndOrderId(
+						nodeFilled.node.userAccount.toString(),
+						nodeFilled.node.order.orderId.toString()
+					);
+				logger.error(
+					`taker breach maint. margin, assoc node: ${nodeFilled.node.userAccount.toString()}, ${
+						nodeFilled.node.order.orderId
+					}; (throttling ${takerNodeSignature} and force cancelling orders); ${log}`
+				);
+				this.throttledNodes.set(takerNodeSignature, Date.now());
+				errorThisFillIx = true;
+
+				const tx = new Transaction();
+				tx.add(
+					ComputeBudgetProgram.requestUnits({
+						units: 1_000_000,
+						additionalFee: 0,
+					})
+				);
+				tx.add(
+					await this.driftClient.getForceCancelOrdersIx(
+						nodeFilled.node.userAccount,
+						(
+							await this.userMap.mustGet(nodeFilled.node.userAccount.toString())
+						).getUserAccount()
+					)
+				);
+
+				this.driftClient.txSender
+					.send(tx, [], this.driftClient.opts)
+					.then((txSig) => {
+						logger.info(
+							`Force cancelled orders for user ${nodeFilled.node.userAccount.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
+						);
+					})
+					.catch((e) => {
+						console.error(e);
+						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
+						webhookMessage(
+							`[${this.name}]: :x: error processing fill tx logs:\n${
+								e.stack ? e.stack : e.message
+							}`
+						);
+					});
+
 				continue;
 			}
 		}
