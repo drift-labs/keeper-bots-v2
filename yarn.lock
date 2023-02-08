@@ -51,16 +51,16 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/sdk@2.13.0":
-  version "2.13.0"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.13.0.tgz#023294fd67c07a6aa69a2170fc9d294a8029bf3f"
-  integrity sha512-heWCg2550D7V7wIGJluIXV3z8GchtyJC4Nsl0cV8HA+FKhh9ymFZDdnP6i9AXFmJeM5xqzHVfVLbvMwNyhl7hA==
+"@drift-labs/sdk@2.15.0":
+  version "2.15.0"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.15.0.tgz#6d773af682080ba89f750a7a72bd26f12f7a0d99"
+  integrity sha512-md+h0jvoNqGLG45rrVUhdnAMGrOJV6DPtXTHsJRynH6wRodZirxqZkkmzuKd4AE7Au9Rf+m+gBZgl+kY06WQfw==
   dependencies:
     "@project-serum/anchor" "0.25.0-beta.1"
     "@project-serum/serum" "^0.13.38"
     "@pythnetwork/client" "2.5.3"
     "@solana/spl-token" "^0.1.6"
-    "@solana/web3.js" "1.66.2"
+    "@solana/web3.js" "1.73.2"
     strict-event-emitter-types "^2.0.0"
     uuid "^8.3.2"
 
@@ -838,16 +838,17 @@
     buffer-layout "^1.2.0"
     dotenv "10.0.0"
 
-"@solana/web3.js@1.66.2":
-  version "1.66.2"
-  resolved "https://registry.yarnpkg.com/@solana/web3.js/-/web3.js-1.66.2.tgz#80b43c5868b846124fe3ebac7d3943930c3fa60c"
-  integrity sha512-RyaHMR2jGmaesnYP045VLeBGfR/gAW3cvZHzMFGg7bkO+WOYOYp1nEllf0/la4U4qsYGKCsO9eEevR5fhHiVHg==
+"@solana/web3.js@1.73.2":
+  version "1.73.2"
+  resolved "https://registry.yarnpkg.com/@solana/web3.js/-/web3.js-1.73.2.tgz#4b30cd402b35733dae3a7d0b638be26a7742b395"
+  integrity sha512-9WACF8W4Nstj7xiDw3Oom22QmrhBh0VyZyZ7JvvG3gOxLWLlX3hvm5nPVJOGcCE/9fFavBbCUb5A6CIuvMGdoA==
   dependencies:
     "@babel/runtime" "^7.12.5"
     "@noble/ed25519" "^1.7.0"
     "@noble/hashes" "^1.1.2"
     "@noble/secp256k1" "^1.6.3"
     "@solana/buffer-layout" "^4.0.0"
+    agentkeepalive "^4.2.1"
     bigint-buffer "^1.1.5"
     bn.js "^5.0.0"
     borsh "^0.7.0"
