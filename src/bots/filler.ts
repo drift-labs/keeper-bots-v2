@@ -811,7 +811,7 @@ export class FillerBot implements Bot {
 				continue;
 			}
 
-			if (isEndIxLog(log)) {
+			if (isEndIxLog(this.driftClient.program.programId.toBase58(), log)) {
 				if (!errorThisFillIx) {
 					successCount++;
 				}
