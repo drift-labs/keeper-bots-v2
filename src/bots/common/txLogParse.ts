@@ -4,10 +4,10 @@ export function isIxLog(log: string): boolean {
 	return match !== null;
 }
 
-export function isEndIxLog(log: string): boolean {
+export function isEndIxLog(programId: string, log: string): boolean {
 	const match = log.match(
 		new RegExp(
-			`Program ${this.driftClient.program.programId.toBase58()} consumed ([0-9]+) of ([0-9]+) compute units`
+			`Program ${programId} consumed ([0-9]+) of ([0-9]+) compute units`
 		)
 	);
 
