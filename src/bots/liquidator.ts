@@ -57,6 +57,8 @@ const errorCodesToSuppress = [
 	6004, // Error Number: 6004. Error Message: Sufficient collateral.
 ];
 
+const LIQUIDATE_THROTTLE_BACKOFF = 20000; // the time to wait before trying to liquidate a throttled user again
+
 function calculateSpotTokenAmountToLiquidate(
 	driftClient: DriftClient,
 	liquidatorUser: User,
@@ -223,6 +225,11 @@ async function liqPerpPnl(
 								e.stack ? e.stack : e.message
 							}`
 						);
+					} else {
+						this.throttledUsers.set(
+							user.userAccountPublicKey.toBase58(),
+							Date.now()
+						);
 					}
 				})
 				.finally(() => {
@@ -274,6 +281,11 @@ async function liqPerpPnl(
 							e.stack ? e.stack : e.message
 						}`
 					);
+				} else {
+					this.throttledUsers.set(
+						user.userAccountPublicKey.toBase58(),
+						Date.now()
+					);
 				}
 			})
 			.finally(() => {
@@ -319,6 +331,7 @@ export class LiquidatorBot implements Bot {
 	private meter: Meter;
 	private exporter: PrometheusExporter;
 	private bootTimeMs: number;
+	private throttledUsers = new Map<string, number>();
 
 	// metrics
 	private runtimeSpecsGauge: ObservableGauge;
@@ -977,6 +990,21 @@ export class LiquidatorBot implements Bot {
 					if (isVariant(userAcc.status, 'bankrupt')) {
 						await this.tryResolveBankruptUser(user);
 					} else if (user.canBeLiquidated()) {
+						if (this.throttledUsers.has(userKey)) {
+							const lastAttempt = this.throttledUsers.get(userKey);
+							const now = Date.now();
+							if (lastAttempt + LIQUIDATE_THROTTLE_BACKOFF > now) {
+								logger.warn(
+									`skipping user (throttled, retry in ${
+										lastAttempt + LIQUIDATE_THROTTLE_BACKOFF - now
+									}ms) ${auth}: ${userKey}`
+								);
+								continue;
+							} else {
+								this.throttledUsers.delete(userKey);
+							}
+						}
+
 						logger.info(
 							`liquidating auth: ${auth}, userAccount: ${userKey}...`
 						);
@@ -1040,6 +1068,7 @@ export class LiquidatorBot implements Bot {
 									);
 									logger.error(e);
 									const errorCode = getErrorCode(e);
+
 									if (!errorCodesToSuppress.includes(errorCode)) {
 										webhookMessage(
 											`[${
@@ -1047,6 +1076,11 @@ export class LiquidatorBot implements Bot {
 											}]: :x: Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}:\n${
 												e.logs ? (e.logs as Array<string>).join('\n') : ''
 											}\n${e.stack ? e.stack : e.message}`
+										);
+									} else {
+										this.throttledUsers.set(
+											user.userAccountPublicKey.toBase58(),
+											Date.now()
 										);
 									}
 								})
@@ -1127,7 +1161,7 @@ export class LiquidatorBot implements Bot {
 												liquidateePosition.marketIndex
 											}\n${
 												e.logs ? (e.logs as Array<string>).join('\n') : ''
-											}\n${e.stack || e}}`
+											}\n${e.stack || e}`
 										);
 									})
 									.finally(() => {
