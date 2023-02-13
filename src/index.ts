@@ -117,6 +117,16 @@ program
 		'--websocket',
 		'Use websocket instead of RPC polling for account updates'
 	)
+	.option(
+		'--disable-auto-derisking',
+		'Set to disable auto derisking (primarily used for liquidator to close inherited positions)'
+	)
+	.option(
+		'--subaccount <string>',
+		'subaccount(s) to use (comma delimited), specify which subaccountsIDs to load',
+		''
+	)
+	.option('--market <string>', 'market(s) to liquidate (comma delimited)', '')
 	.parse();
 
 const opts = program.opts();
@@ -272,7 +282,7 @@ function printOpenPositions(clearingHouseUser: User) {
 const bots: Bot[] = [];
 const runBot = async () => {
 	const wallet = getWallet();
-	const clearingHousePublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
+	const driftPublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
 
 	const connection = new Connection(endpoint, {
 		wsEndpoint: wsEndpoint,
@@ -309,7 +319,7 @@ const runBot = async () => {
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
-		programID: clearingHousePublicKey,
+		programID: driftPublicKey,
 		perpMarketIndexes: PerpMarkets[driftEnv].map((mkt) => mkt.marketIndex),
 		spotMarketIndexes: SpotMarkets[driftEnv].map((mkt) => mkt.marketIndex),
 		oracleInfos: PerpMarkets[driftEnv].map((mkt) => {
@@ -525,7 +535,7 @@ const runBot = async () => {
 					rpcEndpoint: endpoint,
 					commit: commitHash,
 					driftEnv: driftEnv,
-					driftPid: clearingHousePublicKey.toBase58(),
+					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				fillerPollingInterval,
@@ -544,7 +554,7 @@ const runBot = async () => {
 					rpcEndpoint: endpoint,
 					commit: commitHash,
 					driftEnv: driftEnv,
-					driftPid: clearingHousePublicKey.toBase58(),
+					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				fillerPollingInterval,
@@ -586,10 +596,11 @@ const runBot = async () => {
 					rpcEndpoint: endpoint,
 					commit: commitHash,
 					driftEnv: driftEnv,
-					driftPid: clearingHousePublicKey.toBase58(),
+					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				parseInt(metricsPort.toString())
+				parseInt(metricsPort.toString()),
+				opts.disableAutoDerisking
 			)
 		);
 	}

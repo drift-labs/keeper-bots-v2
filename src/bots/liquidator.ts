@@ -332,6 +332,7 @@ export class LiquidatorBot implements Bot {
 	private exporter: PrometheusExporter;
 	private bootTimeMs: number;
 	private throttledUsers = new Map<string, number>();
+	private disableAutoDerisking: boolean;
 
 	// metrics
 	private runtimeSpecsGauge: ObservableGauge;
@@ -380,7 +381,8 @@ export class LiquidatorBot implements Bot {
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
-		metricsPort?: number | undefined
+		metricsPort?: number | undefined,
+		disableAutoDerisking?: boolean | undefined
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
@@ -395,6 +397,12 @@ export class LiquidatorBot implements Bot {
 		this.metricsPort = metricsPort;
 		if (this.metricsPort) {
 			this.initializeMetrics();
+		}
+
+		if (!disableAutoDerisking) {
+			this.disableAutoDerisking = false;
+		} else {
+			this.disableAutoDerisking = disableAutoDerisking;
 		}
 	}
 
@@ -1188,9 +1196,11 @@ export class LiquidatorBot implements Bot {
 				}
 			});
 
-			const startDerisk = Date.now();
-			await this.derisk();
-			logger.debug(`derisk took ${Date.now() - startDerisk}ms`);
+			if (!this.disableAutoDerisking) {
+				const startDerisk = Date.now();
+				await this.derisk();
+				logger.debug(`derisk took ${Date.now() - startDerisk}ms`);
+			}
 			ran = true;
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
