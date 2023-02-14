@@ -31,6 +31,7 @@ import {
 	DriftClientSubscriptionConfig,
 	LogProviderConfig,
 } from '@drift-labs/sdk';
+import { assert } from '@drift-labs/sdk/lib/assert/assert';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
 
@@ -49,6 +50,7 @@ import { UserPnlSettlerBot } from './bots/userPnlSettler';
 import {
 	getOrCreateAssociatedTokenAccount,
 	TOKEN_FAUCET_PROGRAM_ID,
+	loadCommaDelimitToArray,
 } from './utils';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
@@ -124,9 +126,18 @@ program
 	.option(
 		'--subaccount <string>',
 		'subaccount(s) to use (comma delimited), specify which subaccountsIDs to load',
+		'0'
+	)
+	.option(
+		'--perp-markets <string>',
+		'comma delimited list of perp market ID(s) to liquidate (willing to inherit risk), omit for all',
 		''
 	)
-	.option('--market <string>', 'market(s) to liquidate (comma delimited)', '')
+	.option(
+		'--spot-markets <string>',
+		'comma delimited list of spot market ID(s) to liquidate (willing to inherit risk), omit for all',
+		''
+	)
 	.parse();
 
 const opts = program.opts();
@@ -316,6 +327,7 @@ const runBot = async () => {
 		};
 	}
 
+	const subaccountIds = loadCommaDelimitToArray(opts.subaccount);
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
@@ -337,6 +349,8 @@ const runBot = async () => {
 			type: 'retry',
 			timeout: 5000,
 		},
+		activeSubAccountId: subaccountIds[0],
+		subAccountIds: subaccountIds,
 	});
 
 	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {
@@ -586,6 +600,16 @@ const runBot = async () => {
 		);
 	}
 	if (opts.liquidator) {
+		assert(
+			subaccountIds.length === 1,
+			'Liquidator bot only works with one subaccount specified'
+		);
+		const perpMarketIndicies: number[] = loadCommaDelimitToArray(
+			opts.perpMarkets
+		);
+		const spotMarketIndicies: number[] = loadCommaDelimitToArray(
+			opts.perpMarkets
+		);
 		bots.push(
 			new LiquidatorBot(
 				botId ? `liquidator-${botId}` : 'liquidator',
@@ -599,6 +623,8 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				perpMarketIndicies,
+				spotMarketIndicies,
 				parseInt(metricsPort.toString()),
 				opts.disableAutoDerisking
 			)
