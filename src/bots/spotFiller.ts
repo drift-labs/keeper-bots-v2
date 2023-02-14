@@ -718,7 +718,7 @@ export class SpotFillerBot implements Bot {
 		computeUnitLimit: number
 	): number {
 		if (currPendingTx < pendingTxKink1) {
-			return 0;
+			return 1;
 		} else if (
 			currPendingTx >= pendingTxKink1 &&
 			currPendingTx < pendingTxKink2
