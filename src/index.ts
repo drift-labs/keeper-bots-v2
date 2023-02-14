@@ -559,7 +559,9 @@ const runBot = async () => {
 				},
 				fillerPollingInterval,
 				parseInt(metricsPort),
-				parseInt(opts.transactionVersion)
+				opts.transactionVersion === undefined
+					? undefined
+					: parseInt(opts.transactionVersion)
 			)
 		);
 	}
