@@ -49,3 +49,22 @@ export async function getOrCreateAssociatedTokenAccount(
 
 	return associatedTokenAccount;
 }
+
+export function loadCommaDelimitToArray(str: string): number[] {
+	try {
+		return str
+			.split(',')
+			.filter((element) => {
+				if (element.trim() === '') {
+					return false;
+				}
+
+				return !isNaN(Number(element));
+			})
+			.map((element) => {
+				return Number(element);
+			});
+	} catch (e) {
+		return [];
+	}
+}

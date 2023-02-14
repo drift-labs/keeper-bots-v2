@@ -56,10 +56,32 @@ yarn run dev:filler
 
 ## Run JIT Maker Bot
 
-⚠ requires collateral
+⚠ requires collateral (you dont want to run this as is)
 
 ```shell
 yarn
 yarn run dev:jitmaker
 ```
 
+## Run Liquidator Bot
+
+Read the docs: https://docs.drift.trade/liquidators
+
+By default the liquidator will attempt to liqudate (inherit the risk of)
+endangered positions in all markets. Pass `--perp-markets` or `--spot-markets`
+flags to restrict which markets you want to liquidate.
+
+You can also specify which subaccountId you want to use via the `--subaccount`
+flag (the main subaccount 0 is default).
+
+
+Example - default mode (liquidate all markets):
+```shell
+yarn run dev --liquidator
+```
+
+Example - default mode (liquidate SOL-PERP, BTC-PERP and SOL spot):
+```shell
+yarn run dev --liquidator --perp-markets 0,1 --spot-markets 0
+```
+```

@@ -31,6 +31,7 @@ import {
 	DriftClientSubscriptionConfig,
 	LogProviderConfig,
 } from '@drift-labs/sdk';
+import { assert } from '@drift-labs/sdk/lib/assert/assert';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
 
@@ -49,6 +50,7 @@ import { UserPnlSettlerBot } from './bots/userPnlSettler';
 import {
 	getOrCreateAssociatedTokenAccount,
 	TOKEN_FAUCET_PROGRAM_ID,
+	loadCommaDelimitToArray,
 } from './utils';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
@@ -116,6 +118,30 @@ program
 	.option(
 		'--websocket',
 		'Use websocket instead of RPC polling for account updates'
+	)
+	.option(
+		'--disable-auto-derisking',
+		'Set to disable auto derisking (primarily used for liquidator to close inherited positions)'
+	)
+	.option(
+		'--subaccount <string>',
+		'subaccount(s) to use (comma delimited), specify which subaccountsIDs to load',
+		'0'
+	)
+	.option(
+		'--perp-markets <string>',
+		'comma delimited list of perp market ID(s) to liquidate (willing to inherit risk), omit for all',
+		''
+	)
+	.option(
+		'--spot-markets <string>',
+		'comma delimited list of spot market ID(s) to liquidate (willing to inherit risk), omit for all',
+		''
+	)
+	.option(
+		'--transaction-version <number>',
+		'Select transaction version (omit for legacy transaction)',
+		''
 	)
 	.parse();
 
@@ -272,7 +298,7 @@ function printOpenPositions(clearingHouseUser: User) {
 const bots: Bot[] = [];
 const runBot = async () => {
 	const wallet = getWallet();
-	const clearingHousePublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
+	const driftPublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
 
 	const connection = new Connection(endpoint, {
 		wsEndpoint: wsEndpoint,
@@ -306,10 +332,11 @@ const runBot = async () => {
 		};
 	}
 
+	const subaccountIds = loadCommaDelimitToArray(opts.subaccount);
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
-		programID: clearingHousePublicKey,
+		programID: driftPublicKey,
 		perpMarketIndexes: PerpMarkets[driftEnv].map((mkt) => mkt.marketIndex),
 		spotMarketIndexes: SpotMarkets[driftEnv].map((mkt) => mkt.marketIndex),
 		oracleInfos: PerpMarkets[driftEnv].map((mkt) => {
@@ -327,6 +354,8 @@ const runBot = async () => {
 			type: 'retry',
 			timeout: 5000,
 		},
+		activeSubAccountId: subaccountIds[0],
+		subAccountIds: subaccountIds,
 	});
 
 	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {
@@ -525,11 +554,12 @@ const runBot = async () => {
 					rpcEndpoint: endpoint,
 					commit: commitHash,
 					driftEnv: driftEnv,
-					driftPid: clearingHousePublicKey.toBase58(),
+					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				fillerPollingInterval,
-				parseInt(metricsPort)
+				parseInt(metricsPort),
+				parseInt(opts.transactionVersion)
 			)
 		);
 	}
@@ -544,7 +574,7 @@ const runBot = async () => {
 					rpcEndpoint: endpoint,
 					commit: commitHash,
 					driftEnv: driftEnv,
-					driftPid: clearingHousePublicKey.toBase58(),
+					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				fillerPollingInterval,
@@ -576,6 +606,16 @@ const runBot = async () => {
 		);
 	}
 	if (opts.liquidator) {
+		assert(
+			subaccountIds.length === 1,
+			'Liquidator bot only works with one subaccount specified'
+		);
+		const perpMarketIndicies: number[] = loadCommaDelimitToArray(
+			opts.perpMarkets
+		);
+		const spotMarketIndicies: number[] = loadCommaDelimitToArray(
+			opts.perpMarkets
+		);
 		bots.push(
 			new LiquidatorBot(
 				botId ? `liquidator-${botId}` : 'liquidator',
@@ -586,10 +626,13 @@ const runBot = async () => {
 					rpcEndpoint: endpoint,
 					commit: commitHash,
 					driftEnv: driftEnv,
-					driftPid: clearingHousePublicKey.toBase58(),
+					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				parseInt(metricsPort.toString())
+				perpMarketIndicies,
+				spotMarketIndicies,
+				parseInt(metricsPort.toString()),
+				opts.disableAutoDerisking
 			)
 		);
 	}
