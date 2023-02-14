@@ -36,6 +36,7 @@ import {
 
 import {
 	ComputeBudgetProgram,
+	GetVersionedTransactionConfig,
 	PublicKey,
 	Transaction,
 	TransactionResponse,
@@ -975,11 +976,13 @@ export class SpotFillerBot implements Bot {
 	private async processBulkFillTxLogs(nodeToFill: NodeToFill, txSig: string) {
 		let tx: TransactionResponse | null = null;
 		let attempts = 0;
+		const config: GetVersionedTransactionConfig = {
+			commitment: 'confirmed',
+			maxSupportedTransactionVersion: 0,
+		};
 		while (tx === null && attempts < 10) {
 			logger.info(`waiting for ${txSig} to be confirmed`);
-			tx = await this.driftClient.connection.getTransaction(txSig, {
-				commitment: 'confirmed',
-			});
+			tx = await this.driftClient.connection.getTransaction(txSig, config);
 			attempts++;
 			// sleep 1s
 			await this.sleep(1000);
@@ -1078,19 +1081,42 @@ export class SpotFillerBot implements Bot {
 			`sending - currPendingTxs: ${currPendingTxs}, computeUnits: ${computeUnits}, computeUnitsPrice: ${computeUnitsPrice}`
 		);
 
-		this.driftClient
-			.fillSpotOrder(
+		const tx = new Transaction();
+		tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
+		tx.add(
+			ComputeBudgetProgram.setComputeUnitPrice({
+				microLamports: computeUnitsPrice,
+			})
+		);
+		tx.add(
+			await this.driftClient.getFillSpotOrderIx(
 				chUser.getUserAccountPublicKey(),
 				chUser.getUserAccount(),
 				nodeToFill.node.order,
 				serumFulfillmentConfig,
 				makerInfo,
-				referrerInfo,
-				{
-					computeUnits,
-					computeUnitsPrice,
-				}
+				referrerInfo
 			)
+		);
+
+		// const txSize = tx.serialize()
+		// logger.info(`TxSize: ${txSize.length} bytes`);
+
+		// this.driftClient
+		// 	.fillSpotOrder(
+		// 		chUser.getUserAccountPublicKey(),
+		// 		chUser.getUserAccount(),
+		// 		nodeToFill.node.order,
+		// 		serumFulfillmentConfig,
+		// 		makerInfo,
+		// 		referrerInfo,
+		// 		{
+		// 			computeUnits,
+		// 			computeUnitsPrice,
+		// 		}
+		// 	)
+		this.driftClient.txSender
+			.send(tx, [], this.driftClient.opts)
 			.then(async (txSig) => {
 				logger.info(`Filled spot order ${nodeSignature}, TX: ${txSig}`);
 
@@ -1109,7 +1135,7 @@ export class SpotFillerBot implements Bot {
 					method: 'fillSpotOrder',
 				});
 
-				await this.processBulkFillTxLogs(nodeToFill, txSig);
+				await this.processBulkFillTxLogs(nodeToFill, txSig.txSig);
 			})
 			.catch((e) => {
 				const pendingTxs = this.decPendingTransactions(

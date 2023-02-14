@@ -138,6 +138,11 @@ program
 		'comma delimited list of spot market ID(s) to liquidate (willing to inherit risk), omit for all',
 		''
 	)
+	.option(
+		'--transaction-version <number>',
+		'Select transaction version (omit for legacy transaction)',
+		''
+	)
 	.parse();
 
 const opts = program.opts();
@@ -553,7 +558,8 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				fillerPollingInterval,
-				parseInt(metricsPort)
+				parseInt(metricsPort),
+				parseInt(opts.transactionVersion)
 			)
 		);
 	}

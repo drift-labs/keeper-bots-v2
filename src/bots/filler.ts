@@ -38,6 +38,7 @@ import {
 	TransactionSignature,
 	TransactionInstruction,
 	ComputeBudgetProgram,
+	GetVersionedTransactionConfig,
 } from '@solana/web3.js';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -107,6 +108,7 @@ export class FillerBot implements Bot {
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
 	private pollingIntervalMs: number;
+	private transactionVersion: number | undefined;
 
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -163,7 +165,8 @@ export class FillerBot implements Bot {
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
 		pollingIntervalMs?: number,
-		metricsPort?: number
+		metricsPort?: number,
+		transactionVersion?: number
 	) {
 		this.name = name;
 		this.dryRun = dryRun;
@@ -180,6 +183,9 @@ export class FillerBot implements Bot {
 		if (this.metricsPort) {
 			this.initializeMetrics();
 		}
+
+		this.transactionVersion = transactionVersion;
+		logger.info(`${name}: transactionVersion: ${this.transactionVersion}`);
 	}
 
 	private initializeMetrics() {
@@ -1109,11 +1115,13 @@ export class FillerBot implements Bot {
 	): Promise<number> {
 		let tx: TransactionResponse | null = null;
 		let attempts = 0;
+		const config: GetVersionedTransactionConfig = {
+			commitment: 'confirmed',
+			maxSupportedTransactionVersion: 0,
+		};
 		while (tx === null && attempts < 10) {
 			logger.info(`waiting for ${txSig} to be confirmed`);
-			tx = await this.driftClient.connection.getTransaction(txSig, {
-				commitment: 'confirmed',
-			});
+			tx = await this.driftClient.connection.getTransaction(txSig, config);
 			attempts++;
 			await this.sleep(1000);
 		}
@@ -1135,7 +1143,7 @@ export class FillerBot implements Bot {
 	private async tryBulkFillPerpNodes(
 		nodesToFill: Array<NodeToFill>
 	): Promise<[TransactionSignature, number]> {
-		const tx = new Transaction();
+		const ixs: Array<TransactionInstruction> = [];
 		let txSig = '';
 
 		/**
@@ -1164,7 +1172,7 @@ export class FillerBot implements Bot {
 			uniqueAccounts.add(key.pubkey.toString())
 		);
 		uniqueAccounts.add(computeBudgetIx.programId.toString());
-		tx.add(computeBudgetIx);
+		ixs.push(computeBudgetIx);
 
 		// initialize the barebones transaction
 		// signatures
@@ -1296,7 +1304,7 @@ export class FillerBot implements Bot {
 					.getUserAccountPublicKey()
 					.toString()}-${nodeToFill.node.order.orderId.toString()}`
 			);
-			tx.add(ix);
+			ixs.push(ix);
 			runningTxSize += newIxCost + additionalAccountsCost;
 			runningCUUsed += cuToUsePerFill;
 			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
@@ -1318,9 +1326,29 @@ export class FillerBot implements Bot {
 			}ms`
 		);
 
+		let txResp: Promise<TxSigAndSlot>;
 		const txStart = Date.now();
-		this.driftClient.txSender
-			.send(tx, [], this.driftClient.opts)
+		if (this.transactionVersion === undefined) {
+			const tx = new Transaction();
+			for (const ix of ixs) {
+				tx.add(ix);
+			}
+			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
+		} else if (this.transactionVersion === 0) {
+			const lookupTableAccount =
+				await this.driftClient.fetchMarketLookupTableAccount();
+			txResp = this.driftClient.txSender.sendVersionedTransaction(
+				ixs,
+				[lookupTableAccount],
+				[],
+				this.driftClient.opts
+			);
+		} else {
+			throw new Error(
+				`unsupported transaction version ${this.transactionVersion}`
+			);
+		}
+		txResp
 			.then((resp: TxSigAndSlot) => {
 				txSig = resp.txSig;
 				const duration = Date.now() - txStart;
