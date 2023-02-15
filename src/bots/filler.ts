@@ -39,6 +39,7 @@ import {
 	TransactionInstruction,
 	ComputeBudgetProgram,
 	GetVersionedTransactionConfig,
+	AddressLookupTableAccount,
 } from '@solana/web3.js';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -109,6 +110,7 @@ export class FillerBot implements Bot {
 	private driftClient: DriftClient;
 	private pollingIntervalMs: number;
 	private transactionVersion: number | undefined;
+	private lookupTableAccount: AddressLookupTableAccount;
 
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -379,6 +381,9 @@ export class FillerBot implements Bot {
 			await this.userMap.fetchAllUsers();
 			await this.userStatsMap.fetchAllUserStats();
 		});
+
+		this.lookupTableAccount =
+			await this.driftClient.fetchMarketLookupTableAccount();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}
@@ -1337,11 +1342,9 @@ export class FillerBot implements Bot {
 			}
 			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
 		} else if (this.transactionVersion === 0) {
-			const lookupTableAccount =
-				await this.driftClient.fetchMarketLookupTableAccount();
 			txResp = this.driftClient.txSender.sendVersionedTransaction(
 				ixs,
-				[lookupTableAccount],
+				[this.lookupTableAccount],
 				[],
 				this.driftClient.opts
 			);

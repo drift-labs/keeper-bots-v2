@@ -35,6 +35,7 @@ import {
 } from 'async-mutex';
 
 import {
+	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 	GetVersionedTransactionConfig,
 	PublicKey,
@@ -124,6 +125,7 @@ export class SpotFillerBot implements Bot {
 	private driftClient: DriftClient;
 	private pollingIntervalMs: number;
 	private transactionVersion: number;
+	private lookupTableAccount: AddressLookupTableAccount;
 
 	private dlobMutex: MutexInterface;
 	private dlob: DLOB;
@@ -439,6 +441,10 @@ export class SpotFillerBot implements Bot {
 		}
 
 		await Promise.all(initPromises);
+
+		this.lookupTableAccount =
+			await this.driftClient.fetchMarketLookupTableAccount();
+
 		await webhookMessage(`[${this.name}]: started`);
 	}
 
@@ -1116,11 +1122,9 @@ export class SpotFillerBot implements Bot {
 			}
 			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
 		} else if (this.transactionVersion === 0) {
-			const lookupTableAccount =
-				await this.driftClient.fetchMarketLookupTableAccount();
 			txResp = this.driftClient.txSender.sendVersionedTransaction(
 				ixs,
-				[lookupTableAccount],
+				[this.lookupTableAccount],
 				[],
 				this.driftClient.opts
 			);
