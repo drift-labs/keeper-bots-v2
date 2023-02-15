@@ -185,7 +185,9 @@ export class FillerBot implements Bot {
 		}
 
 		this.transactionVersion = transactionVersion;
-		logger.info(`${name}: transactionVersion: ${this.transactionVersion}`);
+		logger.info(
+			`${name}: using transactionVersion: ${this.transactionVersion}`
+		);
 	}
 
 	private initializeMetrics() {
@@ -1328,7 +1330,7 @@ export class FillerBot implements Bot {
 
 		let txResp: Promise<TxSigAndSlot>;
 		const txStart = Date.now();
-		if (this.transactionVersion === undefined) {
+		if (isNaN(this.transactionVersion)) {
 			const tx = new Transaction();
 			for (const ix of ixs) {
 				tx.add(ix);

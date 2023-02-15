@@ -39,6 +39,7 @@ import {
 	GetVersionedTransactionConfig,
 	PublicKey,
 	Transaction,
+	TransactionInstruction,
 	TransactionResponse,
 } from '@solana/web3.js';
 
@@ -69,6 +70,7 @@ import {
 	isOrderDoesNotExistLog,
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
+import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 
 /**
  * Size of throttled nodes to get to before pruning the map
@@ -121,6 +123,7 @@ export class SpotFillerBot implements Bot {
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
 	private pollingIntervalMs: number;
+	private transactionVersion: number;
 
 	private dlobMutex: MutexInterface;
 	private dlob: DLOB;
@@ -174,7 +177,8 @@ export class SpotFillerBot implements Bot {
 		clearingHouse: DriftClient,
 		runtimeSpec: RuntimeSpec,
 		pollingIntervalMs?: number,
-		metricsPort?: number
+		metricsPort?: number,
+		transactionVersion?: number
 	) {
 		if (!bulkAccountLoader) {
 			throw new Error(
@@ -215,6 +219,11 @@ export class SpotFillerBot implements Bot {
 				Atomics.store(this.pendingTransactionsArray, spotMarket.marketIndex, 0);
 			}
 		}
+
+		this.transactionVersion = transactionVersion;
+		logger.info(
+			`${name}: using transactionVersion: ${this.transactionVersion}`
+		);
 	}
 
 	private initializeMetrics() {
@@ -1068,7 +1077,6 @@ export class SpotFillerBot implements Bot {
 			);
 		}
 
-		const txStart = Date.now();
 		const currPendingTxs = this.incPendingTransactions(
 			nodeToFill.node.order.marketIndex
 		);
@@ -1081,14 +1089,14 @@ export class SpotFillerBot implements Bot {
 			`sending - currPendingTxs: ${currPendingTxs}, computeUnits: ${computeUnits}, computeUnitsPrice: ${computeUnitsPrice}`
 		);
 
-		const tx = new Transaction();
-		tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
-		tx.add(
+		const ixs: Array<TransactionInstruction> = [];
+		ixs.push(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
+		ixs.push(
 			ComputeBudgetProgram.setComputeUnitPrice({
 				microLamports: computeUnitsPrice,
 			})
 		);
-		tx.add(
+		ixs.push(
 			await this.driftClient.getFillSpotOrderIx(
 				chUser.getUserAccountPublicKey(),
 				chUser.getUserAccount(),
@@ -1099,24 +1107,29 @@ export class SpotFillerBot implements Bot {
 			)
 		);
 
-		// const txSize = tx.serialize()
-		// logger.info(`TxSize: ${txSize.length} bytes`);
-
-		// this.driftClient
-		// 	.fillSpotOrder(
-		// 		chUser.getUserAccountPublicKey(),
-		// 		chUser.getUserAccount(),
-		// 		nodeToFill.node.order,
-		// 		serumFulfillmentConfig,
-		// 		makerInfo,
-		// 		referrerInfo,
-		// 		{
-		// 			computeUnits,
-		// 			computeUnitsPrice,
-		// 		}
-		// 	)
-		this.driftClient.txSender
-			.send(tx, [], this.driftClient.opts)
+		let txResp: Promise<TxSigAndSlot>;
+		const txStart = Date.now();
+		if (isNaN(this.transactionVersion)) {
+			const tx = new Transaction();
+			for (const ix of ixs) {
+				tx.add(ix);
+			}
+			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
+		} else if (this.transactionVersion === 0) {
+			const lookupTableAccount =
+				await this.driftClient.fetchMarketLookupTableAccount();
+			txResp = this.driftClient.txSender.sendVersionedTransaction(
+				ixs,
+				[lookupTableAccount],
+				[],
+				this.driftClient.opts
+			);
+		} else {
+			throw new Error(
+				`unsupported transaction version ${this.transactionVersion}`
+			);
+		}
+		txResp
 			.then(async (txSig) => {
 				logger.info(`Filled spot order ${nodeSignature}, TX: ${txSig}`);
 

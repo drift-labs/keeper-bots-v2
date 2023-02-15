@@ -559,9 +559,7 @@ const runBot = async () => {
 				},
 				fillerPollingInterval,
 				parseInt(metricsPort),
-				opts.transactionVersion === undefined
-					? undefined
-					: parseInt(opts.transactionVersion)
+				parseInt(opts.transactionVersion)
 			)
 		);
 	}
@@ -580,7 +578,8 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				fillerPollingInterval,
-				parseInt(metricsPort)
+				parseInt(metricsPort),
+				parseInt(opts.transactionVersion)
 			)
 		);
 	}
