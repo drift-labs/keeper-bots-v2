@@ -73,6 +73,7 @@ import {
 	isOrderDoesNotExistLog,
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
+import { getErrorCode } from '../error';
 
 const MAX_TX_PACK_SIZE = 900; //1232;
 const CU_PER_FILL = 200_000; // CU cost for a successful fill
@@ -83,6 +84,10 @@ const FILL_ORDER_THROTTLE_BACKOFF = 10000; // the time to wait before trying to 
 const FILL_ORDER_COOLDOWN_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 const dlobMutexError = new Error('dlobMutex timeout');
+
+const errorCodesToSuppress = [
+	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
+];
 
 enum METRIC_TYPES {
 	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
@@ -1400,6 +1405,7 @@ export class FillerBot implements Bot {
 				console.error(e);
 				logger.error(`Failed to send packed tx (error above):`);
 				const simError = e as SendTransactionError;
+
 				if (simError.logs && simError.logs.length > 0) {
 					this.txSimErrorCounter.add(1);
 					const start = Date.now();
@@ -1407,11 +1413,19 @@ export class FillerBot implements Bot {
 					logger.error(
 						`Failed to send tx, sim error tx logs took: ${Date.now() - start}ms`
 					);
-					webhookMessage(
-						`[${this.name}]: :x: error simulating tx:\n${
-							simError.logs ? simError.logs.join('\n') : ''
-						}\n${e.stack || e}`
-					);
+
+					const errorCode = getErrorCode(e);
+
+					if (
+						!errorCodesToSuppress.includes(errorCode) &&
+						!(e as Error).message.includes('Transaction was not confirmed')
+					) {
+						webhookMessage(
+							`[${this.name}]: :x: error simulating tx:\n${
+								simError.logs ? simError.logs.join('\n') : ''
+							}\n${e.stack || e}`
+						);
+					}
 				}
 			})
 			.finally(() => {
