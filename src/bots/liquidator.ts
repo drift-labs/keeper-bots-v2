@@ -559,8 +559,10 @@ export class LiquidatorBot implements Bot {
 		const intervalId = setInterval(this.tryLiquidate.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
 
-		const deRiskIntervalId = setInterval(this.derisk.bind(this), 10000);
-		this.intervalIds.push(deRiskIntervalId);
+		if (!this.disableAutoDerisking) {
+			const deRiskIntervalId = setInterval(this.derisk.bind(this), 10000);
+			this.intervalIds.push(deRiskIntervalId);
+		}
 
 		logger.info(`${this.name} Bot started!`);
 
@@ -1261,7 +1263,7 @@ export class LiquidatorBot implements Bot {
 				}
 			});
 
-			if (this.disableAutoDerisking === false) {
+			if (!this.disableAutoDerisking) {
 				const startDerisk = Date.now();
 				await this.derisk();
 				logger.debug(`derisk took ${Date.now() - startDerisk}ms`);
