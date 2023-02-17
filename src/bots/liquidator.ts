@@ -427,6 +427,9 @@ export class LiquidatorBot implements Bot {
 		} else {
 			this.disableAutoDerisking = disableAutoDerisking;
 		}
+		logger.info(
+			`${this.name} disableAutoDerisking: ${this.disableAutoDerisking}`
+		);
 
 		this.perpMarketIndicies = perpMarketIndicies;
 		if (this.perpMarketIndicies.length === 0) {
@@ -817,10 +820,10 @@ export class LiquidatorBot implements Bot {
 							);
 						})
 						.catch((e) => {
-							logger.error(e);
 							logger.error(
 								`Error trying to close spot position for market ${position.marketIndex}`
 							);
+							console.error(e);
 							webhookMessage(
 								`[${
 									this.name
@@ -1258,7 +1261,7 @@ export class LiquidatorBot implements Bot {
 				}
 			});
 
-			if (!this.disableAutoDerisking) {
+			if (this.disableAutoDerisking === false) {
 				const startDerisk = Date.now();
 				await this.derisk();
 				logger.debug(`derisk took ${Date.now() - startDerisk}ms`);
