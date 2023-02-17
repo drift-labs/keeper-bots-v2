@@ -455,7 +455,12 @@ export class JitMakerBot implements Bot {
 				? PositionDirection.SHORT
 				: PositionDirection.LONG;
 
-			const jitMakerPrice = nodeToFill.node.order.auctionStartPrice;
+			// prevent potential jit makers from shooting themselves in the foot, fill closer to end price which
+			// is more favorable to the jit maker
+			const jitMakerPrice = nodeToFill.node.order.auctionStartPrice
+				.add(nodeToFill.node.order.auctionEndPrice)
+				.mul(new BN(8))
+				.div(new BN(10));
 
 			const jitMakerBaseAssetAmount = this.determineJitAuctionBaseFillAmount(
 				nodeToFill.node.order.baseAssetAmount.sub(
