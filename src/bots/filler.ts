@@ -1407,7 +1407,6 @@ export class FillerBot implements Bot {
 				const simError = e as SendTransactionError;
 
 				if (simError.logs && simError.logs.length > 0) {
-					this.txSimErrorCounter.add(1);
 					const start = Date.now();
 					await this.handleTransactionLogs(nodesSent, simError.logs);
 					logger.error(
@@ -1420,6 +1419,7 @@ export class FillerBot implements Bot {
 						!errorCodesToSuppress.includes(errorCode) &&
 						!(e as Error).message.includes('Transaction was not confirmed')
 					) {
+						this.txSimErrorCounter.add(1);
 						webhookMessage(
 							`[${this.name}]: :x: error simulating tx:\n${
 								simError.logs ? simError.logs.join('\n') : ''
