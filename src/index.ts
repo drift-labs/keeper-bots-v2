@@ -615,7 +615,7 @@ const runBot = async () => {
 			opts.perpMarkets
 		);
 		const spotMarketIndicies: number[] = loadCommaDelimitToArray(
-			opts.perpMarkets
+			opts.spotMarkets
 		);
 		bots.push(
 			new LiquidatorBot(
