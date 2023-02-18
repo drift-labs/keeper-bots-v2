@@ -555,8 +555,7 @@ export class JitMakerBot implements Bot {
 			// is more favorable to the jit maker
 			const jitMakerPrice = nodeToFill.node.order.auctionStartPrice
 				.add(nodeToFill.node.order.auctionEndPrice)
-				.mul(new BN(8))
-				.div(new BN(10));
+				.div(new BN(2));
 
 			const jitMakerBaseAssetAmount = this.determineJitAuctionBaseFillAmount(
 				nodeToFill.node.order.baseAssetAmount.sub(
