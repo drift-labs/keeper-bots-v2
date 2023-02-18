@@ -72,6 +72,7 @@ import {
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
+import { FillerConfig } from '../config';
 
 /**
  * Size of throttled nodes to get to before pruning the map
@@ -173,42 +174,36 @@ export class SpotFillerBot implements Bot {
 	private pendingTransactionsGauge: ObservableGauge;
 
 	constructor(
-		name: string,
-		dryRun: boolean,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		clearingHouse: DriftClient,
 		runtimeSpec: RuntimeSpec,
-		pollingIntervalMs?: number,
-		metricsPort?: number,
-		transactionVersion?: number
+		config: FillerConfig
 	) {
 		if (!bulkAccountLoader) {
 			throw new Error(
 				'SpotFiller only works in polling mode (cannot run with --websocket flag) bulkAccountLoader is required'
 			);
 		}
-		this.name = name;
-		this.dryRun = dryRun;
+		this.name = config.botId;
+		this.dryRun = config.dryRun;
 		this.bulkAccountLoader = bulkAccountLoader;
 		this.driftClient = clearingHouse;
 		this.runtimeSpec = runtimeSpec;
+		this.pollingIntervalMs =
+			config.fillerPollingInterval ?? this.defaultIntervalMs;
 
 		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
 			clearingHouse
 		);
 		this.serumSubscribers = new Map<number, SerumSubscriber>();
 
-		if (!pollingIntervalMs) {
-			pollingIntervalMs = this.defaultIntervalMs;
-		}
-		this.pollingIntervalMs = pollingIntervalMs;
 		this.dlobMutex = withTimeout(
 			new Mutex(),
 			10 * this.pollingIntervalMs,
 			dlobMutexError
 		);
 
-		this.metricsPort = metricsPort;
+		this.metricsPort = config.metricsPort;
 		if (this.metricsPort) {
 			this.initializeMetrics();
 		}
@@ -222,9 +217,9 @@ export class SpotFillerBot implements Bot {
 			}
 		}
 
-		this.transactionVersion = transactionVersion;
+		this.transactionVersion = config.transactionVersion ?? undefined;
 		logger.info(
-			`${name}: using transactionVersion: ${this.transactionVersion}`
+			`${this.name}: using transactionVersion: ${this.transactionVersion}`
 		);
 	}
 

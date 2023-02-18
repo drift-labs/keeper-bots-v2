@@ -59,6 +59,7 @@ import {
 
 import { logger } from '../logger';
 import { Bot } from '../types';
+import { FillerConfig } from '../config';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
 import {
@@ -165,35 +166,29 @@ export class FillerBot implements Bot {
 	private userStatsMapAuthorityKeysGauge: ObservableGauge;
 
 	constructor(
-		name: string,
-		dryRun: boolean,
 		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
-		pollingIntervalMs?: number,
-		metricsPort?: number,
-		transactionVersion?: number
+		config: FillerConfig
 	) {
-		this.name = name;
-		this.dryRun = dryRun;
+		this.name = config.botId;
+		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.bulkAccountLoader = bulkAccountLoader;
 		this.driftClient = driftClient;
 		this.runtimeSpec = runtimeSpec;
-		if (!pollingIntervalMs) {
-			pollingIntervalMs = this.defaultIntervalMs;
-		}
-		this.pollingIntervalMs = pollingIntervalMs;
+		this.pollingIntervalMs =
+			config.fillerPollingInterval ?? this.defaultIntervalMs;
 
-		this.metricsPort = metricsPort;
+		this.metricsPort = config.metricsPort;
 		if (this.metricsPort) {
 			this.initializeMetrics();
 		}
 
-		this.transactionVersion = transactionVersion;
+		this.transactionVersion = config.transactionVersion ?? undefined;
 		logger.info(
-			`${name}: using transactionVersion: ${this.transactionVersion}`
+			`${this.name}: using transactionVersion: ${this.transactionVersion}`
 		);
 	}
 
@@ -1419,7 +1414,7 @@ export class FillerBot implements Bot {
 						!errorCodesToSuppress.includes(errorCode) &&
 						!(e as Error).message.includes('Transaction was not confirmed')
 					) {
-						this.txSimErrorCounter.add(1);
+						this.txSimErrorCounter.add(1, { errorCode: errorCode.toString() });
 						webhookMessage(
 							`[${this.name}]: :x: error simulating tx:\n${
 								simError.logs ? simError.logs.join('\n') : ''

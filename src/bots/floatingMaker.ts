@@ -19,7 +19,16 @@ import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import { logger } from '../logger';
 import { Bot } from '../types';
-import { Metrics } from '../metrics';
+import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
+import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
+import { Counter, Histogram, Meter, ObservableGauge } from '@opentelemetry/api';
+import {
+	ExplicitBucketHistogramAggregation,
+	InstrumentType,
+	MeterProvider,
+	View,
+} from '@opentelemetry/sdk-metrics-base';
+import { BaseBotConfig } from '../config';
 
 type State = {
 	marketPosition: Map<number, PerpPosition>;
@@ -28,6 +37,14 @@ type State = {
 
 const MARKET_UPDATE_COOLDOWN_SLOTS = 30; // wait slots before updating market position
 const driftEnv = process.env.DRIFT_ENV || 'devnet';
+
+enum METRIC_TYPES {
+	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
+	try_make_duration_histogram = 'try_make_duration_histogram',
+	runtime_specs = 'runtime_specs',
+	mutex_busy = 'mutex_busy',
+	errors = 'errors',
+}
 
 /**
  *
@@ -41,13 +58,24 @@ export class FloatingPerpMakerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 5000;
 
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 	private periodicTaskMutex = new Mutex();
 	private lastSlotMarketUpdated: Map<number, number> = new Map();
 
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private metrics: Metrics | undefined;
+
+	// metrics
+	private metricsInitialized = false;
+	private metricsPort: number | undefined;
+	private exporter: PrometheusExporter;
+	private meter: Meter;
+	private bootTimeMs = Date.now();
+	private runtimeSpecsGauge: ObservableGauge;
+	private runtimeSpec: RuntimeSpec;
+	private mutexBusyCounter: Counter;
+	private errorCounter: Counter;
+	private tryMakeDurationHistogram: Histogram;
 
 	private agentState: State;
 
@@ -71,17 +99,83 @@ export class FloatingPerpMakerBot implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
-		name: string,
-		dryRun: boolean,
 		clearingHouse: DriftClient,
 		slotSubscriber: SlotSubscriber,
-		metrics?: Metrics | undefined
+		runtimeSpec: RuntimeSpec,
+		config: BaseBotConfig
 	) {
-		this.name = name;
-		this.dryRun = dryRun;
-		this.clearingHouse = clearingHouse;
+		this.name = config.botId;
+		this.dryRun = config.dryRun;
+		this.driftClient = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
-		this.metrics = metrics;
+
+		this.metricsPort = config.metricsPort;
+		if (this.metricsPort) {
+			this.initializeMetrics();
+		}
+	}
+
+	private initializeMetrics() {
+		if (this.metricsInitialized) {
+			logger.error('Tried to initilaize metrics multiple times');
+			return;
+		}
+		this.metricsInitialized = true;
+
+		const { endpoint: defaultEndpoint } = PrometheusExporter.DEFAULT_OPTIONS;
+		this.exporter = new PrometheusExporter(
+			{
+				port: this.metricsPort,
+				endpoint: defaultEndpoint,
+			},
+			() => {
+				logger.info(
+					`prometheus scrape endpoint started: http://localhost:${this.metricsPort}${defaultEndpoint}`
+				);
+			}
+		);
+		const meterName = this.name;
+		const meterProvider = new MeterProvider({
+			views: [
+				new View({
+					instrumentName: METRIC_TYPES.try_make_duration_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: meterName,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(20), (_, i) => 0 + i * 5),
+						true
+					),
+				}),
+			],
+		});
+
+		meterProvider.addMetricReader(this.exporter);
+		this.meter = meterProvider.getMeter(meterName);
+
+		this.bootTimeMs = Date.now();
+
+		this.runtimeSpecsGauge = this.meter.createObservableGauge(
+			METRIC_TYPES.runtime_specs,
+			{
+				description: 'Runtime sepcification of this program',
+			}
+		);
+		this.runtimeSpecsGauge.addCallback((obs) => {
+			obs.observe(this.bootTimeMs, this.runtimeSpec);
+		});
+		this.mutexBusyCounter = this.meter.createCounter(METRIC_TYPES.mutex_busy, {
+			description: 'Count of times the mutex was busy',
+		});
+		this.errorCounter = this.meter.createCounter(METRIC_TYPES.errors, {
+			description: 'Count of errors',
+		});
+		this.tryMakeDurationHistogram = this.meter.createHistogram(
+			METRIC_TYPES.try_make_duration_histogram,
+			{
+				description: 'Distribution of tryTrigger',
+				unit: 'ms',
+			}
+		);
 	}
 
 	public async init() {
@@ -139,7 +233,7 @@ export class FloatingPerpMakerBot implements Bot {
 	 * @returns {Promise<void>}
 	 */
 	private updateAgentState(): void {
-		this.clearingHouse.getUserAccount().perpPositions.map((p) => {
+		this.driftClient.getUserAccount().perpPositions.map((p) => {
 			if (p.baseAssetAmount.isZero()) {
 				return;
 			}
@@ -151,7 +245,7 @@ export class FloatingPerpMakerBot implements Bot {
 			this.agentState.openOrders.set(market.marketIndex, []);
 		}
 
-		this.clearingHouse.getUserAccount().orders.map((o) => {
+		this.driftClient.getUserAccount().orders.map((o) => {
 			if (isVariant(o.status, 'init')) {
 				return;
 			}
@@ -175,7 +269,7 @@ export class FloatingPerpMakerBot implements Bot {
 		}
 
 		const openOrders = this.agentState.openOrders.get(marketIndex);
-		const oracle = this.clearingHouse.getOracleDataForPerpMarket(marketIndex);
+		const oracle = this.driftClient.getOracleDataForPerpMarket(marketIndex);
 		const vAsk = calculateAskPrice(marketAccount, oracle);
 		const vBid = calculateBidPrice(marketAccount, oracle);
 
@@ -221,9 +315,9 @@ export class FloatingPerpMakerBot implements Bot {
 		) {
 			// cancel orders
 			for (const o of openOrders) {
-				const tx = await this.clearingHouse.cancelOrder(o.orderId);
+				const tx = await this.driftClient.cancelOrder(o.orderId);
 				console.log(
-					`${this.name} cancelling order ${this.clearingHouse
+					`${this.name} cancelling order ${this.driftClient
 						.getUserAccount()
 						.authority.toBase58()}-${o.orderId}: ${tx}`
 				);
@@ -236,7 +330,7 @@ export class FloatingPerpMakerBot implements Bot {
 			const biasDenom = new BN(100);
 
 			const oracleBidSpread = oracle.price.sub(vBid);
-			const tx0 = await this.clearingHouse.placePerpOrder({
+			const tx0 = await this.driftClient.placePerpOrder({
 				marketIndex: marketIndex,
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.LONG,
@@ -250,7 +344,7 @@ export class FloatingPerpMakerBot implements Bot {
 			console.log(`${this.name} placing long: ${tx0}`);
 
 			const oracleAskSpread = vAsk.sub(oracle.price);
-			const tx1 = await this.clearingHouse.placePerpOrder({
+			const tx1 = await this.driftClient.placePerpOrder({
 				marketIndex: marketIndex,
 				orderType: OrderType.LIMIT,
 				direction: PositionDirection.SHORT,
@@ -274,7 +368,7 @@ export class FloatingPerpMakerBot implements Bot {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				this.updateAgentState();
 				await Promise.all(
-					this.clearingHouse.getPerpMarketAccounts().map((marketAccount) => {
+					this.driftClient.getPerpMarketAccounts().map((marketAccount) => {
 						console.log(
 							`${this.name} updating open orders for market ${marketAccount.marketIndex}`
 						);
@@ -286,19 +380,27 @@ export class FloatingPerpMakerBot implements Bot {
 			});
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
-				this.metrics?.recordMutexBusy(this.name);
+				const user = this.driftClient.getUser();
+				this.mutexBusyCounter.add(
+					1,
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
 			} else {
 				throw e;
 			}
 		} finally {
 			if (ran) {
 				const duration = Date.now() - start;
-				this.metrics?.recordRpcDuration(
-					this.clearingHouse.connection.rpcEndpoint,
-					'updateOpenOrders',
+				const user = this.driftClient.getUser();
+				this.tryMakeDurationHistogram.record(
 					duration,
-					false,
-					this.name
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
 				);
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
 

@@ -28,7 +28,17 @@ import { TransactionSignature, PublicKey } from '@solana/web3.js';
 import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
-import { Metrics } from '../metrics';
+
+import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
+import { Counter, Histogram, Meter, ObservableGauge } from '@opentelemetry/api';
+import {
+	ExplicitBucketHistogramAggregation,
+	InstrumentType,
+	MeterProvider,
+	View,
+} from '@opentelemetry/sdk-metrics-base';
+import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
+import { BaseBotConfig } from '../config';
 
 type Action = {
 	baseAssetAmount: BN;
@@ -64,6 +74,14 @@ type State = {
 
 const dlobMutexError = new Error('dlobMutex timeout');
 
+enum METRIC_TYPES {
+	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
+	try_jit_duration_histogram = 'try_jit_duration_histogram',
+	runtime_specs = 'runtime_specs',
+	mutex_busy = 'mutex_busy',
+	errors = 'errors',
+}
+
 /**
  *
  * This bot is responsible for placing small trades during an order's JIT auction
@@ -76,7 +94,7 @@ export class JitMakerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 1000;
 
-	private clearingHouse: DriftClient;
+	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -90,9 +108,20 @@ export class JitMakerBot implements Bot {
 	private orderLastSeenBaseAmount: Map<string, BN> = new Map(); // need some way to trim this down over time
 
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private metrics: Metrics | undefined;
 
 	private agentState: State;
+
+	// metrics
+	private metricsInitialized = false;
+	private metricsPort: number | undefined;
+	private exporter: PrometheusExporter;
+	private meter: Meter;
+	private bootTimeMs = Date.now();
+	private runtimeSpecsGauge: ObservableGauge;
+	private runtimeSpec: RuntimeSpec;
+	private mutexBusyCounter: Counter;
+	private errorCounter: Counter;
+	private tryJitDurationHistogram: Histogram;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -114,17 +143,84 @@ export class JitMakerBot implements Bot {
 	private MAX_TRADE_SIZE_QUOTE = 1000;
 
 	constructor(
-		name: string,
-		dryRun: boolean,
 		clearingHouse: DriftClient,
 		slotSubscriber: SlotSubscriber,
-		metrics?: Metrics | undefined
+		runtimeSpec: RuntimeSpec,
+		config: BaseBotConfig
 	) {
-		this.name = name;
-		this.dryRun = dryRun;
-		this.clearingHouse = clearingHouse;
+		this.name = config.botId;
+		this.dryRun = config.dryRun;
+		this.driftClient = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
-		this.metrics = metrics;
+		this.runtimeSpec = runtimeSpec;
+
+		this.metricsPort = config.metricsPort;
+		if (this.metricsPort) {
+			this.initializeMetrics();
+		}
+	}
+
+	private initializeMetrics() {
+		if (this.metricsInitialized) {
+			logger.error('Tried to initilaize metrics multiple times');
+			return;
+		}
+		this.metricsInitialized = true;
+
+		const { endpoint: defaultEndpoint } = PrometheusExporter.DEFAULT_OPTIONS;
+		this.exporter = new PrometheusExporter(
+			{
+				port: this.metricsPort,
+				endpoint: defaultEndpoint,
+			},
+			() => {
+				logger.info(
+					`prometheus scrape endpoint started: http://localhost:${this.metricsPort}${defaultEndpoint}`
+				);
+			}
+		);
+		const meterName = this.name;
+		const meterProvider = new MeterProvider({
+			views: [
+				new View({
+					instrumentName: METRIC_TYPES.try_jit_duration_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: meterName,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(20), (_, i) => 0 + i * 5),
+						true
+					),
+				}),
+			],
+		});
+
+		meterProvider.addMetricReader(this.exporter);
+		this.meter = meterProvider.getMeter(meterName);
+
+		this.bootTimeMs = Date.now();
+
+		this.runtimeSpecsGauge = this.meter.createObservableGauge(
+			METRIC_TYPES.runtime_specs,
+			{
+				description: 'Runtime sepcification of this program',
+			}
+		);
+		this.runtimeSpecsGauge.addCallback((obs) => {
+			obs.observe(this.bootTimeMs, this.runtimeSpec);
+		});
+		this.mutexBusyCounter = this.meter.createCounter(METRIC_TYPES.mutex_busy, {
+			description: 'Count of times the mutex was busy',
+		});
+		this.errorCounter = this.meter.createCounter(METRIC_TYPES.errors, {
+			description: 'Count of errors',
+		});
+		this.tryJitDurationHistogram = this.meter.createHistogram(
+			METRIC_TYPES.try_jit_duration_histogram,
+			{
+				description: 'Distribution of tryTrigger',
+				unit: 'ms',
+			}
+		);
 	}
 
 	public async init() {
@@ -132,14 +228,14 @@ export class JitMakerBot implements Bot {
 		const initPromises: Array<Promise<any>> = [];
 
 		this.userMap = new UserMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userMap.fetchAllUsers());
 
 		this.userStatsMap = new UserStatsMap(
-			this.clearingHouse,
-			this.clearingHouse.userAccountSubscriptionConfig
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig
 		);
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
@@ -263,7 +359,7 @@ export class JitMakerBot implements Bot {
 	 */
 	private async updateAgentState(): Promise<void> {
 		// TODO: SPOT
-		for await (const p of this.clearingHouse.getUserAccount().perpPositions) {
+		for await (const p of this.driftClient.getUserAccount().perpPositions) {
 			if (p.baseAssetAmount.isZero()) {
 				continue;
 			}
@@ -291,7 +387,7 @@ export class JitMakerBot implements Bot {
 			if (canUpdateStateBasedOnPosition) {
 				// check if need to enter a closing state
 				const accountCollateral = convertToNumber(
-					this.clearingHouse.getUser().getTotalCollateral(),
+					this.driftClient.getUser().getTotalCollateral(),
 					QUOTE_PRECISION
 				);
 				const positionValue = convertToNumber(
@@ -417,7 +513,7 @@ export class JitMakerBot implements Bot {
 			if (
 				!this.nodeCanBeFilled(
 					nodeToFill.node,
-					await this.clearingHouse.getUserAccountPublicKey()
+					await this.driftClient.getUserAccountPublicKey()
 				)
 			) {
 				continue;
@@ -498,10 +594,6 @@ export class JitMakerBot implements Bot {
 					node: nodeToFill.node,
 				});
 
-				this.metrics?.recordFilledOrder(
-					this.clearingHouse.provider.wallet.publicKey,
-					this.name
-				);
 				logger.info(
 					`${
 						this.name
@@ -515,11 +607,7 @@ export class JitMakerBot implements Bot {
 				// have received the history record yet
 				// TODO this might not hold if events arrive out of order
 				const errorCode = getErrorCode(error);
-				this.metrics?.recordErrorCode(
-					errorCode,
-					this.clearingHouse.provider.wallet.publicKey,
-					this.name
-				);
+				this.errorCounter.add(1, { errorCode: errorCode.toString() });
 
 				logger.error(
 					`Error (${errorCode}) filling JIT auction (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()})`
@@ -579,7 +667,7 @@ export class JitMakerBot implements Bot {
 		const takerUserStatsPublicKey = takerUserStats.userStatsAccountPublicKey;
 		const referrerInfo = takerUserStats.getReferrerInfo();
 
-		return await this.clearingHouse.placeAndMakePerpOrder(
+		return await this.driftClient.placeAndMakePerpOrder(
 			{
 				orderType: OrderType.LIMIT,
 				marketIndex: action.marketIndex,
@@ -620,7 +708,7 @@ export class JitMakerBot implements Bot {
 
 				await Promise.all(
 					// TODO: spot
-					this.clearingHouse.getPerpMarketAccounts().map((marketAccount) => {
+					this.driftClient.getPerpMarketAccounts().map((marketAccount) => {
 						this.tryMakeJitAuctionForMarket(marketAccount);
 					})
 				);
@@ -629,7 +717,14 @@ export class JitMakerBot implements Bot {
 			});
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
-				this.metrics?.recordMutexBusy(this.name);
+				const user = this.driftClient.getUser();
+				this.mutexBusyCounter.add(
+					1,
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
 			} else if (e === dlobMutexError) {
 				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
@@ -638,12 +733,13 @@ export class JitMakerBot implements Bot {
 		} finally {
 			if (ran) {
 				const duration = Date.now() - start;
-				this.metrics?.recordRpcDuration(
-					this.clearingHouse.connection.rpcEndpoint,
-					'tryMake',
+				const user = this.driftClient.getUser();
+				this.tryJitDurationHistogram.record(
 					duration,
-					false,
-					this.name
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
 				);
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
 				await this.watchdogTimerMutex.runExclusive(async () => {

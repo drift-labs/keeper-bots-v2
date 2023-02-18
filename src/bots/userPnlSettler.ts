@@ -24,6 +24,7 @@ import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
+import { BaseBotConfig } from 'src/config';
 
 type SettlePnlIxParams = {
 	users: {
@@ -56,14 +57,13 @@ export class UserPnlSettlerBot implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
-		name: string,
-		dryRun: boolean,
 		driftClient: DriftClient,
 		perpMarkets: PerpMarketConfig[],
-		spotMarkets: SpotMarketConfig[]
+		spotMarkets: SpotMarketConfig[],
+		config: BaseBotConfig
 	) {
-		this.name = name;
-		this.dryRun = dryRun;
+		this.name = config.botId;
+		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
 		this.perpMarkets = perpMarkets;
 		this.spotMarkets = spotMarkets;

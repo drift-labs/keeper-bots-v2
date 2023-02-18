@@ -21,7 +21,8 @@
 		"commander": "^9.4.0",
 		"dotenv": "^10.0.0",
 		"typescript": "4.5.4",
-		"winston": "^3.8.1"
+		"winston": "^3.8.1",
+		"yaml": "^2.2.1"
 	},
 	"devDependencies": {
 		"@typescript-eslint/eslint-plugin": "^4.28.0",

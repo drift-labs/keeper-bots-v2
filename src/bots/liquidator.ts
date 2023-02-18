@@ -52,6 +52,7 @@ import { Bot } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { getErrorCode } from '../error';
+import { LiquidatorConfig } from '../config';
 
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 
@@ -397,18 +398,13 @@ export class LiquidatorBot implements Bot {
 	private lastSlotResyncUserMaps = 0;
 
 	constructor(
-		name: string,
-		dryRun: boolean,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
-		perpMarketIndicies: number[],
-		spotMarketIndicies: number[],
-		metricsPort?: number | undefined,
-		disableAutoDerisking?: boolean | undefined
+		config: LiquidatorConfig
 	) {
-		this.name = name;
-		this.dryRun = dryRun;
+		this.name = config.botId;
+		this.dryRun = config.dryRun;
 		this.bulkAccountLoader = bulkAccountLoader;
 		this.driftClient = driftClient;
 		this.runtimeSpecs = runtimeSpec;
@@ -417,30 +413,30 @@ export class LiquidatorBot implements Bot {
 		);
 		this.bootTimeMs = Date.now();
 
-		this.metricsPort = metricsPort;
+		this.metricsPort = config.metricsPort;
 		if (this.metricsPort) {
 			this.initializeMetrics();
 		}
 
-		if (!disableAutoDerisking) {
+		if (!config.disableAutoDerisking) {
 			this.disableAutoDerisking = false;
 		} else {
-			this.disableAutoDerisking = disableAutoDerisking;
+			this.disableAutoDerisking = config.disableAutoDerisking;
 		}
 		logger.info(
 			`${this.name} disableAutoDerisking: ${this.disableAutoDerisking}`
 		);
 
-		this.perpMarketIndicies = perpMarketIndicies;
-		if (this.perpMarketIndicies.length === 0) {
+		this.perpMarketIndicies = config.perpMarketIndicies;
+		if (!this.perpMarketIndicies || this.perpMarketIndicies.length === 0) {
 			this.perpMarketIndicies = PerpMarkets[
 				this.runtimeSpecs.driftEnv as DriftEnv
 			].map((m) => m.marketIndex);
 		}
 		logger.info(`${this.name} perpMarketIndicies: ${this.perpMarketIndicies}`);
 
-		this.spotMarketIndicies = spotMarketIndicies;
-		if (this.spotMarketIndicies.length === 0) {
+		this.spotMarketIndicies = config.spotMarketIndicies;
+		if (!this.spotMarketIndicies || this.spotMarketIndicies.length === 0) {
 			this.spotMarketIndicies = SpotMarkets[
 				this.runtimeSpecs.driftEnv as DriftEnv
 			].map((m) => m.marketIndex);

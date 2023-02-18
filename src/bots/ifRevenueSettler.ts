@@ -12,6 +12,7 @@ import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
+import { BaseBotConfig } from '../config';
 
 export class IFRevenueSettlerBot implements Bot {
 	public readonly name: string;
@@ -26,14 +27,13 @@ export class IFRevenueSettlerBot implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
-		name: string,
-		dryRun: boolean,
-		clearingHouse: DriftClient,
-		spotMarkets: SpotMarketConfig[]
+		driftClient: DriftClient,
+		spotMarkets: SpotMarketConfig[],
+		config: BaseBotConfig
 	) {
-		this.name = name;
-		this.dryRun = dryRun;
-		this.driftClient = clearingHouse;
+		this.name = config.botId;
+		this.dryRun = config.dryRun;
+		this.driftClient = driftClient;
 		this.spotMarkets = spotMarkets;
 	}
 
