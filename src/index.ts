@@ -160,8 +160,18 @@ if (opts.configFile) {
 	logger.info(`Loading config from command line options`);
 	config = loadConfigFromOpts(opts);
 }
-
-logger.info(`Bot config:\n${JSON.stringify(config, null, 2)}`);
+logger.info(
+	`Bot config:\n${JSON.stringify(
+		config,
+		(k, v) => {
+			if (k === 'keeperPrivateKey') {
+				return '*'.repeat(v.length);
+			}
+			return v;
+		},
+		2
+	)}`
+);
 
 setLogLevel(config.global.debug ? 'debug' : 'info');
 
