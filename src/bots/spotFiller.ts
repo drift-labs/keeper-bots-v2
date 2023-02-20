@@ -1189,7 +1189,10 @@ export class SpotFillerBot implements Bot {
 					this.dlob = new DLOB();
 					try {
 						await tryAcquire(this.userMapMutex).runExclusive(async () => {
-							await this.dlob.initFromUserMap(this.userMap);
+							await this.dlob.initFromUserMap(
+								this.userMap,
+								this.bulkAccountLoader.mostRecentSlot
+							);
 						});
 					} catch (e) {
 						if (e != E_ALREADY_LOCKED) {
@@ -1197,7 +1200,11 @@ export class SpotFillerBot implements Bot {
 						}
 					}
 					if (orderRecord) {
-						this.dlob.insertOrder(orderRecord.order, orderRecord.user);
+						this.dlob.insertOrder(
+							orderRecord.order,
+							orderRecord.user,
+							this.bulkAccountLoader.mostRecentSlot
+						);
 					}
 				});
 

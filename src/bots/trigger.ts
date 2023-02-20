@@ -470,7 +470,10 @@ export class TriggerBot implements Bot {
 					}
 					this.dlob = new DLOB();
 					await this.userMapMutex.runExclusive(async () => {
-						await this.dlob.initFromUserMap(this.userMap);
+						await this.dlob.initFromUserMap(
+							this.userMap,
+							this.slotSubscriber.getSlot()
+						);
 					});
 				});
 

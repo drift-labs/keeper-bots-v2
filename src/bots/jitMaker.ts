@@ -240,7 +240,9 @@ export class JitMakerBot implements Bot {
 		initPromises.push(this.userStatsMap.fetchAllUserStats());
 
 		this.dlob = new DLOB();
-		initPromises.push(this.dlob.initFromUserMap(this.userMap));
+		initPromises.push(
+			this.dlob.initFromUserMap(this.userMap, this.slotSubscriber.getSlot())
+		);
 
 		this.agentState = {
 			stateType: new Map<number, StateType>(),
@@ -506,6 +508,7 @@ export class JitMakerBot implements Bot {
 		const nodesToFill = this.dlob.findJitAuctionNodesToFill(
 			market.marketIndex,
 			this.slotSubscriber.getSlot(),
+			this.driftClient.getOracleDataForPerpMarket(market.marketIndex),
 			MarketType.PERP
 		);
 
@@ -702,7 +705,10 @@ export class JitMakerBot implements Bot {
 						delete this.dlob;
 					}
 					this.dlob = new DLOB();
-					await this.dlob.initFromUserMap(this.userMap);
+					await this.dlob.initFromUserMap(
+						this.userMap,
+						this.slotSubscriber.getSlot()
+					);
 				});
 
 				await Promise.all(

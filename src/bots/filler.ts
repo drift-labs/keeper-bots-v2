@@ -1442,10 +1442,17 @@ export class FillerBot implements Bot {
 					}
 					this.dlob = new DLOB();
 					await tryAcquire(this.userMapMutex).runExclusive(async () => {
-						await this.dlob.initFromUserMap(this.userMap);
+						await this.dlob.initFromUserMap(
+							this.userMap,
+							this.slotSubscriber.getSlot()
+						);
 					});
 					if (orderRecord) {
-						this.dlob.insertOrder(orderRecord.order, orderRecord.user);
+						this.dlob.insertOrder(
+							orderRecord.order,
+							orderRecord.user,
+							this.slotSubscriber.getSlot()
+						);
 					}
 				});
 
