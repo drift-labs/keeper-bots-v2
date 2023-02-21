@@ -160,7 +160,7 @@ logger.info(
 setLogLevel(config.global.debug ? 'debug' : 'info');
 
 export function getWallet(): Wallet {
-	const privateKey = process.env.KEEPER_PRIVATE_KEY;
+	const privateKey = config.global.keeperPrivateKey;
 	if (!privateKey) {
 		throw new Error(
 			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
@@ -189,8 +189,8 @@ export function getWallet(): Wallet {
 	return new Wallet(keypair);
 }
 
-const endpoint = process.env.ENDPOINT;
-const wsEndpoint = process.env.WS_ENDPOINT;
+const endpoint = config.global.endpoint;
+const wsEndpoint = config.global.wsEndpoint;
 logger.info(`RPC endpoint: ${endpoint}`);
 logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`DriftEnv:     ${driftEnv}`);

@@ -32,6 +32,7 @@ export type BotConfigMap = {
 
 export interface GlobalConfig {
 	endpoint?: string;
+	wsEndpoint?: string;
 	keeperPrivateKey?: string;
 	initUser?: boolean;
 	testLiveness?: boolean;
@@ -67,6 +68,10 @@ const defaultConfig: Partial<Config> = {
 
 		eventSubscriberPollingInterval: 5000,
 		bulkAccountLoaderPollingInterval: 5000,
+
+		endpoint: process.env.ENDPOINT,
+		wsEndpoint: process.env.WS_ENDPOINT,
+		keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY,
 	},
 	enabledBots: [],
 	botConfigs: {},
@@ -123,6 +128,7 @@ export function loadConfigFromOpts(opts: any): Config {
 	const config: Config = {
 		global: {
 			endpoint: opts.endpoint ?? process.env.ENDPOINT,
+			wsEndpoint: opts.wsEndpoint ?? process.env.WS_ENDPOINT,
 			keeperPrivateKey: opts.privateKey ?? process.env.KEEPER_PRIVATE_KEY,
 			eventSubscriberPollingInterval:
 				parseInt(process.env.BULK_ACCOUNT_LOADER_POLLING_INTERVAL) ?? 5000,
