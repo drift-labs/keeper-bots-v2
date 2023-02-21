@@ -50,7 +50,6 @@ import {
 	getOrCreateAssociatedTokenAccount,
 	TOKEN_FAUCET_PROGRAM_ID,
 } from './utils';
-// import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import {
 	Config,
@@ -67,21 +66,6 @@ const sdkConfig = initialize({ env: process.env.ENV });
 
 const stateCommitment: Commitment = 'confirmed';
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
-
-// const bulkAccountLoaderPollingInterval = process.env
-// 	.BULK_ACCOUNT_LOADER_POLLING_INTERVAL
-// 	? parseInt(process.env.BULK_ACCOUNT_LOADER_POLLING_INTERVAL)
-// 	: 5000;
-// const eventSubscriberPollingInterval = process.env
-// 	.EVENT_SUBSCRIBER_POLLING_INTERVAL
-// 	? parseInt(process.env.EVENT_SUBSCRIBER_POLLING_INTERVAL)
-// 	: 5000;
-
-// TODO: do these bot specific configs better
-// const fillerPollingInterval = process.env.FILLER_POLLING_INTERVAL
-// 	? parseInt(process.env.FILLER_POLLING_INTERVAL)
-// 	: 6000;
-// const botId = process.env.BOT_ID;
 
 program
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
