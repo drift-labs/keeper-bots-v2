@@ -1414,7 +1414,11 @@ export class FillerBot implements Bot {
 						!errorCodesToSuppress.includes(errorCode) &&
 						!(e as Error).message.includes('Transaction was not confirmed')
 					) {
-						this.txSimErrorCounter.add(1, { errorCode: errorCode.toString() });
+						if (errorCode) {
+							this.txSimErrorCounter.add(1, {
+								errorCode: errorCode.toString(),
+							});
+						}
 						webhookMessage(
 							`[${this.name}]: :x: error simulating tx:\n${
 								simError.logs ? simError.logs.join('\n') : ''
