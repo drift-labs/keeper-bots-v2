@@ -32,6 +32,8 @@ const dlobMutexError = new Error('dlobMutex timeout');
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
+const errorCodesToSuppress = [];
+
 enum METRIC_TYPES {
 	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
 	try_trigger_duration_histogram = 'try_trigger_duration_histogram',
@@ -340,20 +342,30 @@ export class TriggerBot implements Bot {
 						);
 					})
 					.catch((error) => {
-						const errorCode = getErrorCode(error);
-						this.errorCounter.add(1, { errorCode: errorCode.toString() });
 						nodeToTrigger.node.haveTrigger = false;
-						logger.error(
-							`Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
-						);
-						logger.error(error);
-						webhookMessage(
-							`[${
-								this.name
-							}]: :x: Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-								error.logs ? (error.logs as Array<string>).join('\n') : ''
-							}\n${error.stack ? error.stack : error.message}`
-						);
+
+						const errorCode = getErrorCode(error);
+						if (
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(error as Error).message.includes(
+								'Transaction was not confirmed'
+							)
+						) {
+							if (errorCode) {
+								this.errorCounter.add(1, { errorCode: errorCode.toString() });
+							}
+							logger.error(
+								`Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
+							);
+							logger.error(error);
+							webhookMessage(
+								`[${
+									this.name
+								}]: :x: Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+									error.logs ? (error.logs as Array<string>).join('\n') : ''
+								}\n${error.stack ? error.stack : error.message}`
+							);
+						}
 					})
 					.finally(() => {
 						this.removeTriggeringNodes([nodeToTrigger]);
@@ -423,21 +435,30 @@ export class TriggerBot implements Bot {
 						);
 					})
 					.catch((error) => {
-						const errorCode = getErrorCode(error);
-						this.errorCounter.add(1, { errorCode: errorCode.toString() });
-
 						nodeToTrigger.node.haveTrigger = false;
-						logger.error(
-							`Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
-						);
-						logger.error(error);
-						webhookMessage(
-							`[${
-								this.name
-							}]: :x: Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-								error.stack ? error.stack : error.message
-							}`
-						);
+
+						const errorCode = getErrorCode(error);
+						if (
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(error as Error).message.includes(
+								'Transaction was not confirmed'
+							)
+						) {
+							if (errorCode) {
+								this.errorCounter.add(1, { errorCode: errorCode.toString() });
+							}
+							logger.error(
+								`Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
+							);
+							logger.error(error);
+							webhookMessage(
+								`[${
+									this.name
+								}]: :x: Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+									error.stack ? error.stack : error.message
+								}`
+							);
+						}
 					});
 			}
 		} catch (e) {
