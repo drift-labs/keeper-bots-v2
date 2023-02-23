@@ -160,6 +160,13 @@ export function loadConfigFromOpts(opts: any): Config {
 	}
 	if (opts.spotFiller) {
 		config.enabledBots.push('spotFiller');
+		config.botConfigs.spotFiller = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'filler',
+			fillerPollingInterval: 5000,
+			metricsPort: 9464,
+			transactionVersion: 0,
+		};
 	}
 	if (opts.liquidator) {
 		config.enabledBots.push('liquidator');
@@ -174,15 +181,35 @@ export function loadConfigFromOpts(opts: any): Config {
 	}
 	if (opts.trigger) {
 		config.enabledBots.push('trigger');
+		config.botConfigs.trigger = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'trigger',
+			metricsPort: 9464,
+		};
 	}
 	if (opts.jitMaker) {
 		config.enabledBots.push('jitMaker');
+		config.botConfigs.jitMaker = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'jitMaker',
+			metricsPort: 9464,
+		};
 	}
 	if (opts.ifRevenueSettler) {
 		config.enabledBots.push('ifRevenueSettler');
+		config.botConfigs.ifRevenueSettler = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'ifRevenueSettler',
+			metricsPort: 9464,
+		};
 	}
 	if (opts.userPnlSettler) {
 		config.enabledBots.push('userPnlSettler');
+		config.botConfigs.userPnlSettler = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'userPnlSettler',
+			metricsPort: 9464,
+		};
 	}
 
 	return mergeDefaults(defaultConfig, config) as Config;
@@ -192,8 +219,12 @@ export function configHasBot(
 	config: Config,
 	botName: keyof BotConfigMap
 ): boolean {
-	return (
-		config.enabledBots.includes(botName) &&
-		config.botConfigs[botName] !== undefined
-	);
+	const botEnabled = config.enabledBots.includes(botName);
+	const botConfigExists = config.botConfigs[botName] !== undefined;
+	if (botEnabled && !botConfigExists) {
+		throw new Error(
+			`Bot ${botName} is enabled but no config was found for it.`
+		);
+	}
+	return botEnabled && botConfigExists;
 }
