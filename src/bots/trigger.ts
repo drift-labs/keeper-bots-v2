@@ -32,7 +32,9 @@ const dlobMutexError = new Error('dlobMutex timeout');
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
-const errorCodesToSuppress = [];
+const errorCodesToSuppress = [
+	6111, // Error Message: OrderNotTriggerable.
+];
 
 enum METRIC_TYPES {
 	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
