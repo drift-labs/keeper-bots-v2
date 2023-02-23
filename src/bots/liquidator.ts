@@ -83,7 +83,7 @@ function calculateSpotTokenAmountToLiquidate(
 		.mul(PRICE_PRECISION)
 		.mul(MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL)
 		.mul(tokenPrecision);
-	const tokenAmountToLiquidate = collateralToSpend.div(
+	const maxSpendTokenAmountToLiquidate = collateralToSpend.div(
 		oraclePrice
 			.mul(QUOTE_PRECISION)
 			.mul(MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM)
@@ -95,10 +95,10 @@ function calculateSpotTokenAmountToLiquidate(
 		liquidateePosition.balanceType
 	);
 
-	if (tokenAmountToLiquidate.gt(liquidateeTokenAmount)) {
+	if (maxSpendTokenAmountToLiquidate.gt(liquidateeTokenAmount)) {
 		return liquidateeTokenAmount;
 	} else {
-		return tokenAmountToLiquidate;
+		return maxSpendTokenAmountToLiquidate;
 	}
 }
 
@@ -154,166 +154,6 @@ function findBestSpotPosition(
 	}
 
 	return [bestIndex, bestAmount];
-}
-
-async function liqPerpPnl(
-	driftClient: DriftClient,
-	user: User,
-	perpMarketAccount: PerpMarketAccount,
-	usdcAccount: SpotMarketAccount,
-	sdkCallDurationHistogram: Histogram,
-	liquidateePosition: PerpPosition,
-	depositMarketIndextoLiq: number,
-	depositAmountToLiq: BN,
-	borrowMarketIndextoLiq: number,
-	borrowAmountToLiq: BN,
-	perpMarketIndicies: number[],
-	spotMarketIndicies: number[]
-) {
-	if (liquidateePosition.quoteAssetAmount.gt(ZERO)) {
-		const claimablePnl = calculateClaimablePnl(
-			perpMarketAccount,
-			usdcAccount,
-			liquidateePosition,
-			this.driftClient.getOracleDataForPerpMarket(
-				liquidateePosition.marketIndex
-			)
-		);
-
-		let frac = new BN(100000000);
-		if (claimablePnl.gt(ZERO)) {
-			frac = BN.max(
-				liquidateePosition.quoteAssetAmount.div(claimablePnl),
-				new BN(1)
-			);
-		}
-
-		if (frac.lt(new BN(100000000))) {
-			if (!spotMarketIndicies.includes(borrowMarketIndextoLiq)) {
-				logger.info(
-					`skipping liquidateBorrowForPerpPnl of ${user.userAccountPublicKey.toBase58()} on market ${borrowMarketIndextoLiq} because it is not in spotMarketIndices`
-				);
-				return;
-			}
-			const start = Date.now();
-			driftClient
-				.liquidateBorrowForPerpPnl(
-					user.userAccountPublicKey,
-					user.getUserAccount(),
-					liquidateePosition.marketIndex,
-					borrowMarketIndextoLiq,
-					borrowAmountToLiq.div(frac)
-				)
-				.then((tx) => {
-					logger.info(
-						`liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
-							liquidateePosition.marketIndex
-						} tx: ${tx}`
-					);
-					webhookMessage(
-						`[${
-							this.name
-						}]: liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
-							liquidateePosition.marketIndex
-						} tx: ${tx}`
-					);
-				})
-				.catch((e) => {
-					logger.error(
-						`Error in liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
-							liquidateePosition.marketIndex
-						}`
-					);
-					logger.error(e);
-					const errorCode = getErrorCode(e);
-					if (!errorCodesToSuppress.includes(errorCode)) {
-						webhookMessage(
-							`[${
-								this.name
-							}]: :x: error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
-								liquidateePosition.marketIndex
-							}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
-								e.stack ? e.stack : e.message
-							}`
-						);
-					} else {
-						this.throttledUsers.set(
-							user.userAccountPublicKey.toBase58(),
-							Date.now()
-						);
-					}
-				})
-				.finally(() => {
-					sdkCallDurationHistogram.record(Date.now() - start, {
-						method: 'liquidateBorrowForPerpPnl',
-					});
-				});
-		} else {
-			logger.info(
-				`claimablePnl=${claimablePnl.toString()} << liquidateePosition.quoteAssetAmount=${liquidateePosition.quoteAssetAmount.toString()} `
-			);
-			logger.info(`skipping liquidateBorrowForPerpPnl`);
-		}
-	} else {
-		const start = Date.now();
-
-		if (!perpMarketIndicies.includes(liquidateePosition.marketIndex)) {
-			logger.info(
-				`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on market ${
-					liquidateePosition.marketIndex
-				} because it is not in perpMarketIndices`
-			);
-			return;
-		}
-		driftClient
-			.liquidatePerpPnlForDeposit(
-				user.userAccountPublicKey,
-				user.getUserAccount(),
-				liquidateePosition.marketIndex,
-				depositMarketIndextoLiq,
-				depositAmountToLiq
-			)
-			.then((tx) => {
-				logger.info(
-					`did liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
-						liquidateePosition.marketIndex
-					} tx: ${tx}`
-				);
-				webhookMessage(
-					`[${
-						this.name
-					}]: liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
-						liquidateePosition.marketIndex
-					} tx: ${tx}`
-				);
-			})
-			.catch((e) => {
-				console.error(e);
-				logger.error('Error in liquidatePerpPnlForDeposit');
-				const errorCode = getErrorCode(e);
-				if (!errorCodesToSuppress.includes(errorCode)) {
-					webhookMessage(
-						`[${
-							this.name
-						}]: :x: error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
-							liquidateePosition.marketIndex
-						}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
-							e.stack ? e.stack : e.message
-						}`
-					);
-				} else {
-					this.throttledUsers.set(
-						user.userAccountPublicKey.toBase58(),
-						Date.now()
-					);
-				}
-			})
-			.finally(() => {
-				sdkCallDurationHistogram.record(Date.now() - start, {
-					method: 'liquidatePerpPnlForDeposit',
-				});
-			});
-	}
 }
 
 enum METRIC_TYPES {
@@ -1012,6 +852,162 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
+	private async liqPerpPnl(
+		user: User,
+		perpMarketAccount: PerpMarketAccount,
+		usdcAccount: SpotMarketAccount,
+		liquidateePosition: PerpPosition,
+		depositMarketIndextoLiq: number,
+		depositAmountToLiq: BN,
+		borrowMarketIndextoLiq: number,
+		borrowAmountToLiq: BN
+	) {
+		if (liquidateePosition.quoteAssetAmount.gt(ZERO)) {
+			const claimablePnl = calculateClaimablePnl(
+				perpMarketAccount,
+				usdcAccount,
+				liquidateePosition,
+				this.driftClient.getOracleDataForPerpMarket(
+					liquidateePosition.marketIndex
+				)
+			);
+
+			let frac = new BN(100000000);
+			if (claimablePnl.gt(ZERO)) {
+				frac = BN.max(
+					liquidateePosition.quoteAssetAmount.div(claimablePnl),
+					new BN(1)
+				);
+			}
+
+			if (frac.lt(new BN(100000000))) {
+				if (!this.spotMarketIndicies.includes(borrowMarketIndextoLiq)) {
+					logger.info(
+						`skipping liquidateBorrowForPerpPnl of ${user.userAccountPublicKey.toBase58()} on market ${borrowMarketIndextoLiq} because it is not in spotMarketIndices`
+					);
+					return;
+				}
+				const start = Date.now();
+				this.driftClient
+					.liquidateBorrowForPerpPnl(
+						user.userAccountPublicKey,
+						user.getUserAccount(),
+						liquidateePosition.marketIndex,
+						borrowMarketIndextoLiq,
+						borrowAmountToLiq.div(frac)
+					)
+					.then((tx) => {
+						logger.info(
+							`liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
+							} tx: ${tx}`
+						);
+						webhookMessage(
+							`[${
+								this.name
+							}]: liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
+							} tx: ${tx}`
+						);
+					})
+					.catch((e) => {
+						logger.error(
+							`Error in liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
+							}`
+						);
+						logger.error(e);
+						const errorCode = getErrorCode(e);
+						if (!errorCodesToSuppress.includes(errorCode)) {
+							webhookMessage(
+								`[${
+									this.name
+								}]: :x: error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
+									liquidateePosition.marketIndex
+								}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+						} else {
+							this.throttledUsers.set(
+								user.userAccountPublicKey.toBase58(),
+								Date.now()
+							);
+						}
+					})
+					.finally(() => {
+						this.sdkCallDurationHistogram.record(Date.now() - start, {
+							method: 'liquidateBorrowForPerpPnl',
+						});
+					});
+			} else {
+				logger.info(
+					`claimablePnl=${claimablePnl.toString()} << liquidateePosition.quoteAssetAmount=${liquidateePosition.quoteAssetAmount.toString()} `
+				);
+				logger.info(`skipping liquidateBorrowForPerpPnl`);
+			}
+		} else {
+			const start = Date.now();
+
+			if (!this.perpMarketIndicies.includes(liquidateePosition.marketIndex)) {
+				logger.info(
+					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on market ${
+						liquidateePosition.marketIndex
+					} because it is not in perpMarketIndices`
+				);
+				return;
+			}
+			this.driftClient
+				.liquidatePerpPnlForDeposit(
+					user.userAccountPublicKey,
+					user.getUserAccount(),
+					liquidateePosition.marketIndex,
+					depositMarketIndextoLiq,
+					depositAmountToLiq
+				)
+				.then((tx) => {
+					logger.info(
+						`did liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+							liquidateePosition.marketIndex
+						} tx: ${tx}`
+					);
+					webhookMessage(
+						`[${
+							this.name
+						}]: liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+							liquidateePosition.marketIndex
+						} tx: ${tx}`
+					);
+				})
+				.catch((e) => {
+					console.error(e);
+					logger.error('Error in liquidatePerpPnlForDeposit');
+					const errorCode = getErrorCode(e);
+					if (!errorCodesToSuppress.includes(errorCode)) {
+						webhookMessage(
+							`[${
+								this.name
+							}]: :x: error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
+							}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''}\n${
+								e.stack ? e.stack : e.message
+							}`
+						);
+					} else {
+						this.throttledUsers.set(
+							user.userAccountPublicKey.toBase58(),
+							Date.now()
+						);
+					}
+				})
+				.finally(() => {
+					this.sdkCallDurationHistogram.record(Date.now() - start, {
+						method: 'liquidatePerpPnlForDeposit',
+					});
+				});
+		}
+	}
+
 	/**
 	 * iterates over users in userMap and checks:
 	 * 		1. is user bankrupt? if so, resolve bankruptcy
@@ -1156,19 +1152,15 @@ export class LiquidatorBot implements Bot {
 									const perpMarket = this.driftClient.getPerpMarketAccount(
 										liquidateePosition.marketIndex
 									);
-									await liqPerpPnl(
-										this.driftClient,
+									await this.liqPerpPnl(
 										user,
 										perpMarket,
 										usdcMarket,
-										this.sdkCallDurationHistogram,
 										liquidateePosition,
 										depositMarketIndextoLiq,
 										depositAmountToLiq,
 										borrowMarketIndextoLiq,
-										borrowAmountToLiq,
-										this.perpMarketIndicies,
-										this.spotMarketIndicies
+										borrowAmountToLiq
 									);
 
 									break; // todo: exit loop to reload accounts etc?
