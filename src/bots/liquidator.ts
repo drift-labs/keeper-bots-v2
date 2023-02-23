@@ -872,6 +872,45 @@ export class LiquidatorBot implements Bot {
 				)
 			);
 
+			if (claimablePnl.gt(ZERO) && borrowMarketIndextoLiq === -1) {
+				this.driftClient
+					.settlePNL(
+						user.userAccountPublicKey,
+						user.getUserAccount(),
+						liquidateePosition.marketIndex
+					)
+					.then((tx) => {
+						logger.info(
+							`settled positive pnl for ${user.userAccountPublicKey.toBase58()} for market ${
+								liquidateePosition.marketIndex
+							}: ${tx}`
+						);
+						webhookMessage(
+							`[${
+								this.name
+							}]: settled positive pnl for ${user.userAccountPublicKey.toBase58()} for market ${
+								liquidateePosition.marketIndex
+							}: ${tx}`
+						);
+					})
+					.catch((e) => {
+						logger.error(e);
+						logger.error(
+							`Error settling positive pnl for ${user.userAccountPublicKey.toBase58()} for market ${
+								liquidateePosition.marketIndex
+							}`
+						);
+						webhookMessage(
+							`[${
+								this.name
+							}]: :x: Error settling positive pnl for ${user.userAccountPublicKey.toBase58()} for market ${
+								liquidateePosition.marketIndex
+							}:\n${e.stack ? e.stack : e.message}`
+						);
+					});
+				return;
+			}
+
 			let frac = new BN(100000000);
 			if (claimablePnl.gt(ZERO)) {
 				frac = BN.max(
@@ -1162,8 +1201,6 @@ export class LiquidatorBot implements Bot {
 										borrowMarketIndextoLiq,
 										borrowAmountToLiq
 									);
-
-									break; // todo: exit loop to reload accounts etc?
 								}
 								continue;
 							}
