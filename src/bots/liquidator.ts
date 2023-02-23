@@ -988,6 +988,13 @@ export class LiquidatorBot implements Bot {
 		} else {
 			const start = Date.now();
 
+			if (!this.spotMarketIndicies.includes(depositMarketIndextoLiq)) {
+				logger.info(
+					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on spot market ${depositMarketIndextoLiq} because it is not in spotMarketIndices`
+				);
+				return;
+			}
+
 			if (!this.perpMarketIndicies.includes(liquidateePosition.marketIndex)) {
 				logger.info(
 					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on market ${
