@@ -1,5 +1,7 @@
 global:
   endpoint: https://api.mainnet-beta.solana.com
+  wsEndpoint:
+
 
   # Private key to use to sign transactions, null to load from the
   # KEEPER_PRIVATE_KEY env var
@@ -35,7 +37,7 @@ global:
 # Bot specific configs are below
 enabledBots:
   # Perp order filler bot
-  # - filler
+  - filler
 
   # Spot order filler bot
   # - spotFiller
@@ -44,7 +46,7 @@ enabledBots:
   # - trigger
 
   # Liquidator bot, liquidates unhealthy positions by taking over the risk (caution, you should manage risk here)
-  - liquidator
+  # - liquidator
 
   # Example maker bot that participates in JIT auction (caution: you will probably lose money)
   # - jitMaker
@@ -77,7 +79,7 @@ botConfigs:
   liquidator:
     botId: "liquidator"
     dryRun: false
-    metricsPort: 9464
+    metricsPort: 9465
     disableAutoDerisking: false
     # null will handle all markets
     perpMarketIndicies:
@@ -86,4 +88,4 @@ botConfigs:
   trigger:
     botId: "trigger"
     dryRun: false
-    metricsPort: 9464
+    metricsPort: 9465
