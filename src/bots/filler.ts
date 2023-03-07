@@ -27,6 +27,8 @@ import {
 	BulkAccountLoader,
 	SlotSubscriber,
 	OrderRecord,
+	PublicKey,
+	DLOBNode,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -69,8 +71,6 @@ import {
 	isFillIxLog,
 	isIxLog,
 	isMakerBreachedMaintenanceMarginLog,
-	isMakerFallbackLog,
-	isMakerOrderDoesNotExistLog,
 	isOrderDoesNotExistLog,
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
@@ -619,7 +619,7 @@ export class FillerBot implements Bot {
 			return '~';
 		}
 		return this.getFillSignatureFromUserAccountAndOrderId(
-			node.node.userAccount.toString(),
+			node.node.userAccount.toBase58(),
 			node.node.order.orderId.toString()
 		);
 	}
@@ -629,6 +629,51 @@ export class FillerBot implements Bot {
 		orderId: string
 	): string {
 		return `${userAccount}-${orderId}`;
+	}
+
+	/**
+	 * Checks if the node is still throttled, if not, clears it from the throttledNodes map
+	 * @param throttleKey key in throttleMap
+	 * @returns  true if throttleKey is still throttled, false if throttleKey is no longer throttled
+	 */
+	private isThrottledNodeStillThrottled(throttleKey: string): boolean {
+		const lastFillAttempt = this.throttledNodes.get(throttleKey);
+		if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
+			return true;
+		} else {
+			this.clearThrottledNode(throttleKey);
+			return false;
+		}
+	}
+
+	private isDLOBNodeThrottled(dlobNode: DLOBNode): boolean {
+		const userAccountPubkey = dlobNode.userAccount.toBase58();
+		if (this.throttledNodes.has(userAccountPubkey)) {
+			if (this.isThrottledNodeStillThrottled(userAccountPubkey)) {
+				logger.warn(`dlobNode is throttled: (${userAccountPubkey})`);
+				return true;
+			} else {
+				return false;
+			}
+		}
+		const orderSignature = this.getFillSignatureFromUserAccountAndOrderId(
+			dlobNode.userAccount.toBase58(),
+			dlobNode.order.orderId.toString()
+		);
+		if (this.throttledNodes.has(orderSignature)) {
+			if (this.isThrottledNodeStillThrottled(orderSignature)) {
+				logger.warn(`dlobNode is throttled: (${orderSignature})`);
+				return true;
+			} else {
+				return false;
+			}
+		}
+
+		return false;
+	}
+
+	private clearThrottledNode(signature: string) {
+		this.throttledNodes.delete(signature);
 	}
 
 	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
@@ -656,20 +701,9 @@ export class FillerBot implements Bot {
 			}
 		}
 
-		if (this.throttledNodes.has(nodeToFillSignature)) {
-			const lastFillAttempt = this.throttledNodes.get(nodeToFillSignature);
-			if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > now) {
-				logger.warn(
-					`skipping node (throttled, retry in ${
-						lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF - now
-					}ms) on market ${nodeToFill.node.order.marketIndex} for user ${
-						nodeToFill.node.userAccount
-					}-${nodeToFill.node.order.orderId}`
-				);
-				return false;
-			} else {
-				this.throttledNodes.delete(nodeToFillSignature);
-			}
+		// check if taker node is throttled
+		if (this.isDLOBNodeThrottled(nodeToFill.node)) {
+			return false;
 		}
 
 		const marketIndex = nodeToFill.node.order.marketIndex;
@@ -758,6 +792,10 @@ export class FillerBot implements Bot {
 		await tryAcquire(this.userMapMutex).runExclusive(async () => {
 			if (nodeToFill.makerNodes.length > 0) {
 				for (const makerNode of nodeToFill.makerNodes) {
+					if (this.isDLOBNodeThrottled(makerNode)) {
+						continue;
+					}
+
 					const makerUserAccount = (
 						await this.userMap.mustGet(makerNode.userAccount.toString())
 					).getUserAccount();
@@ -839,21 +877,6 @@ export class FillerBot implements Bot {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
-	private bulkThrottleMakerNodes(node: NodeToFill, errorPrefix?: string) {
-		let msg = errorPrefix ? errorPrefix + '\n' : '';
-		for (let makerIdx = 0; makerIdx < node.makerNodes.length; makerIdx++) {
-			const makerNode = node.makerNodes[makerIdx];
-			const makerNodeSignature = this.getFillSignatureFromUserAccountAndOrderId(
-				makerNode.userAccount.toBase58(),
-				makerNode.order.orderId.toString()
-			);
-			this.throttledNodes.set(makerNodeSignature, Date.now());
-			msg += ` [${makerIdx}] ${makerNodeSignature} throttled\n`;
-		}
-
-		logger.error(msg);
-	}
-
 	/**
 	 * Iterates through a tx's logs and handles it appropriately 3e.g. throttling users, updating metrics, etc.)
 	 *
@@ -930,90 +953,33 @@ export class FillerBot implements Bot {
 						filledNode.node.order.orderId
 					}; does not exist (filled by someone else); ${log}`
 				);
-				this.throttledNodes.delete(this.getNodeToFillSignature(filledNode));
+				this.clearThrottledNode(this.getNodeToFillSignature(filledNode));
 				errorThisFillIx = true;
-				continue;
-			}
-
-			const makerOrderIdDoesNotExist = isMakerOrderDoesNotExistLog(log);
-			if (makerOrderIdDoesNotExist) {
-				const filledNode = nodesFilled[ixIdx];
-				if (filledNode.makerNodes.length === 0) {
-					logger.error(
-						`Got maker DNE error, but don't have a maker node: ${log}, ${ixIdx}\n${JSON.stringify(
-							filledNode,
-							null,
-							2
-						)}`
-					);
-					continue;
-				}
-
-				this.bulkThrottleMakerNodes(
-					filledNode,
-					`Throttling makers from DNE error (ixIdx: ${ixIdx})`
-				);
-				continue;
-			}
-
-			const makerFallbackOrderId = isMakerFallbackLog(log);
-			if (makerFallbackOrderId) {
-				const filledNode = nodesFilled[ixIdx];
-				if (filledNode.makerNodes.length === 0) {
-					logger.error(
-						`Got maker fallback log, but don't have a maker node: ${log}, ${ixIdx}\n${JSON.stringify(
-							filledNode,
-							null,
-							2
-						)}`
-					);
-					continue;
-				}
-
-				this.bulkThrottleMakerNodes(
-					filledNode,
-					`Throttling makers from fallback error (ixIdx: ${ixIdx})`
-				);
 				continue;
 			}
 
 			const makerBreachedMaintenanceMargin =
 				isMakerBreachedMaintenanceMarginLog(log);
-			if (makerBreachedMaintenanceMargin) {
-				const filledNode = nodesFilled[ixIdx];
-				if (filledNode.makerNodes.length === 0) {
-					logger.error(
-						`Got maker breached maint. margin log, but don't have any maker nodes: ${log}, ${ixIdx}\n${JSON.stringify(
-							filledNode,
-							null,
-							2
-						)}`
-					);
-					continue;
-				}
-				this.bulkThrottleMakerNodes(
-					filledNode,
-					`Throttling makers from maker breach maint. margin error (ixIdx: ${ixIdx})`
+			if (makerBreachedMaintenanceMargin !== null) {
+				logger.error(
+					`Throttling maker breached maintenance margin: ${makerBreachedMaintenanceMargin}`
 				);
-				errorThisFillIx = true;
-
+				this.throttledNodes.set(makerBreachedMaintenanceMargin, Date.now());
 				const tx = new Transaction();
-				for (const makerNode of filledNode.makerNodes) {
-					tx.add(
-						ComputeBudgetProgram.requestUnits({
-							units: 1_000_000,
-							additionalFee: 0,
-						})
-					);
-					tx.add(
-						await this.driftClient.getForceCancelOrdersIx(
-							makerNode.userAccount,
-							(
-								await this.userMap.mustGet(makerNode.userAccount.toString())
-							).getUserAccount()
-						)
-					);
-				}
+				tx.add(
+					ComputeBudgetProgram.requestUnits({
+						units: 1_000_000,
+						additionalFee: 0,
+					})
+				);
+				tx.add(
+					await this.driftClient.getForceCancelOrdersIx(
+						new PublicKey(makerBreachedMaintenanceMargin),
+						(
+							await this.userMap.mustGet(makerBreachedMaintenanceMargin)
+						).getUserAccount()
+					)
+				);
 				this.driftClient.txSender
 					.send(tx, [], this.driftClient.opts)
 					.then((txSig) => {
@@ -1031,6 +997,7 @@ export class FillerBot implements Bot {
 						);
 					});
 
+				errorThisFillIx = true;
 				continue;
 			}
 
@@ -1038,11 +1005,7 @@ export class FillerBot implements Bot {
 				isTakerBreachedMaintenanceMarginLog(log);
 			if (takerBreachedMaintenanceMargin) {
 				const filledNode = nodesFilled[ixIdx];
-				const takerNodeSignature =
-					this.getFillSignatureFromUserAccountAndOrderId(
-						filledNode.node.userAccount.toString(),
-						filledNode.node.order.orderId.toString()
-					);
+				const takerNodeSignature = filledNode.node.userAccount.toBase58();
 				logger.error(
 					`taker breach maint. margin, assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount.toString()}, ${
 						filledNode.node.order.orderId
