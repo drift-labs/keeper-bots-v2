@@ -1370,17 +1370,20 @@ export class FillerBot implements Bot {
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
-					if (this.dlob) {
-						this.dlob.clear();
-						delete this.dlob;
+					if (!orderRecord || !this.dlob) {
+						if (this.dlob) {
+							this.dlob.clear();
+							delete this.dlob;
+						}
+						this.dlob = new DLOB();
+						await tryAcquire(this.userMapMutex).runExclusive(async () => {
+							await this.dlob.initFromUserMap(
+								this.userMap,
+								this.slotSubscriber.getSlot()
+							);
+						});
 					}
-					this.dlob = new DLOB();
-					await tryAcquire(this.userMapMutex).runExclusive(async () => {
-						await this.dlob.initFromUserMap(
-							this.userMap,
-							this.slotSubscriber.getSlot()
-						);
-					});
+
 					if (orderRecord) {
 						this.dlob.insertOrder(
 							orderRecord.order,
