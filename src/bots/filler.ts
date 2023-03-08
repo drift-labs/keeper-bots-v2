@@ -113,11 +113,11 @@ function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
 	if (prefix) {
 		msg += `${prefix}\n`;
 	}
-	msg = `taker on market ${
+	msg += `taker on market ${
 		takerOrder.marketIndex
-	}: ${takerNode.userAccount.toBase58()}-${
-		takerOrder.orderId
-	} ${convertToNumber(
+	}: ${takerNode.userAccount.toBase58()}-${takerOrder.orderId} ${getVariant(
+		takerOrder.direction
+	)} ${convertToNumber(
 		takerOrder.baseAssetAmountFilled,
 		BASE_PRECISION
 	)}/${convertToNumber(
@@ -132,11 +132,11 @@ function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
 		for (let i = 0; i < node.makerNodes.length; i++) {
 			const makerNode = node.makerNodes[i];
 			const makerOrder = makerNode.order;
-			`  [${i}] market ${
+			msg += `  [${i}] market ${
 				makerOrder.marketIndex
-			}: ${makerNode.userAccount.toBase58()}-${
-				makerOrder.orderId
-			} ${convertToNumber(
+			}: ${makerNode.userAccount.toBase58()}-${makerOrder.orderId} ${getVariant(
+				makerOrder.direction
+			)} ${convertToNumber(
 				makerOrder.baseAssetAmountFilled,
 				BASE_PRECISION
 			)}/${convertToNumber(
@@ -650,7 +650,6 @@ export class FillerBot implements Bot {
 		const userAccountPubkey = dlobNode.userAccount.toBase58();
 		if (this.throttledNodes.has(userAccountPubkey)) {
 			if (this.isThrottledNodeStillThrottled(userAccountPubkey)) {
-				logger.warn(`dlobNode is throttled: (${userAccountPubkey})`);
 				return true;
 			} else {
 				return false;
@@ -662,7 +661,6 @@ export class FillerBot implements Bot {
 		);
 		if (this.throttledNodes.has(orderSignature)) {
 			if (this.isThrottledNodeStillThrottled(orderSignature)) {
-				logger.warn(`dlobNode is throttled: (${orderSignature})`);
 				return true;
 			} else {
 				return false;
@@ -782,22 +780,29 @@ export class FillerBot implements Bot {
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
 		makerInfos: Array<MakerInfo> | undefined;
-		chUser: User;
+		takerUser: User;
 		referrerInfo: ReferrerInfo;
 		marketType: MarketType;
 	}> {
 		const makerInfos: Array<MakerInfo> | undefined = [];
-		let chUser: User;
+		let takerUser: User;
 		let referrerInfo: ReferrerInfo;
 		await tryAcquire(this.userMapMutex).runExclusive(async () => {
+			// set to track whether maker account has already been included
+			const makersIncluded = new Set<string>();
 			if (nodeToFill.makerNodes.length > 0) {
 				for (const makerNode of nodeToFill.makerNodes) {
 					if (this.isDLOBNodeThrottled(makerNode)) {
 						continue;
 					}
 
+					const makerAccount = makerNode.userAccount.toBase58();
+					if (makersIncluded.has(makerAccount)) {
+						continue;
+					}
+
 					const makerUserAccount = (
-						await this.userMap.mustGet(makerNode.userAccount.toString())
+						await this.userMap.mustGet(makerAccount)
 					).getUserAccount();
 					const makerAuthority = makerUserAccount.authority;
 					const makerUserStats = (
@@ -809,22 +814,23 @@ export class FillerBot implements Bot {
 						order: makerNode.order,
 						makerStats: makerUserStats,
 					});
+					makersIncluded.add(makerAccount);
 				}
 			}
 
-			chUser = await this.userMap.mustGet(
+			takerUser = await this.userMap.mustGet(
 				nodeToFill.node.userAccount.toString()
 			);
 			referrerInfo = (
 				await this.userStatsMap.mustGet(
-					chUser.getUserAccount().authority.toString()
+					takerUser.getUserAccount().authority.toString()
 				)
 			).getReferrerInfo();
 		});
 
 		return Promise.resolve({
 			makerInfos,
-			chUser,
+			takerUser,
 			referrerInfo,
 			marketType: nodeToFill.node.order.marketType,
 		});
@@ -1173,7 +1179,7 @@ export class FillerBot implements Bot {
 				logMessageForNodeToFill(nodeToFill, `Filling perp node ${idx}`)
 			);
 
-			const { makerInfos, chUser, referrerInfo, marketType } =
+			const { makerInfos, takerUser, referrerInfo, marketType } =
 				await this.getNodeFillInfo(nodeToFill);
 
 			if (!isVariant(marketType, 'perp')) {
@@ -1181,8 +1187,8 @@ export class FillerBot implements Bot {
 			}
 
 			const ix = await this.driftClient.getFillPerpOrderIx(
-				chUser.getUserAccountPublicKey(),
-				chUser.getUserAccount(),
+				takerUser.getUserAccountPublicKey(),
+				takerUser.getUserAccount(),
 				nodeToFill.node.order,
 				makerInfos,
 				referrerInfo
@@ -1231,7 +1237,7 @@ export class FillerBot implements Bot {
 
 			// add to tx
 			logger.info(
-				`including tx ${chUser
+				`including taker ${takerUser
 					.getUserAccountPublicKey()
 					.toString()}-${nodeToFill.node.order.orderId.toString()}`
 			);
