@@ -42,24 +42,19 @@ export function isMakerOrderDoesNotExistLog(log: string): number | null {
 	return parseInt(match[1]);
 }
 
-export function isMakerFallbackLog(log: string): number | null {
-	const match = log.match(
-		new RegExp('.*Using fallback maker order id ([0-9]+)')
-	);
+/**
+ * parses a maker breached maintenance margin log, returns the maker's userAccount pubkey if it exists
+ * @param log
+ * @returns
+ */
+export function isMakerBreachedMaintenanceMarginLog(
+	log: string
+): string | null {
+	const regex =
+		/^maker \(([1-9A-HJ-NP-Za-km-z]+)\) breached maintenance requirements.*$/;
+	const match = log.match(regex);
 
-	if (!match) {
-		return null;
-	}
-
-	return parseInt(match[1]);
-}
-
-export function isMakerBreachedMaintenanceMarginLog(log: string): boolean {
-	const match = log.match(
-		new RegExp('.*maker breached maintenance requirements.*')
-	);
-
-	return match !== null;
+	return match ? match[1] : null;
 }
 
 export function isTakerBreachedMaintenanceMarginLog(log: string): boolean {

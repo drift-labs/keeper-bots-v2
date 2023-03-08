@@ -346,7 +346,7 @@ const runBot = async () => {
 		userStats: true,
 		txSenderConfig: {
 			type: 'retry',
-			timeout: 5000,
+			timeout: 35000,
 		},
 		activeSubAccountId: config.global.subaccounts[0],
 		subAccountIds: config.global.subaccounts,
