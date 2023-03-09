@@ -26,6 +26,7 @@ import {
 	PRICE_PRECISION,
 	WrappedEvent,
 	DLOBNode,
+	UserSubscriptionConfig,
 } from '@drift-labs/sdk';
 import {
 	Mutex,
@@ -143,6 +144,7 @@ export class SpotFillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 5000;
 
 	private bulkAccountLoader: BulkAccountLoader | undefined;
+	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	private driftClient: DriftClient;
 	private pollingIntervalMs: number;
 	private transactionVersion: number;
@@ -207,6 +209,19 @@ export class SpotFillerBot implements Bot {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.bulkAccountLoader = bulkAccountLoader;
+		if (this.bulkAccountLoader) {
+			this.userStatsMapSubscriptionConfig = {
+				type: 'polling',
+				accountLoader: new BulkAccountLoader(
+					this.bulkAccountLoader.connection,
+					this.bulkAccountLoader.commitment,
+					0 // no polling
+				),
+			};
+		} else {
+			this.userStatsMapSubscriptionConfig =
+				this.driftClient.userAccountSubscriptionConfig;
+		}
 		this.driftClient = clearingHouse;
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
@@ -415,7 +430,7 @@ export class SpotFillerBot implements Bot {
 				);
 				this.userStatsMap = new UserStatsMap(
 					this.driftClient,
-					this.driftClient.userAccountSubscriptionConfig
+					this.userStatsMapSubscriptionConfig
 				);
 
 				await this.userMap.fetchAllUsers();
@@ -578,7 +593,7 @@ export class SpotFillerBot implements Bot {
 					);
 					const newUserStatsMap = new UserStatsMap(
 						this.driftClient,
-						this.driftClient.userAccountSubscriptionConfig
+						this.userStatsMapSubscriptionConfig
 					);
 					newUserMap.fetchAllUsers().then(() => {
 						newUserStatsMap

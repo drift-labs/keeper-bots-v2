@@ -29,6 +29,7 @@ import {
 	OrderRecord,
 	PublicKey,
 	DLOBNode,
+	UserSubscriptionConfig,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -160,6 +161,7 @@ export class FillerBot implements Bot {
 
 	private slotSubscriber: SlotSubscriber;
 	private bulkAccountLoader: BulkAccountLoader | undefined;
+	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	private driftClient: DriftClient;
 	private pollingIntervalMs: number;
 	private transactionVersion: number | undefined;
@@ -223,6 +225,19 @@ export class FillerBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.bulkAccountLoader = bulkAccountLoader;
+		if (this.bulkAccountLoader) {
+			this.userStatsMapSubscriptionConfig = {
+				type: 'polling',
+				accountLoader: new BulkAccountLoader(
+					this.bulkAccountLoader.connection,
+					this.bulkAccountLoader.commitment,
+					0 // no polling
+				),
+			};
+		} else {
+			this.userStatsMapSubscriptionConfig =
+				this.driftClient.userAccountSubscriptionConfig;
+		}
 		this.driftClient = driftClient;
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
@@ -422,7 +437,7 @@ export class FillerBot implements Bot {
 			);
 			this.userStatsMap = new UserStatsMap(
 				this.driftClient,
-				this.driftClient.userAccountSubscriptionConfig
+				this.userStatsMapSubscriptionConfig
 			);
 
 			await this.userMap.fetchAllUsers();
@@ -556,7 +571,7 @@ export class FillerBot implements Bot {
 					);
 					const newUserStatsMap = new UserStatsMap(
 						this.driftClient,
-						this.driftClient.userAccountSubscriptionConfig
+						this.userStatsMapSubscriptionConfig
 					);
 					newUserMap.fetchAllUsers().then(() => {
 						newUserStatsMap
