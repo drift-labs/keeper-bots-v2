@@ -1285,7 +1285,7 @@ export class LiquidatorBot implements Bot {
 								this.name
 							}]: user stuck in beingLiquidated status, clearing it for ${user.userAccountPublicKey.toBase58()}`
 						);
-						this.driftClient.liquidatePerp(
+						await this.driftClient.liquidatePerp(
 							user.userAccountPublicKey,
 							user.getUserAccount(),
 							0,
