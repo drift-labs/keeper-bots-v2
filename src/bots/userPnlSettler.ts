@@ -90,10 +90,10 @@ export class UserPnlSettlerBot implements Bot {
 		delete this.userMap;
 	}
 
-	public async startIntervalLoop(_intervalMs: number): Promise<void> {
+	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		logger.info(`${this.name} Bot started!`);
-		await this.trySettlePnl();
-		// we don't want to run this repeatedly
+		const intervalId = setInterval(this.trySettlePnl.bind(this), intervalMs);
+		this.intervalIds.push(intervalId);
 	}
 
 	public async healthCheck(): Promise<boolean> {
