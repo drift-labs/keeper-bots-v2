@@ -1283,14 +1283,23 @@ export class LiquidatorBot implements Bot {
 						logger.info(
 							`[${
 								this.name
-							}]: user stuck in beingLiquidated status, clearing it for ${user.userAccountPublicKey.toBase58()}`
+							}]: user stuck in beingLiquidated status, need to clear it for ${user.userAccountPublicKey.toBase58()}`
 						);
-						await this.driftClient.liquidatePerp(
-							user.userAccountPublicKey,
-							user.getUserAccount(),
-							0,
-							ZERO
-						);
+						this.driftClient
+							.liquidatePerp(
+								user.userAccountPublicKey,
+								user.getUserAccount(),
+								0,
+								ZERO
+							)
+							.then((tx) => {
+								logger.info(
+									`liquidatePerp for stuck (beingLiquidated) user tx: ${tx}`
+								);
+							})
+							.catch((e) => {
+								console.error(e);
+							});
 					}
 				}
 			});
