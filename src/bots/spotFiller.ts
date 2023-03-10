@@ -197,7 +197,7 @@ export class SpotFillerBot implements Bot {
 
 	constructor(
 		bulkAccountLoader: BulkAccountLoader | undefined,
-		clearingHouse: DriftClient,
+		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig
 	) {
@@ -208,6 +208,7 @@ export class SpotFillerBot implements Bot {
 		}
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
+		this.driftClient = driftClient;
 		this.bulkAccountLoader = bulkAccountLoader;
 		if (this.bulkAccountLoader) {
 			this.userStatsMapSubscriptionConfig = {
@@ -222,14 +223,11 @@ export class SpotFillerBot implements Bot {
 			this.userStatsMapSubscriptionConfig =
 				this.driftClient.userAccountSubscriptionConfig;
 		}
-		this.driftClient = clearingHouse;
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
 			config.fillerPollingInterval ?? this.defaultIntervalMs;
 
-		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
-			clearingHouse
-		);
+		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(driftClient);
 		this.serumSubscribers = new Map<number, SerumSubscriber>();
 
 		this.dlobMutex = withTimeout(
@@ -793,7 +791,7 @@ export class SpotFillerBot implements Bot {
 	 * Iterates through a tx's logs and handles it appropriately 3e.g. throttling users, updating metrics, etc.)
 	 *
 	 * @param nodesFilled nodes that we sent a transaction to fill
-	 * @param logs logs from tx.meta.logMessages or this.clearingHouse.program._events._eventParser.parseLogs
+	 * @param logs logs from tx.meta.logMessages or this.driftClient.program._events._eventParser.parseLogs
 	 *
 	 * @returns number of nodes successfully filled
 	 */

@@ -224,6 +224,7 @@ export class FillerBot implements Bot {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
+		this.driftClient = driftClient;
 		this.bulkAccountLoader = bulkAccountLoader;
 		if (this.bulkAccountLoader) {
 			this.userStatsMapSubscriptionConfig = {
@@ -238,7 +239,6 @@ export class FillerBot implements Bot {
 			this.userStatsMapSubscriptionConfig =
 				this.driftClient.userAccountSubscriptionConfig;
 		}
-		this.driftClient = driftClient;
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
 			config.fillerPollingInterval ?? this.defaultIntervalMs;
