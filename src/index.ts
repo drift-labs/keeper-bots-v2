@@ -346,7 +346,7 @@ const runBot = async () => {
 		userStats: true,
 		txSenderConfig: {
 			type: 'retry',
-			timeout: 5000,
+			timeout: 35000,
 		},
 		activeSubAccountId: config.global.subaccounts[0],
 		subAccountIds: config.global.subaccounts,
@@ -663,11 +663,12 @@ const runBot = async () => {
 	logger.info(`initializing bots`);
 	await Promise.all(bots.map((bot) => bot.init()));
 
-	logger.info(`starting bots`);
-	await Promise.all(
-		bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
-	);
-
+	logger.info(`starting bots (runOnce: ${config.global.runOnce})`);
+	if (!config.global.runOnce) {
+		await Promise.all(
+			bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
+		);
+	}
 	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
 		Promise.all(bots.map((bot) => bot.trigger(event)));
 	});

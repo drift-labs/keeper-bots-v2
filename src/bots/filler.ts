@@ -27,6 +27,9 @@ import {
 	BulkAccountLoader,
 	SlotSubscriber,
 	OrderRecord,
+	PublicKey,
+	DLOBNode,
+	UserSubscriptionConfig,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -69,14 +72,12 @@ import {
 	isFillIxLog,
 	isIxLog,
 	isMakerBreachedMaintenanceMarginLog,
-	isMakerFallbackLog,
-	isMakerOrderDoesNotExistLog,
 	isOrderDoesNotExistLog,
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
 import { getErrorCode } from '../error';
 
-const MAX_TX_PACK_SIZE = 900; //1232;
+const MAX_TX_PACK_SIZE = 1100; //1232;
 const CU_PER_FILL = 200_000; // CU cost for a successful fill
 const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
@@ -106,6 +107,53 @@ enum METRIC_TYPES {
 	user_stats_map_authority_keys = 'user_stats_map_authority_keys',
 }
 
+function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
+	const takerNode = node.node;
+	const takerOrder = takerNode.order;
+	let msg = '';
+	if (prefix) {
+		msg += `${prefix}\n`;
+	}
+	msg += `taker on market ${
+		takerOrder.marketIndex
+	}: ${takerNode.userAccount.toBase58()}-${takerOrder.orderId} ${getVariant(
+		takerOrder.direction
+	)} ${convertToNumber(
+		takerOrder.baseAssetAmountFilled,
+		BASE_PRECISION
+	)}/${convertToNumber(
+		takerOrder.baseAssetAmount,
+		BASE_PRECISION
+	)} @ ${convertToNumber(
+		takerOrder.price,
+		PRICE_PRECISION
+	)} (orderType: ${getVariant(takerOrder.orderType)})\n`;
+	msg += `makers:\n`;
+	if (node.makerNodes.length > 0) {
+		for (let i = 0; i < node.makerNodes.length; i++) {
+			const makerNode = node.makerNodes[i];
+			const makerOrder = makerNode.order;
+			msg += `  [${i}] market ${
+				makerOrder.marketIndex
+			}: ${makerNode.userAccount.toBase58()}-${makerOrder.orderId} ${getVariant(
+				makerOrder.direction
+			)} ${convertToNumber(
+				makerOrder.baseAssetAmountFilled,
+				BASE_PRECISION
+			)}/${convertToNumber(
+				makerOrder.baseAssetAmount,
+				BASE_PRECISION
+			)} @ ${convertToNumber(
+				makerOrder.price,
+				PRICE_PRECISION
+			)} (orderType: ${getVariant(makerOrder.orderType)})\n`;
+		}
+	} else {
+		msg += `  vAMM`;
+	}
+	return msg;
+}
+
 export class FillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
@@ -113,6 +161,7 @@ export class FillerBot implements Bot {
 
 	private slotSubscriber: SlotSubscriber;
 	private bulkAccountLoader: BulkAccountLoader | undefined;
+	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	private driftClient: DriftClient;
 	private pollingIntervalMs: number;
 	private transactionVersion: number | undefined;
@@ -176,6 +225,19 @@ export class FillerBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.bulkAccountLoader = bulkAccountLoader;
+		if (this.bulkAccountLoader) {
+			this.userStatsMapSubscriptionConfig = {
+				type: 'polling',
+				accountLoader: new BulkAccountLoader(
+					this.bulkAccountLoader.connection,
+					this.bulkAccountLoader.commitment,
+					0 // no polling
+				),
+			};
+		} else {
+			this.userStatsMapSubscriptionConfig =
+				this.driftClient.userAccountSubscriptionConfig;
+		}
 		this.driftClient = driftClient;
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
@@ -375,7 +437,7 @@ export class FillerBot implements Bot {
 			);
 			this.userStatsMap = new UserStatsMap(
 				this.driftClient,
-				this.driftClient.userAccountSubscriptionConfig
+				this.userStatsMapSubscriptionConfig
 			);
 
 			await this.userMap.fetchAllUsers();
@@ -509,7 +571,7 @@ export class FillerBot implements Bot {
 					);
 					const newUserStatsMap = new UserStatsMap(
 						this.driftClient,
-						this.driftClient.userAccountSubscriptionConfig
+						this.userStatsMapSubscriptionConfig
 					);
 					newUserMap.fetchAllUsers().then(() => {
 						newUserStatsMap
@@ -572,7 +634,7 @@ export class FillerBot implements Bot {
 			return '~';
 		}
 		return this.getFillSignatureFromUserAccountAndOrderId(
-			node.node.userAccount.toString(),
+			node.node.userAccount.toBase58(),
 			node.node.order.orderId.toString()
 		);
 	}
@@ -582,6 +644,49 @@ export class FillerBot implements Bot {
 		orderId: string
 	): string {
 		return `${userAccount}-${orderId}`;
+	}
+
+	/**
+	 * Checks if the node is still throttled, if not, clears it from the throttledNodes map
+	 * @param throttleKey key in throttleMap
+	 * @returns  true if throttleKey is still throttled, false if throttleKey is no longer throttled
+	 */
+	private isThrottledNodeStillThrottled(throttleKey: string): boolean {
+		const lastFillAttempt = this.throttledNodes.get(throttleKey);
+		if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
+			return true;
+		} else {
+			this.clearThrottledNode(throttleKey);
+			return false;
+		}
+	}
+
+	private isDLOBNodeThrottled(dlobNode: DLOBNode): boolean {
+		const userAccountPubkey = dlobNode.userAccount.toBase58();
+		if (this.throttledNodes.has(userAccountPubkey)) {
+			if (this.isThrottledNodeStillThrottled(userAccountPubkey)) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+		const orderSignature = this.getFillSignatureFromUserAccountAndOrderId(
+			dlobNode.userAccount.toBase58(),
+			dlobNode.order.orderId.toString()
+		);
+		if (this.throttledNodes.has(orderSignature)) {
+			if (this.isThrottledNodeStillThrottled(orderSignature)) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+
+		return false;
+	}
+
+	private clearThrottledNode(signature: string) {
+		this.throttledNodes.delete(signature);
 	}
 
 	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
@@ -609,20 +714,9 @@ export class FillerBot implements Bot {
 			}
 		}
 
-		if (this.throttledNodes.has(nodeToFillSignature)) {
-			const lastFillAttempt = this.throttledNodes.get(nodeToFillSignature);
-			if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > now) {
-				logger.warn(
-					`skipping node (throttled, retry in ${
-						lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF - now
-					}ms) on market ${nodeToFill.node.order.marketIndex} for user ${
-						nodeToFill.node.userAccount
-					}-${nodeToFill.node.order.orderId}`
-				);
-				return false;
-			} else {
-				this.throttledNodes.delete(nodeToFillSignature);
-			}
+		// check if taker node is throttled
+		if (this.isDLOBNodeThrottled(nodeToFill.node)) {
+			return false;
 		}
 
 		const marketIndex = nodeToFill.node.order.marketIndex;
@@ -638,7 +732,7 @@ export class FillerBot implements Bot {
 		}
 
 		if (
-			!nodeToFill.makerNode &&
+			nodeToFill.makerNodes.length === 0 &&
 			isVariant(nodeToFill.node.order.marketType, 'perp') &&
 			!isFillableByVAMM(
 				nodeToFill.node.order,
@@ -653,7 +747,7 @@ export class FillerBot implements Bot {
 			logger.warn(
 				`filtered out unfillable node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
 			);
-			logger.warn(` . no maker node: ${!nodeToFill.makerNode}`);
+			logger.warn(` . no maker node: ${nodeToFill.makerNodes.length === 0}`);
 			logger.warn(
 				` . is perp: ${isVariant(nodeToFill.node.order.marketType, 'perp')}`
 			);
@@ -682,7 +776,7 @@ export class FillerBot implements Bot {
 		}
 
 		// if making with vAMM, ensure valid oracle
-		if (!nodeToFill.makerNode) {
+		if (nodeToFill.makerNodes.length === 0) {
 			const oracleIsValid = isOracleValid(
 				this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex)
 					.amm,
@@ -700,46 +794,58 @@ export class FillerBot implements Bot {
 	}
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
-		makerInfo: MakerInfo | undefined;
-		chUser: User;
+		makerInfos: Array<MakerInfo> | undefined;
+		takerUser: User;
 		referrerInfo: ReferrerInfo;
 		marketType: MarketType;
 	}> {
-		let makerInfo: MakerInfo | undefined;
-		let chUser: User;
+		const makerInfos: Array<MakerInfo> | undefined = [];
+		let takerUser: User;
 		let referrerInfo: ReferrerInfo;
 		await tryAcquire(this.userMapMutex).runExclusive(async () => {
-			if (nodeToFill.makerNode) {
-				const makerUserAccount = (
-					await this.userMap.mustGet(
-						nodeToFill.makerNode.userAccount.toString()
-					)
-				).getUserAccount();
-				const makerAuthority = makerUserAccount.authority;
-				const makerUserStats = (
-					await this.userStatsMap.mustGet(makerAuthority.toString())
-				).userStatsAccountPublicKey;
-				makerInfo = {
-					maker: nodeToFill.makerNode.userAccount,
-					makerUserAccount: makerUserAccount,
-					order: nodeToFill.makerNode.order,
-					makerStats: makerUserStats,
-				};
+			// set to track whether maker account has already been included
+			const makersIncluded = new Set<string>();
+			if (nodeToFill.makerNodes.length > 0) {
+				for (const makerNode of nodeToFill.makerNodes) {
+					if (this.isDLOBNodeThrottled(makerNode)) {
+						continue;
+					}
+
+					const makerAccount = makerNode.userAccount.toBase58();
+					if (makersIncluded.has(makerAccount)) {
+						continue;
+					}
+
+					const makerUserAccount = (
+						await this.userMap.mustGet(makerAccount)
+					).getUserAccount();
+					const makerAuthority = makerUserAccount.authority;
+					const makerUserStats = (
+						await this.userStatsMap.mustGet(makerAuthority.toString())
+					).userStatsAccountPublicKey;
+					makerInfos.push({
+						maker: makerNode.userAccount,
+						makerUserAccount: makerUserAccount,
+						order: makerNode.order,
+						makerStats: makerUserStats,
+					});
+					makersIncluded.add(makerAccount);
+				}
 			}
 
-			chUser = await this.userMap.mustGet(
+			takerUser = await this.userMap.mustGet(
 				nodeToFill.node.userAccount.toString()
 			);
 			referrerInfo = (
 				await this.userStatsMap.mustGet(
-					chUser.getUserAccount().authority.toString()
+					takerUser.getUserAccount().authority.toString()
 				)
 			).getReferrerInfo();
 		});
 
 		return Promise.resolve({
-			makerInfo,
-			chUser,
+			makerInfos,
+			takerUser,
 			referrerInfo,
 			marketType: nodeToFill.node.order.marketType,
 		});
@@ -842,48 +948,12 @@ export class FillerBot implements Bot {
 
 					// can also print this from parsing the log record in upcoming
 					const nodeFilled = nodesFilled[ixIdx];
-					if (nodeFilled.makerNode) {
-						logger.info(
-							`Processing tx log for assoc node ${ixIdx}:\ntaker: ${nodeFilled.node.userAccount.toBase58()}-${
-								nodeFilled.node.order.orderId
-							} ${convertToNumber(
-								nodeFilled.node.order.baseAssetAmountFilled,
-								BASE_PRECISION
-							)}/${convertToNumber(
-								nodeFilled.node.order.baseAssetAmount,
-								BASE_PRECISION
-							)} @ ${convertToNumber(
-								nodeFilled.node.order.price,
-								PRICE_PRECISION
-							)}\nmaker: ${nodeFilled.makerNode.userAccount.toBase58()}-${
-								nodeFilled.makerNode.order.orderId
-							} ${convertToNumber(
-								nodeFilled.makerNode.order.baseAssetAmountFilled,
-								BASE_PRECISION
-							)}/${convertToNumber(
-								nodeFilled.makerNode.order.baseAssetAmount,
-								BASE_PRECISION
-							)} @ ${convertToNumber(
-								nodeFilled.makerNode.order.price,
-								PRICE_PRECISION
-							)}`
-						);
-					} else {
-						logger.info(
-							`Processing tx log for assoc node ${ixIdx}:\ntaker: ${nodeFilled.node.userAccount.toBase58()}-${
-								nodeFilled.node.order.orderId
-							} ${convertToNumber(
-								nodeFilled.node.order.baseAssetAmountFilled,
-								BASE_PRECISION
-							)}/${convertToNumber(
-								nodeFilled.node.order.baseAssetAmount,
-								BASE_PRECISION
-							)} @ ${convertToNumber(
-								nodeFilled.node.order.price,
-								PRICE_PRECISION
-							)}\nmaker: vAMM`
-						);
-					}
+					logger.info(
+						logMessageForNodeToFill(
+							nodeFilled,
+							`Processing tx log for assoc node ${ixIdx}`
+						)
+					);
 				} else {
 					inFillIx = false;
 				}
@@ -904,92 +974,18 @@ export class FillerBot implements Bot {
 						filledNode.node.order.orderId
 					}; does not exist (filled by someone else); ${log}`
 				);
-				this.throttledNodes.delete(this.getNodeToFillSignature(filledNode));
+				this.clearThrottledNode(this.getNodeToFillSignature(filledNode));
 				errorThisFillIx = true;
-				continue;
-			}
-
-			const makerOrderIdDoesNotExist = isMakerOrderDoesNotExistLog(log);
-			if (makerOrderIdDoesNotExist) {
-				const filledNode = nodesFilled[ixIdx];
-				if (!filledNode.makerNode) {
-					logger.error(
-						`Got maker DNE error, but don't have a maker node: ${log}, ${ixIdx}\n${JSON.stringify(
-							filledNode,
-							null,
-							2
-						)}`
-					);
-					continue;
-				}
-				const makerNodeSignature =
-					this.getFillSignatureFromUserAccountAndOrderId(
-						filledNode.makerNode.userAccount.toString(),
-						filledNode.makerNode.order.orderId.toString()
-					);
-				logger.error(
-					`maker assoc node (ixIdx: ${ixIdx}): ${filledNode.makerNode.userAccount.toString()}, ${
-						filledNode.makerNode.order.orderId
-					}; does not exist; throttling: ${makerNodeSignature}; ${log}`
-				);
-				this.throttledNodes.set(makerNodeSignature, Date.now());
-				continue;
-			}
-
-			const makerFallbackOrderId = isMakerFallbackLog(log);
-			if (makerFallbackOrderId) {
-				const filledNode = nodesFilled[ixIdx];
-				if (!filledNode.makerNode) {
-					logger.error(
-						`Got maker fallback log, but don't have a maker node: ${log}, ${ixIdx}\n${JSON.stringify(
-							filledNode,
-							null,
-							2
-						)}`
-					);
-					continue;
-				}
-				const makerNodeSignature =
-					this.getFillSignatureFromUserAccountAndOrderId(
-						filledNode.makerNode.userAccount.toString(),
-						makerFallbackOrderId.toString()
-					);
-				logger.error(
-					`maker fallback order assoc node (ixIdx: ${ixIdx}): ${filledNode.makerNode.userAccount.toString()}, ${
-						filledNode.makerNode.order.orderId
-					}; throttling ${makerNodeSignature}; ${log}`
-				);
-				this.throttledNodes.set(makerNodeSignature, Date.now());
 				continue;
 			}
 
 			const makerBreachedMaintenanceMargin =
 				isMakerBreachedMaintenanceMarginLog(log);
-			if (makerBreachedMaintenanceMargin) {
-				const filledNode = nodesFilled[ixIdx];
-				if (!filledNode.makerNode) {
-					logger.error(
-						`Got maker breached maint. margin log, but don't have a maker node: ${log}, ${ixIdx}\n${JSON.stringify(
-							filledNode,
-							null,
-							2
-						)}`
-					);
-					continue;
-				}
-				const makerNodeSignature =
-					this.getFillSignatureFromUserAccountAndOrderId(
-						filledNode.makerNode.userAccount.toString(),
-						filledNode.makerNode.order.orderId.toString()
-					);
+			if (makerBreachedMaintenanceMargin !== null) {
 				logger.error(
-					`maker breach maint. margin, assoc node (ixIdx: ${ixIdx}): ${filledNode.makerNode.userAccount.toString()}, ${
-						filledNode.makerNode.order.orderId
-					}; (throttling ${makerNodeSignature}); ${log}`
+					`Throttling maker breached maintenance margin: ${makerBreachedMaintenanceMargin}`
 				);
-				this.throttledNodes.set(makerNodeSignature, Date.now());
-				errorThisFillIx = true;
-
+				this.throttledNodes.set(makerBreachedMaintenanceMargin, Date.now());
 				const tx = new Transaction();
 				tx.add(
 					ComputeBudgetProgram.requestUnits({
@@ -999,11 +995,9 @@ export class FillerBot implements Bot {
 				);
 				tx.add(
 					await this.driftClient.getForceCancelOrdersIx(
-						filledNode.makerNode.userAccount,
+						new PublicKey(makerBreachedMaintenanceMargin),
 						(
-							await this.userMap.mustGet(
-								filledNode.makerNode.userAccount.toString()
-							)
+							await this.userMap.mustGet(makerBreachedMaintenanceMargin)
 						).getUserAccount()
 					)
 				);
@@ -1011,7 +1005,7 @@ export class FillerBot implements Bot {
 					.send(tx, [], this.driftClient.opts)
 					.then((txSig) => {
 						logger.info(
-							`Force cancelled orders for maker ${filledNode.makerNode.userAccount.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
+							`Force cancelled orders for makers due to breach of maintenance margin. Tx: ${txSig}`
 						);
 					})
 					.catch((e) => {
@@ -1024,6 +1018,7 @@ export class FillerBot implements Bot {
 						);
 					});
 
+				errorThisFillIx = true;
 				continue;
 			}
 
@@ -1031,11 +1026,7 @@ export class FillerBot implements Bot {
 				isTakerBreachedMaintenanceMarginLog(log);
 			if (takerBreachedMaintenanceMargin) {
 				const filledNode = nodesFilled[ixIdx];
-				const takerNodeSignature =
-					this.getFillSignatureFromUserAccountAndOrderId(
-						filledNode.node.userAccount.toString(),
-						filledNode.node.order.orderId.toString()
-					);
+				const takerNodeSignature = filledNode.node.userAccount.toBase58();
 				logger.error(
 					`taker breach maint. margin, assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount.toString()}, ${
 						filledNode.node.order.orderId
@@ -1200,56 +1191,10 @@ export class FillerBot implements Bot {
 		let idxUsed = 0;
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			logger.info(
-				`filling perp node ${idx}, marketIdx: ${
-					nodeToFill.node.order.marketIndex
-				}: ${nodeToFill.node.userAccount.toString()}, ${
-					nodeToFill.node.order.orderId
-				}, orderType: ${getVariant(nodeToFill.node.order.orderType)}`
+				logMessageForNodeToFill(nodeToFill, `Filling perp node ${idx}`)
 			);
-			if (nodeToFill.makerNode) {
-				logger.info(
-					`filling\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
-						nodeToFill.node.order.orderId
-					} ${convertToNumber(
-						nodeToFill.node.order.baseAssetAmountFilled,
-						BASE_PRECISION
-					)}/${convertToNumber(
-						nodeToFill.node.order.baseAssetAmount,
-						BASE_PRECISION
-					)} @ ${convertToNumber(
-						nodeToFill.node.order.price,
-						PRICE_PRECISION
-					)}\nmaker: ${nodeToFill.makerNode.userAccount.toBase58()}-${
-						nodeToFill.makerNode.order.orderId
-					} ${convertToNumber(
-						nodeToFill.makerNode.order.baseAssetAmountFilled,
-						BASE_PRECISION
-					)}/${convertToNumber(
-						nodeToFill.makerNode.order.baseAssetAmount,
-						BASE_PRECISION
-					)} @ ${convertToNumber(
-						nodeToFill.makerNode.order.price,
-						PRICE_PRECISION
-					)}`
-				);
-			} else {
-				logger.info(
-					`filling\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
-						nodeToFill.node.order.orderId
-					} ${convertToNumber(
-						nodeToFill.node.order.baseAssetAmountFilled,
-						BASE_PRECISION
-					)}/${convertToNumber(
-						nodeToFill.node.order.baseAssetAmount,
-						BASE_PRECISION
-					)} @ ${convertToNumber(
-						nodeToFill.node.order.price,
-						PRICE_PRECISION
-					)}\nmaker: vAMM`
-				);
-			}
 
-			const { makerInfo, chUser, referrerInfo, marketType } =
+			const { makerInfos, takerUser, referrerInfo, marketType } =
 				await this.getNodeFillInfo(nodeToFill);
 
 			if (!isVariant(marketType, 'perp')) {
@@ -1257,10 +1202,10 @@ export class FillerBot implements Bot {
 			}
 
 			const ix = await this.driftClient.getFillPerpOrderIx(
-				chUser.getUserAccountPublicKey(),
-				chUser.getUserAccount(),
+				takerUser.getUserAccountPublicKey(),
+				takerUser.getUserAccount(),
 				nodeToFill.node.order,
-				makerInfo,
+				makerInfos,
 				referrerInfo
 			);
 
@@ -1307,7 +1252,7 @@ export class FillerBot implements Bot {
 
 			// add to tx
 			logger.info(
-				`including tx ${chUser
+				`including taker ${takerUser
 					.getUserAccountPublicKey()
 					.toString()}-${nodeToFill.node.order.orderId.toString()}`
 			);
@@ -1440,17 +1385,20 @@ export class FillerBot implements Bot {
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await this.dlobMutex.runExclusive(async () => {
-					if (this.dlob) {
-						this.dlob.clear();
-						delete this.dlob;
+					if (!orderRecord || !this.dlob) {
+						if (this.dlob) {
+							this.dlob.clear();
+							delete this.dlob;
+						}
+						this.dlob = new DLOB();
+						await tryAcquire(this.userMapMutex).runExclusive(async () => {
+							await this.dlob.initFromUserMap(
+								this.userMap,
+								this.slotSubscriber.getSlot()
+							);
+						});
 					}
-					this.dlob = new DLOB();
-					await tryAcquire(this.userMapMutex).runExclusive(async () => {
-						await this.dlob.initFromUserMap(
-							this.userMap,
-							this.slotSubscriber.getSlot()
-						);
-					});
+
 					if (orderRecord) {
 						this.dlob.insertOrder(
 							orderRecord.order,
