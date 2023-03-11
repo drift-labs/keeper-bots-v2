@@ -78,7 +78,7 @@ import {
 import { getErrorCode } from '../error';
 
 const MAX_TX_PACK_SIZE = 1100; //1232;
-const CU_PER_FILL = 200_000; // CU cost for a successful fill
+const CU_PER_FILL = 260_000; // CU cost for a successful fill
 const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
