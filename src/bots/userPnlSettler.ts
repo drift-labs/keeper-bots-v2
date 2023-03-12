@@ -314,19 +314,15 @@ export class UserPnlSettlerBot implements Bot {
 				!(err as Error).message.includes('Blockhash not found')
 			) {
 				const errorCode = getErrorCode(err);
-				if (!errorCodesToSuppress.includes(errorCode)) {
+				if (errorCodesToSuppress.includes(errorCode)) {
+					console.log(`Suppressing error code: ${errorCode}`);
+				} else {
 					await webhookMessage(
 						`[${
 							this.name
 						}]: :x: Uncaught error: Error code: ${errorCode} while settling pnls:\n${
 							err.logs ? (err.logs as Array<string>).join('\n') : ''
 						}\n${err.stack ? err.stack : err.message}`
-					);
-				} else {
-					await webhookMessage(
-						`[${this.name}]: :x: uncaught error:\n${
-							err.stack ? err.stack : err.messaage
-						}`
 					);
 				}
 			}

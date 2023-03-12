@@ -145,11 +145,21 @@ export class IFRevenueSettlerBot implements Bot {
 					}
 				}
 			}
-		} catch (e) {
-			console.error(e);
-			await webhookMessage(
-				`[${this.name}]: :x: uncaught error:\n${e.stack ? e.stack : e.message}`
-			);
+		} catch (err) {
+			console.error(err);
+			if (
+				!(err as Error).message.includes('Transaction was not confirmed') &&
+				!(err as Error).message.includes('Blockhash not found')
+			) {
+				const errorCode = getErrorCode(err);
+				await webhookMessage(
+					`[${
+						this.name
+					}]: :x: IF Revenue Settler error: Error code: ${errorCode}:\n${
+						err.logs ? (err.logs as Array<string>).join('\n') : ''
+					}\n${err.stack ? err.stack : err.message}`
+				);
+			}
 		} finally {
 			logger.info('Settle IF Revenues finished');
 			await this.watchdogTimerMutex.runExclusive(async () => {
