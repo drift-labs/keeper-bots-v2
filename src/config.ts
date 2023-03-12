@@ -6,6 +6,7 @@ export type BaseBotConfig = {
 	botId: string;
 	dryRun: boolean;
 	metricsPort?: number;
+	runOnce?: boolean;
 };
 
 export type FillerConfig = BaseBotConfig & {
@@ -156,6 +157,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
 			transactionVersion: 0,
+			runOnce: opts.runOnce ?? false,
 		};
 	}
 	if (opts.spotFiller) {
@@ -166,6 +168,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
 			transactionVersion: 0,
+			runOnce: opts.runOnce ?? false,
 		};
 	}
 	if (opts.liquidator) {
@@ -177,6 +180,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			disableAutoDerisking: opts.disableAutoDerisking ?? false,
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
 			spotMarketIndicies: loadCommaDelimitToArray(opts.spotMarketIndicies),
+			runOnce: opts.runOnce ?? false,
 		};
 	}
 	if (opts.trigger) {
@@ -185,6 +189,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			dryRun: opts.dryRun ?? false,
 			botId: process.env.BOT_ID ?? 'trigger',
 			metricsPort: 9464,
+			runOnce: opts.runOnce ?? false,
 		};
 	}
 	if (opts.jitMaker) {
@@ -193,6 +198,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			dryRun: opts.dryRun ?? false,
 			botId: process.env.BOT_ID ?? 'jitMaker',
 			metricsPort: 9464,
+			runOnce: opts.runOnce ?? false,
 		};
 	}
 	if (opts.ifRevenueSettler) {
@@ -201,6 +207,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			dryRun: opts.dryRun ?? false,
 			botId: process.env.BOT_ID ?? 'ifRevenueSettler',
 			metricsPort: 9464,
+			runOnce: opts.runOnce ?? false,
 		};
 	}
 	if (opts.userPnlSettler) {
@@ -209,6 +216,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			dryRun: opts.dryRun ?? false,
 			botId: process.env.BOT_ID ?? 'userPnlSettler',
 			metricsPort: 9464,
+			runOnce: opts.runOnce ?? false,
 		};
 	}
 

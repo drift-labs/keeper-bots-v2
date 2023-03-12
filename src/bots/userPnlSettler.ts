@@ -45,6 +45,7 @@ const errorCodesToSuppress = [
 export class UserPnlSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
+	public readonly runOnce: boolean;
 	public readonly defaultIntervalMs: number = 600000;
 
 	private driftClient: DriftClient;
@@ -64,6 +65,7 @@ export class UserPnlSettlerBot implements Bot {
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
+		this.runOnce = config.runOnce || false;
 		this.driftClient = driftClient;
 		this.perpMarkets = perpMarkets;
 		this.spotMarkets = spotMarkets;
@@ -92,8 +94,12 @@ export class UserPnlSettlerBot implements Bot {
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		logger.info(`${this.name} Bot started!`);
-		const intervalId = setInterval(this.trySettlePnl.bind(this), intervalMs);
-		this.intervalIds.push(intervalId);
+		if (this.runOnce) {
+			await this.trySettlePnl();
+		} else {
+			const intervalId = setInterval(this.trySettlePnl.bind(this), intervalMs);
+			this.intervalIds.push(intervalId);
+		}
 	}
 
 	public async healthCheck(): Promise<boolean> {

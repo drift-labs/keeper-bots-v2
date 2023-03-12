@@ -664,11 +664,9 @@ const runBot = async () => {
 	await Promise.all(bots.map((bot) => bot.init()));
 
 	logger.info(`starting bots (runOnce: ${config.global.runOnce})`);
-	if (!config.global.runOnce) {
-		await Promise.all(
-			bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
-		);
-	}
+	await Promise.all(
+		bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
+	);
 	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
 		Promise.all(bots.map((bot) => bot.trigger(event)));
 	});

@@ -17,6 +17,7 @@ import { BaseBotConfig } from '../config';
 export class IFRevenueSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
+	public readonly runOnce: boolean;
 	public readonly defaultIntervalMs: number = 600000;
 
 	private driftClient: DriftClient;
@@ -33,6 +34,7 @@ export class IFRevenueSettlerBot implements Bot {
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
+		this.runOnce = config.runOnce || false;
 		this.driftClient = driftClient;
 		this.spotMarkets = spotMarkets;
 	}
@@ -50,11 +52,15 @@ export class IFRevenueSettlerBot implements Bot {
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		logger.info(`${this.name} Bot started!`);
-		const intervalId = setInterval(
-			this.trySettleIFRevenue.bind(this),
-			intervalMs
-		);
-		this.intervalIds.push(intervalId);
+		if (this.runOnce) {
+			await this.trySettleIFRevenue();
+		} else {
+			const intervalId = setInterval(
+				this.trySettleIFRevenue.bind(this),
+				intervalMs
+			);
+			this.intervalIds.push(intervalId);
+		}
 	}
 
 	public async healthCheck(): Promise<boolean> {
