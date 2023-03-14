@@ -177,6 +177,8 @@ export class FillerBot implements Bot {
 	private userMapMutex = new Mutex();
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
+	private lastSeenNumberOfSubAccounts: number;
+	private lastSeenNumberOfAuthorities: number;
 
 	private periodicTaskMutex = new Mutex();
 
@@ -440,8 +442,15 @@ export class FillerBot implements Bot {
 				this.userStatsMapSubscriptionConfig
 			);
 
-			await this.userMap.fetchAllUsers();
+			await this.userMap.fetchAllUsers(false);
 			await this.userStatsMap.fetchAllUserStats();
+
+			this.lastSeenNumberOfSubAccounts = this.driftClient
+				.getStateAccount()
+				.numberOfSubAccounts.toNumber();
+			this.lastSeenNumberOfAuthorities = this.driftClient
+				.getStateAccount()
+				.numberOfAuthorities.toNumber();
 		});
 
 		this.lookupTableAccount =
@@ -476,8 +485,10 @@ export class FillerBot implements Bot {
 
 		const stateAccount = this.driftClient.getStateAccount();
 		const userMapResyncRequired =
-			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber() ||
-			this.userStatsMap.size() !== stateAccount.numberOfAuthorities.toNumber();
+			this.lastSeenNumberOfSubAccounts !==
+				stateAccount.numberOfSubAccounts.toNumber() ||
+			this.lastSeenNumberOfAuthorities !==
+				stateAccount.numberOfAuthorities.toNumber();
 		if (userMapResyncRequired) {
 			logger.warn(
 				`${
@@ -535,8 +546,10 @@ export class FillerBot implements Bot {
 	private async resyncUserMapsIfRequired() {
 		const stateAccount = this.driftClient.getStateAccount();
 		const resyncRequired =
-			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber() ||
-			this.userStatsMap.size() !== stateAccount.numberOfAuthorities.toNumber();
+			this.lastSeenNumberOfSubAccounts !==
+				stateAccount.numberOfSubAccounts.toNumber() ||
+			this.lastSeenNumberOfAuthorities !==
+				stateAccount.numberOfAuthorities.toNumber();
 
 		if (resyncRequired) {
 			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
@@ -573,7 +586,7 @@ export class FillerBot implements Bot {
 						this.driftClient,
 						this.userStatsMapSubscriptionConfig
 					);
-					newUserMap.fetchAllUsers().then(() => {
+					newUserMap.fetchAllUsers(false).then(() => {
 						newUserStatsMap
 							.fetchAllUserStats()
 							.then(async () => {
@@ -589,6 +602,11 @@ export class FillerBot implements Bot {
 
 									this.userMap = newUserMap;
 									this.userStatsMap = newUserStatsMap;
+
+									this.lastSeenNumberOfSubAccounts =
+										stateAccount.numberOfSubAccounts.toNumber();
+									this.lastSeenNumberOfAuthorities =
+										stateAccount.numberOfAuthorities.toNumber();
 								});
 							})
 							.finally(() => {

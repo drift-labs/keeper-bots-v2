@@ -216,6 +216,7 @@ export class LiquidatorBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMapMutex = new Mutex();
 	private userMap: UserMap;
+	private lastSeenNumberOfSubAccounts: number;
 	private deriskMutex = new Uint8Array(new SharedArrayBuffer(1));
 	private runtimeSpecs: RuntimeSpec;
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
@@ -293,6 +294,9 @@ export class LiquidatorBot implements Bot {
 				this.driftClient.userAccountSubscriptionConfig
 			);
 			await this.userMap.fetchAllUsers();
+			this.lastSeenNumberOfSubAccounts = this.driftClient
+				.getStateAccount()
+				.numberOfSubAccounts.toNumber();
 		});
 
 		const config = initialize({ env: this.runtimeSpecs.driftEnv as DriftEnv });
@@ -335,7 +339,8 @@ export class LiquidatorBot implements Bot {
 	private async resyncUserMapsIfRequired() {
 		const stateAccount = this.driftClient.getStateAccount();
 		const resyncRequired =
-			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber();
+			this.lastSeenNumberOfSubAccounts !==
+			stateAccount.numberOfSubAccounts.toNumber();
 
 		if (resyncRequired) {
 			logger.info(
@@ -380,6 +385,9 @@ export class LiquidatorBot implements Bot {
 								}
 								delete this.userMap;
 								this.userMap = newUserMap;
+								this.lastSeenNumberOfSubAccounts = this.driftClient
+									.getStateAccount()
+									.numberOfSubAccounts.toNumber();
 							});
 						})
 						.finally(() => {
@@ -426,7 +434,8 @@ export class LiquidatorBot implements Bot {
 
 		const stateAccount = this.driftClient.getStateAccount();
 		const userMapResyncRequired =
-			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber();
+			this.lastSeenNumberOfSubAccounts !==
+			stateAccount.numberOfSubAccounts.toNumber();
 
 		healthy = healthy && !userMapResyncRequired;
 

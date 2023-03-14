@@ -63,6 +63,7 @@ export class TriggerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMapMutex = new Mutex();
 	private userMap: UserMap;
+	private lastSeenNumberOfSubAccounts: number;
 
 	// metrics
 	private metricsInitialized = false;
@@ -174,6 +175,9 @@ export class TriggerBot implements Bot {
 				this.driftClient.userAccountSubscriptionConfig
 			);
 			await this.userMap.fetchAllUsers();
+			this.lastSeenNumberOfSubAccounts = this.driftClient
+				.getStateAccount()
+				.numberOfSubAccounts.toNumber();
 		});
 	}
 
@@ -196,7 +200,8 @@ export class TriggerBot implements Bot {
 
 		const stateAccount = this.driftClient.getStateAccount();
 		const userMapResyncRequired =
-			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber();
+			this.lastSeenNumberOfSubAccounts !==
+			stateAccount.numberOfSubAccounts.toNumber();
 
 		healthy = healthy && !userMapResyncRequired;
 
@@ -215,12 +220,13 @@ export class TriggerBot implements Bot {
 	}
 
 	/**
-	 * Checks that userMap and userStatsMap are up in sync with , if not, signal that we should update them next block.
+	 * Checks that userMap is up in sync, if not, signal that we should update them next block.
 	 */
 	private async resyncUserMapsIfRequired() {
 		const stateAccount = this.driftClient.getStateAccount();
 		const resyncRequired =
-			this.userMap.size() !== stateAccount.numberOfSubAccounts.toNumber();
+			this.lastSeenNumberOfSubAccounts !==
+			stateAccount.numberOfSubAccounts.toNumber();
 
 		if (resyncRequired) {
 			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
@@ -262,6 +268,9 @@ export class TriggerBot implements Bot {
 								}
 								delete this.userMap;
 								this.userMap = newUserMap;
+								this.lastSeenNumberOfSubAccounts = this.driftClient
+									.getStateAccount()
+									.numberOfSubAccounts.toNumber();
 							});
 						})
 						.finally(() => {
