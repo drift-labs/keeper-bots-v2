@@ -1284,10 +1284,6 @@ export class FillerBot implements Bot {
 			runningTxSize += newIxCost + additionalAccountsCost;
 			runningCUUsed += cuToUsePerFill;
 
-			if (this.revertOnFailure) {
-				ixs.push(await this.driftClient.getRevertFillIx());
-			}
-
 			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
 			idxUsed++;
 			nodesSent.push(nodeToFill);
@@ -1306,6 +1302,10 @@ export class FillerBot implements Bot {
 				Date.now() - txPackerStart
 			}ms`
 		);
+
+		if (this.revertOnFailure) {
+			ixs.push(await this.driftClient.getRevertFillIx());
+		}
 
 		let txResp: Promise<TxSigAndSlot>;
 		const txStart = Date.now();
