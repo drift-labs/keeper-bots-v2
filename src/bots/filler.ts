@@ -443,6 +443,7 @@ export class FillerBot implements Bot {
 			);
 
 			await this.userMap.fetchAllUsers(false);
+			console.log('initial userMap size', this.userMap.size());
 			await this.userStatsMap.fetchAllUserStats();
 
 			this.lastSeenNumberOfSubAccounts = this.driftClient
