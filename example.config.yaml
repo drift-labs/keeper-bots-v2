@@ -2,7 +2,6 @@ global:
   endpoint: https://api.mainnet-beta.solana.com
   wsEndpoint:
 
-
   # Private key to use to sign transactions, null to load from the
   # KEEPER_PRIVATE_KEY env var
   keeperPrivateKey:
@@ -68,6 +67,10 @@ botConfigs:
     fillerPollingInterval: 6000
     metricsPort: 9464
     transactionVersion: 0
+    # will revert a transaction during simulation if a fill fails, this will save on tx fees,
+    # and be friendlier for use with services like Jito.
+    # Default is true
+    revertOnFailure: true
 
   spotFiller:
     botId: "spot-filler"
