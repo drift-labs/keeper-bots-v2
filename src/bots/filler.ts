@@ -89,6 +89,7 @@ const dlobMutexError = new Error('dlobMutex timeout');
 
 const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
+	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 ];
 
 enum METRIC_TYPES {
@@ -164,7 +165,8 @@ export class FillerBot implements Bot {
 	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	private driftClient: DriftClient;
 	private pollingIntervalMs: number;
-	private transactionVersion: number | undefined;
+	private transactionVersion?: number;
+	private revertOnFailure?: boolean;
 	private lookupTableAccount: AddressLookupTableAccount;
 
 	private dlobMutex = withTimeout(
@@ -254,6 +256,9 @@ export class FillerBot implements Bot {
 		logger.info(
 			`${this.name}: using transactionVersion: ${this.transactionVersion}`
 		);
+
+		this.revertOnFailure = config.revertOnFailure ?? true;
+		logger.info(`${this.name}: revertOnFailure: ${this.revertOnFailure}`);
 	}
 
 	private initializeMetrics() {
@@ -1278,6 +1283,7 @@ export class FillerBot implements Bot {
 			ixs.push(ix);
 			runningTxSize += newIxCost + additionalAccountsCost;
 			runningCUUsed += cuToUsePerFill;
+
 			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
 			idxUsed++;
 			nodesSent.push(nodeToFill);
@@ -1296,6 +1302,10 @@ export class FillerBot implements Bot {
 				Date.now() - txPackerStart
 			}ms`
 		);
+
+		if (this.revertOnFailure) {
+			ixs.push(await this.driftClient.getRevertFillIx());
+		}
 
 		let txResp: Promise<TxSigAndSlot>;
 		const txStart = Date.now();

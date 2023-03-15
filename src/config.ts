@@ -11,7 +11,8 @@ export type BaseBotConfig = {
 
 export type FillerConfig = BaseBotConfig & {
 	fillerPollingInterval?: number;
-	transactionVersion?: number | null;
+	transactionVersion: number | null;
+	revertOnFailure?: boolean;
 };
 
 export type LiquidatorConfig = BaseBotConfig & {
