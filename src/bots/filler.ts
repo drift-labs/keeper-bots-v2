@@ -584,30 +584,18 @@ export class FillerBot implements Bot {
 
 				if (doResync) {
 					logger.info(`Resyncing UserMap`);
-					const newUserMap = new UserMap(
-						this.driftClient,
-						this.driftClient.userAccountSubscriptionConfig
-					);
-					const newUserStatsMap = new UserStatsMap(
-						this.driftClient,
-						this.userStatsMapSubscriptionConfig
-					);
-					newUserMap.fetchAllUsers(false).then(() => {
-						newUserStatsMap
-							.fetchAllUserStats()
+					const userMapSizeBefore = this.userMap.size();
+					const userStatsMapSizeBefore = this.userStatsMap.size();
+					this.userMap.sync(false).then(() => {
+						this.userStatsMap
+							.sync()
 							.then(async () => {
 								await this.userMapMutex.runExclusive(async () => {
-									for (const user of this.userMap.values()) {
-										await user.unsubscribe();
-									}
-									for (const user of this.userStatsMap.values()) {
-										await user.unsubscribe();
-									}
-									delete this.userMap;
-									delete this.userStatsMap;
-
-									this.userMap = newUserMap;
-									this.userStatsMap = newUserStatsMap;
+									const usersAdded = this.userMap.size() - userMapSizeBefore;
+									console.log('users added', usersAdded);
+									const userStatsAdded =
+										this.userStatsMap.size() - userStatsMapSizeBefore;
+									console.log('user stats added', userStatsAdded);
 
 									this.lastSeenNumberOfSubAccounts =
 										stateAccount.numberOfSubAccounts.toNumber();

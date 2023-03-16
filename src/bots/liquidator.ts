@@ -372,19 +372,10 @@ export class LiquidatorBot implements Bot {
 
 				if (doResync) {
 					logger.info(`Resyncing UserMap`);
-					const newUserMap = new UserMap(
-						this.driftClient,
-						this.driftClient.userAccountSubscriptionConfig
-					);
-					newUserMap
-						.fetchAllUsers()
+					this.userMap
+						.sync()
 						.then(async () => {
 							await this.userMapMutex.runExclusive(async () => {
-								for (const user of this.userMap.values()) {
-									await user.unsubscribe();
-								}
-								delete this.userMap;
-								this.userMap = newUserMap;
 								this.lastSeenNumberOfSubAccounts = this.driftClient
 									.getStateAccount()
 									.numberOfSubAccounts.toNumber();

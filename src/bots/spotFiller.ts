@@ -598,31 +598,11 @@ export class SpotFillerBot implements Bot {
 
 				if (doResync) {
 					logger.info(`Resyncing UserMap`);
-					const newUserMap = new UserMap(
-						this.driftClient,
-						this.driftClient.userAccountSubscriptionConfig
-					);
-					const newUserStatsMap = new UserStatsMap(
-						this.driftClient,
-						this.userStatsMapSubscriptionConfig
-					);
-					newUserMap.fetchAllUsers().then(() => {
-						newUserStatsMap
-							.fetchAllUserStats()
+					this.userMap.sync(false).then(() => {
+						this.userStatsMap
+							.sync()
 							.then(async () => {
 								await this.userMapMutex.runExclusive(async () => {
-									for (const user of this.userMap.values()) {
-										await user.unsubscribe();
-									}
-									for (const user of this.userStatsMap.values()) {
-										await user.unsubscribe();
-									}
-									delete this.userMap;
-									delete this.userStatsMap;
-
-									this.userMap = newUserMap;
-									this.userStatsMap = newUserStatsMap;
-
 									this.lastSeenNumberOfSubAccounts = this.driftClient
 										.getStateAccount()
 										.numberOfSubAccounts.toNumber();
