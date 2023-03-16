@@ -319,7 +319,6 @@ const runBot = async () => {
 		accountSubscription = {
 			type: 'polling',
 			accountLoader: bulkAccountLoader,
-			lazyDecode: true,
 		};
 
 		logProviderConfig = {
