@@ -284,7 +284,7 @@ export class FillerBot implements Bot {
 		}
 		logger.info(
 			`${this.name}: jito enabled: ${
-				this.jitoSearcherClient && this.jitoAuthKeypair
+				!!this.jitoSearcherClient && !!this.jitoAuthKeypair
 			}`
 		);
 	}
@@ -1377,83 +1377,87 @@ export class FillerBot implements Bot {
 				`unsupported transaction version ${this.transactionVersion}`
 			);
 		}
-		txResp
-			.then((resp: TxSigAndSlot) => {
-				txSig = resp.txSig;
-				const duration = Date.now() - txStart;
-				logger.info(`sent tx: ${txSig}, took: ${duration}ms`);
+		if (txResp) {
+			txResp
+				.then((resp: TxSigAndSlot) => {
+					txSig = resp.txSig;
+					const duration = Date.now() - txStart;
+					logger.info(`sent tx: ${txSig}, took: ${duration}ms`);
 
-				const user = this.driftClient.getUser();
-				this.sdkCallDurationHistogram.record(duration, {
-					...metricAttrFromUserAccount(
-						user.getUserAccountPublicKey(),
-						user.getUserAccount()
-					),
-					method: 'sendTx',
-				});
-
-				const parseLogsStart = Date.now();
-				this.processBulkFillTxLogs(nodesSent, txSig)
-					.then((successfulFills) => {
-						const processBulkFillLogsDuration = Date.now() - parseLogsStart;
-						logger.info(
-							`parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}`
-						);
-
-						// record successful fills
-						const user = this.driftClient.getUser();
-						this.successfulFillsCounter.add(
-							successfulFills,
-							metricAttrFromUserAccount(
-								user.userAccountPublicKey,
-								user.getUserAccount()
-							)
-						);
-					})
-					.catch((e) => {
-						console.error(e);
-						logger.error(`Failed to process fill tx logs (error above):`);
-						webhookMessage(
-							`[${this.name}]: :x: error processing fill tx logs:\n${
-								e.stack ? e.stack : e.message
-							}`
-						);
+					const user = this.driftClient.getUser();
+					this.sdkCallDurationHistogram.record(duration, {
+						...metricAttrFromUserAccount(
+							user.getUserAccountPublicKey(),
+							user.getUserAccount()
+						),
+						method: 'sendTx',
 					});
-			})
-			.catch(async (e) => {
-				console.error(e);
-				logger.error(`Failed to send packed tx (error above):`);
-				const simError = e as SendTransactionError;
 
-				if (simError.logs && simError.logs.length > 0) {
-					const start = Date.now();
-					await this.handleTransactionLogs(nodesSent, simError.logs);
-					logger.error(
-						`Failed to send tx, sim error tx logs took: ${Date.now() - start}ms`
-					);
+					const parseLogsStart = Date.now();
+					this.processBulkFillTxLogs(nodesSent, txSig)
+						.then((successfulFills) => {
+							const processBulkFillLogsDuration = Date.now() - parseLogsStart;
+							logger.info(
+								`parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}`
+							);
 
-					const errorCode = getErrorCode(e);
+							// record successful fills
+							const user = this.driftClient.getUser();
+							this.successfulFillsCounter.add(
+								successfulFills,
+								metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
+								)
+							);
+						})
+						.catch((e) => {
+							console.error(e);
+							logger.error(`Failed to process fill tx logs (error above):`);
+							webhookMessage(
+								`[${this.name}]: :x: error processing fill tx logs:\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+						});
+				})
+				.catch(async (e) => {
+					console.error(e);
+					logger.error(`Failed to send packed tx (error above):`);
+					const simError = e as SendTransactionError;
 
-					if (
-						!errorCodesToSuppress.includes(errorCode) &&
-						!(e as Error).message.includes('Transaction was not confirmed')
-					) {
-						if (errorCode) {
-							this.txSimErrorCounter.add(1, {
-								errorCode: errorCode.toString(),
-							});
-						}
-						webhookMessage(
-							`[${this.name}]: :x: error simulating tx:\n${
-								simError.logs ? simError.logs.join('\n') : ''
-							}\n${e.stack || e}`
+					if (simError.logs && simError.logs.length > 0) {
+						const start = Date.now();
+						await this.handleTransactionLogs(nodesSent, simError.logs);
+						logger.error(
+							`Failed to send tx, sim error tx logs took: ${
+								Date.now() - start
+							}ms`
 						);
+
+						const errorCode = getErrorCode(e);
+
+						if (
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(e as Error).message.includes('Transaction was not confirmed')
+						) {
+							if (errorCode) {
+								this.txSimErrorCounter.add(1, {
+									errorCode: errorCode.toString(),
+								});
+							}
+							webhookMessage(
+								`[${this.name}]: :x: error simulating tx:\n${
+									simError.logs ? simError.logs.join('\n') : ''
+								}\n${e.stack || e}`
+							);
+						}
 					}
-				}
-			})
-			.finally(() => {
-				this.removeFillingNodes(nodesToFill);
-			});
+				})
+				.finally(() => {
+					this.removeFillingNodes(nodesToFill);
+				});
+		}
 
 		return [txSig, nodesSent.length];
 	}
