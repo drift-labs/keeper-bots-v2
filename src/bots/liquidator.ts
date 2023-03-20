@@ -30,6 +30,7 @@ import {
 	BulkAccountLoader,
 	PerpMarkets,
 	SpotMarkets,
+	isUserBankrupt,
 } from '@drift-labs/sdk';
 import { E_ALREADY_LOCKED, Mutex, tryAcquire } from 'async-mutex';
 
@@ -766,6 +767,10 @@ export class LiquidatorBot implements Bot {
 		const bankruptPerpMarkets = this.findPerpBankruptingMarkets(user);
 		const bankruptSpotMarkets = this.findSpotBankruptingMarkets(user);
 
+		logger.info(
+			`User ${userKey.toBase58()} is bankrupt in perpMarkets: ${bankruptPerpMarkets} and spotMarkets: ${bankruptSpotMarkets}`
+		);
+
 		// resolve bankrupt markets
 		for (const perpIdx of bankruptPerpMarkets) {
 			logger.info(
@@ -1077,7 +1082,7 @@ export class LiquidatorBot implements Bot {
 					const auth = userAcc.authority.toBase58();
 					const userKey = user.userAccountPublicKey.toBase58();
 
-					if (isVariant(userAcc.status, 'bankrupt')) {
+					if (isUserBankrupt(user) || user.isBankrupt()) {
 						await this.tryResolveBankruptUser(user);
 					} else if (user.canBeLiquidated()) {
 						if (this.throttledUsers.has(userKey)) {
