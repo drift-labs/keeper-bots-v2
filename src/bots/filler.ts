@@ -43,7 +43,11 @@ import {
 	ComputeBudgetProgram,
 	GetVersionedTransactionConfig,
 	AddressLookupTableAccount,
+	Keypair,
 } from '@solana/web3.js';
+
+import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
+import { Bundle } from 'jito-ts/dist/sdk/block-engine/types';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import {
@@ -168,6 +172,9 @@ export class FillerBot implements Bot {
 	private transactionVersion?: number;
 	private revertOnFailure?: boolean;
 	private lookupTableAccount: AddressLookupTableAccount;
+	private jitoSearcherClient?: SearcherClient;
+	private jitoAuthKeypair?: Keypair;
+	private jitoTipAccount?: PublicKey;
 
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -223,7 +230,9 @@ export class FillerBot implements Bot {
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
-		config: FillerConfig
+		config: FillerConfig,
+		jitoSearcherClient?: SearcherClient,
+		jitoAuthKeypair?: Keypair
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
@@ -259,6 +268,25 @@ export class FillerBot implements Bot {
 
 		this.revertOnFailure = config.revertOnFailure ?? true;
 		logger.info(`${this.name}: revertOnFailure: ${this.revertOnFailure}`);
+
+		this.jitoSearcherClient = jitoSearcherClient;
+		this.jitoAuthKeypair = jitoAuthKeypair;
+		const jitoEnabled = this.jitoSearcherClient && this.jitoAuthKeypair;
+		if (jitoEnabled) {
+			this.jitoSearcherClient.getTipAccounts().then((tipAccounts) => {
+				this.jitoTipAccount = new PublicKey(
+					tipAccounts[Math.floor(Math.random() * 9)]
+				);
+				logger.info(
+					`${this.name}: jito tip account: ${this.jitoTipAccount.toBase58()}`
+				);
+			});
+		}
+		logger.info(
+			`${this.name}: jito enabled: ${
+				this.jitoSearcherClient && this.jitoAuthKeypair
+			}`
+		);
 	}
 
 	private initializeMetrics() {
@@ -1297,7 +1325,41 @@ export class FillerBot implements Bot {
 
 		let txResp: Promise<TxSigAndSlot>;
 		const txStart = Date.now();
-		if (isNaN(this.transactionVersion)) {
+		if (this.jitoSearcherClient) {
+			if (!isNaN(this.transactionVersion)) {
+				logger.warn(
+					`${this.name} should use unversioned tx for jito until https://github.com/jito-labs/jito-ts/pull/7`
+				);
+				return;
+			}
+			const blockHash =
+				await this.driftClient.provider.connection.getLatestBlockhash(
+					'processed'
+				);
+
+			const tx = new Transaction();
+			for (const ix of ixs) {
+				tx.add(ix);
+			}
+
+			tx.feePayer = this.driftClient.provider.wallet.publicKey;
+			tx.recentBlockhash = blockHash.blockhash;
+
+			const signedTx = await this.driftClient.provider.wallet.signTransaction(
+				tx
+			);
+			const b = new Bundle([signedTx], 1);
+			b.attachTip(
+				this.jitoAuthKeypair,
+				10_000, // TODO: make this configurable?
+				this.jitoTipAccount,
+				blockHash.blockhash,
+				blockHash.lastValidBlockHeight
+			);
+			this.jitoSearcherClient.sendBundle(b).then((uuid) => {
+				logger.info(`${this.name} sent bundle with uuid ${uuid}`);
+			});
+		} else if (isNaN(this.transactionVersion)) {
 			const tx = new Transaction();
 			for (const ix of ixs) {
 				tx.add(ix);

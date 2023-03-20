@@ -48,6 +48,10 @@ export interface GlobalConfig {
 
 	eventSubscriberPollingInterval: number;
 	bulkAccountLoaderPollingInterval: number;
+
+	useJito?: boolean;
+	jitoBlockEngineUrl?: string;
+	jitoAuthPrivateKey?: string;
 }
 
 export interface Config {
@@ -74,6 +78,10 @@ const defaultConfig: Partial<Config> = {
 		endpoint: process.env.ENDPOINT,
 		wsEndpoint: process.env.WS_ENDPOINT,
 		keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY,
+
+		useJito: false,
+		jitoBlockEngineUrl: process.env.JITO_BLOCK_ENGINE_URL,
+		jitoAuthPrivateKey: process.env.JITO_AUTH_PRIVATE_KEY,
 	},
 	enabledBots: [],
 	botConfigs: {},
@@ -145,6 +153,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			runOnce: opts.runOnce ?? false,
 			debug: opts.debug ?? false,
 			subaccounts: loadCommaDelimitToArray(opts.subaccount),
+			useJito: opts.useJito ?? false,
 		},
 		enabledBots: [],
 		botConfigs: {},

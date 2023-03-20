@@ -3,6 +3,10 @@ import { program, Option } from 'commander';
 import * as http from 'http';
 
 import { Connection, Commitment, Keypair, PublicKey } from '@solana/web3.js';
+import {
+	SearcherClient,
+	searcherClient,
+} from 'jito-ts/dist/sdk/block-engine/searcher';
 
 import {
 	Token,
@@ -10,7 +14,6 @@ import {
 	ASSOCIATED_TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 import {
-	getVariant,
 	BulkAccountLoader,
 	DriftClient,
 	User,
@@ -21,12 +24,9 @@ import {
 	SlotSubscriber,
 	convertToNumber,
 	QUOTE_PRECISION,
-	SPOT_MARKET_BALANCE_PRECISION,
 	SpotMarkets,
 	PerpMarkets,
 	BN,
-	BASE_PRECISION,
-	getSignedTokenAmount,
 	TokenFaucet,
 	DriftClientSubscriptionConfig,
 	LogProviderConfig,
@@ -133,6 +133,10 @@ program
 		'Config file to load (yaml format), will override any other config options',
 		''
 	)
+	.option(
+		'--use-jito',
+		'Submit transactions to a Jito relayer if the bot supports it'
+	)
 	.parse();
 
 const opts = program.opts();
@@ -159,13 +163,7 @@ logger.info(
 
 setLogLevel(config.global.debug ? 'debug' : 'info');
 
-export function getWallet(): Wallet {
-	const privateKey = config.global.keeperPrivateKey;
-	if (!privateKey) {
-		throw new Error(
-			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
-		);
-	}
+function loadKeypair(privateKey: string): Keypair {
 	// try to load privateKey as a filepath
 	let loadedKey: Uint8Array;
 	if (fs.existsSync(privateKey)) {
@@ -185,7 +183,17 @@ export function getWallet(): Wallet {
 		}
 	}
 
-	const keypair = Keypair.fromSecretKey(Uint8Array.from(loadedKey));
+	return Keypair.fromSecretKey(Uint8Array.from(loadedKey));
+}
+
+export function getWallet(): Wallet {
+	const privateKey = config.global.keeperPrivateKey;
+	if (!privateKey) {
+		throw new Error(
+			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
+		);
+	}
+	const keypair = loadKeypair(privateKey);
 	return new Wallet(keypair);
 }
 
@@ -221,73 +229,6 @@ function printUserAccountStats(clearingHouseUser: User) {
 			QUOTE_PRECISION
 		)}`
 	);
-}
-
-function printOpenPositions(clearingHouseUser: User) {
-	logger.info('Open Perp Positions:');
-	for (const p of clearingHouseUser.getUserAccount().perpPositions) {
-		if (p.baseAssetAmount.isZero()) {
-			continue;
-		}
-		const market = PerpMarkets[driftEnv][p.marketIndex];
-		console.log(`[${market.symbol}]`);
-		console.log(
-			` . baseAssetAmount:  ${convertToNumber(
-				p.baseAssetAmount,
-				BASE_PRECISION
-			).toString()}`
-		);
-		console.log(
-			` . quoteAssetAmount: ${convertToNumber(
-				p.quoteAssetAmount,
-				QUOTE_PRECISION
-			).toString()}`
-		);
-		console.log(
-			` . quoteEntryAmount: ${convertToNumber(
-				p.quoteEntryAmount,
-				QUOTE_PRECISION
-			).toString()}`
-		);
-
-		console.log(
-			` . lastCumulativeFundingRate: ${convertToNumber(
-				p.lastCumulativeFundingRate,
-				new BN(10).pow(new BN(14))
-			)}`
-		);
-		console.log(
-			` . openOrders: ${p.openOrders.toString()}, openBids: ${convertToNumber(
-				p.openBids,
-				BASE_PRECISION
-			)}, openAsks: ${convertToNumber(p.openAsks, BASE_PRECISION)}`
-		);
-	}
-
-	logger.info('Open Spot Positions:');
-	for (const p of clearingHouseUser.getUserAccount().spotPositions) {
-		if (p.scaledBalance.isZero()) {
-			continue;
-		}
-		const market = SpotMarkets[driftEnv][p.marketIndex];
-		console.log(`[${market.symbol}]`);
-		console.log(
-			` . baseAssetAmount:  ${convertToNumber(
-				getSignedTokenAmount(p.scaledBalance, p.balanceType),
-				SPOT_MARKET_BALANCE_PRECISION
-			).toString()}`
-		);
-		console.log(` . balanceType: ${getVariant(p.balanceType)}`);
-		console.log(
-			` . openOrders: ${p.openOrders.toString()}, openBids: ${convertToNumber(
-				p.openBids,
-				SPOT_MARKET_BALANCE_PRECISION
-			)}, openAsks: ${convertToNumber(
-				p.openAsks,
-				SPOT_MARKET_BALANCE_PRECISION
-			)}`
-		);
-	}
 }
 
 const bots: Bot[] = [];
@@ -512,23 +453,32 @@ const runBot = async () => {
 		return;
 	}
 
-	// print user orders
-	logger.info('');
-	const ordersToCancel: Array<number> = [];
-	for (const order of driftUser.getUserAccount().orders) {
-		if (order.baseAssetAmount.isZero()) {
-			continue;
+	let jitoSearcherClient: SearcherClient | undefined;
+	let jitoAuthKeypair: Keypair | undefined;
+	if (config.global.useJito) {
+		const jitoBlockEngineUrl = config.global.jitoBlockEngineUrl;
+		const privateKey = config.global.jitoAuthPrivateKey;
+		if (!jitoBlockEngineUrl) {
+			throw new Error(
+				'Must configure or set JITO_BLOCK_ENGINE_URL environment variable '
+			);
 		}
-		ordersToCancel.push(order.orderId);
-	}
-	if (config.global.cancelOpenOrders) {
-		for (const order of ordersToCancel) {
-			logger.info(`Cancelling open order ${order.toString()}`);
-			await driftClient.cancelOrder(order);
+		if (!privateKey) {
+			throw new Error(
+				'Must configure or set JITO_AUTH_PRIVATE_KEY environment variable'
+			);
 		}
+		jitoAuthKeypair = loadKeypair(privateKey);
+		jitoSearcherClient = searcherClient(jitoBlockEngineUrl, jitoAuthKeypair);
+		jitoSearcherClient.onBundleResult(
+			(bundle) => {
+				logger.info(`JITO bundle result: ${bundle}`);
+			},
+			(error) => {
+				logger.error(`JITO bundle error: ${error}`);
+			}
+		);
 	}
-
-	printOpenPositions(driftUser);
 
 	/*
 	 * Start bots depending on flags enabled
@@ -547,7 +497,9 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				config.botConfigs.filler
+				config.botConfigs.filler,
+				jitoSearcherClient,
+				jitoAuthKeypair
 			)
 		);
 	}
