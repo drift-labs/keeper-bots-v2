@@ -1,9 +1,14 @@
 global:
+  # devnet or mainnet-beta
+  driftEnv: mainnet-beta
+
+  # RPC endpoint to use
   endpoint: https://api.mainnet-beta.solana.com
+  # custom websocket endpoint to use (if null will be determined from rpc endpoint)
   wsEndpoint:
 
-  # Private key to use to sign transactions, null to load from the
-  # KEEPER_PRIVATE_KEY env var
+  # Private key to use to sign transactions.
+  # will load from KEEPER_PRIVATE_KEY env var if null
   keeperPrivateKey:
 
   initUser: false # initialize user on startup
@@ -15,7 +20,7 @@ global:
   # end after the deposit transaction is sent
   #forceDeposit: 1000
 
-  websocket: false # use websocket for account loading and events (limited support)
+  websocket: true # use websocket for account loading and events (limited support)
   runOnce: false # Set true to run once and exit, useful for testing or one off bot runs
   debug: false # Enable debug logging
 
@@ -30,6 +35,13 @@ global:
 
   eventSubscriberPollingInterval: 5000
   bulkAccountLoaderPollingInterval: 5000
+
+  useJito: true
+  jitoBlockEngineUrl: frankfurt.mainnet.block-engine.jito.wtf
+  jitoAuthPrivateKey: /path/to/jito/bundle/signing/key/auth.json
+
+  # which subaccounts to load, if null will load subaccount 0 (default)
+  subaccounts:
 
 # Which bots to run, be careful with this, running multiple bots in one instance
 # might use more resources than expected.
@@ -66,7 +78,10 @@ botConfigs:
     dryRun: false
     fillerPollingInterval: 6000
     metricsPort: 9464
-    transactionVersion: 0
+
+    # disable for jito transactions
+    # transactionVersion: 0
+
     # will revert a transaction during simulation if a fill fails, this will save on tx fees,
     # and be friendlier for use with services like Jito.
     # Default is true
@@ -83,6 +98,7 @@ botConfigs:
     botId: "liquidator"
     dryRun: false
     metricsPort: 9465
+    # if true will attempt to sell off any inherited positions
     disableAutoDerisking: false
     # null will handle all markets
     perpMarketIndicies:

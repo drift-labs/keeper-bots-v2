@@ -19,7 +19,6 @@ import {
 	User,
 	initialize,
 	Wallet,
-	DriftEnv,
 	EventSubscriber,
 	SlotSubscriber,
 	convertToNumber,
@@ -59,10 +58,7 @@ import {
 } from './config';
 
 require('dotenv').config();
-const driftEnv = (process.env.ENV || 'devnet') as DriftEnv;
 const commitHash = process.env.COMMIT;
-//@ts-ignore
-const sdkConfig = initialize({ env: process.env.ENV });
 
 const stateCommitment: Commitment = 'confirmed';
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
@@ -161,6 +157,9 @@ logger.info(
 	)}`
 );
 
+// @ts-ignore
+const sdkConfig = initialize({ env: config.global.driftEnv });
+
 setLogLevel(config.global.debug ? 'debug' : 'info');
 
 function loadKeypair(privateKey: string): Keypair {
@@ -201,7 +200,7 @@ const endpoint = config.global.endpoint;
 const wsEndpoint = config.global.wsEndpoint;
 logger.info(`RPC endpoint: ${endpoint}`);
 logger.info(`WS endpoint:  ${wsEndpoint}`);
-logger.info(`DriftEnv:     ${driftEnv}`);
+logger.info(`DriftEnv:     ${config.global.driftEnv}`);
 logger.info(`Commit:       ${commitHash}`);
 
 function sleep(ms) {
@@ -272,9 +271,13 @@ const runBot = async () => {
 		connection,
 		wallet,
 		programID: driftPublicKey,
-		perpMarketIndexes: PerpMarkets[driftEnv].map((mkt) => mkt.marketIndex),
-		spotMarketIndexes: SpotMarkets[driftEnv].map((mkt) => mkt.marketIndex),
-		oracleInfos: PerpMarkets[driftEnv].map((mkt) => {
+		perpMarketIndexes: PerpMarkets[config.global.driftEnv].map(
+			(mkt) => mkt.marketIndex
+		),
+		spotMarketIndexes: SpotMarkets[config.global.driftEnv].map(
+			(mkt) => mkt.marketIndex
+		),
+		oracleInfos: PerpMarkets[config.global.driftEnv].map((mkt) => {
 			return { publicKey: mkt.oracle, source: mkt.oracleSource };
 		}),
 		opts: {
@@ -283,7 +286,7 @@ const runBot = async () => {
 			preflightCommitment: stateCommitment,
 		},
 		accountSubscription,
-		env: driftEnv,
+		env: config.global.driftEnv,
 		userStats: true,
 		txSenderConfig: {
 			type: 'retry',
@@ -318,7 +321,7 @@ const runBot = async () => {
 	try {
 		const tokenAccount = await getOrCreateAssociatedTokenAccount(
 			connection,
-			new PublicKey(constants[driftEnv].USDCMint),
+			new PublicKey(constants[config.global.driftEnv].USDCMint),
 			wallet
 		);
 		const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
@@ -421,7 +424,7 @@ const runBot = async () => {
 			throw new Error('Deposit amount must be greater than 0');
 		}
 
-		const mint = SpotMarkets[driftEnv][0].mint; // TODO: are index 0 always USDC???, support other collaterals
+		const mint = SpotMarkets[config.global.driftEnv][0].mint; // TODO: are index 0 always USDC???, support other collaterals
 
 		const ata = await Token.getAssociatedTokenAddress(
 			ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -432,7 +435,7 @@ const runBot = async () => {
 
 		const amount = new BN(config.global.forceDeposit).mul(QUOTE_PRECISION);
 
-		if (driftEnv == 'devnet') {
+		if (config.global.driftEnv === 'devnet') {
 			const tokenFaucet = new TokenFaucet(
 				connection,
 				wallet,
@@ -493,7 +496,7 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: driftEnv,
+					driftEnv: config.global.driftEnv,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
@@ -511,7 +514,7 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: driftEnv,
+					driftEnv: config.global.driftEnv,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
@@ -528,7 +531,7 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: driftEnv,
+					driftEnv: config.global.driftEnv,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
@@ -544,7 +547,7 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: driftEnv,
+					driftEnv: config.global.driftEnv,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
@@ -566,7 +569,7 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: driftEnv,
+					driftEnv: config.global.driftEnv,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
@@ -582,7 +585,7 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: driftEnv,
+					driftEnv: config.global.driftEnv,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
@@ -595,8 +598,8 @@ const runBot = async () => {
 		bots.push(
 			new UserPnlSettlerBot(
 				driftClient,
-				PerpMarkets[driftEnv],
-				SpotMarkets[driftEnv],
+				PerpMarkets[config.global.driftEnv],
+				SpotMarkets[config.global.driftEnv],
 				config.botConfigs.userPnlSettler
 			)
 		);
@@ -606,7 +609,7 @@ const runBot = async () => {
 		bots.push(
 			new IFRevenueSettlerBot(
 				driftClient,
-				SpotMarkets[driftEnv],
+				SpotMarkets[config.global.driftEnv],
 				config.botConfigs.ifRevenueSettler
 			)
 		);

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import YAML from 'yaml';
 import { loadCommaDelimitToArray } from './utils';
+import { DriftEnv } from '@drift-labs/sdk';
 
 export type BaseBotConfig = {
 	botId: string;
@@ -33,6 +34,7 @@ export type BotConfigMap = {
 };
 
 export interface GlobalConfig {
+	driftEnv?: DriftEnv;
 	endpoint?: string;
 	wsEndpoint?: string;
 	keeperPrivateKey?: string;
@@ -62,6 +64,7 @@ export interface Config {
 
 const defaultConfig: Partial<Config> = {
 	global: {
+		driftEnv: (process.env.ENV ?? 'devnet') as DriftEnv,
 		initUser: false,
 		testLiveness: false,
 		cancelOpenOrders: false,
@@ -137,6 +140,7 @@ export function loadConfigFromFile(path: string): Config {
 export function loadConfigFromOpts(opts: any): Config {
 	const config: Config = {
 		global: {
+			driftEnv: (process.env.ENV ?? 'devnet') as DriftEnv,
 			endpoint: opts.endpoint ?? process.env.ENDPOINT,
 			wsEndpoint: opts.wsEndpoint ?? process.env.WS_ENDPOINT,
 			keeperPrivateKey: opts.privateKey ?? process.env.KEEPER_PRIVATE_KEY,
