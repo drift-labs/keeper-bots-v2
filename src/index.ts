@@ -472,7 +472,7 @@ const runBot = async () => {
 		jitoSearcherClient = searcherClient(jitoBlockEngineUrl, jitoAuthKeypair);
 		jitoSearcherClient.onBundleResult(
 			(bundle) => {
-				logger.info(`JITO bundle result: ${bundle}`);
+				logger.info(`JITO bundle result: ${JSON.stringify(bundle)}`);
 			},
 			(error) => {
 				logger.error(`JITO bundle error: ${error}`);

@@ -175,6 +175,8 @@ export class FillerBot implements Bot {
 	private jitoSearcherClient?: SearcherClient;
 	private jitoAuthKeypair?: Keypair;
 	private jitoTipAccount?: PublicKey;
+	private jitoLeaderNextSlot?: number;
+	private jitoLeaderNextSlotMutex = new Mutex();
 
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -273,13 +275,38 @@ export class FillerBot implements Bot {
 		this.jitoAuthKeypair = jitoAuthKeypair;
 		const jitoEnabled = this.jitoSearcherClient && this.jitoAuthKeypair;
 		if (jitoEnabled) {
-			this.jitoSearcherClient.getTipAccounts().then((tipAccounts) => {
+			this.jitoSearcherClient.getTipAccounts().then(async (tipAccounts) => {
 				this.jitoTipAccount = new PublicKey(
-					tipAccounts[Math.floor(Math.random() * 9)]
+					tipAccounts[Math.floor(Math.random() * tipAccounts.length)]
 				);
 				logger.info(
 					`${this.name}: jito tip account: ${this.jitoTipAccount.toBase58()}`
 				);
+				this.jitoLeaderNextSlot = (
+					await this.jitoSearcherClient.getNextScheduledLeader()
+				).nextLeaderSlot;
+			});
+
+			this.slotSubscriber.eventEmitter.on('newSlot', async (slot: number) => {
+				if (this.jitoLeaderNextSlot) {
+					if (slot > this.jitoLeaderNextSlot) {
+						try {
+							await tryAcquire(this.jitoLeaderNextSlotMutex).runExclusive(
+								async () => {
+									logger.warn('LEADER REACHEd, GETTING NEXT SLOT');
+									this.jitoLeaderNextSlot = (
+										await this.jitoSearcherClient.getNextScheduledLeader()
+									).nextLeaderSlot;
+								}
+							);
+						} catch (e) {
+							console.log('blocked bitch!');
+							if (e !== E_ALREADY_LOCKED) {
+								throw new Error(e);
+							}
+						}
+					}
+				}
 			});
 		}
 		logger.info(
@@ -1325,12 +1352,19 @@ export class FillerBot implements Bot {
 
 		let txResp: Promise<TxSigAndSlot>;
 		const txStart = Date.now();
-		if (this.jitoSearcherClient) {
+		if (this.jitoSearcherClient && this.jitoAuthKeypair) {
 			if (!isNaN(this.transactionVersion)) {
 				logger.warn(
 					`${this.name} should use unversioned tx for jito until https://github.com/jito-labs/jito-ts/pull/7`
 				);
-				return;
+				return ['', 0];
+			}
+			const slotsUntilNextLeader =
+				this.jitoLeaderNextSlot - this.slotSubscriber.getSlot();
+			logger.info(`next jito leader is in ${slotsUntilNextLeader} slots`);
+			if (slotsUntilNextLeader > 2) {
+				logger.info(`next jito leader is too far away, skipping...`);
+				return ['', 0];
 			}
 			const blockHash =
 				await this.driftClient.provider.connection.getLatestBlockhash(
@@ -1348,17 +1382,26 @@ export class FillerBot implements Bot {
 			const signedTx = await this.driftClient.provider.wallet.signTransaction(
 				tx
 			);
-			const b = new Bundle([signedTx], 1);
-			b.attachTip(
+			let b: Bundle | Error = new Bundle([signedTx], 2);
+			b = b.attachTip(
 				this.jitoAuthKeypair,
-				10_000, // TODO: make this configurable?
+				100_000, // TODO: make this configurable?
 				this.jitoTipAccount,
 				blockHash.blockhash,
 				blockHash.lastValidBlockHeight
 			);
-			this.jitoSearcherClient.sendBundle(b).then((uuid) => {
-				logger.info(`${this.name} sent bundle with uuid ${uuid}`);
-			});
+			if (b instanceof Error) {
+				logger.error(`failed to attach tip: ${b.message}`);
+				return ['', 0];
+			}
+			this.jitoSearcherClient
+				.sendBundle(b)
+				.then((uuid) => {
+					logger.info(`${this.name} sent bundle with uuid ${uuid}`);
+				})
+				.catch((err) => {
+					logger.error(`failed to send bundle: ${err.message}`);
+				});
 		} else if (isNaN(this.transactionVersion)) {
 			const tx = new Transaction();
 			for (const ix of ixs) {
