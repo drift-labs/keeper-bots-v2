@@ -30,6 +30,7 @@ import {
 	PublicKey,
 	DLOBNode,
 	UserSubscriptionConfig,
+	isOneOfVariant,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
@@ -790,10 +791,18 @@ export class FillerBot implements Bot {
 		const oraclePriceData =
 			this.driftClient.getOracleDataForPerpMarket(marketIndex);
 
-		// return early to fill if order is expired
 		if (isOrderExpired(nodeToFill.node.order, Date.now() / 1000)) {
+			if (isOneOfVariant(nodeToFill.node.order.orderType, ['limit'])) {
+				// do not try to fill (expire) limit orders b/c they will auto expire when filled against
+				// or the user places a new order
+				return false;
+			}
 			logger.warn(
-				`order is expired on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
+				`order is expired on market ${
+					nodeToFill.node.order.marketIndex
+				} for user ${nodeToFill.node.userAccount}-${
+					nodeToFill.node.order.orderId
+				} (${getVariant(nodeToFill.node.order.orderType)})`
 			);
 			return true;
 		}
