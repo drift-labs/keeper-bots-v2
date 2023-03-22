@@ -984,7 +984,7 @@ export class LiquidatorBot implements Bot {
 					logger.info(
 						`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
 					);
-					await this.driftClient.switchActiveUser(subAccountToUse);
+					this.driftClient.switchActiveUser(subAccountToUse);
 				}
 				const start = Date.now();
 				this.driftClient
@@ -1070,7 +1070,7 @@ export class LiquidatorBot implements Bot {
 			logger.info(
 				`Switching to subaccount ${subAccountToUse} for perp market ${liquidateePosition.marketIndex}`
 			);
-			await this.driftClient.switchActiveUser(subAccountToUse);
+			this.driftClient.switchActiveUser(subAccountToUse);
 
 			this.driftClient
 				.liquidatePerpPnlForDeposit(
@@ -1208,7 +1208,7 @@ export class LiquidatorBot implements Bot {
 								logger.info(
 									`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
 								);
-								await this.driftClient.switchActiveUser(subAccountToUse);
+								this.driftClient.switchActiveUser(subAccountToUse);
 							}
 							const start = Date.now();
 							this.driftClient
@@ -1320,7 +1320,7 @@ tx: ${tx} `
 									logger.info(
 										`Switching to subaccount ${subAccountToUse} for perp market ${liquidateePosition.marketIndex}`
 									);
-									await this.driftClient.switchActiveUser(subAccountToUse);
+									this.driftClient.switchActiveUser(subAccountToUse);
 								}
 
 								const start = Date.now();
