@@ -205,6 +205,7 @@ export class FillerBot implements Bot {
 	private fillingNodes = new Map<string, number>();
 	private useBurstCULimit = false;
 	private fillTxSinceBurstCU = 0;
+	private fillTxId = 0;
 
 	// metrics
 	private metricsInitialized = false;
@@ -1214,11 +1215,241 @@ export class FillerBot implements Bot {
 		}
 	}
 
+	private async sendFillTx(
+		fillTxId: number,
+		nodesSent: Array<NodeToFill>,
+		ixs: Array<TransactionInstruction>
+	) {
+		let txResp: Promise<TxSigAndSlot>;
+		const txStart = Date.now();
+		if (this.jitoSearcherClient && this.jitoAuthKeypair) {
+			if (!isNaN(this.transactionVersion)) {
+				logger.warn(
+					`${this.name} should use unversioned tx for jito until https://github.com/jito-labs/jito-ts/pull/7`
+				);
+				return ['', 0];
+			}
+			const slotsUntilNextLeader =
+				this.jitoLeaderNextSlot - this.slotSubscriber.getSlot();
+			logger.info(
+				`next jito leader is in ${slotsUntilNextLeader} slots (fillTxId: ${fillTxId})`
+			);
+			if (slotsUntilNextLeader > 2) {
+				logger.info(
+					`next jito leader is too far away, skipping... (fillTxId: ${fillTxId})`
+				);
+				return ['', 0];
+			}
+			const blockHash =
+				await this.driftClient.provider.connection.getLatestBlockhash(
+					'processed'
+				);
+
+			const tx = new Transaction();
+			for (const ix of ixs) {
+				tx.add(ix);
+			}
+
+			tx.feePayer = this.driftClient.provider.wallet.publicKey;
+			tx.recentBlockhash = blockHash.blockhash;
+
+			const signedTx = await this.driftClient.provider.wallet.signTransaction(
+				tx
+			);
+			let b: Bundle | Error = new Bundle([signedTx], 2);
+			b = b.attachTip(
+				this.jitoAuthKeypair,
+				100_000, // TODO: make this configurable?
+				this.jitoTipAccount,
+				blockHash.blockhash,
+				blockHash.lastValidBlockHeight
+			);
+			if (b instanceof Error) {
+				logger.error(
+					`failed to attach tip: ${b.message} (fillTxId: ${fillTxId})`
+				);
+				return ['', 0];
+			}
+			this.jitoSearcherClient
+				.sendBundle(b)
+				.then((uuid) => {
+					logger.info(
+						`${this.name} sent bundle with uuid ${uuid} (fillTxId: ${fillTxId})`
+					);
+				})
+				.catch((err) => {
+					logger.error(
+						`failed to send bundle: ${err.message} (fillTxId: ${fillTxId})`
+					);
+				});
+		} else if (isNaN(this.transactionVersion)) {
+			const tx = new Transaction();
+			for (const ix of ixs) {
+				tx.add(ix);
+			}
+			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
+		} else if (this.transactionVersion === 0) {
+			txResp = this.driftClient.txSender.sendVersionedTransaction(
+				ixs,
+				[this.lookupTableAccount],
+				[],
+				this.driftClient.opts
+			);
+		} else {
+			throw new Error(
+				`unsupported transaction version ${this.transactionVersion}`
+			);
+		}
+		if (txResp) {
+			txResp
+				.then((resp: TxSigAndSlot) => {
+					const duration = Date.now() - txStart;
+					logger.info(
+						`sent tx: ${resp.txSig}, took: ${duration}ms (fillTxId: ${fillTxId})`
+					);
+
+					const user = this.driftClient.getUser();
+					this.sdkCallDurationHistogram.record(duration, {
+						...metricAttrFromUserAccount(
+							user.getUserAccountPublicKey(),
+							user.getUserAccount()
+						),
+						method: 'sendTx',
+					});
+
+					const parseLogsStart = Date.now();
+					this.processBulkFillTxLogs(nodesSent, resp.txSig)
+						.then((successfulFills) => {
+							const processBulkFillLogsDuration = Date.now() - parseLogsStart;
+							logger.info(
+								`parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills} (fillTxId: ${fillTxId})`
+							);
+
+							// record successful fills
+							const user = this.driftClient.getUser();
+							this.successfulFillsCounter.add(
+								successfulFills,
+								metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
+								)
+							);
+						})
+						.catch((e) => {
+							console.error(e);
+							logger.error(
+								`Failed to process fill tx logs (error above) (fillTxId: ${fillTxId}):`
+							);
+							webhookMessage(
+								`[${this.name}]: :x: error processing fill tx logs:\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+						});
+				})
+				.catch(async (e) => {
+					console.error(e);
+					logger.error(
+						`Failed to send packed tx (error above) (fillTxId: ${fillTxId}):`
+					);
+					const simError = e as SendTransactionError;
+
+					if (simError.logs && simError.logs.length > 0) {
+						const start = Date.now();
+						await this.handleTransactionLogs(nodesSent, simError.logs);
+						logger.error(
+							`Failed to send tx, sim error tx logs took: ${
+								Date.now() - start
+							}ms (fillTxId: ${fillTxId})`
+						);
+
+						const errorCode = getErrorCode(e);
+
+						if (
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(e as Error).message.includes('Transaction was not confirmed')
+						) {
+							if (errorCode) {
+								this.txSimErrorCounter.add(1, {
+									errorCode: errorCode.toString(),
+								});
+							}
+							webhookMessage(
+								`[${this.name}]: :x: error simulating tx:\n${
+									simError.logs ? simError.logs.join('\n') : ''
+								}\n${e.stack || e}`
+							);
+						}
+					}
+				})
+				.finally(() => {
+					this.removeFillingNodes(nodesSent);
+				});
+		}
+	}
+
+	/**
+	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
+	 * @param node node with multiple makers
+	 */
+	private async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
+		const ixs: Array<TransactionInstruction> = [];
+		const fillTxId = this.fillTxId++;
+		logger.info(
+			logMessageForNodeToFill(
+				nodeToFill,
+				`Filling multi maker perp node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`
+			)
+		);
+
+		try {
+			// first ix is compute budget
+			const computeBudgetIx = ComputeBudgetProgram.requestUnits({
+				units: 10_000_000,
+				additionalFee: 0,
+			});
+			ixs.push(computeBudgetIx);
+
+			const { makerInfos, takerUser, referrerInfo, marketType } =
+				await this.getNodeFillInfo(nodeToFill);
+
+			if (!isVariant(marketType, 'perp')) {
+				throw new Error('expected perp market type');
+			}
+
+			ixs.push(
+				await this.driftClient.getFillPerpOrderIx(
+					takerUser.getUserAccountPublicKey(),
+					takerUser.getUserAccount(),
+					nodeToFill.node.order,
+					makerInfos,
+					referrerInfo
+				)
+			);
+
+			this.fillingNodes.set(
+				this.getNodeToFillSignature(nodeToFill),
+				Date.now()
+			);
+
+			if (this.revertOnFailure) {
+				ixs.push(await this.driftClient.getRevertFillIx());
+			}
+
+			this.sendFillTx(fillTxId, [nodeToFill], ixs);
+		} catch (e) {
+			logger.error(
+				`Error filling multi maker perp node (fillTxId: ${fillTxId}): ${
+					e.stack ? e.stack : e.message
+				}`
+			);
+		}
+	}
+
 	private async tryBulkFillPerpNodes(
 		nodesToFill: Array<NodeToFill>
-	): Promise<[TransactionSignature, number]> {
+	): Promise<number> {
 		const ixs: Array<TransactionInstruction> = [];
-		let txSig = '';
 
 		/**
 		 * At all times, the running Tx size is:
@@ -1265,9 +1496,18 @@ export class FillerBot implements Bot {
 		const txPackerStart = Date.now();
 		const nodesSent: Array<NodeToFill> = [];
 		let idxUsed = 0;
+		const fillTxId = this.fillTxId++;
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
+			if (nodeToFill.makerNodes.length > 1) {
+				this.tryFillMultiMakerPerpNodes(nodeToFill);
+				nodesSent.push(nodeToFill);
+				continue;
+			}
 			logger.info(
-				logMessageForNodeToFill(nodeToFill, `Filling perp node ${idx}`)
+				logMessageForNodeToFill(
+					nodeToFill,
+					`Filling perp node ${idx} (fillTxId: ${fillTxId})`
+				)
 			);
 
 			const { makerInfos, takerUser, referrerInfo, marketType } =
@@ -1321,7 +1561,7 @@ export class FillerBot implements Bot {
 						runningTxSize + newIxCost + additionalAccountsCost
 					}, max: ${MAX_TX_PACK_SIZE}, est. CU used: expected ${
 						runningCUUsed + cuToUsePerFill
-					}, max: ${MAX_CU_PER_TX}`
+					}, max: ${MAX_CU_PER_TX}, (fillTxId: ${fillTxId})`
 				);
 				break;
 			}
@@ -1330,7 +1570,7 @@ export class FillerBot implements Bot {
 			logger.info(
 				`including taker ${takerUser
 					.getUserAccountPublicKey()
-					.toString()}-${nodeToFill.node.order.orderId.toString()}`
+					.toString()}-${nodeToFill.node.order.orderId.toString()} (fillTxId: ${fillTxId})`
 			);
 			ixs.push(ix);
 			runningTxSize += newIxCost + additionalAccountsCost;
@@ -1341,10 +1581,12 @@ export class FillerBot implements Bot {
 			nodesSent.push(nodeToFill);
 		}
 
-		logger.debug(`txPacker took ${Date.now() - txPackerStart}ms`);
+		logger.debug(
+			`txPacker took ${Date.now() - txPackerStart}ms (fillTxId: ${fillTxId})`
+		);
 
 		if (nodesSent.length === 0) {
-			return [txSig, 0];
+			return 0;
 		}
 
 		logger.info(
@@ -1352,166 +1594,16 @@ export class FillerBot implements Bot {
 				uniqueAccounts.size
 			} unique accounts, total ix: ${idxUsed}, calcd tx size: ${runningTxSize}, took ${
 				Date.now() - txPackerStart
-			}ms`
+			}ms (fillTxId: ${fillTxId})`
 		);
 
 		if (this.revertOnFailure) {
 			ixs.push(await this.driftClient.getRevertFillIx());
 		}
 
-		let txResp: Promise<TxSigAndSlot>;
-		const txStart = Date.now();
-		if (this.jitoSearcherClient && this.jitoAuthKeypair) {
-			if (!isNaN(this.transactionVersion)) {
-				logger.warn(
-					`${this.name} should use unversioned tx for jito until https://github.com/jito-labs/jito-ts/pull/7`
-				);
-				return ['', 0];
-			}
-			const slotsUntilNextLeader =
-				this.jitoLeaderNextSlot - this.slotSubscriber.getSlot();
-			logger.info(`next jito leader is in ${slotsUntilNextLeader} slots`);
-			if (slotsUntilNextLeader > 2) {
-				logger.info(`next jito leader is too far away, skipping...`);
-				return ['', 0];
-			}
-			const blockHash =
-				await this.driftClient.provider.connection.getLatestBlockhash(
-					'processed'
-				);
+		this.sendFillTx(fillTxId, nodesSent, ixs);
 
-			const tx = new Transaction();
-			for (const ix of ixs) {
-				tx.add(ix);
-			}
-
-			tx.feePayer = this.driftClient.provider.wallet.publicKey;
-			tx.recentBlockhash = blockHash.blockhash;
-
-			const signedTx = await this.driftClient.provider.wallet.signTransaction(
-				tx
-			);
-			let b: Bundle | Error = new Bundle([signedTx], 2);
-			b = b.attachTip(
-				this.jitoAuthKeypair,
-				100_000, // TODO: make this configurable?
-				this.jitoTipAccount,
-				blockHash.blockhash,
-				blockHash.lastValidBlockHeight
-			);
-			if (b instanceof Error) {
-				logger.error(`failed to attach tip: ${b.message}`);
-				return ['', 0];
-			}
-			this.jitoSearcherClient
-				.sendBundle(b)
-				.then((uuid) => {
-					logger.info(`${this.name} sent bundle with uuid ${uuid}`);
-				})
-				.catch((err) => {
-					logger.error(`failed to send bundle: ${err.message}`);
-				});
-		} else if (isNaN(this.transactionVersion)) {
-			const tx = new Transaction();
-			for (const ix of ixs) {
-				tx.add(ix);
-			}
-			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
-		} else if (this.transactionVersion === 0) {
-			txResp = this.driftClient.txSender.sendVersionedTransaction(
-				ixs,
-				[this.lookupTableAccount],
-				[],
-				this.driftClient.opts
-			);
-		} else {
-			throw new Error(
-				`unsupported transaction version ${this.transactionVersion}`
-			);
-		}
-		if (txResp) {
-			txResp
-				.then((resp: TxSigAndSlot) => {
-					txSig = resp.txSig;
-					const duration = Date.now() - txStart;
-					logger.info(`sent tx: ${txSig}, took: ${duration}ms`);
-
-					const user = this.driftClient.getUser();
-					this.sdkCallDurationHistogram.record(duration, {
-						...metricAttrFromUserAccount(
-							user.getUserAccountPublicKey(),
-							user.getUserAccount()
-						),
-						method: 'sendTx',
-					});
-
-					const parseLogsStart = Date.now();
-					this.processBulkFillTxLogs(nodesSent, txSig)
-						.then((successfulFills) => {
-							const processBulkFillLogsDuration = Date.now() - parseLogsStart;
-							logger.info(
-								`parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills}`
-							);
-
-							// record successful fills
-							const user = this.driftClient.getUser();
-							this.successfulFillsCounter.add(
-								successfulFills,
-								metricAttrFromUserAccount(
-									user.userAccountPublicKey,
-									user.getUserAccount()
-								)
-							);
-						})
-						.catch((e) => {
-							console.error(e);
-							logger.error(`Failed to process fill tx logs (error above):`);
-							webhookMessage(
-								`[${this.name}]: :x: error processing fill tx logs:\n${
-									e.stack ? e.stack : e.message
-								}`
-							);
-						});
-				})
-				.catch(async (e) => {
-					console.error(e);
-					logger.error(`Failed to send packed tx (error above):`);
-					const simError = e as SendTransactionError;
-
-					if (simError.logs && simError.logs.length > 0) {
-						const start = Date.now();
-						await this.handleTransactionLogs(nodesSent, simError.logs);
-						logger.error(
-							`Failed to send tx, sim error tx logs took: ${
-								Date.now() - start
-							}ms`
-						);
-
-						const errorCode = getErrorCode(e);
-
-						if (
-							!errorCodesToSuppress.includes(errorCode) &&
-							!(e as Error).message.includes('Transaction was not confirmed')
-						) {
-							if (errorCode) {
-								this.txSimErrorCounter.add(1, {
-									errorCode: errorCode.toString(),
-								});
-							}
-							webhookMessage(
-								`[${this.name}]: :x: error simulating tx:\n${
-									simError.logs ? simError.logs.join('\n') : ''
-								}\n${e.stack || e}`
-							);
-						}
-					}
-				})
-				.finally(() => {
-					this.removeFillingNodes(nodesToFill);
-				});
-		}
-
-		return [txSig, nodesSent.length];
+		return nodesSent.length;
 	}
 
 	private async tryFill(orderRecord?: OrderRecord) {
@@ -1583,7 +1675,7 @@ export class FillerBot implements Bot {
 				// fill the perp nodes
 				let filledNodeCount = 0;
 				while (filledNodeCount < filteredNodes.length) {
-					const [_tx, attemptedFills] = await this.tryBulkFillPerpNodes(
+					const attemptedFills = await this.tryBulkFillPerpNodes(
 						filteredNodes.slice(filledNodeCount)
 					);
 					filledNodeCount += attemptedFills;
