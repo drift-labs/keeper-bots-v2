@@ -283,7 +283,7 @@ export class UserPnlSettlerBot implements Bot {
 					const usersChunk = params.users.slice(i, i + SETTLE_USER_CHUNKS);
 					try {
 						settlePnlPromises.push(
-							this.driftClient.settlePNLs(usersChunk, params.marketIndex)
+							this.driftClient.settlePNLs(usersChunk, [params.marketIndex])
 						);
 					} catch (err) {
 						const errorCode = getErrorCode(err);
