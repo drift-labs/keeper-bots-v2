@@ -16,10 +16,16 @@ export type FillerConfig = BaseBotConfig & {
 	revertOnFailure?: boolean;
 };
 
+export type SubaccountConfig = {
+	[key: number]: Array<number>;
+};
+
 export type LiquidatorConfig = BaseBotConfig & {
-	perpMarketIndicies: Array<number>;
-	spotMarketIndicies: Array<number>;
 	disableAutoDerisking: boolean;
+	perpMarketIndicies?: Array<number>;
+	spotMarketIndicies?: Array<number>;
+	perpSubAccountConfig?: SubaccountConfig;
+	spotSubAccountConfig?: SubaccountConfig;
 };
 
 export type BotConfigMap = {

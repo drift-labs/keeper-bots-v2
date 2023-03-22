@@ -105,4 +105,16 @@ Read the docs: https://docs.drift.trade/liquidators
 
 By default the liquidator will attempt to liqudate (inherit the risk of)
 endangered positions in all markets. Set `botConfigs.liquidator.perpMarketIndicies` and/or `botConfigs.liquidator.spotMarketIndicies`
-in the config file to restrict which markets you want to liquidate.
+in the config file to restrict which markets you want to liquidate. The
+account specified in `global.subaccounts` will be used as the active
+account.
+
+`perpSubaccountConfig` and `spotSubaccountConfig` can be used instead
+of `perpMarketIndicies` and `spotMarketIndicies` to specify a mapping
+from subaccount to list of market indicies. The value of these 2 fields
+are json strings:
+
+i.e.
+```
+''
+```

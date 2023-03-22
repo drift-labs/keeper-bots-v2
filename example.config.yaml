@@ -104,6 +104,16 @@ botConfigs:
     perpMarketIndicies:
     spotMarketIndicies:
 
+    # this replaces perpMarketIndicies and spotMarketIndicies by allowing you to specify
+    # which subaccount is responsible for liquidating markets
+    # Note: you must set global.subaccounts with all the subaccounts you want to load
+    perpSubAccountConfig:
+      0: # subaccount 0 will watch perp markets 0 and 1
+        - 0
+        - 1
+    spotSubAccountConfig:
+      0: # subaccount 0 will watch all spot markets
+
   trigger:
     botId: "trigger"
     dryRun: false
