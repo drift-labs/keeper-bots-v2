@@ -30,7 +30,6 @@ import {
 	DriftClientSubscriptionConfig,
 	LogProviderConfig,
 } from '@drift-labs/sdk';
-import { assert } from '@drift-labs/sdk/lib/assert/assert';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
 
@@ -557,11 +556,6 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'liquidator')) {
-		assert(
-			config.global.subaccounts.length === 1,
-			'Liquidator bot only works with one subaccount specified'
-		);
-
 		bots.push(
 			new LiquidatorBot(
 				bulkAccountLoader,
