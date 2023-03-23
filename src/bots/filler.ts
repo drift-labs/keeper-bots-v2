@@ -178,6 +178,7 @@ export class FillerBot implements Bot {
 	private jitoTipAccount?: PublicKey;
 	private jitoLeaderNextSlot?: number;
 	private jitoLeaderNextSlotMutex = new Mutex();
+	private tipPayerKeypair?: Keypair;
 
 	private dlobMutex = withTimeout(
 		new Mutex(),
@@ -236,7 +237,8 @@ export class FillerBot implements Bot {
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
 		jitoSearcherClient?: SearcherClient,
-		jitoAuthKeypair?: Keypair
+		jitoAuthKeypair?: Keypair,
+		tipPayerKeypair?: Keypair
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
@@ -275,6 +277,7 @@ export class FillerBot implements Bot {
 
 		this.jitoSearcherClient = jitoSearcherClient;
 		this.jitoAuthKeypair = jitoAuthKeypair;
+		this.tipPayerKeypair = tipPayerKeypair;
 		const jitoEnabled = this.jitoSearcherClient && this.jitoAuthKeypair;
 		if (jitoEnabled) {
 			this.jitoSearcherClient.getTipAccounts().then(async (tipAccounts) => {
@@ -1257,7 +1260,7 @@ export class FillerBot implements Bot {
 			);
 			let b: Bundle | Error = new Bundle([signedTx], 2);
 			b = b.attachTip(
-				this.jitoAuthKeypair,
+				this.tipPayerKeypair,
 				100_000, // TODO: make this configurable?
 				this.jitoTipAccount,
 				blockHash.blockhash,

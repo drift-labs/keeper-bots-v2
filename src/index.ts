@@ -184,7 +184,7 @@ function loadKeypair(privateKey: string): Keypair {
 	return Keypair.fromSecretKey(Uint8Array.from(loadedKey));
 }
 
-export function getWallet(): Wallet {
+export function getWallet(): [Keypair, Wallet] {
 	const privateKey = config.global.keeperPrivateKey;
 	if (!privateKey) {
 		throw new Error(
@@ -192,7 +192,7 @@ export function getWallet(): Wallet {
 		);
 	}
 	const keypair = loadKeypair(privateKey);
-	return new Wallet(keypair);
+	return [keypair, new Wallet(keypair)];
 }
 
 const endpoint = config.global.endpoint;
@@ -231,7 +231,7 @@ function printUserAccountStats(clearingHouseUser: User) {
 
 const bots: Bot[] = [];
 const runBot = async () => {
-	const wallet = getWallet();
+	const [keypair, wallet] = getWallet();
 	const driftPublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
 
 	const connection = new Connection(endpoint, {
@@ -501,7 +501,8 @@ const runBot = async () => {
 				},
 				config.botConfigs.filler,
 				jitoSearcherClient,
-				jitoAuthKeypair
+				jitoAuthKeypair,
+				keypair
 			)
 		);
 	}
