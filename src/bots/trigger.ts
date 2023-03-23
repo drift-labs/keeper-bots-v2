@@ -34,6 +34,7 @@ const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an o
 
 const errorCodesToSuppress = [
 	6111, // Error Message: OrderNotTriggerable.
+	6112, // Error Message: OrderDidNotSatisfyTriggerCondition.
 ];
 
 enum METRIC_TYPES {
