@@ -302,7 +302,6 @@ export class FillerBot implements Bot {
 								}
 							);
 						} catch (e) {
-							console.log('blocked bitch!');
 							if (e !== E_ALREADY_LOCKED) {
 								throw new Error(e);
 							}
