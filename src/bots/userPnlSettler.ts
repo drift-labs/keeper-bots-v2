@@ -163,8 +163,14 @@ export class UserPnlSettlerBot implements Bot {
 
 			const validOracleMarketMap = new Map<number, boolean>();
 			this.perpMarkets.forEach((market) => {
+				const perpMarketAccount =
+					perpMarketAndOracleData[market.marketIndex].marketAccount;
+				if (!perpMarketAccount) {
+					validOracleMarketMap.set(market.marketIndex, false);
+					return;
+				}
 				const oracleValid = isOracleValid(
-					perpMarketAndOracleData[market.marketIndex].marketAccount.amm,
+					perpMarketAccount.amm,
 					perpMarketAndOracleData[market.marketIndex].oraclePriceData,
 					this.driftClient.getStateAccount().oracleGuardRails,
 					slot
