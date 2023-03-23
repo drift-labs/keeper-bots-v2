@@ -139,20 +139,28 @@ export class UserPnlSettlerBot implements Bot {
 			} = {};
 
 			this.perpMarkets.forEach((market) => {
+				const perpMarket = this.driftClient.getPerpMarketAccount(
+					market.marketIndex
+				);
+				if (!perpMarket) {
+					return;
+				}
 				perpMarketAndOracleData[market.marketIndex] = {
-					marketAccount: this.driftClient.getPerpMarketAccount(
-						market.marketIndex
-					),
+					marketAccount: perpMarket,
 					oraclePriceData: this.driftClient.getOracleDataForPerpMarket(
 						market.marketIndex
 					),
 				};
 			});
 			this.spotMarkets.forEach((market) => {
+				const spotMarket = this.driftClient.getSpotMarketAccount(
+					market.marketIndex
+				);
+				if (!spotMarket) {
+					return;
+				}
 				spotMarketAndOracleData[market.marketIndex] = {
-					marketAccount: this.driftClient.getSpotMarketAccount(
-						market.marketIndex
-					),
+					marketAccount: spotMarket,
 					oraclePriceData: this.driftClient.getOracleDataForSpotMarket(
 						market.marketIndex
 					),
