@@ -19,7 +19,7 @@ import {
 	UserMap,
 	UserStatsMap,
 	getOrderSignature,
-	MarketType,
+	MarketType, PostOnlyParams,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -676,7 +676,7 @@ export class JitMakerBot implements Bot {
 				baseAssetAmount: action.baseAssetAmount,
 				direction: action.direction,
 				price: action.price,
-				postOnly: true,
+				postOnly: PostOnlyParams.TRY_POST_ONLY,
 				immediateOrCancel: true,
 			},
 			{
