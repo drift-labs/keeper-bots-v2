@@ -421,7 +421,7 @@ export class LiquidatorBot implements Bot {
 				if (doResync) {
 					logger.info(`Resyncing UserMap`);
 					this.userMap
-						.sync()
+						.sync(false)
 						.then(async () => {
 							await this.userMapMutex.runExclusive(async () => {
 								this.lastSeenNumberOfSubAccounts = this.driftClient
