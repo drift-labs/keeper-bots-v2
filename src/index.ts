@@ -29,6 +29,7 @@ import {
 	TokenFaucet,
 	DriftClientSubscriptionConfig,
 	LogProviderConfig,
+	getMarketsAndOraclesForSubscription,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -266,19 +267,15 @@ const runBot = async () => {
 		};
 	}
 
+	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
+		getMarketsAndOraclesForSubscription(config.global.driftEnv);
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
 		programID: driftPublicKey,
-		perpMarketIndexes: PerpMarkets[config.global.driftEnv].map(
-			(mkt) => mkt.marketIndex
-		),
-		spotMarketIndexes: SpotMarkets[config.global.driftEnv].map(
-			(mkt) => mkt.marketIndex
-		),
-		oracleInfos: PerpMarkets[config.global.driftEnv].map((mkt) => {
-			return { publicKey: mkt.oracle, source: mkt.oracleSource };
-		}),
+		perpMarketIndexes,
+		spotMarketIndexes,
+		oracleInfos,
 		opts: {
 			commitment: stateCommitment,
 			skipPreflight: false,
