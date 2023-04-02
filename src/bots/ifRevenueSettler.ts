@@ -143,6 +143,10 @@ export class IFRevenueSettlerBot implements Bot {
 							}\n${err.stack ? err.stack : err.message}`
 						);
 					}
+				} else {
+					logger.info(
+						`IF revenue not settled on marketIndex=${i} because it's not time yet. LastSettleTs: ${spotIf.lastRevenueSettleTs.toNumber()}, Period: ${spotIf.revenueSettlePeriod.toNumber()}, currentTs: ${currentTs}`
+					);
 				}
 			}
 		} catch (err) {
