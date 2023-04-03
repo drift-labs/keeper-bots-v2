@@ -1,5 +1,4 @@
 import {
-	BN,
 	DriftClient,
 	PerpMarketConfig,
 	OraclePriceData,
@@ -13,6 +12,37 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
+
+function onTheHourUpdate(
+	now: number,
+	lastUpdateTs: number,
+	updatePeriod: number
+): number | Error {
+	const timeSinceLastUpdate = now - lastUpdateTs;
+
+	if (timeSinceLastUpdate < 0) {
+		return new Error('Invalid arguments');
+	}
+
+	const lastUpdateDelay = lastUpdateTs % updatePeriod;
+
+	let nextUpdateWait = updatePeriod - lastUpdateDelay;
+
+	if (nextUpdateWait > updatePeriod / 3) {
+		nextUpdateWait = updatePeriod * 2 - lastUpdateDelay;
+	}
+
+	if (nextUpdateWait > updatePeriod) {
+		nextUpdateWait -= updatePeriod;
+	}
+
+	const timeRemainingUntilUpdate = Math.max(
+		nextUpdateWait - timeSinceLastUpdate,
+		0
+	);
+
+	return timeRemainingUntilUpdate;
+}
 
 export class FundingRateUpdaterBot implements Bot {
 	public readonly name: string;
@@ -95,11 +125,13 @@ export class FundingRateUpdaterBot implements Bot {
 					continue;
 				}
 				const currentTs = Date.now() / 1000;
-				if (
-					perpMarket.amm.lastFundingRateTs
-						.add(perpMarket.amm.fundingPeriod)
-						.lte(new BN(currentTs))
-				) {
+
+				const timeRemainingTilUpdate = onTheHourUpdate(
+					currentTs,
+					perpMarket.amm.lastFundingRateTs.toNumber(),
+					perpMarket.amm.fundingPeriod.toNumber()
+				);
+				if ((timeRemainingTilUpdate as number) <= 0) {
 					logger.info(
 						perpMarket.amm.lastFundingRateTs.toString() +
 							' and ' +
@@ -109,9 +141,10 @@ export class FundingRateUpdaterBot implements Bot {
 						perpMarket.amm.lastFundingRateTs
 							.add(perpMarket.amm.fundingPeriod)
 							.toString() +
-							' < ' +
+							' vs ' +
 							currentTs.toString()
 					);
+					logger.info('timeRemainingTilUpdate=', timeRemainingTilUpdate);
 
 					try {
 						const txSig = await this.driftClient.updateFundingRate(
