@@ -56,6 +56,7 @@ import {
 	loadConfigFromFile,
 	loadConfigFromOpts,
 } from './config';
+import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT;
@@ -75,7 +76,11 @@ program
 	.option('--jit-maker', 'Enable JIT auction maker bot')
 	.option('--floating-maker', 'Enable floating maker bot')
 	.option('--liquidator', 'Enable liquidator bot')
-	.option('--if-revenue-settler', 'Enable Insurance Fund PnL settler bot')
+	.option(
+		'--if-revenue-settler',
+		'Enable Insurance Fund revenue pool settler bot'
+	)
+	.option('--funding-rate-updater', 'Enable Funding Rate updater bot')
 	.option('--user-pnl-settler', 'Enable User PnL settler bot')
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option('--close-open-positions', 'close all open positions')
@@ -604,6 +609,16 @@ const runBot = async () => {
 				driftClient,
 				SpotMarkets[config.global.driftEnv],
 				config.botConfigs.ifRevenueSettler
+			)
+		);
+	}
+
+	if (configHasBot(config, 'fundingRateUpdater')) {
+		bots.push(
+			new FundingRateUpdaterBot(
+				driftClient,
+				PerpMarkets[driftEnv],
+				config.botConfigs.fundingRateUpdater
 			)
 		);
 	}

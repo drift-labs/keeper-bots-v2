@@ -36,6 +36,7 @@ export type BotConfigMap = {
 	floatingMaker?: BaseBotConfig;
 	jitMaker?: BaseBotConfig;
 	ifRevenueSettler?: BaseBotConfig;
+	fundingRateUpdater?: BaseBotConfig;
 	userPnlSettler?: BaseBotConfig;
 };
 
