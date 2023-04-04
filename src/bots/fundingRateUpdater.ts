@@ -1,7 +1,6 @@
 import {
 	DriftClient,
 	PerpMarketConfig,
-	OraclePriceData,
 	ZERO,
 	PerpMarketAccount,
 } from '@drift-labs/sdk';
@@ -104,16 +103,12 @@ export class FundingRateUpdaterBot implements Bot {
 			const perpMarketAndOracleData: {
 				[marketIndex: number]: {
 					marketAccount: PerpMarketAccount;
-					oraclePriceData: OraclePriceData;
 				};
 			} = {};
 
 			this.perpMarkets.forEach((market) => {
 				perpMarketAndOracleData[market.marketIndex] = {
 					marketAccount: this.driftClient.getPerpMarketAccount(
-						market.marketIndex
-					),
-					oraclePriceData: this.driftClient.getOracleDataForSpotMarket(
 						market.marketIndex
 					),
 				};
