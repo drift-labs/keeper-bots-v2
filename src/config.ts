@@ -240,6 +240,15 @@ export function loadConfigFromOpts(opts: any): Config {
 			runOnce: opts.runOnce ?? false,
 		};
 	}
+	if (opts.fundingRateUpdater) {
+		config.enabledBots.push('fundingRateUpdater');
+		config.botConfigs.fundingRateUpdater = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'fundingRateUpdater',
+			metricsPort: 9464,
+			runOnce: opts.runOnce ?? false,
+		};
+	}
 
 	return mergeDefaults(defaultConfig, config) as Config;
 }
