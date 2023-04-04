@@ -23,24 +23,28 @@ function onTheHourUpdate(
 		return new Error('Invalid arguments');
 	}
 
-	const lastUpdateDelay = lastUpdateTs % updatePeriod;
+	let nextUpdateWait = updatePeriod;
+	if (updatePeriod > 1) {
+		const lastUpdateDelay = lastUpdateTs % updatePeriod;
+		if (lastUpdateDelay !== 0) {
+			const maxDelayForNextPeriod = updatePeriod / 3;
+			const twoFundingPeriods = updatePeriod * 2;
 
-	let nextUpdateWait = updatePeriod - lastUpdateDelay;
+			if (lastUpdateDelay > maxDelayForNextPeriod) {
+				// too late for on the hour next period, delay to following period
+				nextUpdateWait = twoFundingPeriods - lastUpdateDelay;
+			} else {
+				// allow update on the hour
+				nextUpdateWait = updatePeriod - lastUpdateDelay;
+			}
 
-	if (nextUpdateWait > updatePeriod / 3) {
-		nextUpdateWait = updatePeriod * 2 - lastUpdateDelay;
+			if (nextUpdateWait > twoFundingPeriods) {
+				nextUpdateWait -= updatePeriod;
+			}
+		}
 	}
 
-	if (nextUpdateWait > updatePeriod) {
-		nextUpdateWait -= updatePeriod;
-	}
-
-	const timeRemainingUntilUpdate = Math.max(
-		nextUpdateWait - timeSinceLastUpdate,
-		0
-	);
-
-	return timeRemainingUntilUpdate;
+	return Math.max(nextUpdateWait - timeSinceLastUpdate, 0);
 }
 
 export class FundingRateUpdaterBot implements Bot {
@@ -121,11 +125,13 @@ export class FundingRateUpdaterBot implements Bot {
 				}
 				const currentTs = Date.now() / 1000;
 
+				logger.info(`Checking market: ${i}`);
 				const timeRemainingTilUpdate = onTheHourUpdate(
 					currentTs,
 					perpMarket.amm.lastFundingRateTs.toNumber(),
 					perpMarket.amm.fundingPeriod.toNumber()
 				);
+				logger.info(` timeRemainingTilUpdate=${timeRemainingTilUpdate}`);
 				if ((timeRemainingTilUpdate as number) <= 0) {
 					logger.info(
 						perpMarket.amm.lastFundingRateTs.toString() +
@@ -139,7 +145,7 @@ export class FundingRateUpdaterBot implements Bot {
 							' vs ' +
 							currentTs.toString()
 					);
-					logger.info('timeRemainingTilUpdate=', timeRemainingTilUpdate);
+					logger.info(`timeRemainingTilUpdate=${timeRemainingTilUpdate}`);
 
 					try {
 						const txSig = await this.driftClient.updateFundingRate(
