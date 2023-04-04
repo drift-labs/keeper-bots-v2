@@ -617,7 +617,7 @@ const runBot = async () => {
 		bots.push(
 			new FundingRateUpdaterBot(
 				driftClient,
-				PerpMarkets[driftEnv],
+				PerpMarkets[config.global.driftEnv],
 				config.botConfigs.fundingRateUpdater
 			)
 		);
