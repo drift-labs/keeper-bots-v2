@@ -119,56 +119,64 @@ export class FundingRateUpdaterBot implements Bot {
 			});
 
 			for (let i = 0; i < this.perpMarkets.length; i++) {
-				const perpMarket = perpMarketAndOracleData[i].marketAccount;
-				if (perpMarket.amm.fundingPeriod.eq(ZERO)) {
-					continue;
-				}
-				const currentTs = Date.now() / 1000;
+				for (let retries = 0; retries < 5; retries++) {
+					const perpMarket = perpMarketAndOracleData[i].marketAccount;
+					if (perpMarket.amm.fundingPeriod.eq(ZERO)) {
+						break;
+					}
+					const currentTs = Date.now() / 1000;
 
-				logger.info(`Checking market: ${i}`);
-				const timeRemainingTilUpdate = onTheHourUpdate(
-					currentTs,
-					perpMarket.amm.lastFundingRateTs.toNumber(),
-					perpMarket.amm.fundingPeriod.toNumber()
-				);
-				logger.info(` timeRemainingTilUpdate=${timeRemainingTilUpdate}`);
-				if ((timeRemainingTilUpdate as number) <= 0) {
-					logger.info(
-						perpMarket.amm.lastFundingRateTs.toString() +
-							' and ' +
-							perpMarket.amm.fundingPeriod.toString()
+					logger.info(`Checking market: ${i} (retry: ${retries}})`);
+					const timeRemainingTilUpdate = onTheHourUpdate(
+						currentTs,
+						perpMarket.amm.lastFundingRateTs.toNumber(),
+						perpMarket.amm.fundingPeriod.toNumber()
 					);
-					logger.info(
-						perpMarket.amm.lastFundingRateTs
-							.add(perpMarket.amm.fundingPeriod)
-							.toString() +
-							' vs ' +
-							currentTs.toString()
-					);
-					logger.info(`timeRemainingTilUpdate=${timeRemainingTilUpdate}`);
-
-					try {
-						const txSig = await this.driftClient.updateFundingRate(
-							i,
-							perpMarket.amm.oracle
+					logger.info(` timeRemainingTilUpdate=${timeRemainingTilUpdate}`);
+					if ((timeRemainingTilUpdate as number) <= 0) {
+						logger.info(
+							perpMarket.amm.lastFundingRateTs.toString() +
+								' and ' +
+								perpMarket.amm.fundingPeriod.toString()
 						);
 						logger.info(
-							`funding rate updated successfully on perp marketIndex=${i}. TxSig: ${txSig}`
+							perpMarket.amm.lastFundingRateTs
+								.add(perpMarket.amm.fundingPeriod)
+								.toString() +
+								' vs ' +
+								currentTs.toString()
 						);
-					} catch (err) {
-						const errorCode = getErrorCode(err);
-						logger.error(
-							`Error code: ${errorCode} while updating funding rates on perp marketIndex=${i}: ${err.message}`
-						);
-						console.error(err);
-						await webhookMessage(
-							`[${
-								this.name
-							}]: :x: Error code: ${errorCode} while updating funding rates on perp marketIndex=${i}:\n${
-								err.logs ? (err.logs as Array<string>).join('\n') : ''
-							}\n${err.stack ? err.stack : err.message}`
-						);
+						logger.info(`timeRemainingTilUpdate=${timeRemainingTilUpdate}`);
+
+						try {
+							const txSig = await this.driftClient.updateFundingRate(
+								i,
+								perpMarket.amm.oracle
+							);
+							logger.info(
+								`funding rate updated successfully on perp marketIndex=${i}. TxSig: ${txSig}`
+							);
+						} catch (err) {
+							const errorCode = getErrorCode(err);
+							logger.error(
+								`Error code: ${errorCode} while updating funding rates on perp marketIndex=${i}: ${err.message}`
+							);
+							console.error(err);
+							if (errorCode && errorCode === 6040) {
+								await new Promise((resolve) => setTimeout(resolve, 1000));
+								continue;
+							} else {
+								await webhookMessage(
+									`[${
+										this.name
+									}]: :x: Error code: ${errorCode} while updating funding rates on perp marketIndex=${i}:\n${
+										err.logs ? (err.logs as Array<string>).join('\n') : ''
+									}\n${err.stack ? err.stack : err.message}`
+								);
+							}
+						}
 					}
+					break;
 				}
 			}
 		} catch (e) {
