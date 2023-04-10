@@ -138,6 +138,13 @@ program
 		'--use-jito',
 		'Submit transactions to a Jito relayer if the bot supports it'
 	)
+	.option(
+		'--use-event-subscriber',
+		'Subscribe to events from the event subscriber (default polling unless \
+			--websocket is also specified). Warning this is expensive as events \
+			require a lot of RPC calls. Only include for bots you know require \
+			the EventSubscriber'
+	)
 	.parse();
 
 const opts = program.opts();
@@ -297,14 +304,18 @@ const runBot = async () => {
 		subAccountIds: config.global.subaccounts,
 	});
 
-	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {
-		maxTx: 8192,
-		maxEventsPerType: 8192,
-		orderBy: 'blockchain',
-		orderDir: 'desc',
-		commitment: stateCommitment,
-		logProviderConfig,
-	});
+	let eventSubscriber: EventSubscriber | undefined;
+	if (config.global.useEventSubscriber) {
+		eventSubscriber = new EventSubscriber(connection, driftClient.program, {
+			maxTx: 8192,
+			maxEventsPerType: 8192,
+			orderBy: 'blockchain',
+			orderDir: 'desc',
+			commitment: stateCommitment,
+			logProviderConfig,
+		});
+		eventSubscriber.subscribe();
+	}
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
 	const lastSlotReceivedMutex = new Mutex();
@@ -337,7 +348,6 @@ const runBot = async () => {
 		logger.error(e);
 	});
 
-	eventSubscriber.subscribe();
 	await slotSubscriber.subscribe();
 	slotSubscriber.eventEmitter.on('newSlot', async (slot: number) => {
 		await lastSlotReceivedMutex.runExclusive(async () => {
@@ -363,7 +373,7 @@ const runBot = async () => {
 		!(await driftClient.subscribe()) ||
 		!(await driftUser.subscribe()) ||
 		!(await driftUserStats.subscribe()) ||
-		!eventSubscriber.subscribe()
+		(config.global.useEventSubscriber && !eventSubscriber.subscribe())
 	) {
 		logger.info('waiting to subscribe to DriftClient and User');
 		await sleep(1000);
@@ -489,6 +499,11 @@ const runBot = async () => {
 	 */
 
 	if (configHasBot(config, 'filler')) {
+		if (config.global.websocket && !config.global.useEventSubscriber) {
+			throw new Error(
+				'config.global.websocket requires config.global.useEventSubscriber'
+			);
+		}
 		bots.push(
 			new FillerBot(
 				slotSubscriber,
@@ -630,9 +645,11 @@ const runBot = async () => {
 	await Promise.all(
 		bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
 	);
-	eventSubscriber.eventEmitter.on('newEvent', async (event) => {
-		Promise.all(bots.map((bot) => bot.trigger(event)));
-	});
+	if (config.global.useEventSubscriber) {
+		eventSubscriber.eventEmitter.on('newEvent', async (event) => {
+			Promise.all(bots.map((bot) => bot.trigger(event)));
+		});
+	}
 
 	// start http server listening to /health endpoint using http package
 	http

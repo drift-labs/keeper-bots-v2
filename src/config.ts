@@ -57,6 +57,7 @@ export interface GlobalConfig {
 
 	eventSubscriberPollingInterval: number;
 	bulkAccountLoaderPollingInterval: number;
+	useEventSubscriber: boolean;
 
 	useJito?: boolean;
 	jitoBlockEngineUrl?: string;
@@ -84,6 +85,7 @@ const defaultConfig: Partial<Config> = {
 
 		eventSubscriberPollingInterval: 5000,
 		bulkAccountLoaderPollingInterval: 5000,
+		useEventSubscriber: false,
 
 		endpoint: process.env.ENDPOINT,
 		wsEndpoint: process.env.WS_ENDPOINT,
@@ -155,6 +157,7 @@ export function loadConfigFromOpts(opts: any): Config {
 				parseInt(process.env.BULK_ACCOUNT_LOADER_POLLING_INTERVAL) ?? 5000,
 			bulkAccountLoaderPollingInterval:
 				parseInt(process.env.EVENT_SUBSCRIBER_POLLING_INTERVAL) ?? 5000,
+			useEventSubscriber: opts.useEventSubscriber ?? false,
 			initUser: opts.initUser ?? false,
 			testLiveness: opts.testLiveness ?? false,
 			cancelOpenOrders: opts.cancelOpenOrders ?? false,
