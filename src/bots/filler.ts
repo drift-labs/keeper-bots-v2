@@ -621,8 +621,24 @@ export class FillerBot implements Bot {
 				let doResync = false;
 				const start = Date.now();
 				if (!this.bulkAccountLoader) {
-					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
-					doResync = true;
+					const nextResyncSlot =
+						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
+					if (nextResyncSlot >= this.slotSubscriber.currentSlot) {
+						const slotsRemaining =
+							nextResyncSlot - this.slotSubscriber.currentSlot;
+						if (slotsRemaining % 10 === 0) {
+							logger.info(
+								`Resyncing UserMaps in cooldown, ${slotsRemaining} more slots to go`
+							);
+						}
+						return;
+					} else {
+						logger.info(
+							`Resyncing UserMaps immediately (no BulkAccountLoader)`
+						);
+						doResync = true;
+						this.lastSlotResyncUserMaps = this.slotSubscriber.currentSlot;
+					}
 				} else {
 					const nextResyncSlot =
 						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
