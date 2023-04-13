@@ -80,10 +80,10 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/sdk@2.25.0-beta.1":
-  version "2.25.0-beta.1"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.25.0-beta.1.tgz#c861fc0228d874fcadca3bb73c53dda2e712309d"
-  integrity sha512-WMApY+piey//ITBQPXlK89OZqAjEcT4ViFb//2DqOza3knDqWSNWj1UVA/Nlqa4kQjfyu4JWoCZuKoZ3ILmDpA==
+"@drift-labs/sdk@2.25.0-beta.2":
+  version "2.25.0-beta.2"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.25.0-beta.2.tgz#bc33769ceabe12f9aae16466a99e75eedb5140ca"
+  integrity sha512-loIcUwAlVm5WOb5ZNykV+qGhPMIBQHmXdOrHm3Aq+kQmT0rwHa2w4l7TEhFg+y+M1jB1LB+DuSUKA3rqTuGIDg==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
     "@project-serum/serum" "^0.13.38"
