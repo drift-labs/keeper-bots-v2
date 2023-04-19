@@ -338,11 +338,6 @@ export class TriggerBot implements Bot {
 							`Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.info(`Tx: ${txSig}`);
-						webhookMessage(
-							`[${
-								this.name
-							}]: :gear: Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}, tx: ${txSig}`
-						);
 					})
 					.catch((error) => {
 						nodeToTrigger.node.haveTrigger = false;
@@ -431,11 +426,6 @@ export class TriggerBot implements Bot {
 							`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
 						);
 						logger.info(`Tx: ${txSig}`);
-						webhookMessage(
-							`[${
-								this.name
-							}]: :gear: Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}, tx: ${txSig}`
-						);
 					})
 					.catch((error) => {
 						nodeToTrigger.node.haveTrigger = false;

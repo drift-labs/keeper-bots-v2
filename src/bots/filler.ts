@@ -45,6 +45,7 @@ import {
 	GetVersionedTransactionConfig,
 	AddressLookupTableAccount,
 	Keypair,
+	VersionedTransaction,
 } from '@solana/web3.js';
 
 import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
@@ -94,6 +95,7 @@ const dlobMutexError = new Error('dlobMutex timeout');
 
 const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
+	6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
 	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 ];
 
@@ -1263,6 +1265,7 @@ export class FillerBot implements Bot {
 					'processed'
 				);
 
+			// const tx = new Transaction();
 			const tx = new Transaction();
 			for (const ix of ixs) {
 				tx.add(ix);
@@ -1274,13 +1277,15 @@ export class FillerBot implements Bot {
 			const signedTx = await this.driftClient.provider.wallet.signTransaction(
 				tx
 			);
-			let b: Bundle | Error = new Bundle([signedTx], 2);
-			b = b.attachTip(
+			let b: Bundle | Error = new Bundle(
+				[new VersionedTransaction(signedTx.compileMessage())],
+				2
+			);
+			b = b.addTipTx(
 				this.tipPayerKeypair,
 				100_000, // TODO: make this configurable?
 				this.jitoTipAccount,
-				blockHash.blockhash,
-				blockHash.lastValidBlockHeight
+				blockHash.blockhash
 			);
 			if (b instanceof Error) {
 				logger.error(
