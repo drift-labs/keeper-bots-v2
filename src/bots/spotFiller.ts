@@ -1177,24 +1177,30 @@ export class SpotFillerBot implements Bot {
 
 				await this.processBulkFillTxLogs(nodeToFill, txSig.txSig);
 			})
-			.catch((e) => {
+			.catch(async (e) => {
 				const pendingTxs = this.decPendingTransactions(
 					nodeToFill.node.order.marketIndex
 				);
-				logger.info(`sim error - currPendingTxs: ${pendingTxs}`);
+				const errorCode = getErrorCode(e);
 
-				logger.error(`Failed to fill spot order:`);
+				logger.info(`sim error - currPendingTxs: ${pendingTxs}`);
+				logger.error(`Failed to fill spot order (errorCode: ${errorCode}):`);
 				console.error(e);
 
-				const errorCode = getErrorCode(e);
+				if (e.logs) {
+					await this.handleTransactionLogs(nodeToFill, e.logs);
+				}
+
 				if (
 					!errorCodesToSuppress.includes(errorCode) &&
 					!(e as Error).message.includes('Transaction was not confirmed')
 				) {
 					webhookMessage(
-						`[${this.name}]: :x: error trying to fill spot orders:\n${
+						`[${
+							this.name
+						}]: :x: error trying to fill spot orders:\n\nSim logs:\n${
 							e.logs ? (e.logs as Array<string>).join('\n') : ''
-						}\n${e.stack ? e.stack : e.message}`
+						}\n\n${e.stack ? e.stack : e.message}`
 					);
 				}
 			})
