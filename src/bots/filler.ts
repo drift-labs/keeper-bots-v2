@@ -31,9 +31,10 @@ import {
 	DLOBNode,
 	UserSubscriptionConfig,
 	isOneOfVariant,
+	DLOBSubscriber,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
-import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
+import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
 	SendTransactionError,
@@ -90,7 +91,6 @@ const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting bur
 const FILL_ORDER_THROTTLE_BACKOFF = 10000; // the time to wait before trying to fill a throttled (error filling) node again
 const FILL_ORDER_COOLDOWN_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
-const dlobMutexError = new Error('dlobMutex timeout');
 
 const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
@@ -180,12 +180,7 @@ export class FillerBot implements Bot {
 	private jitoLeaderNextSlotMutex = new Mutex();
 	private tipPayerKeypair?: Keypair;
 
-	private dlobMutex = withTimeout(
-		new Mutex(),
-		2 * this.defaultIntervalMs,
-		dlobMutexError
-	);
-	private dlob: DLOB;
+	private dlobSubscriber: DLOBSubscriber;
 
 	private userMapMutex = new Mutex();
 	private userMap: UserMap;
@@ -499,16 +494,19 @@ export class FillerBot implements Bot {
 		await this.userMapMutex.runExclusive(async () => {
 			this.userMap = new UserMap(
 				this.driftClient,
-				this.driftClient.userAccountSubscriptionConfig
+				this.driftClient.userAccountSubscriptionConfig,
+				false
 			);
 			this.userStatsMap = new UserStatsMap(
 				this.driftClient,
 				this.userStatsMapSubscriptionConfig
 			);
 
-			await this.userMap.fetchAllUsers(false);
-			console.log('initial userMap size', this.userMap.size());
-			await this.userStatsMap.fetchAllUserStats();
+			await this.userMap.sync();
+			await this.userStatsMap.sync();
+			logger.info(
+				`initial userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}`
+			);
 
 			this.lastSeenNumberOfSubAccounts = this.driftClient
 				.getStateAccount()
@@ -517,6 +515,13 @@ export class FillerBot implements Bot {
 				.getStateAccount()
 				.numberOfAuthorities.toNumber();
 		});
+
+		this.dlobSubscriber = new DLOBSubscriber({
+			dlobSource: this.userMap,
+			slotSource: this.slotSubscriber,
+			updateFrequency: this.pollingIntervalMs - 500,
+		});
+		await this.dlobSubscriber.subscribe();
 
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
@@ -602,7 +607,7 @@ export class FillerBot implements Bot {
 	}
 
 	public viewDlob(): DLOB {
-		return this.dlob;
+		return this.dlobSubscriber.getDLOB();
 	}
 
 	/**
@@ -698,9 +703,9 @@ export class FillerBot implements Bot {
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
 
-		let nodes: Array<NodeToFill> = [];
-		await this.dlobMutex.runExclusive(async () => {
-			nodes = this.dlob.findNodesToFill(
+		return this.dlobSubscriber
+			.getDLOB()
+			.findNodesToFill(
 				marketIndex,
 				vBid,
 				vAsk,
@@ -711,9 +716,6 @@ export class FillerBot implements Bot {
 				this.driftClient.getStateAccount(),
 				this.driftClient.getPerpMarketAccount(marketIndex)
 			);
-		});
-
-		return nodes;
 	}
 
 	private getNodeToFillSignature(node: NodeToFill): string {
@@ -1629,29 +1631,14 @@ export class FillerBot implements Bot {
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				await this.dlobMutex.runExclusive(async () => {
-					if (!orderRecord || !this.dlob) {
-						if (this.dlob) {
-							this.dlob.clear();
-							delete this.dlob;
-						}
-						this.dlob = new DLOB();
-						await tryAcquire(this.userMapMutex).runExclusive(async () => {
-							await this.dlob.initFromUserMap(
-								this.userMap,
-								this.slotSubscriber.getSlot()
-							);
-						});
-					}
-
-					if (orderRecord) {
-						this.dlob.insertOrder(
-							orderRecord.order,
-							orderRecord.user,
-							this.slotSubscriber.getSlot()
-						);
-					}
-				});
+				const dlob = this.dlobSubscriber.getDLOB();
+				if (orderRecord && dlob) {
+					dlob.insertOrder(
+						orderRecord.order,
+						orderRecord.user,
+						orderRecord.order.slot.toNumber()
+					);
+				}
 
 				await this.resyncUserMapsIfRequired();
 
