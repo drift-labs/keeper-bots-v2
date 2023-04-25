@@ -83,7 +83,7 @@ import {
 } from './common/txLogParse';
 import { getErrorCode } from '../error';
 
-const MAX_TX_PACK_SIZE = 1100; //1232;
+const MAX_TX_PACK_SIZE = 1200; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
 const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
@@ -693,8 +693,9 @@ export class FillerBot implements Bot {
 	}
 
 	private async getPerpFillableNodesForMarket(
-		market: PerpMarketAccount
-	): Promise<Array<NodeToFill>> {
+		market: PerpMarketAccount,
+		dlob: DLOB
+	): Promise<[Array<NodeToFill>, DLOB]> {
 		const marketIndex = market.marketIndex;
 
 		const oraclePriceData =
@@ -703,19 +704,18 @@ export class FillerBot implements Bot {
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
 
-		return this.dlobSubscriber
-			.getDLOB()
-			.findNodesToFill(
-				marketIndex,
-				vBid,
-				vAsk,
-				this.slotSubscriber.currentSlot,
-				Date.now() / 1000,
-				MarketType.PERP,
-				oraclePriceData,
-				this.driftClient.getStateAccount(),
-				this.driftClient.getPerpMarketAccount(marketIndex)
-			);
+		const nodesToFill = dlob.findNodesToFill(
+			marketIndex,
+			vBid,
+			vAsk,
+			this.slotSubscriber.currentSlot,
+			Date.now() / 1000,
+			MarketType.PERP,
+			oraclePriceData,
+			this.driftClient.getStateAccount(),
+			this.driftClient.getPerpMarketAccount(marketIndex)
+		);
+		return [nodesToFill, dlob];
 	}
 
 	private getNodeToFillSignature(node: NodeToFill): string {
@@ -1519,7 +1519,7 @@ export class FillerBot implements Bot {
 		const fillTxId = this.fillTxId++;
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			if (nodeToFill.makerNodes.length > 1) {
-				this.tryFillMultiMakerPerpNodes(nodeToFill);
+				await this.tryFillMultiMakerPerpNodes(nodeToFill);
 				nodesSent.push(nodeToFill);
 				continue;
 			}
@@ -1577,7 +1577,7 @@ export class FillerBot implements Bot {
 				runningCUUsed + cuToUsePerFill >= MAX_CU_PER_TX
 			) {
 				logger.info(
-					`Fully packed fill tx: est. tx size ${
+					`Fully packed fill tx (ixs: ${ixs.length}): est. tx size ${
 						runningTxSize + newIxCost + additionalAccountsCost
 					}, max: ${MAX_TX_PACK_SIZE}, est. CU used: expected ${
 						runningCUUsed + cuToUsePerFill
@@ -1627,11 +1627,12 @@ export class FillerBot implements Bot {
 	}
 
 	private async tryFill(orderRecord?: OrderRecord) {
+		console.log('beep motof');
 		const startTime = Date.now();
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				const dlob = this.dlobSubscriber.getDLOB();
+				let dlob = this.dlobSubscriber.getDLOB();
 				if (orderRecord && dlob) {
 					dlob.insertOrder(
 						orderRecord.order,
@@ -1644,11 +1645,17 @@ export class FillerBot implements Bot {
 
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];
+				let oo = 0;
 				for (const market of this.driftClient.getPerpMarketAccounts()) {
+					console.log(`wtf: ${oo}`);
+					oo++;
 					try {
-						fillableNodes = fillableNodes.concat(
-							await this.getPerpFillableNodesForMarket(market)
+						let nodesToFill: Array<NodeToFill> = [];
+						[nodesToFill, dlob] = await this.getPerpFillableNodesForMarket(
+							market,
+							dlob
 						);
+						fillableNodes = fillableNodes.concat(nodesToFill);
 						logger.debug(
 							`got ${fillableNodes.length} fillable nodes on market ${market.marketIndex}`
 						);
