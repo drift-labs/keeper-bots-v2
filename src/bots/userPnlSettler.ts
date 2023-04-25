@@ -76,9 +76,10 @@ export class UserPnlSettlerBot implements Bot {
 		// initialize userMap instance
 		this.userMap = new UserMap(
 			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
+			this.driftClient.userAccountSubscriptionConfig,
+			false
 		);
-		await this.userMap.fetchAllUsers();
+		await this.userMap.sync();
 	}
 
 	public async reset() {

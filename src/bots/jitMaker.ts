@@ -230,15 +230,16 @@ export class JitMakerBot implements Bot {
 
 		this.userMap = new UserMap(
 			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
+			this.driftClient.userAccountSubscriptionConfig,
+			false
 		);
-		initPromises.push(this.userMap.fetchAllUsers());
+		initPromises.push(this.userMap.sync());
 
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
 			this.driftClient.userAccountSubscriptionConfig
 		);
-		initPromises.push(this.userStatsMap.fetchAllUserStats());
+		initPromises.push(this.userStatsMap.sync());
 
 		this.dlob = new DLOB();
 		initPromises.push(

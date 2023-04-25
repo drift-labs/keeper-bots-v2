@@ -173,9 +173,10 @@ export class TriggerBot implements Bot {
 		await this.userMapMutex.runExclusive(async () => {
 			this.userMap = new UserMap(
 				this.driftClient,
-				this.driftClient.userAccountSubscriptionConfig
+				this.driftClient.userAccountSubscriptionConfig,
+				false
 			);
-			await this.userMap.fetchAllUsers();
+			await this.userMap.sync();
 			this.lastSeenNumberOfSubAccounts = this.driftClient
 				.getStateAccount()
 				.numberOfSubAccounts.toNumber();

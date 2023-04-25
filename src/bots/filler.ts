@@ -666,7 +666,7 @@ export class FillerBot implements Bot {
 					logger.info(`Resyncing UserMap`);
 					const userMapSizeBefore = this.userMap.size();
 					const userStatsMapSizeBefore = this.userStatsMap.size();
-					this.userMap.sync(false).then(() => {
+					this.userMap.sync().then(() => {
 						this.userStatsMap
 							.sync()
 							.then(async () => {
@@ -1708,8 +1708,6 @@ export class FillerBot implements Bot {
 						user.getUserAccount()
 					)
 				);
-			} else if (e === dlobMutexError) {
-				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
 				webhookMessage(
 					`[${this.name}]: :x: uncaught error:\n${

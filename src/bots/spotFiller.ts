@@ -426,15 +426,16 @@ export class SpotFillerBot implements Bot {
 			this.userMapMutex.runExclusive(async () => {
 				this.userMap = new UserMap(
 					this.driftClient,
-					this.driftClient.userAccountSubscriptionConfig
+					this.driftClient.userAccountSubscriptionConfig,
+					false
 				);
 				this.userStatsMap = new UserStatsMap(
 					this.driftClient,
 					this.userStatsMapSubscriptionConfig
 				);
 
-				await this.userMap.fetchAllUsers();
-				await this.userStatsMap.fetchAllUserStats();
+				await this.userMap.sync();
+				await this.userStatsMap.sync();
 
 				this.lastSeenNumberOfSubAccounts = this.driftClient
 					.getStateAccount()
@@ -598,7 +599,7 @@ export class SpotFillerBot implements Bot {
 
 				if (doResync) {
 					logger.info(`Resyncing UserMap`);
-					this.userMap.sync(false).then(() => {
+					this.userMap.sync().then(() => {
 						this.userStatsMap
 							.sync()
 							.then(async () => {
