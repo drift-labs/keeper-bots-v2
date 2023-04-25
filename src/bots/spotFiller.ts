@@ -27,14 +27,9 @@ import {
 	WrappedEvent,
 	DLOBNode,
 	UserSubscriptionConfig,
+	DLOBSubscriber,
 } from '@drift-labs/sdk';
-import {
-	Mutex,
-	tryAcquire,
-	withTimeout,
-	E_ALREADY_LOCKED,
-	MutexInterface,
-} from 'async-mutex';
+import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
 	AddressLookupTableAccount,
@@ -97,8 +92,6 @@ const pendingTxKink2 = 10; // number of pending tx after which we clamp the prio
 const minPriorityFee = 5000;
 const maxPriorityFee = 10000;
 
-const dlobMutexError = new Error('dlobMutex timeout');
-
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
 ];
@@ -150,8 +143,7 @@ export class SpotFillerBot implements Bot {
 	private transactionVersion: number;
 	private lookupTableAccount: AddressLookupTableAccount;
 
-	private dlobMutex: MutexInterface;
-	private dlob: DLOB;
+	private dlobSubscriber: DLOBSubscriber;
 
 	private userMapMutex = new Mutex();
 	private userMap: UserMap;
@@ -231,12 +223,6 @@ export class SpotFillerBot implements Bot {
 
 		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(driftClient);
 		this.serumSubscribers = new Map<number, SerumSubscriber>();
-
-		this.dlobMutex = withTimeout(
-			new Mutex(),
-			10 * this.pollingIntervalMs,
-			dlobMutexError
-		);
 
 		this.metricsPort = config.metricsPort;
 		if (this.metricsPort) {
@@ -561,7 +547,7 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public viewDlob(): DLOB {
-		return this.dlob;
+		return this.dlobSubscriber.getDLOB();
 	}
 
 	private async resyncUserMapsIfRequired() {
@@ -622,35 +608,28 @@ export class SpotFillerBot implements Bot {
 	}
 
 	private async getSpotFillableNodesForMarket(
-		market: SpotMarketAccount
+		market: SpotMarketAccount,
+		dlob: DLOB
 	): Promise<Array<NodeToFill>> {
-		let nodes: Array<NodeToFill> = [];
-
 		const oraclePriceData = this.driftClient.getOracleDataForSpotMarket(
 			market.marketIndex
 		);
 
-		// TODO: check oracle validity when ready
+		const serumSubscriber = this.serumSubscribers.get(market.marketIndex);
+		const serumBestBid = serumSubscriber?.getBestBid();
+		const serumBestAsk = serumSubscriber?.getBestAsk();
 
-		await this.dlobMutex.runExclusive(async () => {
-			const serumSubscriber = this.serumSubscribers.get(market.marketIndex);
-			const serumBestBid = serumSubscriber?.getBestBid();
-			const serumBestAsk = serumSubscriber?.getBestAsk();
-
-			nodes = this.dlob.findNodesToFill(
-				market.marketIndex,
-				serumBestBid,
-				serumBestAsk,
-				oraclePriceData.slot.toNumber(),
-				Date.now() / 1000,
-				MarketType.SPOT,
-				oraclePriceData,
-				this.driftClient.getStateAccount(),
-				this.driftClient.getSpotMarketAccount(market.marketIndex)
-			);
-		});
-
-		return nodes;
+		return dlob.findNodesToFill(
+			market.marketIndex,
+			serumBestBid,
+			serumBestAsk,
+			oraclePriceData.slot.toNumber(),
+			Date.now() / 1000,
+			MarketType.SPOT,
+			oraclePriceData,
+			this.driftClient.getStateAccount(),
+			this.driftClient.getSpotMarketAccount(market.marketIndex)
+		);
 	}
 
 	private getNodeToFillSignature(node: NodeToFill): string {
@@ -1216,32 +1195,14 @@ export class SpotFillerBot implements Bot {
 
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				await this.dlobMutex.runExclusive(async () => {
-					if (this.dlob) {
-						this.dlob.clear();
-						delete this.dlob;
-					}
-					this.dlob = new DLOB();
-					try {
-						await tryAcquire(this.userMapMutex).runExclusive(async () => {
-							await this.dlob.initFromUserMap(
-								this.userMap,
-								this.bulkAccountLoader.mostRecentSlot
-							);
-						});
-					} catch (e) {
-						if (e != E_ALREADY_LOCKED) {
-							throw new Error(`Failed to init DLOB from usermap: ${e}`);
-						}
-					}
-					if (orderRecord) {
-						this.dlob.insertOrder(
-							orderRecord.order,
-							orderRecord.user,
-							this.bulkAccountLoader.mostRecentSlot
-						);
-					}
-				});
+				const dlob = this.dlobSubscriber.getDLOB();
+				if (orderRecord && dlob) {
+					dlob.insertOrder(
+						orderRecord.order,
+						orderRecord.user,
+						orderRecord.order.slot.toNumber()
+					);
+				}
 
 				await this.resyncUserMapsIfRequired();
 
@@ -1257,7 +1218,7 @@ export class SpotFillerBot implements Bot {
 				let fillableNodes: Array<NodeToFill> = [];
 				for (const market of this.driftClient.getSpotMarketAccounts()) {
 					fillableNodes = fillableNodes.concat(
-						await this.getSpotFillableNodesForMarket(market)
+						await this.getSpotFillableNodesForMarket(market, dlob)
 					);
 				}
 
@@ -1286,8 +1247,6 @@ export class SpotFillerBot implements Bot {
 						user.getUserAccount()
 					)
 				);
-			} else if (e === dlobMutexError) {
-				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
 				logger.error('some other error:');
 				console.error(e);

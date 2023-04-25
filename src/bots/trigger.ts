@@ -10,8 +10,9 @@ import {
 	BulkAccountLoader,
 	getOrderSignature,
 	User,
+	DLOBSubscriber,
 } from '@drift-labs/sdk';
-import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
+import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import { logger } from '../logger';
 import { Bot } from '../types';
@@ -28,7 +29,6 @@ import {
 } from '@opentelemetry/sdk-metrics-base';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 
-const dlobMutexError = new Error('dlobMutex timeout');
 const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
@@ -53,12 +53,7 @@ export class TriggerBot implements Bot {
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
-	private dlobMutex = withTimeout(
-		new Mutex(),
-		10 * this.defaultIntervalMs,
-		dlobMutexError
-	);
-	private dlob: DLOB;
+	private dlobSubscriber: DLOBSubscriber;
 	private triggeringNodes = new Map<string, number>();
 	private periodicTaskMutex = new Mutex();
 	private intervalIds: Array<NodeJS.Timer> = [];
@@ -218,7 +213,7 @@ export class TriggerBot implements Bot {
 	}
 
 	public viewDlob(): DLOB {
-		return this.dlob;
+		return this.dlobSubscriber.getDLOB();
 	}
 
 	/**
@@ -281,16 +276,14 @@ export class TriggerBot implements Bot {
 			const oraclePriceData =
 				this.driftClient.getOracleDataForPerpMarket(marketIndex);
 
-			let nodesToTrigger: Array<NodeToTrigger> = [];
-			await this.dlobMutex.runExclusive(async () => {
-				nodesToTrigger = this.dlob.findNodesToTrigger(
-					marketIndex,
-					this.slotSubscriber.getSlot(),
-					oraclePriceData.price,
-					MarketType.PERP,
-					this.driftClient.getStateAccount()
-				);
-			});
+			const dlob = this.dlobSubscriber.getDLOB();
+			const nodesToTrigger = dlob.findNodesToTrigger(
+				marketIndex,
+				this.slotSubscriber.getSlot(),
+				oraclePriceData.price,
+				MarketType.PERP,
+				this.driftClient.getStateAccount()
+			);
 
 			for (const nodeToTrigger of nodesToTrigger) {
 				const now = Date.now();
@@ -393,16 +386,14 @@ export class TriggerBot implements Bot {
 			const oraclePriceData =
 				this.driftClient.getOracleDataForSpotMarket(marketIndex);
 
-			let nodesToTrigger: Array<NodeToTrigger> = [];
-			await this.dlobMutex.runExclusive(async () => {
-				nodesToTrigger = this.dlob.findNodesToTrigger(
-					marketIndex,
-					this.slotSubscriber.getSlot(),
-					oraclePriceData.price,
-					MarketType.SPOT,
-					this.driftClient.getStateAccount()
-				);
-			});
+			const dlob = this.dlobSubscriber.getDLOB();
+			const nodesToTrigger = dlob.findNodesToTrigger(
+				marketIndex,
+				this.slotSubscriber.getSlot(),
+				oraclePriceData.price,
+				MarketType.SPOT,
+				this.driftClient.getStateAccount()
+			);
 
 			for (const nodeToTrigger of nodesToTrigger) {
 				if (nodeToTrigger.node.haveTrigger) {
@@ -488,20 +479,6 @@ export class TriggerBot implements Bot {
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				await this.dlobMutex.runExclusive(async () => {
-					if (this.dlob) {
-						this.dlob.clear();
-						delete this.dlob;
-					}
-					this.dlob = new DLOB();
-					await this.userMapMutex.runExclusive(async () => {
-						await this.dlob.initFromUserMap(
-							this.userMap,
-							this.slotSubscriber.getSlot()
-						);
-					});
-				});
-
 				await this.resyncUserMapsIfRequired();
 
 				await Promise.all([
@@ -524,8 +501,6 @@ export class TriggerBot implements Bot {
 						user.getUserAccount()
 					)
 				);
-			} else if (e === dlobMutexError) {
-				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
 				webhookMessage(
 					`[${this.name}]: :x: Uncaught error in main loop:\n${

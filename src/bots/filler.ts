@@ -695,7 +695,7 @@ export class FillerBot implements Bot {
 	private async getPerpFillableNodesForMarket(
 		market: PerpMarketAccount,
 		dlob: DLOB
-	): Promise<[Array<NodeToFill>, DLOB]> {
+	): Promise<Array<NodeToFill>> {
 		const marketIndex = market.marketIndex;
 
 		const oraclePriceData =
@@ -704,7 +704,7 @@ export class FillerBot implements Bot {
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
 
-		const nodesToFill = dlob.findNodesToFill(
+		return dlob.findNodesToFill(
 			marketIndex,
 			vBid,
 			vAsk,
@@ -715,7 +715,6 @@ export class FillerBot implements Bot {
 			this.driftClient.getStateAccount(),
 			this.driftClient.getPerpMarketAccount(marketIndex)
 		);
-		return [nodesToFill, dlob];
 	}
 
 	private getNodeToFillSignature(node: NodeToFill): string {
@@ -1627,12 +1626,11 @@ export class FillerBot implements Bot {
 	}
 
 	private async tryFill(orderRecord?: OrderRecord) {
-		console.log('beep motof');
 		const startTime = Date.now();
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				let dlob = this.dlobSubscriber.getDLOB();
+				const dlob = this.dlobSubscriber.getDLOB();
 				if (orderRecord && dlob) {
 					dlob.insertOrder(
 						orderRecord.order,
@@ -1645,13 +1643,9 @@ export class FillerBot implements Bot {
 
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];
-				let oo = 0;
 				for (const market of this.driftClient.getPerpMarketAccounts()) {
-					console.log(`wtf: ${oo}`);
-					oo++;
 					try {
-						let nodesToFill: Array<NodeToFill> = [];
-						[nodesToFill, dlob] = await this.getPerpFillableNodesForMarket(
+						const nodesToFill = await this.getPerpFillableNodesForMarket(
 							market,
 							dlob
 						);
