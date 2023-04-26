@@ -27,14 +27,10 @@ import {
 	WrappedEvent,
 	DLOBNode,
 	UserSubscriptionConfig,
+	DLOBSubscriber,
+	SlotSubscriber,
 } from '@drift-labs/sdk';
-import {
-	Mutex,
-	tryAcquire,
-	withTimeout,
-	E_ALREADY_LOCKED,
-	MutexInterface,
-} from 'async-mutex';
+import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
 	AddressLookupTableAccount,
@@ -85,7 +81,6 @@ const THROTTLED_NODE_SIZE_TO_PRUNE = 10;
  * Time to wait before trying a node again
  */
 const FILL_ORDER_BACKOFF = 10000;
-const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 
 /**
  * Constants to determine if we should add a priority fee to a transaction
@@ -96,8 +91,6 @@ const pendingTxKink2 = 10; // number of pending tx after which we clamp the prio
 // the max priority fee we will add on top of the 5000 lamport base fee.
 const minPriorityFee = 5000;
 const maxPriorityFee = 10000;
-
-const dlobMutexError = new Error('dlobMutex timeout');
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
@@ -143,6 +136,7 @@ export class SpotFillerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 5000;
 
+	private slotSubscriber: SlotSubscriber;
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	private driftClient: DriftClient;
@@ -150,14 +144,10 @@ export class SpotFillerBot implements Bot {
 	private transactionVersion: number;
 	private lookupTableAccount: AddressLookupTableAccount;
 
-	private dlobMutex: MutexInterface;
-	private dlob: DLOB;
+	private dlobSubscriber: DLOBSubscriber;
 
-	private userMapMutex = new Mutex();
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
-	private lastSeenNumberOfSubAccounts: number;
-	private lastSeenNumberOfAuthorities: number;
 
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
 	private serumSubscribers: Map<number, SerumSubscriber>;
@@ -166,9 +156,6 @@ export class SpotFillerBot implements Bot {
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
-
-	private lastSlotReyncUserMapsMutex = new Mutex();
-	private lastSlotResyncUserMaps = 0;
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
@@ -198,6 +185,7 @@ export class SpotFillerBot implements Bot {
 	private pendingTransactionsGauge: ObservableGauge;
 
 	constructor(
+		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
@@ -210,6 +198,7 @@ export class SpotFillerBot implements Bot {
 		}
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
+		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		this.bulkAccountLoader = bulkAccountLoader;
 		if (this.bulkAccountLoader) {
@@ -231,12 +220,6 @@ export class SpotFillerBot implements Bot {
 
 		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(driftClient);
 		this.serumSubscribers = new Map<number, SerumSubscriber>();
-
-		this.dlobMutex = withTimeout(
-			new Mutex(),
-			10 * this.pollingIntervalMs,
-			dlobMutexError
-		);
 
 		this.metricsPort = config.metricsPort;
 		if (this.metricsPort) {
@@ -422,28 +405,25 @@ export class SpotFillerBot implements Bot {
 
 		const initPromises: Array<Promise<any>> = [];
 
-		initPromises.push(
-			this.userMapMutex.runExclusive(async () => {
-				this.userMap = new UserMap(
-					this.driftClient,
-					this.driftClient.userAccountSubscriptionConfig
-				);
-				this.userStatsMap = new UserStatsMap(
-					this.driftClient,
-					this.userStatsMapSubscriptionConfig
-				);
-
-				await this.userMap.fetchAllUsers();
-				await this.userStatsMap.fetchAllUserStats();
-
-				this.lastSeenNumberOfSubAccounts = this.driftClient
-					.getStateAccount()
-					.numberOfSubAccounts.toNumber();
-				this.lastSeenNumberOfAuthorities = this.driftClient
-					.getStateAccount()
-					.numberOfAuthorities.toNumber();
-			})
+		this.userMap = new UserMap(
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig,
+			false
 		);
+		initPromises.push(this.userMap.subscribe());
+
+		this.userStatsMap = new UserStatsMap(
+			this.driftClient,
+			this.userStatsMapSubscriptionConfig
+		);
+		initPromises.push(this.userStatsMap.subscribe());
+
+		this.dlobSubscriber = new DLOBSubscriber({
+			dlobSource: this.userMap,
+			slotSource: this.slotSubscriber,
+			updateFrequency: this.pollingIntervalMs - 500,
+		});
+		initPromises.push(this.dlobSubscriber.subscribe());
 
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
 		for (const spotMarketConfig of config.SPOT_MARKETS) {
@@ -485,7 +465,20 @@ export class SpotFillerBot implements Bot {
 		await webhookMessage(`[${this.name}]: started`);
 	}
 
-	public async reset() {}
+	public async reset() {
+		for (const intervalId of this.intervalIds) {
+			clearInterval(intervalId);
+		}
+		this.intervalIds = [];
+
+		await this.dlobSubscriber.unsubscribe();
+		await this.userStatsMap.unsubscribe();
+		await this.userMap.unsubscribe();
+
+		for (const serumSubscriber of this.serumSubscribers.values()) {
+			await serumSubscriber.unsubscribe();
+		}
+	}
 
 	public async startIntervalLoop(_intervalMs: number) {
 		const intervalId = setInterval(
@@ -507,35 +500,12 @@ export class SpotFillerBot implements Bot {
 			}
 		});
 
-		const stateAccount = this.driftClient.getStateAccount();
-		const userMapResyncRequired =
-			this.lastSeenNumberOfSubAccounts !==
-				stateAccount.numberOfSubAccounts.toNumber() ||
-			this.lastSeenNumberOfAuthorities !==
-				stateAccount.numberOfAuthorities.toNumber();
-
-		if (userMapResyncRequired) {
-			logger.warn(
-				`${
-					this.name
-				} user map resync required, userMap size: ${this.userMap.size()}, stateAccount.numberOfSubAccounts: ${stateAccount.numberOfSubAccounts.toNumber()}, userStatsMap size: ${this.userStatsMap.size()}, stateAccount.numberOfAuthorities: ${stateAccount.numberOfAuthorities.toNumber()}`
-			);
-		}
-		healthy = healthy && !userMapResyncRequired;
-
 		return healthy;
 	}
 
 	public async trigger(record: WrappedEvent<any>) {
-		// logger.info(
-		// 	`Spot filler seen record (slot: ${record.slot}): ${record.eventType}`
-		// );
-
-		// potentially a race here, but the lock is really slow :/
-		// await this.userMapMutex.runExclusive(async () => {
 		await this.userMap.updateWithEventRecord(record);
 		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
-		// });
 
 		if (record.eventType === 'OrderRecord') {
 			const orderRecord = record as OrderRecord;
@@ -560,96 +530,32 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public viewDlob(): DLOB {
-		return this.dlob;
-	}
-
-	private async resyncUserMapsIfRequired() {
-		const stateAccount = this.driftClient.getStateAccount();
-		const resyncRequired =
-			this.lastSeenNumberOfSubAccounts !==
-				stateAccount.numberOfSubAccounts.toNumber() ||
-			this.lastSeenNumberOfAuthorities !==
-				stateAccount.numberOfAuthorities.toNumber();
-
-		if (resyncRequired) {
-			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
-				let doResync = false;
-				const start = Date.now();
-				if (!this.bulkAccountLoader) {
-					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
-					doResync = true;
-				} else {
-					const nextResyncSlot =
-						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
-					if (nextResyncSlot >= this.bulkAccountLoader.mostRecentSlot) {
-						const slotsRemaining =
-							nextResyncSlot - this.bulkAccountLoader.mostRecentSlot;
-						if (slotsRemaining % 10 === 0) {
-							logger.info(
-								`Resyncing UserMaps in cooldown, ${slotsRemaining} more slots to go`
-							);
-						}
-						return;
-					} else {
-						doResync = true;
-						this.lastSlotResyncUserMaps = this.bulkAccountLoader.mostRecentSlot;
-					}
-				}
-
-				if (doResync) {
-					logger.info(`Resyncing UserMap`);
-					this.userMap.sync(false).then(() => {
-						this.userStatsMap
-							.sync()
-							.then(async () => {
-								await this.userMapMutex.runExclusive(async () => {
-									this.lastSeenNumberOfSubAccounts = this.driftClient
-										.getStateAccount()
-										.numberOfSubAccounts.toNumber();
-									this.lastSeenNumberOfAuthorities = this.driftClient
-										.getStateAccount()
-										.numberOfAuthorities.toNumber();
-								});
-							})
-							.finally(() => {
-								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
-							});
-					});
-				}
-			});
-		}
+		return this.dlobSubscriber.getDLOB();
 	}
 
 	private async getSpotFillableNodesForMarket(
-		market: SpotMarketAccount
+		market: SpotMarketAccount,
+		dlob: DLOB
 	): Promise<Array<NodeToFill>> {
-		let nodes: Array<NodeToFill> = [];
-
 		const oraclePriceData = this.driftClient.getOracleDataForSpotMarket(
 			market.marketIndex
 		);
 
-		// TODO: check oracle validity when ready
+		const serumSubscriber = this.serumSubscribers.get(market.marketIndex);
+		const serumBestBid = serumSubscriber?.getBestBid();
+		const serumBestAsk = serumSubscriber?.getBestAsk();
 
-		await this.dlobMutex.runExclusive(async () => {
-			const serumSubscriber = this.serumSubscribers.get(market.marketIndex);
-			const serumBestBid = serumSubscriber?.getBestBid();
-			const serumBestAsk = serumSubscriber?.getBestAsk();
-
-			nodes = this.dlob.findNodesToFill(
-				market.marketIndex,
-				serumBestBid,
-				serumBestAsk,
-				oraclePriceData.slot.toNumber(),
-				Date.now() / 1000,
-				MarketType.SPOT,
-				oraclePriceData,
-				this.driftClient.getStateAccount(),
-				this.driftClient.getSpotMarketAccount(market.marketIndex)
-			);
-		});
-
-		return nodes;
+		return dlob.findNodesToFill(
+			market.marketIndex,
+			serumBestBid,
+			serumBestAsk,
+			oraclePriceData.slot.toNumber(),
+			Date.now() / 1000,
+			MarketType.SPOT,
+			oraclePriceData,
+			this.driftClient.getStateAccount(),
+			this.driftClient.getSpotMarketAccount(market.marketIndex)
+		);
 	}
 
 	private getNodeToFillSignature(node: NodeToFill): string {
@@ -666,42 +572,31 @@ export class SpotFillerBot implements Bot {
 		marketType: MarketType;
 	}> {
 		let makerInfo: MakerInfo | undefined;
-		let chUser: User;
-		let referrerInfo: ReferrerInfo;
-
-		try {
-			await this.userMapMutex.runExclusive(async () => {
-				const makerNode = getMakerNodeFromNodeToFill(nodeToFill);
-				if (makerNode) {
-					const makerUserAccount = (
-						await this.userMap.mustGet(makerNode.userAccount.toString())
-					).getUserAccount();
-					const makerAuthority = makerUserAccount.authority;
-					const makerUserStats = (
-						await this.userStatsMap.mustGet(makerAuthority.toString())
-					).userStatsAccountPublicKey;
-					makerInfo = {
-						maker: makerNode.userAccount,
-						makerUserAccount: makerUserAccount,
-						order: makerNode.order,
-						makerStats: makerUserStats,
-					};
-				}
-
-				chUser = await this.userMap.mustGet(
-					nodeToFill.node.userAccount.toString()
-				);
-				referrerInfo = (
-					await this.userStatsMap.mustGet(
-						chUser.getUserAccount().authority.toString()
-					)
-				).getReferrerInfo();
-			});
-		} catch (e) {
-			if (e != E_ALREADY_LOCKED) {
-				throw new Error(`Error locking userMapMutex to fill node: ${e}`);
-			}
+		const makerNode = getMakerNodeFromNodeToFill(nodeToFill);
+		if (makerNode) {
+			const makerUserAccount = (
+				await this.userMap.mustGet(makerNode.userAccount.toString())
+			).getUserAccount();
+			const makerAuthority = makerUserAccount.authority;
+			const makerUserStats = (
+				await this.userStatsMap.mustGet(makerAuthority.toString())
+			).userStatsAccountPublicKey;
+			makerInfo = {
+				maker: makerNode.userAccount,
+				makerUserAccount: makerUserAccount,
+				order: makerNode.order,
+				makerStats: makerUserStats,
+			};
 		}
+
+		const chUser = await this.userMap.mustGet(
+			nodeToFill.node.userAccount.toString()
+		);
+		const referrerInfo = (
+			await this.userStatsMap.mustGet(
+				chUser.getUserAccount().authority.toString()
+			)
+		).getReferrerInfo();
 
 		return Promise.resolve({
 			makerInfo,
@@ -1215,34 +1110,14 @@ export class SpotFillerBot implements Bot {
 
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				await this.dlobMutex.runExclusive(async () => {
-					if (this.dlob) {
-						this.dlob.clear();
-						delete this.dlob;
-					}
-					this.dlob = new DLOB();
-					try {
-						await tryAcquire(this.userMapMutex).runExclusive(async () => {
-							await this.dlob.initFromUserMap(
-								this.userMap,
-								this.bulkAccountLoader.mostRecentSlot
-							);
-						});
-					} catch (e) {
-						if (e != E_ALREADY_LOCKED) {
-							throw new Error(`Failed to init DLOB from usermap: ${e}`);
-						}
-					}
-					if (orderRecord) {
-						this.dlob.insertOrder(
-							orderRecord.order,
-							orderRecord.user,
-							this.bulkAccountLoader.mostRecentSlot
-						);
-					}
-				});
-
-				await this.resyncUserMapsIfRequired();
+				const dlob = this.dlobSubscriber.getDLOB();
+				if (orderRecord && dlob) {
+					dlob.insertOrder(
+						orderRecord.order,
+						orderRecord.user,
+						orderRecord.order.slot.toNumber()
+					);
+				}
 
 				if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
 					for (const [key, value] of this.throttledNodes.entries()) {
@@ -1256,7 +1131,7 @@ export class SpotFillerBot implements Bot {
 				let fillableNodes: Array<NodeToFill> = [];
 				for (const market of this.driftClient.getSpotMarketAccounts()) {
 					fillableNodes = fillableNodes.concat(
-						await this.getSpotFillableNodesForMarket(market)
+						await this.getSpotFillableNodesForMarket(market, dlob)
 					);
 				}
 
@@ -1285,8 +1160,6 @@ export class SpotFillerBot implements Bot {
 						user.getUserAccount()
 					)
 				);
-			} else if (e === dlobMutexError) {
-				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
 				logger.error('some other error:');
 				console.error(e);

@@ -9,9 +9,9 @@ import {
 	MarketType,
 	BulkAccountLoader,
 	getOrderSignature,
-	User,
+	DLOBSubscriber,
 } from '@drift-labs/sdk';
-import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
+import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import { logger } from '../logger';
 import { Bot } from '../types';
@@ -28,8 +28,6 @@ import {
 } from '@opentelemetry/sdk-metrics-base';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 
-const dlobMutexError = new Error('dlobMutex timeout');
-const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
 const errorCodesToSuppress = [
@@ -53,18 +51,11 @@ export class TriggerBot implements Bot {
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
-	private dlobMutex = withTimeout(
-		new Mutex(),
-		10 * this.defaultIntervalMs,
-		dlobMutexError
-	);
-	private dlob: DLOB;
+	private dlobSubscriber: DLOBSubscriber;
 	private triggeringNodes = new Map<string, number>();
 	private periodicTaskMutex = new Mutex();
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private userMapMutex = new Mutex();
 	private userMap: UserMap;
-	private lastSeenNumberOfSubAccounts: number;
 
 	// metrics
 	private metricsInitialized = false;
@@ -80,9 +71,6 @@ export class TriggerBot implements Bot {
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
-
-	private lastSlotReyncUserMapsMutex = new Mutex();
-	private lastSlotResyncUserMaps = 0;
 
 	constructor(
 		bulkAccountLoader: BulkAccountLoader | undefined,
@@ -169,20 +157,30 @@ export class TriggerBot implements Bot {
 
 	public async init() {
 		logger.info(`${this.name} initing`);
-		// initialize userMap instance
-		await this.userMapMutex.runExclusive(async () => {
-			this.userMap = new UserMap(
-				this.driftClient,
-				this.driftClient.userAccountSubscriptionConfig
-			);
-			await this.userMap.fetchAllUsers();
-			this.lastSeenNumberOfSubAccounts = this.driftClient
-				.getStateAccount()
-				.numberOfSubAccounts.toNumber();
+		this.userMap = new UserMap(
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig,
+			false
+		);
+		await this.userMap.subscribe();
+
+		this.dlobSubscriber = new DLOBSubscriber({
+			dlobSource: this.userMap,
+			slotSource: this.slotSubscriber,
+			updateFrequency: this.defaultIntervalMs - 500,
 		});
+		await this.dlobSubscriber.subscribe();
 	}
 
-	public async reset() {}
+	public async reset() {
+		for (const intervalId of this.intervalIds) {
+			clearInterval(intervalId);
+		}
+		this.intervalIds = [];
+
+		await this.dlobSubscriber.unsubscribe();
+		await this.userMap.unsubscribe();
+	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
 		this.tryTrigger();
@@ -199,78 +197,15 @@ export class TriggerBot implements Bot {
 				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
 		});
 
-		const stateAccount = this.driftClient.getStateAccount();
-		const userMapResyncRequired =
-			this.lastSeenNumberOfSubAccounts !==
-			stateAccount.numberOfSubAccounts.toNumber();
-
-		healthy = healthy && !userMapResyncRequired;
-
 		return healthy;
 	}
 
 	public async trigger(record: any): Promise<void> {
-		// potentially a race here, but the lock is really slow :/
-		// await this.userMapMutex.runExclusive(async () => {
 		await this.userMap.updateWithEventRecord(record);
-		// });
 	}
 
 	public viewDlob(): DLOB {
-		return this.dlob;
-	}
-
-	/**
-	 * Checks that userMap is up in sync, if not, signal that we should update them next block.
-	 */
-	private async resyncUserMapsIfRequired() {
-		const stateAccount = this.driftClient.getStateAccount();
-		const resyncRequired =
-			this.lastSeenNumberOfSubAccounts !==
-			stateAccount.numberOfSubAccounts.toNumber();
-
-		if (resyncRequired) {
-			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
-				let doResync = false;
-				const start = Date.now();
-				if (!this.bulkAccountLoader) {
-					logger.info(`Resyncing UserMaps immediately (no BulkAccountLoader)`);
-					doResync = true;
-				} else {
-					const nextResyncSlot =
-						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
-					if (nextResyncSlot >= this.bulkAccountLoader.mostRecentSlot) {
-						const slotsRemaining =
-							nextResyncSlot - this.bulkAccountLoader.mostRecentSlot;
-						if (slotsRemaining % 10 === 0) {
-							logger.info(
-								`Resyncing UserMaps in cooldown, ${slotsRemaining} more slots to go`
-							);
-						}
-						return;
-					} else {
-						doResync = true;
-						this.lastSlotResyncUserMaps = this.bulkAccountLoader.mostRecentSlot;
-					}
-				}
-
-				if (doResync) {
-					logger.info(`Resyncing UserMap`);
-					this.userMap
-						.sync()
-						.then(async () => {
-							await this.userMapMutex.runExclusive(async () => {
-								this.lastSeenNumberOfSubAccounts = this.driftClient
-									.getStateAccount()
-									.numberOfSubAccounts.toNumber();
-							});
-						})
-						.finally(() => {
-							logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
-						});
-				}
-			});
-		}
+		return this.dlobSubscriber.getDLOB();
 	}
 
 	private async tryTriggerForPerpMarket(market: PerpMarketAccount) {
@@ -280,16 +215,14 @@ export class TriggerBot implements Bot {
 			const oraclePriceData =
 				this.driftClient.getOracleDataForPerpMarket(marketIndex);
 
-			let nodesToTrigger: Array<NodeToTrigger> = [];
-			await this.dlobMutex.runExclusive(async () => {
-				nodesToTrigger = this.dlob.findNodesToTrigger(
-					marketIndex,
-					this.slotSubscriber.getSlot(),
-					oraclePriceData.price,
-					MarketType.PERP,
-					this.driftClient.getStateAccount()
-				);
-			});
+			const dlob = this.dlobSubscriber.getDLOB();
+			const nodesToTrigger = dlob.findNodesToTrigger(
+				marketIndex,
+				this.slotSubscriber.getSlot(),
+				oraclePriceData.price,
+				MarketType.PERP,
+				this.driftClient.getStateAccount()
+			);
 
 			for (const nodeToTrigger of nodesToTrigger) {
 				const now = Date.now();
@@ -321,12 +254,9 @@ export class TriggerBot implements Bot {
 					} (account: ${nodeToTrigger.node.userAccount.toString()}) perp order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
-				let user: User;
-				await this.userMapMutex.runExclusive(async () => {
-					user = await this.userMap.mustGet(
-						nodeToTrigger.node.userAccount.toString()
-					);
-				});
+				const user = await this.userMap.mustGet(
+					nodeToTrigger.node.userAccount.toString()
+				);
 				this.driftClient
 					.triggerOrder(
 						nodeToTrigger.node.userAccount,
@@ -392,16 +322,14 @@ export class TriggerBot implements Bot {
 			const oraclePriceData =
 				this.driftClient.getOracleDataForSpotMarket(marketIndex);
 
-			let nodesToTrigger: Array<NodeToTrigger> = [];
-			await this.dlobMutex.runExclusive(async () => {
-				nodesToTrigger = this.dlob.findNodesToTrigger(
-					marketIndex,
-					this.slotSubscriber.getSlot(),
-					oraclePriceData.price,
-					MarketType.SPOT,
-					this.driftClient.getStateAccount()
-				);
-			});
+			const dlob = this.dlobSubscriber.getDLOB();
+			const nodesToTrigger = dlob.findNodesToTrigger(
+				marketIndex,
+				this.slotSubscriber.getSlot(),
+				oraclePriceData.price,
+				MarketType.SPOT,
+				this.driftClient.getStateAccount()
+			);
 
 			for (const nodeToTrigger of nodesToTrigger) {
 				if (nodeToTrigger.node.haveTrigger) {
@@ -414,12 +342,9 @@ export class TriggerBot implements Bot {
 					`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) spot order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
-				let user: User;
-				await this.userMapMutex.runExclusive(async () => {
-					user = await this.userMap.mustGet(
-						nodeToTrigger.node.userAccount.toString()
-					);
-				});
+				const user = await this.userMap.mustGet(
+					nodeToTrigger.node.userAccount.toString()
+				);
 				this.driftClient
 					.triggerOrder(
 						nodeToTrigger.node.userAccount,
@@ -487,22 +412,6 @@ export class TriggerBot implements Bot {
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				await this.dlobMutex.runExclusive(async () => {
-					if (this.dlob) {
-						this.dlob.clear();
-						delete this.dlob;
-					}
-					this.dlob = new DLOB();
-					await this.userMapMutex.runExclusive(async () => {
-						await this.dlob.initFromUserMap(
-							this.userMap,
-							this.slotSubscriber.getSlot()
-						);
-					});
-				});
-
-				await this.resyncUserMapsIfRequired();
-
 				await Promise.all([
 					this.driftClient.getPerpMarketAccounts().map((marketAccount) => {
 						this.tryTriggerForPerpMarket(marketAccount);
@@ -523,8 +432,6 @@ export class TriggerBot implements Bot {
 						user.getUserAccount()
 					)
 				);
-			} else if (e === dlobMutexError) {
-				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
 				webhookMessage(
 					`[${this.name}]: :x: Uncaught error in main loop:\n${

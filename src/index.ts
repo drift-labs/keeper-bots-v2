@@ -526,6 +526,7 @@ const runBot = async () => {
 	if (configHasBot(config, 'spotFiller')) {
 		bots.push(
 			new SpotFillerBot(
+				slotSubscriber,
 				bulkAccountLoader,
 				driftClient,
 				{
