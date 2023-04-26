@@ -252,7 +252,16 @@ export class JitMakerBot implements Bot {
 		await Promise.all(initPromises);
 	}
 
-	public async reset() {}
+	public async reset() {
+		for (const intervalId of this.intervalIds) {
+			clearInterval(intervalId);
+		}
+		this.intervalIds = [];
+
+		await this.dlobSubscriber.unsubscribe();
+		await this.userStatsMap.unsubscribe();
+		await this.userMap.unsubscribe();
+	}
 
 	public async startIntervalLoop(intervalMs: number) {
 		await this.tryMake();

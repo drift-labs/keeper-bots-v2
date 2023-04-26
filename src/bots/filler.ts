@@ -90,7 +90,6 @@ const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 10000; // the time to wait before trying to fill a throttled (error filling) node again
 const FILL_ORDER_COOLDOWN_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
-const USER_MAP_RESYNC_COOLDOWN_SLOTS = 50;
 
 const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
@@ -182,19 +181,13 @@ export class FillerBot implements Bot {
 
 	private dlobSubscriber: DLOBSubscriber;
 
-	private userMapMutex = new Mutex();
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
-	private lastSeenNumberOfSubAccounts: number;
-	private lastSeenNumberOfAuthorities: number;
 
 	private periodicTaskMutex = new Mutex();
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
-
-	private lastSlotReyncUserMapsMutex = new Mutex();
-	private lastSlotResyncUserMaps = 0;
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
@@ -491,30 +484,22 @@ export class FillerBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 
-		await this.userMapMutex.runExclusive(async () => {
-			this.userMap = new UserMap(
-				this.driftClient,
-				this.driftClient.userAccountSubscriptionConfig,
-				false
-			);
-			this.userStatsMap = new UserStatsMap(
-				this.driftClient,
-				this.userStatsMapSubscriptionConfig
-			);
+		this.userMap = new UserMap(
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig,
+			false
+		);
+		await this.userMap.subscribe();
 
-			await this.userMap.sync();
-			await this.userStatsMap.sync();
-			logger.info(
-				`initial userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}`
-			);
+		this.userStatsMap = new UserStatsMap(
+			this.driftClient,
+			this.userStatsMapSubscriptionConfig
+		);
+		await this.userStatsMap.subscribe();
 
-			this.lastSeenNumberOfSubAccounts = this.driftClient
-				.getStateAccount()
-				.numberOfSubAccounts.toNumber();
-			this.lastSeenNumberOfAuthorities = this.driftClient
-				.getStateAccount()
-				.numberOfAuthorities.toNumber();
-		});
+		logger.info(
+			`initial userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}`
+		);
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
@@ -529,7 +514,16 @@ export class FillerBot implements Bot {
 		await webhookMessage(`[${this.name}]: started`);
 	}
 
-	public async reset() {}
+	public async reset() {
+		for (const intervalId of this.intervalIds) {
+			clearInterval(intervalId);
+		}
+		this.intervalIds = [];
+
+		await this.dlobSubscriber.unsubscribe();
+		await this.userMap.unsubscribe();
+		await this.userStatsMap.unsubscribe();
+	}
 
 	public async startIntervalLoop(_intervalMs: number) {
 		const intervalId = setInterval(
@@ -553,22 +547,6 @@ export class FillerBot implements Bot {
 			}
 		});
 
-		const stateAccount = this.driftClient.getStateAccount();
-		const userMapResyncRequired =
-			this.lastSeenNumberOfSubAccounts !==
-				stateAccount.numberOfSubAccounts.toNumber() ||
-			this.lastSeenNumberOfAuthorities !==
-				stateAccount.numberOfAuthorities.toNumber();
-		if (userMapResyncRequired) {
-			logger.warn(
-				`${
-					this.name
-				} user map resync required, userMap size: ${this.userMap.size()}, stateAccount.numberOfSubAccounts: ${stateAccount.numberOfSubAccounts.toNumber()}, userStatsMap size: ${this.userStatsMap.size()}, stateAccount.numberOfAuthorities: ${stateAccount.numberOfAuthorities.toNumber()}`
-			);
-		}
-
-		healthy = healthy && !userMapResyncRequired;
-
 		return healthy;
 	}
 
@@ -579,11 +557,8 @@ export class FillerBot implements Bot {
 		if (record.order) {
 			logger.debug(` . ${record.user} - ${record.order.orderId}`);
 		}
-		// potentially a race here, but the lock is really slow :/
-		// await this.userMapMutex.runExclusive(async () => {
 		await this.userMap.updateWithEventRecord(record);
 		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
-		// });
 
 		if (record.eventType === 'OrderRecord') {
 			const orderRecord = record as OrderRecord;
@@ -608,88 +583,6 @@ export class FillerBot implements Bot {
 
 	public viewDlob(): DLOB {
 		return this.dlobSubscriber.getDLOB();
-	}
-
-	/**
-	 * Checks that userMap and userStatsMap are up in sync with , if not, signal that we should update them next block.
-	 */
-	private async resyncUserMapsIfRequired() {
-		const stateAccount = this.driftClient.getStateAccount();
-		const resyncRequired =
-			this.lastSeenNumberOfSubAccounts !==
-				stateAccount.numberOfSubAccounts.toNumber() ||
-			this.lastSeenNumberOfAuthorities !==
-				stateAccount.numberOfAuthorities.toNumber();
-
-		if (resyncRequired) {
-			await this.lastSlotReyncUserMapsMutex.runExclusive(async () => {
-				let doResync = false;
-				const start = Date.now();
-				if (!this.bulkAccountLoader) {
-					const nextResyncSlot =
-						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
-					if (nextResyncSlot >= this.slotSubscriber.currentSlot) {
-						const slotsRemaining =
-							nextResyncSlot - this.slotSubscriber.currentSlot;
-						if (slotsRemaining % 10 === 0) {
-							logger.info(
-								`Resyncing UserMaps in cooldown, ${slotsRemaining} more slots to go`
-							);
-						}
-						return;
-					} else {
-						logger.info(
-							`Resyncing UserMaps immediately (no BulkAccountLoader)`
-						);
-						doResync = true;
-						this.lastSlotResyncUserMaps = this.slotSubscriber.currentSlot;
-					}
-				} else {
-					const nextResyncSlot =
-						this.lastSlotResyncUserMaps + USER_MAP_RESYNC_COOLDOWN_SLOTS;
-					if (nextResyncSlot >= this.bulkAccountLoader.mostRecentSlot) {
-						const slotsRemaining =
-							nextResyncSlot - this.bulkAccountLoader.mostRecentSlot;
-						if (slotsRemaining % 10 === 0) {
-							logger.info(
-								`Resyncing UserMaps in cooldown, ${slotsRemaining} more slots to go`
-							);
-						}
-						return;
-					} else {
-						doResync = true;
-						this.lastSlotResyncUserMaps = this.bulkAccountLoader.mostRecentSlot;
-					}
-				}
-
-				if (doResync) {
-					logger.info(`Resyncing UserMap`);
-					const userMapSizeBefore = this.userMap.size();
-					const userStatsMapSizeBefore = this.userStatsMap.size();
-					this.userMap.sync().then(() => {
-						this.userStatsMap
-							.sync()
-							.then(async () => {
-								await this.userMapMutex.runExclusive(async () => {
-									const usersAdded = this.userMap.size() - userMapSizeBefore;
-									console.log('users added', usersAdded);
-									const userStatsAdded =
-										this.userStatsMap.size() - userStatsMapSizeBefore;
-									console.log('user stats added', userStatsAdded);
-
-									this.lastSeenNumberOfSubAccounts =
-										stateAccount.numberOfSubAccounts.toNumber();
-									this.lastSeenNumberOfAuthorities =
-										stateAccount.numberOfAuthorities.toNumber();
-								});
-							})
-							.finally(() => {
-								logger.info(`UserMaps resynced in ${Date.now() - start}ms`);
-							});
-					});
-				}
-			});
-		}
 	}
 
 	private async getPerpFillableNodesForMarket(
@@ -896,48 +789,45 @@ export class FillerBot implements Bot {
 		marketType: MarketType;
 	}> {
 		const makerInfos: Array<MakerInfo> | undefined = [];
-		let takerUser: User;
-		let referrerInfo: ReferrerInfo;
-		await tryAcquire(this.userMapMutex).runExclusive(async () => {
-			// set to track whether maker account has already been included
-			const makersIncluded = new Set<string>();
-			if (nodeToFill.makerNodes.length > 0) {
-				for (const makerNode of nodeToFill.makerNodes) {
-					if (this.isDLOBNodeThrottled(makerNode)) {
-						continue;
-					}
 
-					const makerAccount = makerNode.userAccount.toBase58();
-					if (makersIncluded.has(makerAccount)) {
-						continue;
-					}
-
-					const makerUserAccount = (
-						await this.userMap.mustGet(makerAccount)
-					).getUserAccount();
-					const makerAuthority = makerUserAccount.authority;
-					const makerUserStats = (
-						await this.userStatsMap.mustGet(makerAuthority.toString())
-					).userStatsAccountPublicKey;
-					makerInfos.push({
-						maker: makerNode.userAccount,
-						makerUserAccount: makerUserAccount,
-						order: makerNode.order,
-						makerStats: makerUserStats,
-					});
-					makersIncluded.add(makerAccount);
+		// set to track whether maker account has already been included
+		const makersIncluded = new Set<string>();
+		if (nodeToFill.makerNodes.length > 0) {
+			for (const makerNode of nodeToFill.makerNodes) {
+				if (this.isDLOBNodeThrottled(makerNode)) {
+					continue;
 				}
-			}
 
-			takerUser = await this.userMap.mustGet(
-				nodeToFill.node.userAccount.toString()
-			);
-			referrerInfo = (
-				await this.userStatsMap.mustGet(
-					takerUser.getUserAccount().authority.toString()
-				)
-			).getReferrerInfo();
-		});
+				const makerAccount = makerNode.userAccount.toBase58();
+				if (makersIncluded.has(makerAccount)) {
+					continue;
+				}
+
+				const makerUserAccount = (
+					await this.userMap.mustGet(makerAccount)
+				).getUserAccount();
+				const makerAuthority = makerUserAccount.authority;
+				const makerUserStats = (
+					await this.userStatsMap.mustGet(makerAuthority.toString())
+				).userStatsAccountPublicKey;
+				makerInfos.push({
+					maker: makerNode.userAccount,
+					makerUserAccount: makerUserAccount,
+					order: makerNode.order,
+					makerStats: makerUserStats,
+				});
+				makersIncluded.add(makerAccount);
+			}
+		}
+
+		const takerUser = await this.userMap.mustGet(
+			nodeToFill.node.userAccount.toString()
+		);
+		const referrerInfo = (
+			await this.userStatsMap.mustGet(
+				takerUser.getUserAccount().authority.toString()
+			)
+		).getReferrerInfo();
 
 		return Promise.resolve({
 			makerInfos,
@@ -1638,8 +1528,6 @@ export class FillerBot implements Bot {
 						orderRecord.order.slot.toNumber()
 					);
 				}
-
-				await this.resyncUserMapsIfRequired();
 
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];
