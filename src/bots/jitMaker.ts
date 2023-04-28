@@ -239,6 +239,7 @@ export class JitMakerBot implements Bot {
 			dlobSource: this.userMap,
 			slotSource: this.slotSubscriber,
 			updateFrequency: this.defaultIntervalMs - 500,
+			driftClient: this.driftClient,
 		});
 		await this.dlobSubscriber.subscribe();
 

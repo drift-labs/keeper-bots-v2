@@ -505,6 +505,7 @@ export class FillerBot implements Bot {
 			dlobSource: this.userMap,
 			slotSource: this.slotSubscriber,
 			updateFrequency: this.pollingIntervalMs - 500,
+			driftClient: this.driftClient,
 		});
 		await this.dlobSubscriber.subscribe();
 
