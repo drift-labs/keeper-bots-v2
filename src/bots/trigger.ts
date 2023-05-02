@@ -3,13 +3,13 @@ import {
 	PerpMarketAccount,
 	SpotMarketAccount,
 	SlotSubscriber,
-	DLOB,
 	NodeToTrigger,
 	UserMap,
 	MarketType,
-	BulkAccountLoader,
 	getOrderSignature,
 	DLOBSubscriber,
+	EventSubscriber,
+	WrappedEvent,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -48,8 +48,8 @@ export class TriggerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 1000;
 
-	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
+	private eventSubscriber: EventSubscriber;
 	private slotSubscriber: SlotSubscriber;
 	private dlobSubscriber: DLOBSubscriber;
 	private triggeringNodes = new Map<string, number>();
@@ -73,16 +73,16 @@ export class TriggerBot implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
-		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
+		eventSubscriber: EventSubscriber,
 		slotSubscriber: SlotSubscriber,
 		runtimeSpec: RuntimeSpec,
 		config: BaseBotConfig
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
-		(this.bulkAccountLoader = bulkAccountLoader),
-			(this.driftClient = driftClient);
+		this.driftClient = driftClient;
+		this.eventSubscriber = eventSubscriber;
 		this.runtimeSpec = runtimeSpec;
 		this.slotSubscriber = slotSubscriber;
 
@@ -179,6 +179,8 @@ export class TriggerBot implements Bot {
 		}
 		this.intervalIds = [];
 
+		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
+
 		await this.dlobSubscriber.unsubscribe();
 		await this.userMap.unsubscribe();
 	}
@@ -187,6 +189,13 @@ export class TriggerBot implements Bot {
 		this.tryTrigger();
 		const intervalId = setInterval(this.tryTrigger.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
+
+		this.eventSubscriber.eventEmitter.on(
+			'newEvent',
+			async (record: WrappedEvent<any>) => {
+				this.userMap.updateWithEventRecord(record);
+			}
+		);
 
 		logger.info(`${this.name} Bot started!`);
 	}
@@ -199,14 +208,6 @@ export class TriggerBot implements Bot {
 		});
 
 		return healthy;
-	}
-
-	public async trigger(record: any): Promise<void> {
-		await this.userMap.updateWithEventRecord(record);
-	}
-
-	public viewDlob(): DLOB {
-		return this.dlobSubscriber.getDLOB();
 	}
 
 	private async tryTriggerForPerpMarket(market: PerpMarketAccount) {

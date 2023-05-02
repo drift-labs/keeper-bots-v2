@@ -36,7 +36,7 @@ global:
   eventSubscriberPollingInterval: 5000
   bulkAccountLoaderPollingInterval: 5000
 
-  useJito: true
+  useJito: false
   jitoBlockEngineUrl: frankfurt.mainnet.block-engine.jito.wtf
   jitoAuthPrivateKey: /path/to/jito/bundle/signing/key/auth.json
 

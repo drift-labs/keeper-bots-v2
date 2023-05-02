@@ -214,12 +214,6 @@ export class FloatingPerpMakerBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(_record: any): Promise<void> {}
-
-	public viewDlob(): undefined {
-		return undefined;
-	}
-
 	/**
 	 * Updates the agent state based on its current market positions.
 	 *

@@ -10,13 +10,13 @@ import {
 	OraclePriceData,
 	calculateClaimablePnl,
 	QUOTE_PRECISION,
-	NewUserRecord,
-	OrderRecord,
 	UserMap,
 	ZERO,
 	calculateNetUserPnlImbalance,
 	convertToNumber,
 	isOracleValid,
+	EventSubscriber,
+	WrappedEvent,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -49,6 +49,7 @@ export class UserPnlSettlerBot implements Bot {
 	public readonly defaultIntervalMs: number = 600000;
 
 	private driftClient: DriftClient;
+	private eventSubscriber: EventSubscriber;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private perpMarkets: PerpMarketConfig[];
@@ -59,6 +60,7 @@ export class UserPnlSettlerBot implements Bot {
 
 	constructor(
 		driftClient: DriftClient,
+		eventSubscriber: EventSubscriber,
 		perpMarkets: PerpMarketConfig[],
 		spotMarkets: SpotMarketConfig[],
 		config: BaseBotConfig
@@ -67,6 +69,7 @@ export class UserPnlSettlerBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
 		this.driftClient = driftClient;
+		this.eventSubscriber = eventSubscriber;
 		this.perpMarkets = perpMarkets;
 		this.spotMarkets = spotMarkets;
 	}
@@ -87,10 +90,10 @@ export class UserPnlSettlerBot implements Bot {
 			clearInterval(intervalId);
 		}
 		this.intervalIds = [];
-		for (const user of this.userMap.values()) {
-			await user.unsubscribe();
-		}
-		delete this.userMap;
+
+		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
+
+		await this.userMap.unsubscribe();
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
@@ -100,6 +103,13 @@ export class UserPnlSettlerBot implements Bot {
 		} else {
 			const intervalId = setInterval(this.trySettlePnl.bind(this), intervalMs);
 			this.intervalIds.push(intervalId);
+
+			this.eventSubscriber.eventEmitter.on(
+				'newEvent',
+				async (record: WrappedEvent<any>) => {
+					this.userMap.updateWithEventRecord(record);
+				}
+			);
 		}
 	}
 
@@ -110,18 +120,6 @@ export class UserPnlSettlerBot implements Bot {
 				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
 		});
 		return healthy;
-	}
-
-	public async trigger(record: any): Promise<void> {
-		if (record.eventType === 'OrderRecord') {
-			await this.userMap.updateWithOrderRecord(record as OrderRecord);
-		} else if (record.eventType === 'NewUserRecord') {
-			await this.userMap.mustGet((record as NewUserRecord).user.toString());
-		}
-	}
-
-	public viewDlob(): undefined {
-		return undefined;
 	}
 
 	private async trySettlePnl() {
