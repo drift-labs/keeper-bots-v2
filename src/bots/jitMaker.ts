@@ -21,8 +21,9 @@ import {
 	getOrderSignature,
 	MarketType,
 	PostOnlyParams,
+	DLOBSubscriber,
 } from '@drift-labs/sdk';
-import { Mutex, tryAcquire, withTimeout, E_ALREADY_LOCKED } from 'async-mutex';
+import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import { TransactionSignature, PublicKey } from '@solana/web3.js';
 
@@ -73,8 +74,6 @@ type State = {
 	perpMarketPosition: Map<number, PerpPosition>;
 };
 
-const dlobMutexError = new Error('dlobMutex timeout');
-
 enum METRIC_TYPES {
 	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
 	try_jit_duration_histogram = 'try_jit_duration_histogram',
@@ -97,12 +96,7 @@ export class JitMakerBot implements Bot {
 
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
-	private dlobMutex = withTimeout(
-		new Mutex(),
-		10 * this.defaultIntervalMs,
-		dlobMutexError
-	);
-	private dlob: DLOB;
+	private dlobSubscriber: DLOBSubscriber;
 	private periodicTaskMutex = new Mutex();
 	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
@@ -230,20 +224,24 @@ export class JitMakerBot implements Bot {
 
 		this.userMap = new UserMap(
 			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
+			this.driftClient.userAccountSubscriptionConfig,
+			false
 		);
-		initPromises.push(this.userMap.fetchAllUsers());
+		initPromises.push(this.userMap.sync());
 
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
 			this.driftClient.userAccountSubscriptionConfig
 		);
-		initPromises.push(this.userStatsMap.fetchAllUserStats());
+		initPromises.push(this.userStatsMap.sync());
 
-		this.dlob = new DLOB();
-		initPromises.push(
-			this.dlob.initFromUserMap(this.userMap, this.slotSubscriber.getSlot())
-		);
+		this.dlobSubscriber = new DLOBSubscriber({
+			dlobSource: this.userMap,
+			slotSource: this.slotSubscriber,
+			updateFrequency: this.defaultIntervalMs - 500,
+			driftClient: this.driftClient,
+		});
+		await this.dlobSubscriber.subscribe();
 
 		this.agentState = {
 			stateType: new Map<number, StateType>(),
@@ -260,12 +258,10 @@ export class JitMakerBot implements Bot {
 			clearInterval(intervalId);
 		}
 		this.intervalIds = [];
-		if (this.dlob) {
-			this.dlob.clear();
-			delete this.dlob;
-		}
-		delete this.userMap;
-		delete this.userStatsMap;
+
+		await this.dlobSubscriber.unsubscribe();
+		await this.userStatsMap.unsubscribe();
+		await this.userMap.unsubscribe();
 	}
 
 	public async startIntervalLoop(intervalMs: number) {
@@ -302,7 +298,7 @@ export class JitMakerBot implements Bot {
 	}
 
 	public viewDlob(): DLOB {
-		return this.dlob;
+		return this.dlobSubscriber.getDLOB();
 	}
 
 	/**
@@ -504,9 +500,9 @@ export class JitMakerBot implements Bot {
 	 * Draws an action based on the current state of the bot.
 	 *
 	 */
-	private async drawAndExecuteAction(market: PerpMarketAccount) {
+	private async drawAndExecuteAction(market: PerpMarketAccount, dlob: DLOB) {
 		// get nodes available to fill in the jit auction
-		const nodesToFill = this.dlob.findJitAuctionNodesToFill(
+		const nodesToFill = dlob.findJitAuctionNodesToFill(
 			market.marketIndex,
 			this.slotSubscriber.getSlot(),
 			this.driftClient.getOracleDataForPerpMarket(market.marketIndex),
@@ -690,9 +686,12 @@ export class JitMakerBot implements Bot {
 		);
 	}
 
-	private async tryMakeJitAuctionForMarket(market: PerpMarketAccount) {
+	private async tryMakeJitAuctionForMarket(
+		market: PerpMarketAccount,
+		dlob: DLOB
+	) {
 		await this.updateAgentState();
-		await this.drawAndExecuteAction(market);
+		await this.drawAndExecuteAction(market, dlob);
 	}
 
 	private async tryMake() {
@@ -700,22 +699,16 @@ export class JitMakerBot implements Bot {
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				await this.dlobMutex.runExclusive(async () => {
-					if (this.dlob) {
-						this.dlob.clear();
-						delete this.dlob;
-					}
-					this.dlob = new DLOB();
-					await this.dlob.initFromUserMap(
-						this.userMap,
-						this.slotSubscriber.getSlot()
-					);
-				});
+				const dlob = this.dlobSubscriber.getDLOB();
+				if (!dlob) {
+					logger.info(`${this.name}: DLOB not initialized yet`);
+					return;
+				}
 
 				await Promise.all(
 					// TODO: spot
 					this.driftClient.getPerpMarketAccounts().map((marketAccount) => {
-						this.tryMakeJitAuctionForMarket(marketAccount);
+						this.tryMakeJitAuctionForMarket(marketAccount, dlob);
 					})
 				);
 
@@ -731,8 +724,6 @@ export class JitMakerBot implements Bot {
 						user.getUserAccount()
 					)
 				);
-			} else if (e === dlobMutexError) {
-				logger.error(`${this.name} dlobMutexError timeout`);
 			} else {
 				throw e;
 			}
