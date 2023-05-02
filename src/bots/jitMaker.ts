@@ -278,7 +278,7 @@ export class JitMakerBot implements Bot {
 			'newEvent',
 			async (record: WrappedEvent<any>) => {
 				await this.userMap.updateWithEventRecord(record);
-				this.userStatsMap.updateWithEventRecord(record, this.userMap);
+				await this.userStatsMap.updateWithEventRecord(record, this.userMap);
 			}
 		);
 

@@ -27,7 +27,6 @@ import {
 	TEN_THOUSAND,
 	WrappedEvent,
 	PositionDirection,
-	BulkAccountLoader,
 	PerpMarkets,
 	SpotMarkets,
 	isUserBankrupt,
@@ -209,7 +208,6 @@ export class LiquidatorBot implements Bot {
 	private sdkCallDurationHistogram: Histogram;
 	private userMapUserAccountKeysGauge: ObservableGauge;
 
-	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
 	private eventSubscriber: EventSubscriber;
 	private perpMarketIndicies: number[];
@@ -238,7 +236,6 @@ export class LiquidatorBot implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
-		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		eventSubscriber: EventSubscriber,
 		runtimeSpec: RuntimeSpec,
@@ -247,7 +244,6 @@ export class LiquidatorBot implements Bot {
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
-		this.bulkAccountLoader = bulkAccountLoader;
 		this.driftClient = driftClient;
 		this.eventSubscriber = eventSubscriber;
 		this.runtimeSpecs = runtimeSpec;

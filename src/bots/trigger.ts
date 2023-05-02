@@ -6,7 +6,6 @@ import {
 	NodeToTrigger,
 	UserMap,
 	MarketType,
-	BulkAccountLoader,
 	getOrderSignature,
 	DLOBSubscriber,
 	EventSubscriber,
@@ -49,7 +48,6 @@ export class TriggerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 1000;
 
-	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
 	private eventSubscriber: EventSubscriber;
 	private slotSubscriber: SlotSubscriber;
@@ -75,7 +73,6 @@ export class TriggerBot implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
-		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		eventSubscriber: EventSubscriber,
 		slotSubscriber: SlotSubscriber,
@@ -84,8 +81,7 @@ export class TriggerBot implements Bot {
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
-		(this.bulkAccountLoader = bulkAccountLoader),
-			(this.driftClient = driftClient);
+		this.driftClient = driftClient;
 		this.eventSubscriber = eventSubscriber;
 		this.runtimeSpec = runtimeSpec;
 		this.slotSubscriber = slotSubscriber;

@@ -531,7 +531,6 @@ const runBot = async () => {
 	if (configHasBot(config, 'trigger')) {
 		bots.push(
 			new TriggerBot(
-				bulkAccountLoader,
 				driftClient,
 				eventSubscriber,
 				slotSubscriber,
@@ -567,7 +566,6 @@ const runBot = async () => {
 	if (configHasBot(config, 'liquidator')) {
 		bots.push(
 			new LiquidatorBot(
-				bulkAccountLoader,
 				driftClient,
 				eventSubscriber,
 				{
