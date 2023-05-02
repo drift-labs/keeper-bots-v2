@@ -23,15 +23,15 @@ import {
 	QUOTE_PRECISION,
 	WrappedEvent,
 	PerpMarkets,
-	OrderActionRecord,
 	BulkAccountLoader,
 	SlotSubscriber,
-	OrderRecord,
 	PublicKey,
 	DLOBNode,
 	UserSubscriptionConfig,
 	isOneOfVariant,
 	DLOBSubscriber,
+	EventSubscriber,
+	OrderActionRecord,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -170,6 +170,7 @@ export class FillerBot implements Bot {
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	private driftClient: DriftClient;
+	private eventSubscriber: EventSubscriber;
 	private pollingIntervalMs: number;
 	private transactionVersion?: number;
 	private revertOnFailure?: boolean;
@@ -224,6 +225,7 @@ export class FillerBot implements Bot {
 		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
+		eventSubscriber: EventSubscriber,
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
 		jitoSearcherClient?: SearcherClient,
@@ -234,7 +236,8 @@ export class FillerBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
-		this.bulkAccountLoader = bulkAccountLoader;
+		(this.eventSubscriber = eventSubscriber),
+			(this.bulkAccountLoader = bulkAccountLoader);
 		if (this.bulkAccountLoader) {
 			this.userStatsMapSubscriptionConfig = {
 				type: 'polling',
@@ -523,6 +526,8 @@ export class FillerBot implements Bot {
 		}
 		this.intervalIds = [];
 
+		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
+
 		await this.dlobSubscriber.unsubscribe();
 		await this.userMap.unsubscribe();
 		await this.userStatsMap.unsubscribe();
@@ -535,7 +540,34 @@ export class FillerBot implements Bot {
 		);
 		this.intervalIds.push(intervalId);
 
-		logger.info(`${this.name} Bot started!`);
+		this.eventSubscriber.eventEmitter.on(
+			'newEvent',
+			async (record: WrappedEvent<any>) => {
+				await this.userMap.updateWithEventRecord(record);
+				await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+
+				if (record.eventType === 'OrderActionRecord') {
+					const actionRecord = record as OrderActionRecord;
+
+					if (isVariant(actionRecord.action, 'fill')) {
+						if (isVariant(actionRecord.marketType, 'perp')) {
+							this.observedFillsCountCounter.add(1, {
+								market:
+									PerpMarkets[this.runtimeSpec.driftEnv][
+										actionRecord.marketIndex
+									].symbol,
+							});
+						}
+					}
+				}
+			}
+		);
+
+		logger.info(
+			`${this.name} Bot started! (websocket: ${
+				this.bulkAccountLoader === undefined
+			})`
+		);
 	}
 
 	public async healthCheck(): Promise<boolean> {
@@ -551,41 +583,6 @@ export class FillerBot implements Bot {
 		});
 
 		return healthy;
-	}
-
-	public async trigger(record: WrappedEvent<any>) {
-		logger.debug(
-			`filler seen record (slot: ${record.slot}): ${record.eventType}`
-		);
-		if (record.order) {
-			logger.debug(` . ${record.user} - ${record.order.orderId}`);
-		}
-		await this.userMap.updateWithEventRecord(record);
-		await this.userStatsMap.updateWithEventRecord(record, this.userMap);
-
-		if (record.eventType === 'OrderRecord') {
-			const orderRecord = record as OrderRecord;
-			const marketType = getVariant(orderRecord.order.marketType);
-			if (marketType === 'perp') {
-				await this.tryFill(orderRecord);
-			}
-		} else if (record.eventType === 'OrderActionRecord') {
-			const actionRecord = record as OrderActionRecord;
-			if (getVariant(actionRecord.action) === 'fill') {
-				const marketType = getVariant(actionRecord.marketType);
-				if (marketType === 'perp') {
-					this.observedFillsCountCounter.add(1, {
-						market:
-							PerpMarkets[this.runtimeSpec.driftEnv][actionRecord.marketIndex]
-								.symbol,
-					});
-				}
-			}
-		}
-	}
-
-	public viewDlob(): DLOB {
-		return this.dlobSubscriber.getDLOB();
 	}
 
 	private async getPerpFillableNodesForMarket(
@@ -604,7 +601,7 @@ export class FillerBot implements Bot {
 			marketIndex,
 			vBid,
 			vAsk,
-			this.slotSubscriber.currentSlot,
+			this.slotSubscriber.currentSlot + 2, // add offset to account for latency
 			Date.now() / 1000,
 			MarketType.PERP,
 			oraclePriceData,
@@ -1521,19 +1518,12 @@ export class FillerBot implements Bot {
 		return nodesSent.length;
 	}
 
-	private async tryFill(orderRecord?: OrderRecord) {
+	private async tryFill() {
 		const startTime = Date.now();
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				const dlob = this.dlobSubscriber.getDLOB();
-				if (orderRecord && dlob) {
-					dlob.insertOrder(
-						orderRecord.order,
-						orderRecord.user,
-						orderRecord.order.slot.toNumber()
-					);
-				}
 
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];

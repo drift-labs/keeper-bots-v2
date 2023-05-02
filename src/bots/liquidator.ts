@@ -31,6 +31,7 @@ import {
 	PerpMarkets,
 	SpotMarkets,
 	isUserBankrupt,
+	EventSubscriber,
 } from '@drift-labs/sdk';
 import { E_ALREADY_LOCKED, Mutex } from 'async-mutex';
 
@@ -210,6 +211,7 @@ export class LiquidatorBot implements Bot {
 
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private driftClient: DriftClient;
+	private eventSubscriber: EventSubscriber;
 	private perpMarketIndicies: number[];
 	private spotMarketIndicies: number[];
 	private activeSubAccountId: number;
@@ -238,6 +240,7 @@ export class LiquidatorBot implements Bot {
 	constructor(
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
+		eventSubscriber: EventSubscriber,
 		runtimeSpec: RuntimeSpec,
 		config: LiquidatorConfig,
 		defaultSubaccountId: number
@@ -246,6 +249,7 @@ export class LiquidatorBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.bulkAccountLoader = bulkAccountLoader;
 		this.driftClient = driftClient;
+		this.eventSubscriber = eventSubscriber;
 		this.runtimeSpecs = runtimeSpec;
 		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
 			this.driftClient
@@ -354,11 +358,10 @@ export class LiquidatorBot implements Bot {
 			clearInterval(intervalId);
 		}
 		this.intervalIds = [];
-		await this.userMap.unsubscribe();
-	}
 
-	public async trigger(record: WrappedEvent<any>) {
-		await this.userMap.updateWithEventRecord(record);
+		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
+
+		await this.userMap.unsubscribe();
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
@@ -370,6 +373,13 @@ export class LiquidatorBot implements Bot {
 			const deRiskIntervalId = setInterval(this.derisk.bind(this), 10000);
 			this.intervalIds.push(deRiskIntervalId);
 		}
+
+		this.eventSubscriber.eventEmitter.on(
+			'newEvent',
+			async (record: WrappedEvent<any>) => {
+				this.userMap.updateWithEventRecord(record);
+			}
+		);
 
 		logger.info(`${this.name} Bot started!`);
 
@@ -404,10 +414,6 @@ export class LiquidatorBot implements Bot {
 		}
 
 		return healthy;
-	}
-
-	public viewDlob(): undefined {
-		return undefined;
 	}
 
 	/**

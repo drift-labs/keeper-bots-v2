@@ -96,12 +96,6 @@ export class FundingRateUpdaterBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(_record: any): Promise<void> {}
-
-	public viewDlob(): undefined {
-		return undefined;
-	}
-
 	private async tryUpdateFundingRate() {
 		try {
 			const perpMarketAndOracleData: {

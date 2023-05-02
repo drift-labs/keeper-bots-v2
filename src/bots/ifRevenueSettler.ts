@@ -72,12 +72,6 @@ export class IFRevenueSettlerBot implements Bot {
 		return healthy;
 	}
 
-	public async trigger(_record: any): Promise<void> {}
-
-	public viewDlob(): undefined {
-		return undefined;
-	}
-
 	private async trySettleIFRevenue() {
 		try {
 			const spotMarketAndOracleData: {

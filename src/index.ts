@@ -138,13 +138,6 @@ program
 		'--use-jito',
 		'Submit transactions to a Jito relayer if the bot supports it'
 	)
-	.option(
-		'--use-event-subscriber',
-		'Subscribe to events from the event subscriber (default polling unless \
-			--websocket is also specified). Warning this is expensive as events \
-			require a lot of RPC calls. Only include for bots you know require \
-			the EventSubscriber'
-	)
 	.parse();
 
 const opts = program.opts();
@@ -179,19 +172,18 @@ function loadKeypair(privateKey: string): Keypair {
 	let loadedKey: Uint8Array;
 	if (fs.existsSync(privateKey)) {
 		logger.info(`loading private key from ${privateKey}`);
-		loadedKey = new Uint8Array(
-			JSON.parse(fs.readFileSync(privateKey).toString())
+		privateKey = fs.readFileSync(privateKey).toString();
+	}
+
+	if (privateKey.includes(',')) {
+		logger.info(`Trying to load private key as comma separated numbers`);
+		loadedKey = Uint8Array.from(
+			privateKey.split(',').map((val) => Number(val))
 		);
 	} else {
-		if (privateKey.includes(',')) {
-			logger.info(`Trying to load private key as comma separated numbers`);
-			loadedKey = Uint8Array.from(
-				privateKey.split(',').map((val) => Number(val))
-			);
-		} else {
-			logger.info(`Trying to load private key as base58 string`);
-			loadedKey = new Uint8Array(bs58.decode(privateKey));
-		}
+		logger.info(`Trying to load private key as base58 string`);
+		privateKey = privateKey.replace(/\s/g, '');
+		loadedKey = new Uint8Array(bs58.decode(privateKey));
 	}
 
 	return Keypair.fromSecretKey(Uint8Array.from(loadedKey));
@@ -204,6 +196,8 @@ export function getWallet(): [Keypair, Wallet] {
 			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
 		);
 	}
+
+	logger.info(`Loading wallet keypair`);
 	const keypair = loadKeypair(privateKey);
 	return [keypair, new Wallet(keypair)];
 }
@@ -304,18 +298,14 @@ const runBot = async () => {
 		subAccountIds: config.global.subaccounts,
 	});
 
-	let eventSubscriber: EventSubscriber | undefined;
-	if (config.global.useEventSubscriber) {
-		eventSubscriber = new EventSubscriber(connection, driftClient.program, {
-			maxTx: 8192,
-			maxEventsPerType: 8192,
-			orderBy: 'blockchain',
-			orderDir: 'desc',
-			commitment: stateCommitment,
-			logProviderConfig,
-		});
-		eventSubscriber.subscribe();
-	}
+	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {
+		maxTx: 4096,
+		maxEventsPerType: 4096,
+		orderBy: 'blockchain',
+		orderDir: 'desc',
+		commitment: stateCommitment,
+		logProviderConfig,
+	});
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
 	const lastSlotReceivedMutex = new Mutex();
@@ -373,7 +363,7 @@ const runBot = async () => {
 		!(await driftClient.subscribe()) ||
 		!(await driftUser.subscribe()) ||
 		!(await driftUserStats.subscribe()) ||
-		(config.global.useEventSubscriber && !eventSubscriber.subscribe())
+		!(await eventSubscriber.subscribe())
 	) {
 		logger.info('waiting to subscribe to DriftClient and User');
 		await sleep(1000);
@@ -482,6 +472,7 @@ const runBot = async () => {
 				'Must configure or set JITO_AUTH_PRIVATE_KEY environment variable'
 			);
 		}
+		logger.info(`Loading jito keypair`);
 		jitoAuthKeypair = loadKeypair(privateKey);
 		jitoSearcherClient = searcherClient(jitoBlockEngineUrl, jitoAuthKeypair);
 		jitoSearcherClient.onBundleResult(
@@ -499,16 +490,12 @@ const runBot = async () => {
 	 */
 
 	if (configHasBot(config, 'filler')) {
-		if (config.global.websocket && !config.global.useEventSubscriber) {
-			throw new Error(
-				'config.global.websocket requires config.global.useEventSubscriber'
-			);
-		}
 		bots.push(
 			new FillerBot(
 				slotSubscriber,
 				bulkAccountLoader,
 				driftClient,
+				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -529,6 +516,7 @@ const runBot = async () => {
 				slotSubscriber,
 				bulkAccountLoader,
 				driftClient,
+				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -545,6 +533,7 @@ const runBot = async () => {
 			new TriggerBot(
 				bulkAccountLoader,
 				driftClient,
+				eventSubscriber,
 				slotSubscriber,
 				{
 					rpcEndpoint: endpoint,
@@ -561,6 +550,7 @@ const runBot = async () => {
 		bots.push(
 			new JitMakerBot(
 				driftClient,
+				eventSubscriber,
 				slotSubscriber,
 				{
 					rpcEndpoint: endpoint,
@@ -579,6 +569,7 @@ const runBot = async () => {
 			new LiquidatorBot(
 				bulkAccountLoader,
 				driftClient,
+				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -612,6 +603,7 @@ const runBot = async () => {
 		bots.push(
 			new UserPnlSettlerBot(
 				driftClient,
+				eventSubscriber,
 				PerpMarkets[config.global.driftEnv],
 				SpotMarkets[config.global.driftEnv],
 				config.botConfigs.userPnlSettler
@@ -646,11 +638,6 @@ const runBot = async () => {
 	await Promise.all(
 		bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
 	);
-	if (config.global.useEventSubscriber) {
-		eventSubscriber.eventEmitter.on('newEvent', async (event) => {
-			Promise.all(bots.map((bot) => bot.trigger(event)));
-		});
-	}
 
 	// start http server listening to /health endpoint using http package
 	http
