@@ -1545,7 +1545,7 @@ export class FillerBot implements Bot {
 						);
 						fillableNodes = fillableNodes.concat(nodesToFill);
 						logger.debug(
-							`got ${fillableNodes.length} fillable nodes on market ${market.marketIndex}`
+							`got ${nodesToFill.length} fillable nodes on market ${market.marketIndex}`
 						);
 					} catch (e) {
 						console.error(e);
