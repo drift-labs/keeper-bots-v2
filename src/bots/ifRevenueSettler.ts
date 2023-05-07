@@ -12,7 +12,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
-import { sleepS } from 'src/utils';
+import { sleepS } from '../utils';
 
 export class IFRevenueSettlerBot implements Bot {
 	public readonly name: string;
