@@ -131,14 +131,18 @@ export class IFRevenueSettlerBot implements Bot {
 					currentTs +
 					1;
 
-				ifSettlePromises.push(async () => {
-					logger.info(
-						`IF revenue settling on market ${i} in ${timeUntilSettle} seconds`
-					);
-					await sleepS(timeUntilSettle);
-					await this.settleIFRevenue(i);
-				});
+				ifSettlePromises.push(
+					(async () => {
+						logger.info(
+							`IF revenue settling on market ${i} in ${timeUntilSettle} seconds`
+						);
+						await sleepS(timeUntilSettle);
+						await this.settleIFRevenue(i);
+					})()
+				);
 			}
+
+			await Promise.all(ifSettlePromises);
 		} catch (err) {
 			console.error(err);
 			if (
