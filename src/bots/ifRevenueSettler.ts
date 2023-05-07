@@ -1,5 +1,4 @@
 import {
-	BN,
 	DriftClient,
 	SpotMarketConfig,
 	SpotMarketAccount,
@@ -13,6 +12,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
+import { sleepS } from 'src/utils';
 
 export class IFRevenueSettlerBot implements Bot {
 	public readonly name: string;
@@ -72,6 +72,30 @@ export class IFRevenueSettlerBot implements Bot {
 		return healthy;
 	}
 
+	private async settleIFRevenue(spotMarketIndex: number) {
+		try {
+			const txSig = await this.driftClient.settleRevenueToInsuranceFund(
+				spotMarketIndex
+			);
+			logger.info(
+				`IF revenue settled successfully on marketIndex=${spotMarketIndex}. TxSig: ${txSig}`
+			);
+		} catch (err) {
+			const errorCode = getErrorCode(err);
+			logger.error(
+				`Error code: ${errorCode} while settling revenue to IF for marketIndex=${spotMarketIndex}: ${err.message}`
+			);
+			console.error(err);
+			await webhookMessage(
+				`[${
+					this.name
+				}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${spotMarketIndex}:\n${
+					err.logs ? (err.logs as Array<string>).join('\n') : ''
+				}\n${err.stack ? err.stack : err.message}`
+			);
+		}
+	}
+
 	private async trySettleIFRevenue() {
 		try {
 			const spotMarketAndOracleData: {
@@ -92,56 +116,28 @@ export class IFRevenueSettlerBot implements Bot {
 				};
 			});
 
+			const ifSettlePromises = [];
 			for (let i = 0; i < this.spotMarkets.length; i++) {
 				const spotIf = spotMarketAndOracleData[i].marketAccount.insuranceFund;
 				if (spotIf.revenueSettlePeriod.eq(ZERO)) {
 					continue;
 				}
 				const currentTs = Date.now() / 1000;
-				if (
-					spotIf.lastRevenueSettleTs
-						.add(spotIf.revenueSettlePeriod)
-						.lte(new BN(currentTs))
-				) {
-					logger.info(
-						spotIf.lastRevenueSettleTs.toString() +
-							' and ' +
-							spotIf.revenueSettlePeriod.toString()
-					);
-					logger.info(
-						spotIf.lastRevenueSettleTs
-							.add(spotIf.revenueSettlePeriod)
-							.toString() +
-							' < ' +
-							currentTs.toString()
-					);
 
-					try {
-						const txSig = await this.driftClient.settleRevenueToInsuranceFund(
-							i
-						);
-						logger.info(
-							`IF revenue settled successfully on marketIndex=${i}. TxSig: ${txSig}`
-						);
-					} catch (err) {
-						const errorCode = getErrorCode(err);
-						logger.error(
-							`Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}: ${err.message}`
-						);
-						console.error(err);
-						await webhookMessage(
-							`[${
-								this.name
-							}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${i}:\n${
-								err.logs ? (err.logs as Array<string>).join('\n') : ''
-							}\n${err.stack ? err.stack : err.message}`
-						);
-					}
-				} else {
+				// add 1 sec buffer
+				const timeUntilSettle =
+					spotIf.lastRevenueSettleTs.toNumber() +
+					spotIf.revenueSettlePeriod.toNumber() -
+					currentTs +
+					1;
+
+				ifSettlePromises.push(async () => {
 					logger.info(
-						`IF revenue not settled on marketIndex=${i} because it's not time yet. LastSettleTs: ${spotIf.lastRevenueSettleTs.toNumber()}, Period: ${spotIf.revenueSettlePeriod.toNumber()}, currentTs: ${currentTs}`
+						`IF revenue settling on market ${i} in ${timeUntilSettle} seconds`
 					);
-				}
+					await sleepS(timeUntilSettle);
+					await this.settleIFRevenue(i);
+				});
 			}
 		} catch (err) {
 			console.error(err);

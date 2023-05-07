@@ -68,3 +68,11 @@ export function loadCommaDelimitToArray(str: string): number[] {
 		return [];
 	}
 }
+
+export function sleepMs(ms: number) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export function sleepS(s: number) {
+	return sleepMs(s * 1000);
+}

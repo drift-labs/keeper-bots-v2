@@ -47,6 +47,7 @@ import { IFRevenueSettlerBot } from './bots/ifRevenueSettler';
 import { UserPnlSettlerBot } from './bots/userPnlSettler';
 import {
 	getOrCreateAssociatedTokenAccount,
+	sleepMs,
 	TOKEN_FAUCET_PROGRAM_ID,
 } from './utils';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
@@ -209,10 +210,6 @@ logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`DriftEnv:     ${config.global.driftEnv}`);
 logger.info(`Commit:       ${commitHash}`);
 
-function sleep(ms) {
-	return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function printUserAccountStats(clearingHouseUser: User) {
 	const freeCollateral = clearingHouseUser.getFreeCollateral();
 	logger.info(
@@ -366,7 +363,7 @@ const runBot = async () => {
 		!(await eventSubscriber.subscribe())
 	) {
 		logger.info('waiting to subscribe to DriftClient and User');
-		await sleep(1000);
+		await sleepMs(1000);
 	}
 	logger.info(
 		`User PublicKey: ${driftUser.getUserAccountPublicKey().toBase58()}`
@@ -729,7 +726,7 @@ async function recursiveTryCatch(f: () => void) {
 			bot.reset();
 			await bot.init();
 		}
-		await sleep(15000);
+		await sleepMs(15000);
 		await recursiveTryCatch(f);
 	}
 }
