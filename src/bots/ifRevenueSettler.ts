@@ -14,6 +14,8 @@ import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
 import { sleepS } from '../utils';
 
+const MAX_SETTLE_WAIT_TIME_S = 10 * 60; // 10 minutes
+
 export class IFRevenueSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
@@ -131,15 +133,21 @@ export class IFRevenueSettlerBot implements Bot {
 					currentTs +
 					1;
 
-				ifSettlePromises.push(
-					(async () => {
-						logger.info(
-							`IF revenue settling on market ${i} in ${timeUntilSettle} seconds`
-						);
-						await sleepS(timeUntilSettle);
-						await this.settleIFRevenue(i);
-					})()
-				);
+				if (timeUntilSettle <= MAX_SETTLE_WAIT_TIME_S) {
+					ifSettlePromises.push(
+						(async () => {
+							logger.info(
+								`IF revenue settling on market ${i} in ${timeUntilSettle} seconds`
+							);
+							await sleepS(timeUntilSettle);
+							await this.settleIFRevenue(i);
+						})()
+					);
+				} else {
+					logger.info(
+						`Too long to wait (${timeUntilSettle} seconds) to settle IF for marke market ${i}, skipping...`
+					);
+				}
 			}
 
 			await Promise.all(ifSettlePromises);
