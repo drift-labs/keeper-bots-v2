@@ -50,7 +50,8 @@
 		"prettify": "prettier --check './src/**/*.ts'",
 		"prettify:fix": "prettier --write './src/**/*.ts'",
 		"lint": "eslint . --ext ts --quiet",
-		"lint:fix": "eslint . --ext ts --fix"
+		"lint:fix": "eslint . --ext ts --fix",
+		"example:restingLimitMaker": "ts-node market_making_examples/restingLimitMaker/index.ts"
 	},
 	"engines": {
 		"node": ">=16"

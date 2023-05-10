@@ -1,4 +1,3 @@
-import fs from 'fs';
 import { program, Option } from 'commander';
 import * as http from 'http';
 
@@ -14,7 +13,6 @@ import {
 	DriftClient,
 	User,
 	initialize,
-	Wallet,
 	EventSubscriber,
 	SlotSubscriber,
 	convertToNumber,
@@ -45,8 +43,9 @@ import {
 	getOrCreateAssociatedTokenAccount,
 	sleepMs,
 	TOKEN_FAUCET_PROGRAM_ID,
+	getWallet,
+	loadKeypair,
 } from './utils';
-import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import {
 	Config,
 	configHasBot,
@@ -56,7 +55,7 @@ import {
 import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
 
 require('dotenv').config();
-const commitHash = process.env.COMMIT;
+const commitHash = process.env.COMMIT ?? '';
 
 const stateCommitment: Commitment = 'confirmed';
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
@@ -138,7 +137,7 @@ program
 	.parse();
 
 const opts = program.opts();
-let config: Config = undefined;
+let config: Config;
 if (opts.configFile) {
 	logger.info(`Loading config from ${opts.configFile}`);
 	config = loadConfigFromFile(opts.configFile);
@@ -164,45 +163,7 @@ const sdkConfig = initialize({ env: config.global.driftEnv });
 
 setLogLevel(config.global.debug ? 'debug' : 'info');
 
-function loadKeypair(privateKey: string): Keypair {
-	// try to load privateKey as a filepath
-	let loadedKey: Uint8Array;
-	if (fs.existsSync(privateKey)) {
-		logger.info(`loading private key from ${privateKey}`);
-		privateKey = fs.readFileSync(privateKey).toString();
-	}
-
-	if (privateKey.includes('[') && privateKey.includes(']')) {
-		logger.info(`Trying to load private key as numbers array`);
-		loadedKey = Uint8Array.from(JSON.parse(privateKey));
-	} else if (privateKey.includes(',')) {
-		logger.info(`Trying to load private key as comma separated numbers`);
-		loadedKey = Uint8Array.from(
-			privateKey.split(',').map((val) => Number(val))
-		);
-	} else {
-		logger.info(`Trying to load private key as base58 string`);
-		privateKey = privateKey.replace(/\s/g, '');
-		loadedKey = new Uint8Array(bs58.decode(privateKey));
-	}
-
-	return Keypair.fromSecretKey(Uint8Array.from(loadedKey));
-}
-
-export function getWallet(): [Keypair, Wallet] {
-	const privateKey = config.global.keeperPrivateKey;
-	if (!privateKey) {
-		throw new Error(
-			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
-		);
-	}
-
-	logger.info(`Loading wallet keypair`);
-	const keypair = loadKeypair(privateKey);
-	return [keypair, new Wallet(keypair)];
-}
-
-const endpoint = config.global.endpoint;
+const endpoint = config.global.endpoint!;
 const wsEndpoint = config.global.wsEndpoint;
 logger.info(`RPC endpoint: ${endpoint}`);
 logger.info(`WS endpoint:  ${wsEndpoint}`);
@@ -234,7 +195,14 @@ function printUserAccountStats(clearingHouseUser: User) {
 
 const bots: Bot[] = [];
 const runBot = async () => {
-	const [keypair, wallet] = getWallet();
+	logger.info(`Loading wallet keypair`);
+	const privateKeyOrFilepath = config.global.keeperPrivateKey;
+	if (!privateKeyOrFilepath) {
+		throw new Error(
+			'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json or a list of commma separated numbers'
+		);
+	}
+	const [keypair, wallet] = getWallet(privateKeyOrFilepath);
 	const driftPublicKey = new PublicKey(sdkConfig.DRIFT_PROGRAM_ID);
 
 	const connection = new Connection(endpoint, {
@@ -270,7 +238,7 @@ const runBot = async () => {
 	}
 
 	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
-		getMarketsAndOraclesForSubscription(config.global.driftEnv);
+		getMarketsAndOraclesForSubscription(config.global.driftEnv!);
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
@@ -290,7 +258,7 @@ const runBot = async () => {
 			type: 'retry',
 			timeout: 35000,
 		},
-		activeSubAccountId: config.global.subaccounts[0],
+		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts,
 	});
 
@@ -319,7 +287,7 @@ const runBot = async () => {
 	try {
 		const tokenAccount = await getOrCreateAssociatedTokenAccount(
 			connection,
-			new PublicKey(constants[config.global.driftEnv].USDCMint),
+			new PublicKey(constants[config.global.driftEnv!].USDCMint),
 			wallet
 		);
 		const usdcBalance = await connection.getTokenAccountBalance(tokenAccount);
@@ -421,7 +389,7 @@ const runBot = async () => {
 			throw new Error('Deposit amount must be greater than 0');
 		}
 
-		const mint = SpotMarkets[config.global.driftEnv][0].mint; // TODO: are index 0 always USDC???, support other collaterals
+		const mint = SpotMarkets[config.global.driftEnv!][0].mint; // TODO: are index 0 always USDC???, support other collaterals
 
 		const ata = await getAssociatedTokenAddress(mint, wallet.publicKey);
 
@@ -490,11 +458,11 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: config.global.driftEnv,
+					driftEnv: config.global.driftEnv!,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				config.botConfigs.filler,
+				config.botConfigs!.filler!,
 				jitoSearcherClient,
 				jitoAuthKeypair,
 				keypair
@@ -511,11 +479,11 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: config.global.driftEnv,
+					driftEnv: config.global.driftEnv!,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				config.botConfigs.spotFiller
+				config.botConfigs!.spotFiller!
 			)
 		);
 	}
@@ -528,11 +496,11 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: config.global.driftEnv,
+					driftEnv: config.global.driftEnv!,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				config.botConfigs.trigger
+				config.botConfigs!.trigger!
 			)
 		);
 	}
@@ -545,11 +513,11 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: config.global.driftEnv,
+					driftEnv: config.global.driftEnv!,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				config.botConfigs.trigger
+				config.botConfigs!.trigger!
 			)
 		);
 	}
@@ -562,12 +530,12 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: config.global.driftEnv,
+					driftEnv: config.global.driftEnv!,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				config.botConfigs.liquidator,
-				config.global.subaccounts[0]
+				config.botConfigs!.liquidator!,
+				config.global.subaccounts![0]
 			)
 		);
 	}
@@ -579,11 +547,11 @@ const runBot = async () => {
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
-					driftEnv: config.global.driftEnv,
+					driftEnv: config.global.driftEnv!,
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				config.botConfigs.floatingMaker
+				config.botConfigs!.floatingMaker!
 			)
 		);
 	}
@@ -593,9 +561,9 @@ const runBot = async () => {
 			new UserPnlSettlerBot(
 				driftClient,
 				eventSubscriber,
-				PerpMarkets[config.global.driftEnv],
-				SpotMarkets[config.global.driftEnv],
-				config.botConfigs.userPnlSettler
+				PerpMarkets[config.global.driftEnv!],
+				SpotMarkets[config.global.driftEnv!],
+				config.botConfigs!.userPnlSettler!
 			)
 		);
 	}
@@ -604,8 +572,8 @@ const runBot = async () => {
 		bots.push(
 			new IFRevenueSettlerBot(
 				driftClient,
-				SpotMarkets[config.global.driftEnv],
-				config.botConfigs.ifRevenueSettler
+				SpotMarkets[config.global.driftEnv!],
+				config.botConfigs!.ifRevenueSettler!
 			)
 		);
 	}
@@ -614,8 +582,8 @@ const runBot = async () => {
 		bots.push(
 			new FundingRateUpdaterBot(
 				driftClient,
-				PerpMarkets[config.global.driftEnv],
-				config.botConfigs.fundingRateUpdater
+				PerpMarkets[config.global.driftEnv!],
+				config.botConfigs!.fundingRateUpdater!
 			)
 		);
 	}
