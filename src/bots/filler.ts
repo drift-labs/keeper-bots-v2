@@ -1202,8 +1202,12 @@ export class FillerBot implements Bot {
 			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
 		} else if (this.transactionVersion === 0) {
 			txResp = this.driftClient.txSender.sendVersionedTransaction(
-				ixs,
-				[this.lookupTableAccount],
+				await this.driftClient.txSender.getVersionedTransaction(
+					ixs,
+					[this.lookupTableAccount],
+					[],
+					this.driftClient.opts
+				),
 				[],
 				this.driftClient.opts
 			);
