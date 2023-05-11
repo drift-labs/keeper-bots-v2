@@ -439,7 +439,8 @@ const main = async () => {
 		const askPct = (midPriceNum / askNum - 1.00) * 100.0;
 		const spreadPct = (askNum / bidNum - 1.00) * 100.0;
 
-		const { currLeverage, currPositionbase } = loadUserPortfolio(driftClient);
+		const { currLeverage, currPositionbase, accountUsdValue } = loadUserPortfolio(driftClient);
+		logger.debug(`User account value: ${accountUsdValue}, current leverage: ${currLeverage}`);
 
 		const { baseBidPrice, baseAskPrice } = calculateBaseBidAsk(
 			midPriceNum,
