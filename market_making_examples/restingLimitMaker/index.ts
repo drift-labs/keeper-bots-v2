@@ -241,7 +241,7 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 	const ixs: Array<TransactionInstruction> = [];
 	ixs.push(
 		ComputeBudgetProgram.setComputeUnitLimit({
-			units: 2_000_000,
+			units: 2_000_010,
 		})
 	);
 	let reusedOrderSlots = 0;
@@ -258,11 +258,22 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 		if (i + 1 <= openBids.length) {
 			// reuse existing bid
 			const openBid = openBids[i];
-			ixs.push(await driftClient.getModifyOrderIx(openBid.orderId, {
+			const ops = {
 				price: bidPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
 				maxTs: orderExpireTs,
-			}));
+				direction: null,
+				oraclePriceOffset: null,
+				triggerPrice: null,
+				triggerCondition: null,
+				auctionDuration: null,
+				auctionStartPrice: null,
+				auctionEndPrice: null,
+				reduceOnly: null,
+				postOnly: null,
+				immediateOrCancel: null,
+			};
+			ixs.push(await driftClient.getModifyOrderIx(openBid.orderId, ops));
 			reusedOrderSlots++;
 		} else {
 			// place a new bid
@@ -285,11 +296,22 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 		if (i + 1 <= openAsks.length) {
 			// reuse existing ask
 			const openAsk = openAsks[i];
-			ixs.push(await driftClient.getModifyOrderIx(openAsk.orderId, {
+			const ops = {
 				price: askPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
 				maxTs: orderExpireTs,
-			}));
+				direction: null,
+				oraclePriceOffset: null,
+				triggerPrice: null,
+				triggerCondition: null,
+				auctionDuration: null,
+				auctionStartPrice: null,
+				auctionEndPrice: null,
+				reduceOnly: null,
+				postOnly: null,
+				immediateOrCancel: null,
+			};
+			ixs.push(await driftClient.getModifyOrderIx(openAsk.orderId, ops));
 			reusedOrderSlots++;
 		} else {
 			// place a new ask
