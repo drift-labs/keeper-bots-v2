@@ -84,7 +84,7 @@ import {
 } from './common/txLogParse';
 import { getErrorCode } from '../error';
 
-const MAX_TX_PACK_SIZE = 1200; //1232;
+const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
 const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
@@ -1201,13 +1201,14 @@ export class FillerBot implements Bot {
 			}
 			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
 		} else if (this.transactionVersion === 0) {
+			const tx = await this.driftClient.txSender.getVersionedTransaction(
+				ixs,
+				[this.lookupTableAccount],
+				[],
+				this.driftClient.opts
+			);
 			txResp = this.driftClient.txSender.sendVersionedTransaction(
-				await this.driftClient.txSender.getVersionedTransaction(
-					ixs,
-					[this.lookupTableAccount],
-					[],
-					this.driftClient.opts
-				),
+				tx,
 				[],
 				this.driftClient.opts
 			);
@@ -1468,9 +1469,10 @@ export class FillerBot implements Bot {
 				? BURST_CU_PER_FILL
 				: CU_PER_FILL;
 			if (
-				runningTxSize + newIxCost + additionalAccountsCost >=
+				(runningTxSize + newIxCost + additionalAccountsCost >=
 					MAX_TX_PACK_SIZE ||
-				runningCUUsed + cuToUsePerFill >= MAX_CU_PER_TX
+					runningCUUsed + cuToUsePerFill >= MAX_CU_PER_TX) &&
+				ixs.length > 1 // ensure at least 1 attempted fill
 			) {
 				logger.info(
 					`Fully packed fill tx (ixs: ${ixs.length}): est. tx size ${

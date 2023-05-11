@@ -176,7 +176,10 @@ function loadKeypair(privateKey: string): Keypair {
 		privateKey = fs.readFileSync(privateKey).toString();
 	}
 
-	if (privateKey.includes(',')) {
+	if (privateKey.includes('[') && privateKey.includes(']')) {
+		logger.info(`Trying to load private key as numbers array`);
+		loadedKey = Uint8Array.from(JSON.parse(privateKey));
+	} else if (privateKey.includes(',')) {
 		logger.info(`Trying to load private key as comma separated numbers`);
 		loadedKey = Uint8Array.from(
 			privateKey.split(',').map((val) => Number(val))
