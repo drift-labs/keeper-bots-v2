@@ -82,7 +82,7 @@ const orderSizePerSideBN = new BN(orderSizePerSide).mul(BASE_PRECISION);
 /// number of orders to place on each side of the book (careful if too many orders might go over tx size or CU limits)
 const ordersPerSide = intEnvVarWithDefault("ORDERS_PER_SIDE", 5);
 /// number of ticks between each order on the book
-const ticksBetweenOrders = intEnvVarWithDefault("TICKS_BETWEEN_ORDERS", 10);
+const ticksBetweenOrders = intEnvVarWithDefault("TICKS_BETWEEN_ORDERS", 300);
 /// target leverage for this account
 const targetLeverage = intEnvVarWithDefault("TARGET_LEVERAGE", 1);
 if (!targetLeverage || targetLeverage <= 0) {
@@ -184,14 +184,13 @@ const calculateBaseBidAsk = (dlobMidPrice: number, currLeverage: number, current
 };
 
 
-const needUpdateOrders = (driftClient: DriftClient, dlobMidPrice: number, myBaseBid: number, myBaseAsk: number): boolean => {
+const needUpdateOrders = (expectedOpenSize: BN, openBids: BN, openAsks: BN, dlobMidPrice: number, myBaseBid: number, myBaseAsk: number, vBid: number, vAsk: number): boolean => {
 	// update orders if any orders have been completely filled
-	const expectedOpenSize = new BN(ordersPerSide).mul(orderSizePerSideBN);
-	if (!driftClient.getUser().getPerpPosition(perpMarketIndex)!.openBids.eq(expectedOpenSize)) {
+	if (!openBids.abs().eq(expectedOpenSize)) {
 		logger.info("Requoting due to filled bids");
 		return true;
 	}
-	if (!driftClient.getUser().getPerpPosition(perpMarketIndex)!.openAsks.eq(expectedOpenSize)) {
+	if (!openAsks.abs().eq(expectedOpenSize)) {
 		logger.info("Requoting due to filled ask order");
 		return true;
 	}
@@ -199,12 +198,22 @@ const needUpdateOrders = (driftClient: DriftClient, dlobMidPrice: number, myBase
 	// update orders if the dlob midprice is less than min spread from our base bid/ask
 	const bidThreshold = myBaseBid * (1 + minSpreadBps / 2 / 10000.0);
 	if (dlobMidPrice < bidThreshold) {
-		logger.info("Requoting due to approaching bid");
+		logger.info("Requoting due to dlobMidPrice approaching bid");
 		return true;
 	}
 	const askThreshold = myBaseAsk * (1 - minSpreadBps / 2 / 10000.0);
 	if (dlobMidPrice > askThreshold) {
-		logger.info("Requoting due to approaching ask");
+		logger.info("Requoting due to dlobMidPrice approaching ask");
+		return true;
+	}
+
+	// dont want vamm to cross us
+	if (vBid > askThreshold) {
+		logger.info(`Requoting due to vBid (${vBid}) approaching askThres (${askThreshold})`);
+		return true;
+	}
+	if (vAsk < bidThreshold) {
+		logger.info(`Requoting due to vAsk (${vAsk}) approaching bidThres (${bidThreshold})`);
 		return true;
 	}
 
@@ -408,18 +417,24 @@ const main = async () => {
 		const perpMarketAccount = driftClient.getPerpMarketAccount(perpMarketIndex)!;
 		const vAsk = calculateAskPrice(perpMarketAccount, oracleData);
 		const vBid = calculateBidPrice(perpMarketAccount, oracleData);
+		const vAskNum = convertToNumber(vAsk, PRICE_PRECISION);
+		const vBidNum = convertToNumber(vBid, PRICE_PRECISION);
 
 		const bestBidNode = (dlob.getMakerLimitBids(perpMarketIndex, slot, MarketType.PERP, oracleData).next().value as DLOBNode);
-		const bestBid = bestBidNode.getPrice(oracleData, slot);
+		const dlobBid = bestBidNode.getPrice(oracleData, slot);
+		const dlobBidNum = convertToNumber(dlobBid, PRICE_PRECISION);
+		const bestBid = BN.min(vBid, dlobBid);
 
 		const bestAskNode = (dlob.getMakerLimitAsks(perpMarketIndex, slot, MarketType.PERP, oracleData).next().value as DLOBNode);
-		const bestAsk = bestAskNode.getPrice(oracleData, slot);
+		const dlobAsk = bestAskNode.getPrice(oracleData, slot);
+		const dlobAskNum = convertToNumber(dlobAsk, PRICE_PRECISION);
+		const bestAsk = BN.max(vAsk, dlobAsk);
 
-		const dlobMidPrice = bestBid.add(bestAsk).div(new BN(2));
+		const midPrice = bestBid.add(bestAsk).div(new BN(2));
 
 		const bidNum = convertToNumber(bestBid, PRICE_PRECISION);
 		const askNum = convertToNumber(bestAsk, PRICE_PRECISION);
-		const midPriceNum = convertToNumber(dlobMidPrice, PRICE_PRECISION);
+		const midPriceNum = convertToNumber(midPrice, PRICE_PRECISION);
 		const bidPct = (bidNum / midPriceNum - 1.00) * 100.0;
 		const askPct = (midPriceNum / askNum - 1.00) * 100.0;
 		const spreadPct = (askNum / bidNum - 1.00) * 100.0;
@@ -430,13 +445,19 @@ const main = async () => {
 			midPriceNum,
 			currLeverage,
 			currPositionbase);
-		logger.debug(` . dlobPcts bid: ${bidPct.toFixed(4)}% : mid: ${midPriceNum} : ask: (${askPct.toFixed(4)}%), spread: ${spreadPct}%`);
-		logger.debug(` . dlobBid:      ${bidNum};      dlobAsk:      ${askNum}`);
-		logger.debug(` . vBid:         ${vBid};         dlobAsk:      ${vAsk}`);
-		logger.debug(` . baseBidPrice: ${baseBidPrice}; baseAskPrice: ${baseAskPrice}`);
+		logger.debug(` . dlobPcts bid: ${bidPct.toFixed(4)}% : ask: (${askPct.toFixed(4)}%), spread: ${spreadPct}%`);
+		logger.debug(` . dlobBid:      ${dlobBidNum.toFixed(6)}; \t\tdlobAsk:      ${dlobAskNum.toFixed(6)}`);
+		logger.debug(` . vBid:         ${vBidNum.toFixed(6)}; \t\tvAsk:         ${vAskNum.toFixed(6)}`);
+		logger.debug(` . midPrice: ${midPriceNum}`);
+		logger.debug(` . baseBidPrice: ${baseBidPrice.toFixed(6)}; \t\tbaseAskPrice: ${baseAskPrice.toFixed(6)}`);
 
+		const driftUser = driftClient.getUser();
+		const openBids = driftUser.getPerpPosition(perpMarketIndex)!.openBids;
+		const openAsks = driftUser.getPerpPosition(perpMarketIndex)!.openAsks;
+		const expectedOpenSize = new BN(ordersPerSide).mul(orderSizePerSideBN);
+		logger.debug(` . openBids: ${convertToNumber(openBids, BASE_PRECISION)}; openAsks: ${convertToNumber(openAsks, BASE_PRECISION)}, expectedOpenSize: ${convertToNumber(expectedOpenSize, BASE_PRECISION)}`);
 
-		if (needUpdateOrders(driftClient, midPriceNum, baseBidPrice, baseAskPrice)) {
+		if (needUpdateOrders(expectedOpenSize, openBids, openAsks, midPriceNum, baseBidPrice, baseAskPrice, vBidNum, vAskNum)) {
 			await updateOrders(driftClient, baseBidPrice, baseAskPrice);
 		}
 
