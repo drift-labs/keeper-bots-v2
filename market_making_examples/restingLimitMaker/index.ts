@@ -26,6 +26,7 @@ import {
 	PostOnlyParams,
 	calculateAskPrice,
 	calculateBidPrice,
+	ZERO,
 } from '@drift-labs/sdk';
 import { logger, setLogLevel } from '../../src/logger';
 import { getWallet } from '../../src/utils';
@@ -47,6 +48,9 @@ const boolEnvVarWithDefault = (name: string, defaultValue: boolean): boolean => 
 	}
 	return (value as string).toLowerCase() === "true";
 };
+
+const ORDER_TIF_S = 30;
+const MAX_USER_ACCOUNT_STALE_SLOTS = ORDER_TIF_S * 2;
 
 /// dry run set to 'true' will not actually place orders
 const dryRun = boolEnvVarWithDefault("DRY_RUN", false);
@@ -245,7 +249,7 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 	}
 
 	// reduce, resuse, recycle open order slots
-	const orderExpireTs = new BN((Date.now()) / 1000 + 30); // new order will expire in 30s
+	const orderExpireTs = new BN((Date.now()) / 1000 + ORDER_TIF_S); // new order will expire in 30s
 	const marketTick = convertToNumber(driftClient.getPerpMarketAccount(perpMarketIndex)!.amm.orderTickSize, PRICE_PRECISION);
 	const ixs: Array<TransactionInstruction> = [];
 	ixs.push(
@@ -411,8 +415,16 @@ const main = async () => {
 		if (updatInProgress) return;
 		updatInProgress = true;
 		const start = Date.now();
-		const slot = slotSubscriber.getSlot();
+		const currSlot = slotSubscriber.getSlot();
 		const oracleData = driftClient.getOracleDataForPerpMarket(perpMarketIndex);
+
+		const userAccountData = driftClient.getUserAccountAndSlot();
+		if (currSlot > userAccountData.slot + MAX_USER_ACCOUNT_STALE_SLOTS) {
+			logger.info(`User account data stale by ${currSlot - userAccountData.slot} slots, updating`);
+			const startFetch = Date.now();
+			await driftClient.getUser().fetchAccounts();
+			logger.info(`Fetch user accounts took ${Date.now() - startFetch}ms`);
+		}
 
 		const perpMarketAccount = driftClient.getPerpMarketAccount(perpMarketIndex)!;
 		const vAsk = calculateAskPrice(perpMarketAccount, oracleData);
@@ -420,13 +432,13 @@ const main = async () => {
 		const vAskNum = convertToNumber(vAsk, PRICE_PRECISION);
 		const vBidNum = convertToNumber(vBid, PRICE_PRECISION);
 
-		const bestBidNode = (dlob.getMakerLimitBids(perpMarketIndex, slot, MarketType.PERP, oracleData).next().value as DLOBNode);
-		const dlobBid = bestBidNode.getPrice(oracleData, slot);
+		const bestBidNode = (dlob.getMakerLimitBids(perpMarketIndex, currSlot, MarketType.PERP, oracleData).next().value as DLOBNode);
+		const dlobBid = bestBidNode ? bestBidNode.getPrice(oracleData, currSlot) : vBid;
 		const dlobBidNum = convertToNumber(dlobBid, PRICE_PRECISION);
 		const bestBid = BN.min(vBid, dlobBid);
 
-		const bestAskNode = (dlob.getMakerLimitAsks(perpMarketIndex, slot, MarketType.PERP, oracleData).next().value as DLOBNode);
-		const dlobAsk = bestAskNode.getPrice(oracleData, slot);
+		const bestAskNode = (dlob.getMakerLimitAsks(perpMarketIndex, currSlot, MarketType.PERP, oracleData).next().value as DLOBNode);
+		const dlobAsk = bestAskNode ? bestAskNode.getPrice(oracleData, currSlot) : vAsk;
 		const dlobAskNum = convertToNumber(dlobAsk, PRICE_PRECISION);
 		const bestAsk = BN.max(vAsk, dlobAsk);
 
@@ -453,8 +465,9 @@ const main = async () => {
 		logger.debug(` . baseBidPrice: ${baseBidPrice.toFixed(6)}; \t\tbaseAskPrice: ${baseAskPrice.toFixed(6)}`);
 
 		const driftUser = driftClient.getUser();
-		const openBids = driftUser.getPerpPosition(perpMarketIndex)!.openBids;
-		const openAsks = driftUser.getPerpPosition(perpMarketIndex)!.openAsks;
+		const pos = driftUser.getPerpPosition(perpMarketIndex);
+		const openBids = pos ? pos.openBids : ZERO;
+		const openAsks = pos ? pos.openAsks : ZERO;
 		const expectedOpenSize = new BN(ordersPerSide).mul(orderSizePerSideBN);
 		logger.debug(` . openBids: ${convertToNumber(openBids, BASE_PRECISION)}; openAsks: ${convertToNumber(openAsks, BASE_PRECISION)}, expectedOpenSize: ${convertToNumber(expectedOpenSize, BASE_PRECISION)}`);
 
