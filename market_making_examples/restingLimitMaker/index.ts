@@ -27,6 +27,7 @@ import {
 	calculateAskPrice,
 	calculateBidPrice,
 	ZERO,
+	ModifyOrderPolicy,
 } from '@drift-labs/sdk';
 import { logger, setLogLevel } from '../../src/logger';
 import { getWallet } from '../../src/utils';
@@ -79,6 +80,9 @@ if (!minSpreadBps || minSpreadBps <= 0) {
 const maxSpreadBps = intEnvVarWithDefault("MAX_SPREAD_BPS", 20);
 if (!maxSpreadBps || maxSpreadBps <= 0) {
 	throw new Error('Must set MAX_SPREAD_BPS environment variable to be > 0');
+}
+if (minSpreadBps < maxSpreadBps) {
+	throw new Error('MIN_SPREAD_BPS must be less than MAX_SPREAD_BPS');
 }
 /// size of each order on the book (1 SOL-PERP)
 const orderSizePerSide = intEnvVarWithDefault("ORDER_SIZE", 1);
@@ -272,6 +276,7 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 			// reuse existing bid
 			const openBid = openBids[i];
 			const ops = {
+				orderId: openBid.orderId,
 				price: bidPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
 				maxTs: orderExpireTs,
@@ -285,8 +290,9 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				reduceOnly: null,
 				postOnly: null,
 				immediateOrCancel: null,
+				policy: ModifyOrderPolicy.TRY_MODIFY,
 			};
-			ixs.push(await driftClient.getModifyOrderIx(openBid.orderId, ops));
+			ixs.push(await driftClient.getModifyOrderIx(ops));
 			reusedOrderSlots++;
 		} else {
 			// place a new bid
@@ -310,6 +316,7 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 			// reuse existing ask
 			const openAsk = openAsks[i];
 			const ops = {
+				orderId: openAsk.orderId,
 				price: askPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
 				maxTs: orderExpireTs,
@@ -323,8 +330,9 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				reduceOnly: null,
 				postOnly: null,
 				immediateOrCancel: null,
+				policy: ModifyOrderPolicy.TRY_MODIFY,
 			};
-			ixs.push(await driftClient.getModifyOrderIx(openAsk.orderId, ops));
+			ixs.push(await driftClient.getModifyOrderIx(ops));
 			reusedOrderSlots++;
 		} else {
 			// place a new ask
