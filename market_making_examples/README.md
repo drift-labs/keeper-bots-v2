@@ -12,3 +12,11 @@ Note: run them from the root of the repository.
 yarn run example:restingLimitMaker
 ```
 
+
+
+### Jit Maker
+
+```
+yarn run example:jitMaker
+```
+
