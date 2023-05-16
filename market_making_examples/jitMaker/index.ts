@@ -3,7 +3,7 @@
  * the dlob mid price, widening the risk increasing side to prevent reaching max leverage.
  *
  */
-import { Connection, PublicKey, TransactionInstruction, ComputeBudgetProgram } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 import {
 	DriftClient,
 	initialize,
@@ -14,7 +14,6 @@ import {
 	DriftEnv,
 	UserMap,
 	DLOBSubscriber,
-	DLOB,
 	MarketType,
 	BASE_PRECISION,
 	getVariant,
@@ -50,9 +49,6 @@ const boolEnvVarWithDefault = (name: string, defaultValue: boolean): boolean => 
 	}
 	return (value as string).toLowerCase() === "true";
 };
-
-const ORDER_TIF_S = 30;
-const MAX_USER_ACCOUNT_STALE_SLOTS = ORDER_TIF_S * 2;
 
 /// dry run set to 'true' will not actually place orders
 const dryRun = boolEnvVarWithDefault("DRY_RUN", false);
@@ -140,13 +136,13 @@ const loadUserPortfolio = (driftClient: DriftClient): {
 };
 
 const canIncreaseRisk = (currLeverage: number): boolean => {
-	return currLeverage < targetLeverage
+	return currLeverage < targetLeverage;
 };
 
 const jitOrderIncreasesRisk = (currPositionBase: number, orderDirection: PositionDirection): boolean => {
 	// test opposite directions since our jit order we will be on the other side
 	return (isVariant(orderDirection, 'short') && currPositionBase > 0) || (isVariant(orderDirection, 'long') && currPositionBase < 0);
-}
+};
 
 const executeJitOrder = async (
 	driftClient: DriftClient,
@@ -157,8 +153,14 @@ const executeJitOrder = async (
 	fillSize: BN,
 	fillPrice: BN,
 ) => {
-	const fillDirection = isVariant(order.direction, 'long') ? PositionDirection.SHORT : PositionDirection.LONG
+	const fillDirection = isVariant(order.direction, 'long') ? PositionDirection.SHORT : PositionDirection.LONG;
 	logger.info(`Filling jit order: ${getVariant(fillDirection)} ${convertToNumber(fillSize, BASE_PRECISION)} ${convertToNumber(fillPrice, PRICE_PRECISION)}`);
+
+	if (dryRun) {
+		logger.info(`DRY RUN: not placing order.`);
+		return;
+	}
+
 	const tx = await driftClient.placeAndMakePerpOrder({
 		orderType: OrderType.LIMIT,
 		marketIndex: perpMarketIndex,
@@ -172,9 +174,10 @@ const executeJitOrder = async (
 		takerStats: takerStatsInfo.userStatsAccountPublicKey,
 		takerUserAccount: takerUserAccount,
 		order,
-	});
+	},
+		takerStatsInfo.getReferrerInfo());
 	logger.info(tx);
-}
+};
 
 
 const main = async () => {
@@ -219,7 +222,7 @@ const main = async () => {
 	const userStatsMap = new UserStatsMap(
 		driftClient,
 		driftClient.userAccountSubscriptionConfig
-	)
+	);
 	await userStatsMap.subscribe();
 
 	const dlobSubscriber = new DLOBSubscriber({
@@ -302,8 +305,6 @@ const main = async () => {
 		updatInProgress = false;
 		logger.debug('market making loop took: ' + (Date.now() - start) + 'ms');
 	});
-	// dlobSubscriber.eventEmitter.on('update', async (dlob: DLOB) => {
-	// });
 };
 
 main();
