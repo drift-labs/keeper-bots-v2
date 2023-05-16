@@ -280,16 +280,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				price: bidPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
 				maxTs: orderExpireTs,
-				direction: null,
-				oraclePriceOffset: null,
-				triggerPrice: null,
-				triggerCondition: null,
-				auctionDuration: null,
-				auctionStartPrice: null,
-				auctionEndPrice: null,
-				reduceOnly: null,
-				postOnly: null,
-				immediateOrCancel: null,
 				policy: ModifyOrderPolicy.TRY_MODIFY,
 			};
 			ixs.push(await driftClient.getModifyOrderIx(ops));
@@ -320,16 +310,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				price: askPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
 				maxTs: orderExpireTs,
-				direction: null,
-				oraclePriceOffset: null,
-				triggerPrice: null,
-				triggerCondition: null,
-				auctionDuration: null,
-				auctionStartPrice: null,
-				auctionEndPrice: null,
-				reduceOnly: null,
-				postOnly: null,
-				immediateOrCancel: null,
 				policy: ModifyOrderPolicy.TRY_MODIFY,
 			};
 			ixs.push(await driftClient.getModifyOrderIx(ops));
@@ -427,6 +407,9 @@ const main = async () => {
 		const oracleData = driftClient.getOracleDataForPerpMarket(perpMarketIndex);
 
 		const userAccountData = driftClient.getUserAccountAndSlot();
+		if (!userAccountData) {
+			return;
+		}
 		if (currSlot > userAccountData.slot + MAX_USER_ACCOUNT_STALE_SLOTS) {
 			logger.info(`User account data stale by ${currSlot - userAccountData.slot} slots, updating`);
 			const startFetch = Date.now();
