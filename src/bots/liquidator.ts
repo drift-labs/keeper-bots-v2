@@ -31,6 +31,11 @@ import {
 	SpotMarkets,
 	isUserBankrupt,
 	EventSubscriber,
+	Route,
+	JupiterClient,
+	MarketType,
+	SwapMode,
+	getVariant,
 } from '@drift-labs/sdk';
 import { E_ALREADY_LOCKED, Mutex } from 'async-mutex';
 
@@ -220,6 +225,7 @@ export class LiquidatorBot implements Bot {
 	private deriskMutex = new Uint8Array(new SharedArrayBuffer(1));
 	private runtimeSpecs: RuntimeSpec;
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
+	private jupiterClient: JupiterClient;
 
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
@@ -322,8 +328,17 @@ export class LiquidatorBot implements Bot {
 			}
 		}
 		logger.info(`${this.name} spotMarketIndicies: ${this.spotMarketIndicies}`);
-		console.log('this.spotMarketToSubaccount:');
-		console.log(this.spotMarketToSubaccount);
+		logger.info(
+			`this.spotMarketToSubaccount: ${JSON.stringify(
+				this.spotMarketToSubaccount
+			)}`
+		);
+
+		if (config.useJupiter) {
+			this.jupiterClient = new JupiterClient({
+				connection: this.driftClient.connection,
+			});
+		}
 	}
 
 	public async init() {
@@ -410,6 +425,179 @@ export class LiquidatorBot implements Bot {
 		}
 
 		return healthy;
+	}
+
+	private async driftSpotTrade(
+		orderDirection: PositionDirection,
+		marketIndex: number,
+		standardizedTokenAmount: BN
+	) {
+		const start = Date.now();
+		this.driftClient
+			.placeSpotOrder(
+				getMarketOrderParams({
+					marketIndex: marketIndex,
+					direction: orderDirection,
+					baseAssetAmount: standardizedTokenAmount,
+					reduceOnly: true,
+				})
+			)
+			.then((tx) => {
+				logger.info(
+					`closing spot position for market ${marketIndex.toString()}: ${tx} `
+				);
+			})
+			.catch((e) => {
+				logger.error(
+					`Error trying to close spot position for market ${marketIndex}`
+				);
+				console.error(e);
+				webhookMessage(
+					`[${
+						this.name
+					}]: :x: error trying to close spot position on market ${marketIndex} \n:${
+						e.stack ? e.stack : e.message
+					} `
+				);
+			})
+			.finally(() => {
+				this.sdkCallDurationHistogram.record(Date.now() - start, {
+					method: 'placeSpotOrderDrift',
+				});
+			});
+	}
+
+	private async jupiterSpotSwap(
+		orderDirection: PositionDirection,
+		spotMarketIndex: number,
+		standardizedTokenAmount: BN,
+		route: Route
+	) {
+		let outMarketIndex: number;
+		let inMarketIndex: number;
+		let jupSwapMode: SwapMode;
+		if (isVariant(orderDirection, 'long')) {
+			// sell USDC, buy spotMarketIndex
+			inMarketIndex = 0;
+			outMarketIndex = spotMarketIndex;
+			jupSwapMode = 'ExactOut';
+		} else {
+			// sell spotMarketIndex, buy USDC
+			inMarketIndex = spotMarketIndex;
+			outMarketIndex = 0;
+			jupSwapMode = 'ExactIn';
+		}
+
+		const start = Date.now();
+		this.driftClient
+			.swap({
+				jupiterClient: this.jupiterClient,
+				outMarketIndex,
+				inMarketIndex,
+				amount: standardizedTokenAmount,
+				swapMode: jupSwapMode,
+				route,
+			})
+			.then((tx) => {
+				logger.info(
+					`closing spot position for market ${spotMarketIndex.toString()}: ${tx} `
+				);
+			})
+			.catch((e) => {
+				logger.error(
+					`Error trying to ${getVariant(
+						orderDirection
+					)} spot position for market ${spotMarketIndex} on jupiter`
+				);
+				console.error(e);
+				webhookMessage(
+					`[${this.name}]: :x: error trying to ${getVariant(
+						orderDirection
+					)} spot position on market on jupiter ${spotMarketIndex} \n:${
+						e.stack ? e.stack : e.message
+					} `
+				);
+			})
+			.finally(() => {
+				this.sdkCallDurationHistogram.record(Date.now() - start, {
+					method: 'placeAndTakeSpotOrderJupiter',
+				});
+			});
+	}
+
+	private async determineBestSpotSwapRoute(
+		spotMarketIndex: number,
+		orderDirection: PositionDirection,
+		baseAmountIn: BN
+	): Promise<Route | undefined> {
+		const oraclePriceData =
+			this.driftClient.getOracleDataForSpotMarket(spotMarketIndex);
+		const dlob = await this.userMap.getDLOB(oraclePriceData.slot);
+		if (!dlob) {
+			logger.error('afiled to load DLOB');
+			return undefined;
+		}
+
+		const dlobFillQuoteAmount = dlob.estimateFillWithExactBaseAmount({
+			marketIndex: spotMarketIndex,
+			marketType: MarketType.SPOT,
+			baseAmount: baseAmountIn,
+			orderDirection,
+			slot: oraclePriceData.slot,
+			oraclePriceData,
+		});
+
+		let outMarket: SpotMarketAccount;
+		let inMarket: SpotMarketAccount;
+		let jupSwapMode: SwapMode;
+		if (isVariant(orderDirection, 'long')) {
+			// sell USDC, buy spotMarketIndex
+			inMarket = this.driftClient.getSpotMarketAccount(0);
+			outMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
+			jupSwapMode = 'ExactOut';
+		} else {
+			// sell spotMarketIndex, buy USDC
+			inMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
+			outMarket = this.driftClient.getSpotMarketAccount(0);
+			jupSwapMode = 'ExactIn';
+		}
+
+		let jupiterRoutes = await this.jupiterClient.getRoutes({
+			inputMint: inMarket.mint,
+			outputMint: outMarket.mint,
+			amount: baseAmountIn,
+			swapMode: jupSwapMode,
+		});
+
+		// fills containing Openbook will be too big, filter them out
+		jupiterRoutes = jupiterRoutes.filter((route: Route) =>
+			route.marketInfos.every(
+				(marketInfo) => !marketInfo.label.includes('Openbook')
+			)
+		);
+
+		if (jupiterRoutes.length === 0) {
+			return undefined;
+		}
+
+		const bestRoute = jupiterRoutes[0];
+		if (isVariant(orderDirection, 'long')) {
+			// buying spotMarketIndex, want min in
+			const jupAmountIn = new BN(bestRoute.inAmount);
+			if (dlobFillQuoteAmount.lt(jupAmountIn)) {
+				return undefined;
+			} else {
+				return bestRoute;
+			}
+		} else {
+			// selling spotMarketIndex, want max out
+			const jupAmountOut = new BN(bestRoute.outAmount);
+			if (dlobFillQuoteAmount.gt(jupAmountOut)) {
+				return undefined;
+			} else {
+				return bestRoute;
+			}
+		}
 	}
 
 	/**
@@ -577,73 +765,47 @@ export class LiquidatorBot implements Bot {
 				}
 
 				if (isVariant(position.balanceType, 'deposit')) {
-					const start = Date.now();
-					this.driftClient
-						.placeSpotOrder(
-							getMarketOrderParams({
-								marketIndex: position.marketIndex,
-								direction: PositionDirection.SHORT,
-								baseAssetAmount: standardizedTokenAmount,
-								reduceOnly: true,
-							})
-						)
-						.then((tx) => {
-							logger.info(
-								`closing spot position for market ${position.marketIndex.toString()}: ${tx} `
-							);
-						})
-						.catch((e) => {
-							logger.error(
-								`Error trying to close spot position for market ${position.marketIndex}`
-							);
-							console.error(e);
-							webhookMessage(
-								`[${
-									this.name
-								}]: : x: error trying to close spot position on market ${
-									position.marketIndex
-								} \n:${e.stack ? e.stack : e.message} `
-							);
-						})
-						.finally(() => {
-							this.sdkCallDurationHistogram.record(Date.now() - start, {
-								method: 'placeAndTakeSpotOrder',
-							});
-						});
+					// sell out of deposit
+					const jupRoute = await this.determineBestSpotSwapRoute(
+						position.marketIndex,
+						PositionDirection.SHORT,
+						standardizedTokenAmount
+					);
+					if (!jupRoute) {
+						this.driftSpotTrade(
+							PositionDirection.SHORT,
+							position.marketIndex,
+							standardizedTokenAmount
+						);
+					} else {
+						this.jupiterSpotSwap(
+							PositionDirection.SHORT,
+							position.marketIndex,
+							standardizedTokenAmount,
+							jupRoute
+						);
+					}
 				} else {
-					const start = Date.now();
-					this.driftClient
-						.placeSpotOrder(
-							getMarketOrderParams({
-								marketIndex: position.marketIndex,
-								direction: PositionDirection.LONG,
-								baseAssetAmount: standardizedTokenAmount,
-								reduceOnly: true,
-							})
-						)
-						.then((tx) => {
-							logger.info(
-								`closing spot position for market ${position.marketIndex.toString()}: ${tx} `
-							);
-						})
-						.catch((e) => {
-							logger.error(
-								`Error trying to close spot position for market ${position.marketIndex}`
-							);
-							console.error(e);
-							webhookMessage(
-								`[${
-									this.name
-								}]: : x: error trying to close spot position on market ${
-									position.marketIndex
-								} \n:${e.stack ? e.stack : e.message} `
-							);
-						})
-						.finally(() => {
-							this.sdkCallDurationHistogram.record(Date.now() - start, {
-								method: 'placeAndTakeSpotOrder',
-							});
-						});
+					// buy back borrow
+					const jupRoute = await this.determineBestSpotSwapRoute(
+						position.marketIndex,
+						PositionDirection.LONG,
+						standardizedTokenAmount
+					);
+					if (!jupRoute) {
+						this.driftSpotTrade(
+							PositionDirection.LONG,
+							position.marketIndex,
+							standardizedTokenAmount
+						);
+					} else {
+						this.jupiterSpotSwap(
+							PositionDirection.LONG,
+							position.marketIndex,
+							standardizedTokenAmount,
+							jupRoute
+						);
+					}
 				}
 			}
 		} finally {

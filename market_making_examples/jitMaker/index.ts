@@ -70,7 +70,7 @@ const driftEnv = (process.env.DRIFT_ENV ?? 'mainnet-beta') as DriftEnv;
 const wsEndpoint = process.env.WS_ENDPOINT;
 /// target leverage for this account
 const targetLeverage = intEnvVarWithDefault("TARGET_LEVERAGE", 1);
-if (!targetLeverage || targetLeverage <= 0) {
+if (targetLeverage === undefined) {
 	throw new Error('Must set TARGET_LEVERAGE environment variable to be > 0');
 }
 /// perp market index to market make on
@@ -276,7 +276,7 @@ const main = async () => {
 			const orderPrice = jitNode.node.getPrice(oracleData, currSlot);
 			const orderPrice1 = jitNode.node.getPrice(oracleData, currSlot + 1);
 			const orderPrice2 = jitNode.node.getPrice(oracleData, currSlot + 2);
-			logger.info(` [${i}]: ${taker?.toBase58()}-${order.orderId}; slotsLeft: ${(order.slot.toNumber() + order.auctionDuration) - currSlot}; ${getVariant(order.orderType)} ${getVariant(order.direction)} ${convertToNumber(order.baseAssetAmount.sub(order.baseAssetAmountFilled), BASE_PRECISION)} @ ${convertToNumber(orderPrice, PRICE_PRECISION)},${convertToNumber(orderPrice1, PRICE_PRECISION)},${convertToNumber(orderPrice2, PRICE_PRECISION)} vBid: ${vBidNum}, vAsk: ${vAskNum}`);
+			logger.info(` [${i}]: ${taker?.toBase58()}-${order.orderId}; currSlot: ${currSlot}, slotsLeft: ${(order.slot.toNumber() + order.auctionDuration) - currSlot}; ${getVariant(order.orderType)} ${getVariant(order.direction)} ${convertToNumber(order.baseAssetAmount.sub(order.baseAssetAmountFilled), BASE_PRECISION)} @ ${convertToNumber(orderPrice, PRICE_PRECISION)},${convertToNumber(orderPrice1, PRICE_PRECISION)},${convertToNumber(orderPrice2, PRICE_PRECISION)} vBid: ${vBidNum}, vAsk: ${vAskNum}`);
 
 			// just fill the min trade size
 			const takerAuthority = userMap.getUserAuthority(taker.toBase58());
