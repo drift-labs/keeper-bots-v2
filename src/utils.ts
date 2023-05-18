@@ -1,8 +1,7 @@
 import { Wallet } from '@drift-labs/sdk';
 import {
-	Token,
-	TOKEN_PROGRAM_ID,
-	ASSOCIATED_TOKEN_PROGRAM_ID,
+	createAssociatedTokenAccountInstruction,
+	getAssociatedTokenAddress,
 } from '@solana/spl-token';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 
@@ -16,9 +15,7 @@ export async function getOrCreateAssociatedTokenAccount(
 	mint: PublicKey,
 	wallet: Wallet
 ): Promise<PublicKey> {
-	const associatedTokenAccount = await Token.getAssociatedTokenAddress(
-		ASSOCIATED_TOKEN_PROGRAM_ID,
-		TOKEN_PROGRAM_ID,
+	const associatedTokenAccount = await getAssociatedTokenAddress(
 		mint,
 		wallet.publicKey
 	);
@@ -26,13 +23,11 @@ export async function getOrCreateAssociatedTokenAccount(
 	const accountInfo = await connection.getAccountInfo(associatedTokenAccount);
 	if (accountInfo == null) {
 		const tx = new Transaction().add(
-			Token.createAssociatedTokenAccountInstruction(
-				ASSOCIATED_TOKEN_PROGRAM_ID,
-				TOKEN_PROGRAM_ID,
-				mint,
+			createAssociatedTokenAccountInstruction(
+				wallet.publicKey,
 				associatedTokenAccount,
 				wallet.publicKey,
-				wallet.publicKey
+				mint
 			)
 		);
 		const txSig = await connection.sendTransaction(tx, [wallet.payer]);
