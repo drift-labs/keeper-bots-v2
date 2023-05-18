@@ -80,16 +80,16 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/sdk@2.28.0":
-  version "2.28.0"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.28.0.tgz#781a51044b1226927481291fa0d792eda69e3e38"
-  integrity sha512-B1eX1ERspR4xtBz6P0D5YgoiEtunJqdVtKc0q+3q4bO2N1X0USL6td9GiSmPPz7x8TutiC99mKcrpUy9u42QwQ==
+"@drift-labs/sdk@2.30.0":
+  version "2.30.0"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.30.0.tgz#68aa67c5f351d53453c850222c16480350853dd1"
+  integrity sha512-tyIZ0zi4Ap3KI+tmLecusgcjd/soAzV4gzYKFcRxEuy/o5vbuXMpEsZDvAOhwokP+8AZwFZgp2EhHrxh0obn2w==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
     "@ellipsis-labs/phoenix-sdk" "^1.4.2"
     "@project-serum/serum" "^0.13.38"
     "@pythnetwork/client" "2.5.3"
-    "@solana/spl-token" "^0.1.6"
+    "@solana/spl-token" "^0.3.7"
     "@solana/web3.js" "1.73.2"
     strict-event-emitter-types "^2.0.0"
     uuid "^8.3.2"
