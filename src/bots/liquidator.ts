@@ -35,6 +35,7 @@ import {
 	JupiterClient,
 	MarketType,
 	SwapMode,
+	SwapReduceOnly,
 	getVariant,
 } from '@drift-labs/sdk';
 import { E_ALREADY_LOCKED, Mutex } from 'async-mutex';
@@ -476,16 +477,19 @@ export class LiquidatorBot implements Bot {
 		let outMarketIndex: number;
 		let inMarketIndex: number;
 		let jupSwapMode: SwapMode;
+		let jupReduceOnly: SwapReduceOnly;
 		if (isVariant(orderDirection, 'long')) {
 			// sell USDC, buy spotMarketIndex
 			inMarketIndex = 0;
 			outMarketIndex = spotMarketIndex;
 			jupSwapMode = 'ExactOut';
+			jupReduceOnly = SwapReduceOnly.Out;
 		} else {
 			// sell spotMarketIndex, buy USDC
 			inMarketIndex = spotMarketIndex;
 			outMarketIndex = 0;
 			jupSwapMode = 'ExactIn';
+			jupReduceOnly = SwapReduceOnly.In;
 		}
 
 		const start = Date.now();
@@ -497,6 +501,7 @@ export class LiquidatorBot implements Bot {
 				amount: standardizedTokenAmount,
 				swapMode: jupSwapMode,
 				route,
+				reduceOnly: jupReduceOnly,
 			})
 			.then((tx) => {
 				logger.info(
@@ -530,22 +535,27 @@ export class LiquidatorBot implements Bot {
 		orderDirection: PositionDirection,
 		baseAmountIn: BN
 	): Promise<Route | undefined> {
+		if (!this.jupiterClient) {
+			return undefined;
+		}
 		const oraclePriceData =
 			this.driftClient.getOracleDataForSpotMarket(spotMarketIndex);
 		const dlob = await this.userMap.getDLOB(oraclePriceData.slot);
 		if (!dlob) {
-			logger.error('afiled to load DLOB');
-			return undefined;
+			logger.error('failed to load DLOB');
 		}
 
-		const dlobFillQuoteAmount = dlob.estimateFillWithExactBaseAmount({
-			marketIndex: spotMarketIndex,
-			marketType: MarketType.SPOT,
-			baseAmount: baseAmountIn,
-			orderDirection,
-			slot: oraclePriceData.slot,
-			oraclePriceData,
-		});
+		let dlobFillQuoteAmount: BN;
+		if (dlob) {
+			dlobFillQuoteAmount = dlob.estimateFillWithExactBaseAmount({
+				marketIndex: spotMarketIndex,
+				marketType: MarketType.SPOT,
+				baseAmount: baseAmountIn,
+				orderDirection,
+				slot: oraclePriceData.slot,
+				oraclePriceData,
+			});
+		}
 
 		let outMarket: SpotMarketAccount;
 		let inMarket: SpotMarketAccount;
@@ -584,7 +594,7 @@ export class LiquidatorBot implements Bot {
 		if (isVariant(orderDirection, 'long')) {
 			// buying spotMarketIndex, want min in
 			const jupAmountIn = new BN(bestRoute.inAmount);
-			if (dlobFillQuoteAmount.lt(jupAmountIn)) {
+			if (dlobFillQuoteAmount?.lt(jupAmountIn)) {
 				return undefined;
 			} else {
 				return bestRoute;
@@ -592,7 +602,7 @@ export class LiquidatorBot implements Bot {
 		} else {
 			// selling spotMarketIndex, want max out
 			const jupAmountOut = new BN(bestRoute.outAmount);
-			if (dlobFillQuoteAmount.gt(jupAmountOut)) {
+			if (dlobFillQuoteAmount?.gt(jupAmountOut)) {
 				return undefined;
 			} else {
 				return bestRoute;
