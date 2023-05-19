@@ -11,16 +11,13 @@
 		"experimentalDecorators": true,
 		"emitDecoratorMetadata": true,
 		"baseUrl": ".",
-		// "rootDir": "src",
 		"rootDirs": [
-			"src",
-			"market_making_examples"
+			"src"
 		],
 		"outDir": "./lib"
 	},
 	"include": [
-		"src/**/*",
-		"market_making_examples/**/*"
+		"src/**/*"
 	],
 	"exclude": [
 		"node_modules"
