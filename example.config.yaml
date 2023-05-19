@@ -100,6 +100,8 @@ botConfigs:
     metricsPort: 9465
     # if true will attempt to sell off any inherited positions
     disableAutoDerisking: false
+    # if true will swap spot assets on jupiter if the price is better
+    useJupiter: true
     # null will handle all markets
     perpMarketIndicies:
     spotMarketIndicies:

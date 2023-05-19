@@ -22,6 +22,7 @@ export type SubaccountConfig = {
 
 export type LiquidatorConfig = BaseBotConfig & {
 	disableAutoDerisking: boolean;
+	useJupiter: boolean;
 	perpMarketIndicies?: Array<number>;
 	spotMarketIndicies?: Array<number>;
 	perpSubAccountConfig?: SubaccountConfig;
@@ -199,6 +200,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			botId: process.env.BOT_ID ?? 'liquidator',
 			metricsPort: 9464,
 			disableAutoDerisking: opts.disableAutoDerisking ?? false,
+			useJupiter: opts.useJupiter ?? true,
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
 			spotMarketIndicies: loadCommaDelimitToArray(opts.spotMarketIndicies),
 			runOnce: opts.runOnce ?? false,
