@@ -343,7 +343,8 @@ export class LiquidatorBot implements Bot {
 			)}`
 		);
 
-		if (config.useJupiter) {
+		// jupiter only works with mainnet
+		if (config.useJupiter && this.runtimeSpecs.driftEnv === 'mainnet-beta') {
 			this.jupiterClient = new JupiterClient({
 				connection: this.driftClient.connection,
 			});
