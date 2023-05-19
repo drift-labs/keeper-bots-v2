@@ -70,7 +70,7 @@ const driftEnv = (process.env.DRIFT_ENV ?? 'mainnet-beta') as DriftEnv;
 const wsEndpoint = process.env.WS_ENDPOINT;
 /// target leverage for this account
 const targetLeverage = intEnvVarWithDefault("TARGET_LEVERAGE", 1);
-if (targetLeverage === undefined) {
+if (targetLeverage < 0) {
 	throw new Error('Must set TARGET_LEVERAGE environment variable to be > 0');
 }
 /// perp market index to market make on
