@@ -7,11 +7,7 @@ import {
 	searcherClient,
 } from 'jito-ts/dist/sdk/block-engine/searcher';
 
-import {
-	Token,
-	TOKEN_PROGRAM_ID,
-	ASSOCIATED_TOKEN_PROGRAM_ID,
-} from '@solana/spl-token';
+import { getAssociatedTokenAddress } from '@solana/spl-token';
 import {
 	BulkAccountLoader,
 	DriftClient,
@@ -395,12 +391,7 @@ const runBot = async () => {
 
 		const mint = SpotMarkets[config.global.driftEnv!][0].mint; // TODO: are index 0 always USDC???, support other collaterals
 
-		const ata = await Token.getAssociatedTokenAddress(
-			ASSOCIATED_TOKEN_PROGRAM_ID,
-			TOKEN_PROGRAM_ID,
-			mint,
-			wallet.publicKey
-		);
+		const ata = await getAssociatedTokenAddress(mint, wallet.publicKey);
 
 		const amount = new BN(config.global.forceDeposit).mul(QUOTE_PRECISION);
 
