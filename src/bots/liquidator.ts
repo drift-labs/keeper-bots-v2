@@ -77,6 +77,10 @@ function calculateSpotTokenAmountToLiquidate(
 	const spotMarket = driftClient.getSpotMarketAccount(
 		liquidateePosition.marketIndex
 	);
+	if (!spotMarket) {
+		logger.error(`No spot market found for ${liquidateePosition.marketIndex}`);
+		return ZERO;
+	}
 
 	const tokenPrecision = new BN(10 ** spotMarket.decimals);
 
@@ -133,6 +137,10 @@ function findBestSpotPosition(
 		}
 
 		const spotMarket = driftClient.getSpotMarketAccount(position.marketIndex);
+		if (!spotMarket) {
+			logger.error(`No spot market found for ${position.marketIndex}`);
+			continue;
+		}
 		const tokenAmount = calculateSpotTokenAmountToLiquidate(
 			driftClient,
 			liquidatorUser,
@@ -540,25 +548,25 @@ export class LiquidatorBot implements Bot {
 		}
 		const oraclePriceData =
 			this.driftClient.getOracleDataForSpotMarket(spotMarketIndex);
-		const dlob = await this.userMap.getDLOB(oraclePriceData.slot);
+		const dlob = await this.userMap.getDLOB(oraclePriceData.slot.toNumber());
 		if (!dlob) {
 			logger.error('failed to load DLOB');
 		}
 
-		let dlobFillQuoteAmount: BN;
+		let dlobFillQuoteAmount: BN | undefined;
 		if (dlob) {
 			dlobFillQuoteAmount = dlob.estimateFillWithExactBaseAmount({
 				marketIndex: spotMarketIndex,
 				marketType: MarketType.SPOT,
 				baseAmount: baseAmountIn,
 				orderDirection,
-				slot: oraclePriceData.slot,
+				slot: oraclePriceData.slot.toNumber(),
 				oraclePriceData,
 			});
 		}
 
-		let outMarket: SpotMarketAccount;
-		let inMarket: SpotMarketAccount;
+		let outMarket: SpotMarketAccount | undefined;
+		let inMarket: SpotMarketAccount | undefined;
 		let jupSwapMode: SwapMode;
 		if (isVariant(orderDirection, 'long')) {
 			// sell USDC, buy spotMarketIndex
@@ -570,6 +578,11 @@ export class LiquidatorBot implements Bot {
 			inMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
 			outMarket = this.driftClient.getSpotMarketAccount(0);
 			jupSwapMode = 'ExactIn';
+		}
+
+		if (!inMarket || !outMarket) {
+			logger.error('failed to get spot markets');
+			return undefined;
 		}
 
 		let jupiterRoutes = await this.jupiterClient.getRoutes({
@@ -624,6 +637,10 @@ export class LiquidatorBot implements Bot {
 
 		try {
 			const userAccount = this.driftClient.getUserAccount();
+			if (!userAccount) {
+				logger.error('failed to get user account');
+				return;
+			}
 
 			// close open positions
 			for (const position of userAccount.perpPositions) {
@@ -709,7 +726,7 @@ export class LiquidatorBot implements Bot {
 						});
 				} else if (position.quoteAssetAmount.gt(ZERO)) {
 					const availablePnl = calculateMarketAvailablePNL(
-						this.driftClient.getPerpMarketAccount(position.marketIndex),
+						this.driftClient.getPerpMarketAccount(position.marketIndex)!,
 						this.driftClient.getQuoteSpotMarketAccount()
 					);
 
@@ -751,16 +768,25 @@ export class LiquidatorBot implements Bot {
 					continue;
 				}
 
+				const spotMarket = this.driftClient.getSpotMarketAccount(
+					position.marketIndex
+				);
+				if (!spotMarket) {
+					logger.error(
+						`failed to get spot market account for market ${position.marketIndex}`
+					);
+					continue;
+				}
+
 				// need to standardize token amount to check if its closable via market orders
 				const standardizedTokenAmount = getSignedTokenAmount(
 					standardizeBaseAssetAmount(
 						getTokenAmount(
 							position.scaledBalance,
-							this.driftClient.getSpotMarketAccount(position.marketIndex),
+							spotMarket,
 							position.balanceType
 						),
-						this.driftClient.getSpotMarketAccount(position.marketIndex)
-							.orderStepSize
+						spotMarket.orderStepSize
 					),
 					position.balanceType
 				);
@@ -1160,6 +1186,14 @@ export class LiquidatorBot implements Bot {
 			const subAccountToUse = this.perpMarketToSubaccount.get(
 				liquidateePosition.marketIndex
 			);
+			if (!subAccountToUse) {
+				logger.info(
+					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on perp market ${
+						liquidateePosition.marketIndex
+					} because it is not in perpMarketIndices`
+				);
+				return;
+			}
 			logger.info(
 				`Switching to subaccount ${subAccountToUse} for perp market ${liquidateePosition.marketIndex}`
 			);
@@ -1191,7 +1225,7 @@ export class LiquidatorBot implements Bot {
 					console.error(e);
 					logger.error('Error in liquidatePerpPnlForDeposit');
 					const errorCode = getErrorCode(e);
-					if (!errorCodesToSuppress.includes(errorCode)) {
+					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 						webhookMessage(
 							`[${
 								this.name
@@ -1233,8 +1267,8 @@ export class LiquidatorBot implements Bot {
 				if (isUserBankrupt(user) || user.isBankrupt()) {
 					await this.tryResolveBankruptUser(user);
 				} else if (user.canBeLiquidated()) {
-					if (this.throttledUsers.has(userKey)) {
-						const lastAttempt = this.throttledUsers.get(userKey);
+					const lastAttempt = this.throttledUsers.get(userKey);
+					if (lastAttempt) {
 						const now = Date.now();
 						if (lastAttempt + LIQUIDATE_THROTTLE_BACKOFF > now) {
 							logger.warn(
@@ -1287,6 +1321,12 @@ export class LiquidatorBot implements Bot {
 							const subAccountToUse = this.spotMarketToSubaccount.get(
 								borrowMarketIndextoLiq
 							);
+							if (!subAccountToUse) {
+								logger.info(
+									`skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
+								);
+								continue;
+							}
 							logger.info(
 								`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
 							);
@@ -1324,7 +1364,7 @@ tx: ${tx} `
 								logger.error(e);
 								const errorCode = getErrorCode(e);
 
-								if (!errorCodesToSuppress.includes(errorCode)) {
+								if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 									webhookMessage(
 										`[${
 											this.name
@@ -1349,6 +1389,10 @@ tx: ${tx} `
 					const usdcMarket = this.driftClient.getSpotMarketAccount(
 						QUOTE_SPOT_MARKET_INDEX
 					);
+					if (!usdcMarket) {
+						logger.error(`no usdcMarket for ${QUOTE_SPOT_MARKET_INDEX}`);
+						return;
+					}
 
 					// less attractive, perp / perp pnl liquidations
 					for (const liquidateePosition of liquidateeUserAccount.perpPositions) {
@@ -1357,6 +1401,12 @@ tx: ${tx} `
 								const perpMarket = this.driftClient.getPerpMarketAccount(
 									liquidateePosition.marketIndex
 								);
+								if (!perpMarket) {
+									logger.error(
+										`no perpMarket for ${liquidateePosition.marketIndex}`
+									);
+									continue;
+								}
 								await this.liqPerpPnl(
 									user,
 									perpMarket,
@@ -1399,6 +1449,12 @@ tx: ${tx} `
 								const subAccountToUse = this.perpMarketToSubaccount.get(
 									liquidateePosition.marketIndex
 								);
+								if (!subAccountToUse) {
+									logger.info(
+										`skipping liquidatePerp call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
+									);
+									continue;
+								}
 								logger.info(
 									`Switching to subaccount ${subAccountToUse} for perp market ${liquidateePosition.marketIndex}`
 								);
