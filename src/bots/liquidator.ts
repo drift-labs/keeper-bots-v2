@@ -1574,6 +1574,9 @@ tx: ${tx} `
 							);
 						}
 						if (indexWithOpenOrders !== -1) {
+							logger.info(
+								`${auth}-${user.userAccountPublicKey.toBase58()} liquidateSpot with assets in ${indexWithMaxAssets} and open orders in ${indexWithOpenOrders}`
+							);
 							await this.driftClient.liquidateSpot(
 								user.userAccountPublicKey,
 								user.getUserAccount(),
@@ -1581,15 +1584,6 @@ tx: ${tx} `
 								indexWithOpenOrders,
 								ZERO
 							);
-						}
-
-						for (const perpPos of user.getUserAccount().perpPositions) {
-							if (perpPos.openBids.abs().gt(ZERO)) {
-								console.log(`perpOpenBids: ${perpPos.openBids}`);
-							}
-							if (perpPos.openAsks.abs().gt(ZERO)) {
-								console.log(`perpOpenAsks: ${perpPos.openAsks}`);
-							}
 						}
 					}
 				} else if (isVariant(userAcc.status, 'beingLiquidated')) {
