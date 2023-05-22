@@ -328,6 +328,7 @@ export class LiquidatorBot implements Bot {
 			logger.info('Loading spot markets to watch from spotMarketIndicies');
 			this.spotMarketIndicies = config.spotMarketIndicies || [];
 			if (!this.spotMarketIndicies || this.spotMarketIndicies.length === 0) {
+				console.log('ok');
 				this.spotMarketIndicies = SpotMarkets[
 					this.runtimeSpecs.driftEnv as DriftEnv
 				].map((m) => {
@@ -340,11 +341,8 @@ export class LiquidatorBot implements Bot {
 			}
 		}
 		logger.info(`${this.name} spotMarketIndicies: ${this.spotMarketIndicies}`);
-		logger.info(
-			`this.spotMarketToSubaccount: ${JSON.stringify(
-				this.spotMarketToSubaccount
-			)}`
-		);
+		console.log('this.spotMarketToSubaccount:');
+		console.log(this.spotMarketToSubaccount);
 
 		// jupiter only works with mainnet
 		if (config.useJupiter && this.runtimeSpecs.driftEnv === 'mainnet-beta') {
@@ -1190,7 +1188,7 @@ export class LiquidatorBot implements Bot {
 			const subAccountToUse = this.perpMarketToSubaccount.get(
 				liquidateePosition.marketIndex
 			);
-			if (!subAccountToUse) {
+			if (subAccountToUse === undefined) {
 				logger.info(
 					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on perp market ${
 						liquidateePosition.marketIndex
@@ -1233,7 +1231,7 @@ export class LiquidatorBot implements Bot {
 						webhookMessage(
 							`[${
 								this.name
-							}]: : x: error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+							}]: :x: error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
 								liquidateePosition.marketIndex
 							}: \n${e.logs ? (e.logs as Array<string>).join('\n') : ''} \n${
 								e.stack ? e.stack : e.message
@@ -1325,7 +1323,7 @@ export class LiquidatorBot implements Bot {
 							const subAccountToUse = this.spotMarketToSubaccount.get(
 								borrowMarketIndextoLiq
 							);
-							if (!subAccountToUse) {
+							if (subAccountToUse === undefined) {
 								logger.info(
 									`skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
 								);
@@ -1453,7 +1451,7 @@ tx: ${tx} `
 								const subAccountToUse = this.perpMarketToSubaccount.get(
 									liquidateePosition.marketIndex
 								);
-								if (!subAccountToUse) {
+								if (subAccountToUse === undefined) {
 									logger.info(
 										`skipping liquidatePerp call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
 									);
