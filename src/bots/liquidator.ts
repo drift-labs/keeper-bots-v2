@@ -1566,24 +1566,44 @@ tx: ${tx} `
 							logger.info(
 								`${auth}-${user.userAccountPublicKey.toBase58()} liquidatePerp with open orders in ${liquidateePerpIndexWithOpenOrders}`
 							);
-							await this.driftClient.liquidatePerp(
-								user.userAccountPublicKey,
-								user.getUserAccount(),
-								liquidateePerpIndexWithOpenOrders,
-								ZERO
+							this.throttledUsers.set(
+								user.userAccountPublicKey.toBase58(),
+								Date.now()
 							);
+							this.driftClient
+								.liquidatePerp(
+									user.userAccountPublicKey,
+									user.getUserAccount(),
+									liquidateePerpIndexWithOpenOrders,
+									ZERO
+								)
+								.then((tx) => {
+									logger.info(
+										`liquidatePerp (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+									);
+								});
 						}
 						if (indexWithOpenOrders !== -1) {
 							logger.info(
 								`${auth}-${user.userAccountPublicKey.toBase58()} liquidateSpot with assets in ${indexWithMaxAssets} and open orders in ${indexWithOpenOrders}`
 							);
-							await this.driftClient.liquidateSpot(
-								user.userAccountPublicKey,
-								user.getUserAccount(),
-								indexWithMaxAssets,
-								indexWithOpenOrders,
-								ZERO
+							this.throttledUsers.set(
+								user.userAccountPublicKey.toBase58(),
+								Date.now()
 							);
+							this.driftClient
+								.liquidateSpot(
+									user.userAccountPublicKey,
+									user.getUserAccount(),
+									indexWithMaxAssets,
+									indexWithOpenOrders,
+									ZERO
+								)
+								.then((tx) => {
+									logger.info(
+										`liquidateSpot (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+									);
+								});
 						}
 					}
 				} else if (isVariant(userAcc.status, 'beingLiquidated')) {
