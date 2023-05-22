@@ -113,20 +113,51 @@ function calculateSpotTokenAmountToLiquidate(
 
 function findBestSpotPosition(
 	driftClient: DriftClient,
+	liquidateeUser: User,
 	liquidatorUser: User,
 	spotPositions: SpotPosition[],
 	isBorrow: boolean,
 	positionTakerOverPctNumerator: BN,
 	positionTakerOverPctDenominator: BN
-): [number, BN] {
+): {
+	bestIndex: number;
+	bestAmount: BN;
+	indexWithMaxAssets: number;
+	indexWithOpenOrders: number;
+} {
 	let bestIndex = -1;
 	let bestAmount = ZERO;
 	let currentAstWeight = 0;
 	let currentLibWeight = Number.MAX_VALUE;
+	let indexWithMaxAssets = -1;
+	let maxAssets = new BN(-1);
+	let indexWithOpenOrders = -1;
 
 	for (const position of spotPositions) {
 		if (position.scaledBalance.eq(ZERO)) {
 			continue;
+		}
+
+		const market = driftClient.getSpotMarketAccount(position.marketIndex);
+		if (!market) {
+			logger.error(`No spot market found for ${position.marketIndex}`);
+			continue;
+		}
+
+		if (position.openOrders > 0) {
+			indexWithOpenOrders = position.marketIndex;
+		}
+
+		const totalAssetValue = liquidateeUser.getSpotMarketAssetValue(
+			position.marketIndex,
+			'Maintenance',
+			true,
+			undefined,
+			undefined
+		);
+		if (totalAssetValue.abs().gt(maxAssets)) {
+			maxAssets = totalAssetValue.abs();
+			indexWithMaxAssets = position.marketIndex;
 		}
 
 		if (
@@ -166,7 +197,12 @@ function findBestSpotPosition(
 		}
 	}
 
-	return [bestIndex, bestAmount];
+	return {
+		bestIndex,
+		bestAmount,
+		indexWithMaxAssets: indexWithMaxAssets,
+		indexWithOpenOrders,
+	};
 }
 
 enum METRIC_TYPES {
@@ -328,7 +364,6 @@ export class LiquidatorBot implements Bot {
 			logger.info('Loading spot markets to watch from spotMarketIndicies');
 			this.spotMarketIndicies = config.spotMarketIndicies || [];
 			if (!this.spotMarketIndicies || this.spotMarketIndicies.length === 0) {
-				console.log('ok');
 				this.spotMarketIndicies = SpotMarkets[
 					this.runtimeSpecs.driftEnv as DriftEnv
 				].map((m) => {
@@ -1293,27 +1328,37 @@ export class LiquidatorBot implements Bot {
 					const liquidateeUserAccount = user.getUserAccount();
 
 					// most attractive spot market liq
-					const [depositMarketIndextoLiq, depositAmountToLiq] =
-						findBestSpotPosition(
-							this.driftClient,
-							liquidatorUser,
-							liquidateeUserAccount.spotPositions,
-							false,
-							this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
-							this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
-						);
+					const {
+						bestIndex: depositMarketIndextoLiq,
+						bestAmount: depositAmountToLiq,
+						indexWithMaxAssets,
+						indexWithOpenOrders,
+					} = findBestSpotPosition(
+						this.driftClient,
+						user,
+						liquidatorUser,
+						liquidateeUserAccount.spotPositions,
+						false,
+						this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
+						this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
+					);
 
-					const [borrowMarketIndextoLiq, borrowAmountToLiq] =
-						findBestSpotPosition(
-							this.driftClient,
-							liquidatorUser,
-							liquidateeUserAccount.spotPositions,
-							true,
-							this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
-							this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
-						);
+					const {
+						bestIndex: borrowMarketIndextoLiq,
+						bestAmount: borrowAmountToLiq,
+					} = findBestSpotPosition(
+						this.driftClient,
+						user,
+						liquidatorUser,
+						liquidateeUserAccount.spotPositions,
+						true,
+						this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
+						this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
+					);
 
+					let liquidateeHasSpotPos = false;
 					if (borrowMarketIndextoLiq != -1 && depositMarketIndextoLiq != -1) {
+						liquidateeHasSpotPos = true;
 						if (!this.spotMarketIndicies.includes(borrowMarketIndextoLiq)) {
 							logger.info(
 								`Skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because borrowMarketIndextoLiq(${borrowMarketIndextoLiq}) is not in spotMarketIndicies`
@@ -1397,7 +1442,15 @@ tx: ${tx} `
 					}
 
 					// less attractive, perp / perp pnl liquidations
+					let liquidateeHasPerpPos = false;
+					let liquidateePerpHasOpenOrders = false;
+					let liquidateePerpIndexWithOpenOrders = -1;
 					for (const liquidateePosition of liquidateeUserAccount.perpPositions) {
+						if (liquidateePosition.openOrders > 0) {
+							liquidateePerpHasOpenOrders = true;
+							liquidateePerpIndexWithOpenOrders =
+								liquidateePosition.marketIndex;
+						}
 						if (liquidateePosition.baseAssetAmount.isZero()) {
 							if (!liquidateePosition.quoteAssetAmount.isZero()) {
 								const perpMarket = this.driftClient.getPerpMarketAccount(
@@ -1422,6 +1475,7 @@ tx: ${tx} `
 							}
 							continue;
 						}
+						liquidateeHasPerpPos = true;
 
 						const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
 							liquidatorUser,
@@ -1500,6 +1554,55 @@ tx: ${tx} `
 									this.sdkCallDurationHistogram.record(Date.now() - start, {
 										method: 'liquidatePerp',
 									});
+								});
+						}
+					}
+
+					if (!liquidateeHasSpotPos && !liquidateeHasPerpPos) {
+						logger.info(
+							`${auth}-${user.userAccountPublicKey.toBase58()} can be liquidated but has no positions`
+						);
+						if (liquidateePerpHasOpenOrders) {
+							logger.info(
+								`${auth}-${user.userAccountPublicKey.toBase58()} liquidatePerp with open orders in ${liquidateePerpIndexWithOpenOrders}`
+							);
+							this.throttledUsers.set(
+								user.userAccountPublicKey.toBase58(),
+								Date.now()
+							);
+							this.driftClient
+								.liquidatePerp(
+									user.userAccountPublicKey,
+									user.getUserAccount(),
+									liquidateePerpIndexWithOpenOrders,
+									ZERO
+								)
+								.then((tx) => {
+									logger.info(
+										`liquidatePerp (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+									);
+								});
+						}
+						if (indexWithOpenOrders !== -1) {
+							logger.info(
+								`${auth}-${user.userAccountPublicKey.toBase58()} liquidateSpot with assets in ${indexWithMaxAssets} and open orders in ${indexWithOpenOrders}`
+							);
+							this.throttledUsers.set(
+								user.userAccountPublicKey.toBase58(),
+								Date.now()
+							);
+							this.driftClient
+								.liquidateSpot(
+									user.userAccountPublicKey,
+									user.getUserAccount(),
+									indexWithMaxAssets,
+									indexWithOpenOrders,
+									ZERO
+								)
+								.then((tx) => {
+									logger.info(
+										`liquidateSpot (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+									);
 								});
 						}
 					}
