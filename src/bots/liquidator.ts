@@ -325,15 +325,18 @@ export class LiquidatorBot implements Bot {
 				config.spotSubAccountConfig
 			).flat();
 		} else {
+			logger.info('Loading spot markets to watch from spotMarketIndicies');
 			this.spotMarketIndicies = config.spotMarketIndicies || [];
 			if (!this.spotMarketIndicies || this.spotMarketIndicies.length === 0) {
-				for (const m of SpotMarkets[this.runtimeSpecs.driftEnv as DriftEnv]) {
+				this.spotMarketIndicies = SpotMarkets[
+					this.runtimeSpecs.driftEnv as DriftEnv
+				].map((m) => {
 					this.spotMarketToSubaccount.set(
 						m.marketIndex,
 						this.activeSubAccountId
 					);
-					this.spotMarketIndicies.push(m.marketIndex);
-				}
+					return m.marketIndex;
+				});
 			}
 		}
 		logger.info(`${this.name} spotMarketIndicies: ${this.spotMarketIndicies}`);
