@@ -13,7 +13,6 @@ import {
 	PRICE_PRECISION,
 	Order,
 	PerpPosition,
-	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -36,7 +35,6 @@ type State = {
 };
 
 const MARKET_UPDATE_COOLDOWN_SLOTS = 30; // wait slots before updating market position
-const driftEnv = process.env.DRIFT_ENV || 'devnet';
 
 enum METRIC_TYPES {
 	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
@@ -234,8 +232,8 @@ export class FloatingPerpMakerBot implements Bot {
 			this.agentState.marketPosition.set(p.marketIndex, p);
 		});
 
-		// zeor out the open orders
-		for (const market of PerpMarkets[driftEnv]) {
+		// zero out the open orders
+		for (const market of this.driftClient.getPerpMarketAccounts()) {
 			this.agentState.openOrders.set(market.marketIndex, []);
 		}
 

@@ -22,7 +22,6 @@ import {
 	BASE_PRECISION,
 	QUOTE_PRECISION,
 	WrappedEvent,
-	PerpMarkets,
 	BulkAccountLoader,
 	SlotSubscriber,
 	PublicKey,
@@ -551,12 +550,14 @@ export class FillerBot implements Bot {
 
 					if (isVariant(actionRecord.action, 'fill')) {
 						if (isVariant(actionRecord.marketType, 'perp')) {
-							this.observedFillsCountCounter.add(1, {
-								market:
-									PerpMarkets[this.runtimeSpec.driftEnv][
-										actionRecord.marketIndex
-									].symbol,
-							});
+							const perpMarket = this.driftClient.getPerpMarketAccount(
+								actionRecord.marketIndex
+							);
+							if (perpMarket) {
+								this.observedFillsCountCounter.add(1, {
+									market: perpMarket.name,
+								});
+							}
 						}
 					}
 				}

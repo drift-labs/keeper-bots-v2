@@ -27,8 +27,6 @@ import {
 	TEN_THOUSAND,
 	WrappedEvent,
 	PositionDirection,
-	PerpMarkets,
-	SpotMarkets,
 	isUserBankrupt,
 	EventSubscriber,
 	Route,
@@ -335,15 +333,15 @@ export class LiquidatorBot implements Bot {
 			logger.info('Loading perp markets to watch from perpMarketIndicies');
 			this.perpMarketIndicies = config.perpMarketIndicies || [];
 			if (!this.perpMarketIndicies || this.perpMarketIndicies.length === 0) {
-				this.perpMarketIndicies = PerpMarkets[
-					this.runtimeSpecs.driftEnv as DriftEnv
-				].map((m) => {
-					this.perpMarketToSubaccount.set(
-						m.marketIndex,
-						this.activeSubAccountId
-					);
-					return m.marketIndex;
-				});
+				this.perpMarketIndicies = this.driftClient
+					.getPerpMarketAccounts()
+					.map((m) => {
+						this.perpMarketToSubaccount.set(
+							m.marketIndex,
+							this.activeSubAccountId
+						);
+						return m.marketIndex;
+					});
 			}
 		}
 		logger.info(`${this.name} perpMarketIndicies: ${this.perpMarketIndicies}`);
@@ -364,15 +362,15 @@ export class LiquidatorBot implements Bot {
 			logger.info('Loading spot markets to watch from spotMarketIndicies');
 			this.spotMarketIndicies = config.spotMarketIndicies || [];
 			if (!this.spotMarketIndicies || this.spotMarketIndicies.length === 0) {
-				this.spotMarketIndicies = SpotMarkets[
-					this.runtimeSpecs.driftEnv as DriftEnv
-				].map((m) => {
-					this.spotMarketToSubaccount.set(
-						m.marketIndex,
-						this.activeSubAccountId
-					);
-					return m.marketIndex;
-				});
+				this.spotMarketIndicies = this.driftClient
+					.getSpotMarketAccounts()
+					.map((m) => {
+						this.spotMarketToSubaccount.set(
+							m.marketIndex,
+							this.activeSubAccountId
+						);
+						return m.marketIndex;
+					});
 			}
 		}
 		logger.info(`${this.name} spotMarketIndicies: ${this.spotMarketIndicies}`);

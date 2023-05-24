@@ -17,7 +17,6 @@ import {
 	SerumFulfillmentConfigMap,
 	SerumV3FulfillmentConfigAccount,
 	OrderActionRecord,
-	SpotMarkets,
 	BulkAccountLoader,
 	OrderRecord,
 	convertToNumber,
@@ -250,10 +249,8 @@ export class SpotFillerBot implements Bot {
 		}
 
 		// load the pending tx atomic
-		for (const spotMarket of SpotMarkets[
-			this.runtimeSpec.driftEnv as DriftEnv
-		]) {
-			if (spotMarket.serumMarket || spotMarket.phoenixMarket) {
+		for (const spotMarket of this.driftClient.getSpotMarketAccounts()) {
+			if (spotMarket.marketIndex !== 0) {
 				Atomics.store(this.pendingTransactionsArray, spotMarket.marketIndex, 0);
 			}
 		}
@@ -377,12 +374,10 @@ export class SpotFillerBot implements Bot {
 			}
 		);
 		this.pendingTransactionsGauge.addCallback(async (obs) => {
-			for (const spotMarket of SpotMarkets[
-				this.runtimeSpec.driftEnv as DriftEnv
-			]) {
-				if (spotMarket.serumMarket || spotMarket.phoenixMarket) {
+			for (const spotMarket of this.driftClient.getSpotMarketAccounts()) {
+				if (spotMarket.marketIndex) {
 					const marketIndex = spotMarket.marketIndex;
-					const symbol = spotMarket.symbol;
+					const symbol = spotMarket.name;
 					obs.observe(
 						Atomics.load(this.pendingTransactionsArray, marketIndex),
 						{
@@ -557,12 +552,14 @@ export class SpotFillerBot implements Bot {
 
 					if (isVariant(actionRecord.action, 'fill')) {
 						if (isVariant(actionRecord.marketType, 'spot')) {
-							this.observedFillsCountCounter.add(1, {
-								market:
-									SpotMarkets[this.runtimeSpec.driftEnv][
-										actionRecord.marketIndex
-									].symbol,
-							});
+							const spotMarket = this.driftClient.getSpotMarketAccount(
+								actionRecord.marketIndex
+							);
+							if (spotMarket) {
+								this.observedFillsCountCounter.add(1, {
+									market: spotMarket.name,
+								});
+							}
 						}
 					}
 				}
@@ -809,10 +806,9 @@ export class SpotFillerBot implements Bot {
 			if (isEndIxLog(this.driftClient.program.programId.toBase58(), log)) {
 				if (!errorThisFillIx) {
 					this.successfulFillsCounter.add(1, {
-						market:
-							SpotMarkets[this.runtimeSpec.driftEnv][
-								nodeFilled.node.order.marketIndex
-							].symbol,
+						market: this.driftClient.getSpotMarketAccount(
+							nodeFilled.node.order.marketIndex
+						).name,
 					});
 					successCount++;
 				}

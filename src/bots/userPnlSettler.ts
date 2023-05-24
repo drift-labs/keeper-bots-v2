@@ -61,8 +61,6 @@ export class UserPnlSettlerBot implements Bot {
 	constructor(
 		driftClient: DriftClient,
 		eventSubscriber: EventSubscriber,
-		perpMarkets: PerpMarketConfig[],
-		spotMarkets: SpotMarketConfig[],
 		config: BaseBotConfig
 	) {
 		this.name = config.botId;
@@ -70,8 +68,6 @@ export class UserPnlSettlerBot implements Bot {
 		this.runOnce = config.runOnce || false;
 		this.driftClient = driftClient;
 		this.eventSubscriber = eventSubscriber;
-		this.perpMarkets = perpMarkets;
-		this.spotMarkets = spotMarkets;
 	}
 
 	public async init() {
@@ -137,43 +133,27 @@ export class UserPnlSettlerBot implements Bot {
 				};
 			} = {};
 
-			this.perpMarkets.forEach((market) => {
-				const perpMarket = this.driftClient.getPerpMarketAccount(
-					market.marketIndex
-				);
-				if (!perpMarket) {
-					return;
-				}
-				perpMarketAndOracleData[market.marketIndex] = {
+			for (const perpMarket of this.driftClient.getPerpMarketAccounts()) {
+				perpMarketAndOracleData[perpMarket.marketIndex] = {
 					marketAccount: perpMarket,
 					oraclePriceData: this.driftClient.getOracleDataForPerpMarket(
-						market.marketIndex
+						perpMarket.marketIndex
 					),
 				};
-			});
-			this.spotMarkets.forEach((market) => {
-				const spotMarket = this.driftClient.getSpotMarketAccount(
-					market.marketIndex
-				);
-				if (!spotMarket) {
-					return;
-				}
-				spotMarketAndOracleData[market.marketIndex] = {
+			}
+			for (const spotMarket of this.driftClient.getSpotMarketAccounts()) {
+				spotMarketAndOracleData[spotMarket.marketIndex] = {
 					marketAccount: spotMarket,
 					oraclePriceData: this.driftClient.getOracleDataForSpotMarket(
-						market.marketIndex
+						spotMarket.marketIndex
 					),
 				};
-			});
+			}
 
 			const slot = await this.driftClient.connection.getSlot();
 
 			const validOracleMarketMap = new Map<number, boolean>();
-			this.perpMarkets.forEach((market) => {
-				if (!perpMarketAndOracleData[market.marketIndex]) {
-					validOracleMarketMap.set(market.marketIndex, false);
-					return;
-				}
+			for (const market of this.driftClient.getPerpMarketAccounts()) {
 				const oracleValid = isOracleValid(
 					perpMarketAndOracleData[market.marketIndex].marketAccount.amm,
 					perpMarketAndOracleData[market.marketIndex].oraclePriceData,
@@ -186,7 +166,7 @@ export class UserPnlSettlerBot implements Bot {
 				}
 
 				validOracleMarketMap.set(market.marketIndex, oracleValid);
-			});
+			}
 
 			const usersToSettle: SettlePnlIxParams[] = [];
 
@@ -284,9 +264,9 @@ export class UserPnlSettlerBot implements Bot {
 			}
 
 			for (const params of usersToSettle) {
-				const marketStr = this.perpMarkets.find(
-					(mkt) => mkt.marketIndex === params.marketIndex
-				).symbol;
+				const marketStr = this.driftClient.getPerpMarketAccount(
+					params.marketIndex
+				).name;
 
 				logger.info(
 					`Trying to settle PNL for ${params.users.length} users on market ${marketStr}`
