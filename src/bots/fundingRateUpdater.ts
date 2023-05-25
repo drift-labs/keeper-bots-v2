@@ -1,9 +1,4 @@
-import {
-	DriftClient,
-	PerpMarketConfig,
-	ZERO,
-	PerpMarketAccount,
-} from '@drift-labs/sdk';
+import { DriftClient, ZERO, PerpMarketAccount } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
 import { getErrorCode } from '../error';
@@ -54,20 +49,14 @@ export class FundingRateUpdaterBot implements Bot {
 
 	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private perpMarkets: PerpMarketConfig[];
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(
-		driftClient: DriftClient,
-		perpMarkets: PerpMarketConfig[],
-		config: BaseBotConfig
-	) {
+	constructor(driftClient: DriftClient, config: BaseBotConfig) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
-		this.perpMarkets = perpMarkets;
 	}
 
 	public async init() {
@@ -104,15 +93,17 @@ export class FundingRateUpdaterBot implements Bot {
 				};
 			} = {};
 
-			this.perpMarkets.forEach((market) => {
-				perpMarketAndOracleData[market.marketIndex] = {
-					marketAccount: this.driftClient.getPerpMarketAccount(
-						market.marketIndex
-					),
+			for (const marketAccount of this.driftClient.getPerpMarketAccounts()) {
+				perpMarketAndOracleData[marketAccount.marketIndex] = {
+					marketAccount,
 				};
-			});
+			}
 
-			for (let i = 0; i < this.perpMarkets.length; i++) {
+			for (
+				let i = 0;
+				i < this.driftClient.getPerpMarketAccounts().length;
+				i++
+			) {
 				const maxRetries = 5;
 				for (let retries = 0; retries < maxRetries; retries++) {
 					const perpMarket = perpMarketAndOracleData[i].marketAccount;

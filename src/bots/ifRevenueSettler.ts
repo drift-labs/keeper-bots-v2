@@ -1,6 +1,5 @@
 import {
 	DriftClient,
-	SpotMarketConfig,
 	SpotMarketAccount,
 	OraclePriceData,
 	ZERO,
@@ -24,21 +23,15 @@ export class IFRevenueSettlerBot implements Bot {
 
 	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private spotMarkets: SpotMarketConfig[];
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(
-		driftClient: DriftClient,
-		spotMarkets: SpotMarketConfig[],
-		config: BaseBotConfig
-	) {
+	constructor(driftClient: DriftClient, config: BaseBotConfig) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
 		this.driftClient = driftClient;
-		this.spotMarkets = spotMarkets;
 	}
 
 	public async init() {
@@ -107,19 +100,21 @@ export class IFRevenueSettlerBot implements Bot {
 				};
 			} = {};
 
-			this.spotMarkets.forEach((market) => {
-				spotMarketAndOracleData[market.marketIndex] = {
-					marketAccount: this.driftClient.getSpotMarketAccount(
-						market.marketIndex
-					),
+			for (const marketAccount of this.driftClient.getSpotMarketAccounts()) {
+				spotMarketAndOracleData[marketAccount.marketIndex] = {
+					marketAccount,
 					oraclePriceData: this.driftClient.getOracleDataForSpotMarket(
-						market.marketIndex
+						marketAccount.marketIndex
 					),
 				};
-			});
+			}
 
 			const ifSettlePromises = [];
-			for (let i = 0; i < this.spotMarkets.length; i++) {
+			for (
+				let i = 0;
+				i < this.driftClient.getSpotMarketAccounts().length;
+				i++
+			) {
 				const spotIf = spotMarketAndOracleData[i].marketAccount.insuranceFund;
 				if (spotIf.revenueSettlePeriod.eq(ZERO)) {
 					continue;

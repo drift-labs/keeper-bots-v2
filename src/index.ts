@@ -18,12 +18,10 @@ import {
 	convertToNumber,
 	QUOTE_PRECISION,
 	SpotMarkets,
-	PerpMarkets,
 	BN,
 	TokenFaucet,
 	DriftClientSubscriptionConfig,
 	LogProviderConfig,
-	getMarketsAndOraclesForSubscription,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -237,15 +235,10 @@ const runBot = async () => {
 		};
 	}
 
-	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
-		getMarketsAndOraclesForSubscription(config.global.driftEnv!);
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
 		programID: driftPublicKey,
-		perpMarketIndexes,
-		spotMarketIndexes,
-		oracleInfos,
 		opts: {
 			commitment: stateCommitment,
 			skipPreflight: false,
@@ -561,8 +554,6 @@ const runBot = async () => {
 			new UserPnlSettlerBot(
 				driftClient,
 				eventSubscriber,
-				PerpMarkets[config.global.driftEnv!],
-				SpotMarkets[config.global.driftEnv!],
 				config.botConfigs!.userPnlSettler!
 			)
 		);
@@ -570,11 +561,7 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'ifRevenueSettler')) {
 		bots.push(
-			new IFRevenueSettlerBot(
-				driftClient,
-				SpotMarkets[config.global.driftEnv!],
-				config.botConfigs!.ifRevenueSettler!
-			)
+			new IFRevenueSettlerBot(driftClient, config.botConfigs!.ifRevenueSettler!)
 		);
 	}
 
@@ -582,7 +569,6 @@ const runBot = async () => {
 		bots.push(
 			new FundingRateUpdaterBot(
 				driftClient,
-				PerpMarkets[config.global.driftEnv!],
 				config.botConfigs!.fundingRateUpdater!
 			)
 		);
