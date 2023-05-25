@@ -82,6 +82,7 @@ import {
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
 import { getErrorCode } from '../error';
+import { decodeName } from 'src/utils';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
@@ -555,7 +556,7 @@ export class FillerBot implements Bot {
 							);
 							if (perpMarket) {
 								this.observedFillsCountCounter.add(1, {
-									market: perpMarket.name,
+									market: decodeName(perpMarket.name),
 								});
 							}
 						}

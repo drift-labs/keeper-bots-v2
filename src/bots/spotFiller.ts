@@ -74,6 +74,7 @@ import {
 } from './common/txLogParse';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { FillerConfig } from '../config';
+import { decodeName } from 'src/utils';
 
 /**
  * Size of throttled nodes to get to before pruning the map
@@ -377,7 +378,7 @@ export class SpotFillerBot implements Bot {
 			for (const spotMarket of this.driftClient.getSpotMarketAccounts()) {
 				if (spotMarket.marketIndex) {
 					const marketIndex = spotMarket.marketIndex;
-					const symbol = spotMarket.name;
+					const symbol = decodeName(spotMarket.name);
 					obs.observe(
 						Atomics.load(this.pendingTransactionsArray, marketIndex),
 						{

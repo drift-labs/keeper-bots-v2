@@ -104,3 +104,8 @@ export function sleepMs(ms: number) {
 export function sleepS(s: number) {
 	return sleepMs(s * 1000);
 }
+
+export function decodeName(bytes: number[]): string {
+	const buffer = Buffer.from(bytes);
+	return buffer.toString('utf8').trim();
+}
