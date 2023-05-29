@@ -74,7 +74,7 @@ import {
 } from './common/txLogParse';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { FillerConfig } from '../config';
-import { decodeName } from 'src/utils';
+import { decodeName } from '../utils';
 
 /**
  * Size of throttled nodes to get to before pruning the map

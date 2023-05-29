@@ -1443,7 +1443,7 @@ tx: ${tx} `
 					let liquidateeHasPerpPos = false;
 					let liquidateePerpHasOpenOrders = false;
 					let liquidateePerpIndexWithOpenOrders = -1;
-					for (const liquidateePosition of liquidateeUserAccount.perpPositions) {
+					for (const liquidateePosition of user.getActivePerpPositions()) {
 						if (liquidateePosition.openOrders > 0) {
 							liquidateePerpHasOpenOrders = true;
 							liquidateePerpIndexWithOpenOrders =
@@ -1554,6 +1554,24 @@ tx: ${tx} `
 									});
 								});
 						}
+
+						logger.info(
+							`liquidatePerp ${auth}-${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
+							} to clear it:`
+						);
+						this.driftClient
+							.liquidatePerp(
+								user.userAccountPublicKey,
+								user.getUserAccount(),
+								liquidateePosition.marketIndex,
+								ZERO
+							)
+							.then((tx) => {
+								logger.info(
+									`liquidatePerp (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+								);
+							});
 					}
 
 					if (!liquidateeHasSpotPos && !liquidateeHasPerpPos) {
