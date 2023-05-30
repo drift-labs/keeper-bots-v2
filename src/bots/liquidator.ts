@@ -720,7 +720,7 @@ export class LiquidatorBot implements Bot {
 								`Error trying to close perp position for market ${position.marketIndex}`
 							);
 							webhookMessage(
-								`[${this.name}]: : x: error in placePerpOrder\n:${
+								`[${this.name}]: :x: error in placePerpOrder\n:${
 									e.stack ? e.stack : e.message
 								} `
 							);
@@ -749,7 +749,7 @@ export class LiquidatorBot implements Bot {
 								`Error trying to settle negative perp pnl for market ${position.marketIndex}`
 							);
 							webhookMessage(
-								`[${this.name}]: : x: error in settlePNL for negative pnl\n:${
+								`[${this.name}]: :x: error in settlePNL for negative pnl\n:${
 									e.stack ? e.stack : e.message
 								} `
 							);
@@ -784,7 +784,7 @@ export class LiquidatorBot implements Bot {
 									`Error trying to settle positive perp pnl for market ${position.marketIndex}`
 								);
 								webhookMessage(
-									`[${this.name}]: : x: error in settlePNL for positive pnl\n:${
+									`[${this.name}]: :x: error in settlePNL for positive pnl\n:${
 										e.stack ? e.stack : e.message
 									} `
 								);
@@ -1003,7 +1003,7 @@ export class LiquidatorBot implements Bot {
 					webhookMessage(
 						`[${
 							this.name
-						}]: : x: Error resolvePerpBankruptcy for ${userKey.toBase58()}, auth: ${userAcc.authority.toBase58()} \n:${
+						}]: :x: Error resolvePerpBankruptcy for ${userKey.toBase58()}, auth: ${userAcc.authority.toBase58()} \n:${
 							e.stack ? e.stack : e.message
 						} `
 					);
@@ -1045,7 +1045,7 @@ export class LiquidatorBot implements Bot {
 					webhookMessage(
 						`[${
 							this.name
-						}]: : x: Error resolveSpotBankruptcy for ${userKey.toBase58()}, auth: ${userAcc.authority.toBase58()}: \n${
+						}]: :x: Error resolveSpotBankruptcy for ${userKey.toBase58()}, auth: ${userAcc.authority.toBase58()}: \n${
 							e.stack ? e.stack : e.message
 						} `
 					);
@@ -1109,7 +1109,7 @@ export class LiquidatorBot implements Bot {
 						webhookMessage(
 							`[${
 								this.name
-							}]: : x: Error settling positive pnl for ${user.userAccountPublicKey.toBase58()} for market ${
+							}]: :x: Error settling positive pnl for ${user.userAccountPublicKey.toBase58()} for market ${
 								liquidateePosition.marketIndex
 							}: \n${e.stack ? e.stack : e.message} `
 						);
@@ -1175,7 +1175,7 @@ export class LiquidatorBot implements Bot {
 							webhookMessage(
 								`[${
 									this.name
-								}]: : x: error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
+								}]: :x: error in liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} on market ${
 									liquidateePosition.marketIndex
 								}: \n${e.logs ? (e.logs as Array<string>).join('\n') : ''} \n${
 									e.stack ? e.stack : e.message
@@ -1413,7 +1413,7 @@ tx: ${tx} `
 									webhookMessage(
 										`[${
 											this.name
-										}]: : x: Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}: \n${
+										}]: :x: Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}: \n${
 											e.logs ? (e.logs as Array<string>).join('\n') : ''
 										} \n${e.stack ? e.stack : e.message} `
 									);
@@ -1441,6 +1441,7 @@ tx: ${tx} `
 
 					// less attractive, perp / perp pnl liquidations
 					let liquidateeHasPerpPos = false;
+					let liquidateeHasUnsettledPerpPnl = false;
 					let liquidateeHasLpPos = false;
 					let liquidateePerpHasOpenOrders = false;
 					let liquidateePerpIndexWithOpenOrders = -1;
@@ -1451,12 +1452,15 @@ tx: ${tx} `
 								liquidateePosition.marketIndex;
 						}
 
+						liquidateeHasUnsettledPerpPnl =
+							liquidateePosition.baseAssetAmount.isZero() ||
+							!liquidateePosition.quoteAssetAmount.isZero();
 						liquidateeHasPerpPos =
 							!liquidateePosition.baseAssetAmount.isZero() ||
 							!liquidateePosition.quoteAssetAmount.isZero();
 						liquidateeHasLpPos = !liquidateePosition.lpShares.isZero();
 
-						if (liquidateeHasPerpPos) {
+						if (liquidateeHasUnsettledPerpPnl) {
 							const perpMarket = this.driftClient.getPerpMarketAccount(
 								liquidateePosition.marketIndex
 							);
@@ -1544,7 +1548,7 @@ tx: ${tx} `
 									webhookMessage(
 										`[${
 											this.name
-										}]: : x: Error liquidating auth: ${auth}, user: ${userKey} on market ${
+										}]: :x: Error liquidating auth: ${auth}, user: ${userKey} on market ${
 											liquidateePosition.marketIndex
 										} \n${
 											e.logs ? (e.logs as Array<string>).join('\n') : ''
@@ -1558,7 +1562,7 @@ tx: ${tx} `
 								});
 						}
 
-						if (!liquidateeHasPerpPos && liquidateeHasLpPos) {
+						if (liquidateeHasLpPos) {
 							logger.info(
 								`liquidatePerp ${auth}-${user.userAccountPublicKey.toBase58()} on market ${
 									liquidateePosition.marketIndex
@@ -1573,7 +1577,12 @@ tx: ${tx} `
 								)
 								.then((tx) => {
 									logger.info(
-										`liquidatePerp (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+										`liquidatePerp (no perp pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+									);
+								})
+								.catch((e) => {
+									logger.error(
+										`Error liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePosition.marketIndex}\n${e}`
 									);
 								});
 						}
@@ -1602,6 +1611,11 @@ tx: ${tx} `
 									logger.info(
 										`liquidatePerp (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
 									);
+								})
+								.catch((e) => {
+									logger.error(
+										`Error in liquidatePerp, liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePerpIndexWithOpenOrders}\n${e}`
+									);
 								});
 						}
 						if (indexWithOpenOrders !== -1) {
@@ -1623,6 +1637,11 @@ tx: ${tx} `
 								.then((tx) => {
 									logger.info(
 										`liquidateSpot (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+									);
+								})
+								.catch((e) => {
+									logger.error(
+										`Error in liquidateSpot, liquidating auth: ${auth}, user: ${userKey} on market ${indexWithMaxAssets}\n${e}`
 									);
 								});
 						}
@@ -1665,7 +1684,7 @@ tx: ${tx} `
 			} else {
 				console.error(e);
 				webhookMessage(
-					`[${this.name}]: : x: uncaught error: \n${
+					`[${this.name}]: :x: uncaught error: \n${
 						e.stack ? e.stack : e.message
 					} `
 				);
