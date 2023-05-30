@@ -1441,6 +1441,7 @@ tx: ${tx} `
 
 					// less attractive, perp / perp pnl liquidations
 					let liquidateeHasPerpPos = false;
+					let liquidateeHasLpPos = false;
 					let liquidateePerpHasOpenOrders = false;
 					let liquidateePerpIndexWithOpenOrders = -1;
 					for (const liquidateePosition of user.getActivePerpPositions()) {
@@ -1449,31 +1450,33 @@ tx: ${tx} `
 							liquidateePerpIndexWithOpenOrders =
 								liquidateePosition.marketIndex;
 						}
-						if (liquidateePosition.baseAssetAmount.isZero()) {
-							if (!liquidateePosition.quoteAssetAmount.isZero()) {
-								const perpMarket = this.driftClient.getPerpMarketAccount(
-									liquidateePosition.marketIndex
+
+						liquidateeHasPerpPos =
+							!liquidateePosition.baseAssetAmount.isZero() ||
+							!liquidateePosition.quoteAssetAmount.isZero();
+						liquidateeHasLpPos = !liquidateePosition.lpShares.isZero();
+
+						if (liquidateeHasPerpPos) {
+							const perpMarket = this.driftClient.getPerpMarketAccount(
+								liquidateePosition.marketIndex
+							);
+							if (!perpMarket) {
+								logger.error(
+									`no perpMarket for ${liquidateePosition.marketIndex}`
 								);
-								if (!perpMarket) {
-									logger.error(
-										`no perpMarket for ${liquidateePosition.marketIndex}`
-									);
-									continue;
-								}
-								await this.liqPerpPnl(
-									user,
-									perpMarket,
-									usdcMarket,
-									liquidateePosition,
-									depositMarketIndextoLiq,
-									depositAmountToLiq,
-									borrowMarketIndextoLiq,
-									borrowAmountToLiq
-								);
+								continue;
 							}
-							continue;
+							await this.liqPerpPnl(
+								user,
+								perpMarket,
+								usdcMarket,
+								liquidateePosition,
+								depositMarketIndextoLiq,
+								depositAmountToLiq,
+								borrowMarketIndextoLiq,
+								borrowAmountToLiq
+							);
 						}
-						liquidateeHasPerpPos = true;
 
 						const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
 							liquidatorUser,
@@ -1555,23 +1558,25 @@ tx: ${tx} `
 								});
 						}
 
-						logger.info(
-							`liquidatePerp ${auth}-${user.userAccountPublicKey.toBase58()} on market ${
-								liquidateePosition.marketIndex
-							} to clear it:`
-						);
-						this.driftClient
-							.liquidatePerp(
-								user.userAccountPublicKey,
-								user.getUserAccount(),
-								liquidateePosition.marketIndex,
-								ZERO
-							)
-							.then((tx) => {
-								logger.info(
-									`liquidatePerp (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
-								);
-							});
+						if (!liquidateeHasPerpPos && liquidateeHasLpPos) {
+							logger.info(
+								`liquidatePerp ${auth}-${user.userAccountPublicKey.toBase58()} on market ${
+									liquidateePosition.marketIndex
+								} has lp shares but no perp pos, trying to clear it:`
+							);
+							this.driftClient
+								.liquidatePerp(
+									user.userAccountPublicKey,
+									user.getUserAccount(),
+									liquidateePosition.marketIndex,
+									ZERO
+								)
+								.then((tx) => {
+									logger.info(
+										`liquidatePerp (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+									);
+								});
+						}
 					}
 
 					if (!liquidateeHasSpotPos && !liquidateeHasPerpPos) {
