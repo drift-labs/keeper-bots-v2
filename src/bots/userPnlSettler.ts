@@ -40,6 +40,7 @@ const SETTLE_USER_CHUNKS = 2;
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
 	6035, // Error Code: InvalidOracle. Error Number: 6035. Error Message: InvalidOracle.
+	6078, // Error Code: PerpMarketNotFound. Error Number: 6078. Error Message: PerpMarketNotFound.
 ];
 
 export class UserPnlSettlerBot implements Bot {
