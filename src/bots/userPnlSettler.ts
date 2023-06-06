@@ -17,6 +17,9 @@ import {
 	isOracleValid,
 	EventSubscriber,
 	WrappedEvent,
+	calculateNetUserPnl,
+	getTokenAmount,
+	SpotBalanceType,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -40,6 +43,7 @@ const SETTLE_USER_CHUNKS = 2;
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
 	6035, // Error Code: InvalidOracle. Error Number: 6035. Error Message: InvalidOracle.
+	6078, // Error Code: PerpMarketNotFound. Error Number: 6078. Error Message: PerpMarketNotFound.
 ];
 
 export class UserPnlSettlerBot implements Bot {
@@ -223,6 +227,32 @@ export class UserPnlSettlerBot implements Bot {
 									.getUserAccountPublicKey()
 									.toBase58()} in market ${perpMarketIdx}, but there is a pnl imbalance (${convertToNumber(
 									pnlImbalance,
+									QUOTE_PRECISION
+								)})`
+							);
+							continue;
+						}
+
+						const netUserPnl = calculateNetUserPnl(
+							perpMarketAndOracleData[perpMarketIdx].marketAccount,
+							perpMarketAndOracleData[perpMarketIdx].oraclePriceData
+						);
+
+						const pnlPoolTokenAmount = getTokenAmount(
+							perpMarketAndOracleData[perpMarketIdx].marketAccount.pnlPool
+								.scaledBalance,
+							spotMarketAndOracleData[spotMarketIdx].marketAccount,
+							SpotBalanceType.DEPOSIT
+						);
+						const maxPnlPoolExcess = netUserPnl.lt(pnlPoolTokenAmount)
+							? pnlPoolTokenAmount.sub(BN.max(netUserPnl, ZERO))
+							: ZERO;
+						if (maxPnlPoolExcess.gt(ZERO)) {
+							logger.warn(
+								`Want to settle positive PnL for user ${user
+									.getUserAccountPublicKey()
+									.toBase58()} in market ${perpMarketIdx}, but there is not enough PnL pool excess (${convertToNumber(
+									maxPnlPoolExcess,
 									QUOTE_PRECISION
 								)})`
 							);

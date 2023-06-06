@@ -784,7 +784,7 @@ export class SpotFillerBot implements Bot {
 	}
 
 	/**
-	 * Iterates through a tx's logs and handles it appropriately 3e.g. throttling users, updating metrics, etc.)
+	 * Iterates through a tx's logs and handles it appropriately e.g. throttling users, updating metrics, etc.)
 	 *
 	 * @param nodesFilled nodes that we sent a transaction to fill
 	 * @param logs logs from tx.meta.logMessages or this.driftClient.program._events._eventParser.parseLogs
@@ -1176,7 +1176,9 @@ export class SpotFillerBot implements Bot {
 		}
 		txResp
 			.then(async (txSig) => {
-				logger.info(`Filled spot order ${nodeSignature}, TX: ${txSig}`);
+				logger.info(
+					`Filled spot order ${nodeSignature}, TX: ${JSON.stringify(txSig)}`
+				);
 
 				const pendingTxs = this.decPendingTransactions(
 					nodeToFill.node.order.marketIndex
