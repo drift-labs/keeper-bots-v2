@@ -1453,7 +1453,7 @@ tx: ${tx} `
 						}
 
 						liquidateeHasUnsettledPerpPnl =
-							liquidateePosition.baseAssetAmount.isZero() ||
+							liquidateePosition.baseAssetAmount.isZero() &&
 							!liquidateePosition.quoteAssetAmount.isZero();
 						liquidateeHasPerpPos =
 							!liquidateePosition.baseAssetAmount.isZero() ||
