@@ -28,6 +28,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from 'src/config';
+import { decodeName } from 'src/utils';
 
 type SettlePnlIxParams = {
 	users: {
@@ -294,9 +295,9 @@ export class UserPnlSettlerBot implements Bot {
 			}
 
 			for (const params of usersToSettle) {
-				const marketStr = this.driftClient.getPerpMarketAccount(
-					params.marketIndex
-				).name;
+				const marketStr = decodeName(
+					this.driftClient.getPerpMarketAccount(params.marketIndex).name
+				);
 
 				logger.info(
 					`Trying to settle PNL for ${params.users.length} users on market ${marketStr}`
