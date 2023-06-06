@@ -27,8 +27,8 @@ import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
-import { BaseBotConfig } from 'src/config';
-import { decodeName } from 'src/utils';
+import { BaseBotConfig } from '../config';
+import { decodeName } from '../utils';
 
 type SettlePnlIxParams = {
 	users: {
