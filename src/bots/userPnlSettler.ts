@@ -248,7 +248,7 @@ export class UserPnlSettlerBot implements Bot {
 						const maxPnlPoolExcess = netUserPnl.lt(pnlPoolTokenAmount)
 							? pnlPoolTokenAmount.sub(BN.max(netUserPnl, ZERO))
 							: ZERO;
-						if (maxPnlPoolExcess.gt(ZERO)) {
+						if (maxPnlPoolExcess.lte(ZERO)) {
 							logger.warn(
 								`Want to settle positive PnL for user ${user
 									.getUserAccountPublicKey()
