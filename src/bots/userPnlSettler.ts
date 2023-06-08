@@ -20,6 +20,7 @@ import {
 	calculateNetUserPnl,
 	getTokenAmount,
 	SpotBalanceType,
+	isVariant,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -28,7 +29,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from 'src/config';
-import { decodeName } from 'src/utils';
+import { decodeName } from '../utils';
 
 type SettlePnlIxParams = {
 	users: {
@@ -177,7 +178,10 @@ export class UserPnlSettlerBot implements Bot {
 
 			for (const user of this.userMap.values()) {
 				const userAccount = user.getUserAccount();
-
+				const isUsdcBorrow = isVariant(
+					userAccount.spotPositions[0].balanceType,
+					'borrow'
+				);
 				for (const settleePosition of userAccount.perpPositions) {
 					if (
 						settleePosition.quoteAssetAmount.eq(ZERO) &&
@@ -210,7 +214,8 @@ export class UserPnlSettlerBot implements Bot {
 					// only settle for $10 or more negative pnl
 					if (
 						unsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
-						!settleePosition.baseAssetAmount.eq(ZERO)
+						!settleePosition.baseAssetAmount.eq(ZERO) &&
+						!isUsdcBorrow
 					) {
 						continue;
 					}
@@ -248,7 +253,7 @@ export class UserPnlSettlerBot implements Bot {
 						const maxPnlPoolExcess = netUserPnl.lt(pnlPoolTokenAmount)
 							? pnlPoolTokenAmount.sub(BN.max(netUserPnl, ZERO))
 							: ZERO;
-						if (maxPnlPoolExcess.gt(ZERO)) {
+						if (maxPnlPoolExcess.gte(ZERO)) {
 							logger.warn(
 								`Want to settle positive PnL for user ${user
 									.getUserAccountPublicKey()
