@@ -30,7 +30,10 @@ import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
 import { decodeName } from '../utils';
-import { AddressLookupTableAccount } from '@solana/web3.js';
+import {
+	AddressLookupTableAccount,
+	ComputeBudgetProgram,
+} from '@solana/web3.js';
 
 type SettlePnlIxParams = {
 	users: {
@@ -322,9 +325,16 @@ export class UserPnlSettlerBot implements Bot {
 				for (let i = 0; i < params.users.length; i += SETTLE_USER_CHUNKS) {
 					const usersChunk = params.users.slice(i, i + SETTLE_USER_CHUNKS);
 					try {
-						const ixs = await this.driftClient.getSettlePNLsIxs(usersChunk, [
-							params.marketIndex,
-						]);
+						const ixs = [
+							ComputeBudgetProgram.setComputeUnitLimit({
+								units: 1_000_000,
+							}),
+						];
+						ixs.push(
+							...(await this.driftClient.getSettlePNLsIxs(usersChunk, [
+								params.marketIndex,
+							]))
+						);
 						settlePnlPromises.push(
 							this.driftClient.txSender.sendVersionedTransaction(
 								await this.driftClient.txSender.getVersionedTransaction(
