@@ -98,6 +98,7 @@ const maxPriorityFee = 10000;
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
+	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 ];
 
 enum METRIC_TYPES {
