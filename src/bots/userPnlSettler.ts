@@ -29,6 +29,7 @@ import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
 import { decodeName } from '../utils';
+import { AddressLookupTableAccount } from '@solana/web3.js';
 
 type SettlePnlIxParams = {
 	users: {
@@ -54,6 +55,7 @@ export class UserPnlSettlerBot implements Bot {
 	public readonly defaultIntervalMs: number = 600000;
 
 	private driftClient: DriftClient;
+	private lookupTableAccount: AddressLookupTableAccount;
 	private eventSubscriber: EventSubscriber;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
@@ -77,6 +79,10 @@ export class UserPnlSettlerBot implements Bot {
 
 	public async init() {
 		logger.info(`${this.name} initing`);
+
+		this.lookupTableAccount =
+			await this.driftClient.fetchMarketLookupTableAccount();
+
 		// initialize userMap instance
 		this.userMap = new UserMap(
 			this.driftClient,
@@ -307,12 +313,24 @@ export class UserPnlSettlerBot implements Bot {
 					throw new Error('Dry run - not sending settle pnl tx');
 				}
 
-				const settlePnlPromises = new Array<Promise<string>>();
+				const settlePnlPromises = [];
 				for (let i = 0; i < params.users.length; i += SETTLE_USER_CHUNKS) {
 					const usersChunk = params.users.slice(i, i + SETTLE_USER_CHUNKS);
 					try {
+						const ixs = await this.driftClient.getSettlePNLsIxs(usersChunk, [
+							params.marketIndex,
+						]);
 						settlePnlPromises.push(
-							this.driftClient.settlePNLs(usersChunk, [params.marketIndex])
+							this.driftClient.txSender.sendVersionedTransaction(
+								await this.driftClient.txSender.getVersionedTransaction(
+									ixs,
+									[this.lookupTableAccount],
+									[],
+									this.driftClient.opts
+								),
+								[],
+								this.driftClient.opts
+							)
 						);
 					} catch (err) {
 						const errorCode = getErrorCode(err);
