@@ -21,6 +21,7 @@ import {
 	getTokenAmount,
 	SpotBalanceType,
 	isVariant,
+	TxSigAndSlot,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -321,7 +322,7 @@ export class UserPnlSettlerBot implements Bot {
 					throw new Error('Dry run - not sending settle pnl tx');
 				}
 
-				const settlePnlPromises = [];
+				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
 				for (let i = 0; i < params.users.length; i += SETTLE_USER_CHUNKS) {
 					const usersChunk = params.users.slice(i, i + SETTLE_USER_CHUNKS);
 					try {
@@ -366,7 +367,7 @@ export class UserPnlSettlerBot implements Bot {
 				}
 				const txs = await Promise.all(settlePnlPromises);
 				for (const tx of txs) {
-					logger.info(`Settle PNL tx: ${tx}`);
+					logger.info(`Settle PNL tx: ${JSON.stringify(tx)}`);
 				}
 			}
 		} catch (err) {
