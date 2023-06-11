@@ -35,6 +35,7 @@ import {
 	SwapMode,
 	SwapReduceOnly,
 	getVariant,
+	OraclePriceData,
 } from '@drift-labs/sdk';
 import { E_ALREADY_LOCKED, Mutex } from 'async-mutex';
 
@@ -240,6 +241,7 @@ export class LiquidatorBot implements Bot {
 	private bootTimeMs: number;
 	private throttledUsers = new Map<string, number>();
 	private disableAutoDerisking: boolean;
+	private liquidatorConfig: LiquidatorConfig;
 
 	// metrics
 	private runtimeSpecsGauge: ObservableGauge;
@@ -383,6 +385,8 @@ export class LiquidatorBot implements Bot {
 				connection: this.driftClient.connection,
 			});
 		}
+
+		this.liquidatorConfig = config;
 	}
 
 	public async init() {
@@ -471,10 +475,23 @@ export class LiquidatorBot implements Bot {
 		return healthy;
 	}
 
+	private calculateOrderLimitPrice(
+		oracle: OraclePriceData,
+		direction: PositionDirection
+	): BN {
+		const slippageBN = new BN(this.liquidatorConfig.maxSlippagePct * 10000);
+		if (isVariant(direction, 'long')) {
+			return oracle.price.mul(new BN(10000).add(slippageBN)).div(new BN(10000));
+		} else {
+			return oracle.price.mul(new BN(10000).sub(slippageBN)).div(new BN(10000));
+		}
+	}
+
 	private async driftSpotTrade(
 		orderDirection: PositionDirection,
 		marketIndex: number,
-		standardizedTokenAmount: BN
+		standardizedTokenAmount: BN,
+		limitPrice: BN
 	) {
 		const start = Date.now();
 		this.driftClient
@@ -484,6 +501,7 @@ export class LiquidatorBot implements Bot {
 					direction: orderDirection,
 					baseAssetAmount: standardizedTokenAmount,
 					reduceOnly: true,
+					price: limitPrice,
 				})
 			)
 			.then((tx) => {
@@ -699,14 +717,20 @@ export class LiquidatorBot implements Bot {
 						continue;
 					}
 
+					const oracle = this.driftClient.getOracleDataForPerpMarket(
+						position.marketIndex
+					);
+					const direction = findDirectionToClose(position);
+					const limitPrice = this.calculateOrderLimitPrice(oracle, direction);
 					const start = Date.now();
 					this.driftClient
 						.placePerpOrder(
 							getMarketOrderParams({
-								direction: findDirectionToClose(position),
+								direction,
 								baseAssetAmount: positionPlusOpenOrders,
 								reduceOnly: true,
 								marketIndex: position.marketIndex,
+								price: limitPrice,
 							})
 						)
 						.then((tx) => {
@@ -835,6 +859,9 @@ export class LiquidatorBot implements Bot {
 					continue;
 				}
 
+				const oracle = this.driftClient.getOracleDataForSpotMarket(
+					position.marketIndex
+				);
 				if (isVariant(position.balanceType, 'deposit')) {
 					// sell out of deposit
 					const jupRoute = await this.determineBestSpotSwapRoute(
@@ -843,10 +870,15 @@ export class LiquidatorBot implements Bot {
 						standardizedTokenAmount
 					);
 					if (!jupRoute) {
+						const limitPrice = this.calculateOrderLimitPrice(
+							oracle,
+							PositionDirection.SHORT
+						);
 						this.driftSpotTrade(
 							PositionDirection.SHORT,
 							position.marketIndex,
-							standardizedTokenAmount
+							standardizedTokenAmount,
+							limitPrice
 						);
 					} else {
 						this.jupiterSpotSwap(
@@ -864,10 +896,15 @@ export class LiquidatorBot implements Bot {
 						standardizedTokenAmount
 					);
 					if (!jupRoute) {
+						const limitPrice = this.calculateOrderLimitPrice(
+							oracle,
+							PositionDirection.SHORT
+						);
 						this.driftSpotTrade(
 							PositionDirection.LONG,
 							position.marketIndex,
-							standardizedTokenAmount
+							standardizedTokenAmount,
+							limitPrice
 						);
 					} else {
 						this.jupiterSpotSwap(

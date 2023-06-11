@@ -27,6 +27,7 @@ export type LiquidatorConfig = BaseBotConfig & {
 	spotMarketIndicies?: Array<number>;
 	perpSubAccountConfig?: SubaccountConfig;
 	spotSubAccountConfig?: SubaccountConfig;
+	maxSlippagePct?: number;
 };
 
 export type BotConfigMap = {
@@ -204,6 +205,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
 			spotMarketIndicies: loadCommaDelimitToArray(opts.spotMarketIndicies),
 			runOnce: opts.runOnce ?? false,
+			maxSlippagePct: opts.maxSlippagePct ?? 0.05,
 		};
 	}
 	if (opts.trigger) {

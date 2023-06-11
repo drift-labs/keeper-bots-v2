@@ -116,6 +116,9 @@ botConfigs:
     spotSubAccountConfig:
       0: # subaccount 0 will watch all spot markets
 
+    # max slippage (from oracle price) to incur allow when derisking
+    maxSlippagePct: 0.05
+
   trigger:
     botId: "trigger"
     dryRun: false
