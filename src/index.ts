@@ -13,7 +13,6 @@ import {
 	DriftClient,
 	User,
 	initialize,
-	EventSubscriber,
 	SlotSubscriber,
 	convertToNumber,
 	QUOTE_PRECISION,
@@ -21,7 +20,6 @@ import {
 	BN,
 	TokenFaucet,
 	DriftClientSubscriptionConfig,
-	LogProviderConfig,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -213,9 +211,6 @@ const runBot = async () => {
 	let accountSubscription: DriftClientSubscriptionConfig = {
 		type: 'websocket',
 	};
-	let logProviderConfig: LogProviderConfig = {
-		type: 'websocket',
-	};
 
 	if (!config.global.websocket) {
 		bulkAccountLoader = new BulkAccountLoader(
@@ -227,11 +222,6 @@ const runBot = async () => {
 		accountSubscription = {
 			type: 'polling',
 			accountLoader: bulkAccountLoader,
-		};
-
-		logProviderConfig = {
-			type: 'polling',
-			frequency: config.global.eventSubscriberPollingInterval,
 		};
 	}
 
@@ -253,15 +243,6 @@ const runBot = async () => {
 		},
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts,
-	});
-
-	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {
-		maxTx: 4096,
-		maxEventsPerType: 4096,
-		orderBy: 'blockchain',
-		orderDir: 'desc',
-		commitment: stateCommitment,
-		logProviderConfig,
 	});
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
@@ -319,8 +300,7 @@ const runBot = async () => {
 	while (
 		!(await driftClient.subscribe()) ||
 		!(await driftUser.subscribe()) ||
-		!(await driftUserStats.subscribe()) ||
-		!(await eventSubscriber.subscribe())
+		!(await driftUserStats.subscribe())
 	) {
 		logger.info('waiting to subscribe to DriftClient and User');
 		await sleepMs(1000);
@@ -447,7 +427,6 @@ const runBot = async () => {
 				slotSubscriber,
 				bulkAccountLoader,
 				driftClient,
-				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -468,7 +447,6 @@ const runBot = async () => {
 				slotSubscriber,
 				bulkAccountLoader,
 				driftClient,
-				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -484,7 +462,6 @@ const runBot = async () => {
 		bots.push(
 			new TriggerBot(
 				driftClient,
-				eventSubscriber,
 				slotSubscriber,
 				{
 					rpcEndpoint: endpoint,
@@ -501,7 +478,6 @@ const runBot = async () => {
 		bots.push(
 			new JitMakerBot(
 				driftClient,
-				eventSubscriber,
 				slotSubscriber,
 				{
 					rpcEndpoint: endpoint,
@@ -519,7 +495,6 @@ const runBot = async () => {
 		bots.push(
 			new LiquidatorBot(
 				driftClient,
-				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -551,11 +526,7 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'userPnlSettler')) {
 		bots.push(
-			new UserPnlSettlerBot(
-				driftClient,
-				eventSubscriber,
-				config.botConfigs!.userPnlSettler!
-			)
+			new UserPnlSettlerBot(driftClient, config.botConfigs!.userPnlSettler!)
 		);
 	}
 

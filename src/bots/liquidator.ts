@@ -25,10 +25,8 @@ import {
 	getSignedTokenAmount,
 	standardizeBaseAssetAmount,
 	TEN_THOUSAND,
-	WrappedEvent,
 	PositionDirection,
 	isUserBankrupt,
-	EventSubscriber,
 	Route,
 	JupiterClient,
 	MarketType,
@@ -259,7 +257,6 @@ export class LiquidatorBot implements Bot {
 	private userMapUserAccountKeysGauge: ObservableGauge;
 
 	private driftClient: DriftClient;
-	private eventSubscriber: EventSubscriber;
 	private perpMarketIndicies: number[];
 	private spotMarketIndicies: number[];
 	private activeSubAccountId: number;
@@ -288,7 +285,6 @@ export class LiquidatorBot implements Bot {
 
 	constructor(
 		driftClient: DriftClient,
-		eventSubscriber: EventSubscriber,
 		runtimeSpec: RuntimeSpec,
 		config: LiquidatorConfig,
 		defaultSubaccountId: number
@@ -296,7 +292,6 @@ export class LiquidatorBot implements Bot {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
-		this.eventSubscriber = eventSubscriber;
 		this.runtimeSpecs = runtimeSpec;
 		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
 			this.driftClient
@@ -418,8 +413,6 @@ export class LiquidatorBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
-
 		await this.userMap.unsubscribe();
 	}
 
@@ -432,13 +425,6 @@ export class LiquidatorBot implements Bot {
 			const deRiskIntervalId = setInterval(this.derisk.bind(this), 10000);
 			this.intervalIds.push(deRiskIntervalId);
 		}
-
-		this.eventSubscriber.eventEmitter.on(
-			'newEvent',
-			async (record: WrappedEvent<any>) => {
-				this.userMap.updateWithEventRecord(record);
-			}
-		);
 
 		logger.info(`${this.name} Bot started!`);
 
