@@ -1239,6 +1239,14 @@ export class LiquidatorBot implements Bot {
 		} else {
 			const start = Date.now();
 
+			// TODO only safe assumption if all spot markets are collateral tier
+			if (borrowMarketIndextoLiq !== -1) {
+				logger.info(
+					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on spot market ${depositMarketIndextoLiq} because there is a borrow that must be liquidated for spot market ${borrowMarketIndextoLiq}`
+				);
+				return;
+			}
+
 			if (!this.spotMarketIndicies.includes(depositMarketIndextoLiq)) {
 				logger.info(
 					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on spot market ${depositMarketIndextoLiq} because it is not in spotMarketIndices`
