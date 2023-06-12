@@ -563,6 +563,7 @@ export class LiquidatorBot implements Bot {
 				swapMode: jupSwapMode,
 				route,
 				reduceOnly: jupReduceOnly,
+				slippageBps: this.liquidatorConfig.maxSlippagePct * 10000,
 			})
 			.then((tx) => {
 				logger.info(
