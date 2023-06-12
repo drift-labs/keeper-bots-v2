@@ -62,7 +62,7 @@ const errorCodesToSuppress = [
 	6004, // Error Number: 6004. Error Message: Sufficient collateral.
 ];
 
-const LIQUIDATE_THROTTLE_BACKOFF = 20000; // the time to wait before trying to liquidate a throttled user again
+const LIQUIDATE_THROTTLE_BACKOFF = 5000; // the time to wait before trying to liquidate a throttled user again
 
 function calculateSpotTokenAmountToLiquidate(
 	driftClient: DriftClient,
