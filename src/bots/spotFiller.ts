@@ -16,11 +16,13 @@ import {
 	PollingDriftClientAccountSubscriber,
 	SerumFulfillmentConfigMap,
 	SerumV3FulfillmentConfigAccount,
+	OrderActionRecord,
 	BulkAccountLoader,
 	OrderRecord,
 	convertToNumber,
 	BASE_PRECISION,
 	PRICE_PRECISION,
+	WrappedEvent,
 	DLOBNode,
 	UserSubscriptionConfig,
 	DLOBSubscriber,
@@ -29,6 +31,7 @@ import {
 	PhoenixSubscriber,
 	BN,
 	PhoenixV1FulfillmentConfigAccount,
+	EventSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -150,6 +153,7 @@ export class SpotFillerBot implements Bot {
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	private driftClient: DriftClient;
+	private eventSubscriber: EventSubscriber;
 	private pollingIntervalMs: number;
 	private transactionVersion: number;
 	private lookupTableAccount: AddressLookupTableAccount;
@@ -201,6 +205,7 @@ export class SpotFillerBot implements Bot {
 		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
+		eventSubscriber: EventSubscriber,
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig
 	) {
@@ -213,6 +218,7 @@ export class SpotFillerBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
+		this.eventSubscriber = eventSubscriber;
 		this.bulkAccountLoader = bulkAccountLoader;
 		if (this.bulkAccountLoader) {
 			this.userStatsMapSubscriptionConfig = {
@@ -515,6 +521,8 @@ export class SpotFillerBot implements Bot {
 		}
 		this.intervalIds = [];
 
+		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
+
 		await this.dlobSubscriber.unsubscribe();
 		await this.userStatsMap.unsubscribe();
 		await this.userMap.unsubscribe();
@@ -534,6 +542,31 @@ export class SpotFillerBot implements Bot {
 			this.pollingIntervalMs
 		);
 		this.intervalIds.push(intervalId);
+
+		this.eventSubscriber.eventEmitter.on(
+			'newEvent',
+			async (record: WrappedEvent<any>) => {
+				await this.userMap.updateWithEventRecord(record);
+				await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+
+				if (record.eventType === 'OrderActionRecord') {
+					const actionRecord = record as OrderActionRecord;
+
+					if (isVariant(actionRecord.action, 'fill')) {
+						if (isVariant(actionRecord.marketType, 'spot')) {
+							const spotMarket = this.driftClient.getSpotMarketAccount(
+								actionRecord.marketIndex
+							);
+							if (spotMarket) {
+								this.observedFillsCountCounter.add(1, {
+									market: spotMarket.name,
+								});
+							}
+						}
+					}
+				}
+			}
+		);
 
 		logger.info(`${this.name} Bot started!`);
 	}

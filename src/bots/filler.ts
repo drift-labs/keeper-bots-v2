@@ -21,6 +21,7 @@ import {
 	convertToNumber,
 	BASE_PRECISION,
 	QUOTE_PRECISION,
+	WrappedEvent,
 	BulkAccountLoader,
 	SlotSubscriber,
 	PublicKey,
@@ -28,6 +29,8 @@ import {
 	UserSubscriptionConfig,
 	isOneOfVariant,
 	DLOBSubscriber,
+	EventSubscriber,
+	OrderActionRecord,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -79,6 +82,7 @@ import {
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
 import { getErrorCode } from '../error';
+import { decodeName } from '../utils';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
@@ -167,6 +171,7 @@ export class FillerBot implements Bot {
 	private bulkAccountLoader: BulkAccountLoader | undefined;
 	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	private driftClient: DriftClient;
+	private eventSubscriber: EventSubscriber;
 	private pollingIntervalMs: number;
 	private transactionVersion?: number;
 	private revertOnFailure?: boolean;
@@ -221,6 +226,7 @@ export class FillerBot implements Bot {
 		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
+		eventSubscriber: EventSubscriber,
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
 		jitoSearcherClient?: SearcherClient,
@@ -231,7 +237,8 @@ export class FillerBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
-		this.bulkAccountLoader = bulkAccountLoader;
+		(this.eventSubscriber = eventSubscriber),
+			(this.bulkAccountLoader = bulkAccountLoader);
 		if (this.bulkAccountLoader) {
 			this.userStatsMapSubscriptionConfig = {
 				type: 'polling',
@@ -520,6 +527,8 @@ export class FillerBot implements Bot {
 		}
 		this.intervalIds = [];
 
+		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
+
 		await this.dlobSubscriber.unsubscribe();
 		await this.userMap.unsubscribe();
 		await this.userStatsMap.unsubscribe();
@@ -531,6 +540,31 @@ export class FillerBot implements Bot {
 			this.pollingIntervalMs
 		);
 		this.intervalIds.push(intervalId);
+
+		this.eventSubscriber.eventEmitter.on(
+			'newEvent',
+			async (record: WrappedEvent<any>) => {
+				await this.userMap.updateWithEventRecord(record);
+				await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+
+				if (record.eventType === 'OrderActionRecord') {
+					const actionRecord = record as OrderActionRecord;
+
+					if (isVariant(actionRecord.action, 'fill')) {
+						if (isVariant(actionRecord.marketType, 'perp')) {
+							const perpMarket = this.driftClient.getPerpMarketAccount(
+								actionRecord.marketIndex
+							);
+							if (perpMarket) {
+								this.observedFillsCountCounter.add(1, {
+									market: decodeName(perpMarket.name),
+								});
+							}
+						}
+					}
+				}
+			}
+		);
 
 		logger.info(
 			`${this.name} Bot started! (websocket: ${
