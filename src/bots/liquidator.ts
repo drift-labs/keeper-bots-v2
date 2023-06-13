@@ -57,6 +57,10 @@ import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { getErrorCode } from '../error';
 import { LiquidatorConfig } from '../config';
+import {
+	getPerpMarketTierNumber,
+	perpTierIsAsSafeAs,
+} from '@drift-labs/sdk/lib/math/tiers';
 
 const errorCodesToSuppress = [
 	6004, // Error Number: 6004. Error Message: Sufficient collateral.
@@ -1082,6 +1086,87 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
+	private liqBorrow(
+		depositMarketIndextoLiq: number,
+		borrowMarketIndextoLiq: number,
+		borrowAmountToLiq: BN,
+		user: User
+	) {
+		if (!this.spotMarketIndicies.includes(borrowMarketIndextoLiq)) {
+			logger.info(
+				`Skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because borrowMarketIndextoLiq(${borrowMarketIndextoLiq}) is not in spotMarketIndicies`
+			);
+			return;
+		}
+
+		const subAccountToUse = this.spotMarketToSubaccount.get(
+			borrowMarketIndextoLiq
+		);
+		if (subAccountToUse === undefined) {
+			logger.info(
+				`skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
+			);
+			return;
+		}
+		logger.info(
+			`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
+		);
+		this.driftClient.switchActiveUser(subAccountToUse);
+
+		const start = Date.now();
+		this.driftClient
+			.liquidateSpot(
+				user.userAccountPublicKey,
+				user.getUserAccount(),
+				depositMarketIndextoLiq,
+				borrowMarketIndextoLiq,
+				borrowAmountToLiq
+			)
+			.then((tx) => {
+				logger.info(
+					`liquidateSpot user = ${user.userAccountPublicKey.toString()}
+(deposit_index = ${depositMarketIndextoLiq} for borrow_index = ${borrowMarketIndextoLiq}
+								maxBorrowAmount = ${borrowAmountToLiq.toString()})
+tx: ${tx} `
+				);
+				webhookMessage(
+					`[${
+						this.name
+					}]: liquidateSpot user = ${user.userAccountPublicKey.toString()}
+(deposit_index = ${depositMarketIndextoLiq} for borrow_index = ${borrowMarketIndextoLiq}
+								maxBorrowAmount = ${borrowAmountToLiq.toString()})
+tx: ${tx} `
+				);
+			})
+			.catch((e) => {
+				logger.error(
+					`Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq} `
+				);
+				logger.error(e);
+				const errorCode = getErrorCode(e);
+
+				if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
+					webhookMessage(
+						`[${
+							this.name
+						}]: :x: Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}: \n${
+							e.logs ? (e.logs as Array<string>).join('\n') : ''
+						} \n${e.stack ? e.stack : e.message} `
+					);
+				} else {
+					this.throttledUsers.set(
+						user.userAccountPublicKey.toBase58(),
+						Date.now()
+					);
+				}
+			})
+			.finally(() => {
+				this.sdkCallDurationHistogram.record(Date.now() - start, {
+					method: 'liquidateSpot',
+				});
+			});
+	}
+
 	private async liqPerpPnl(
 		user: User,
 		perpMarketAccount: PerpMarketAccount,
@@ -1226,6 +1311,16 @@ export class LiquidatorBot implements Bot {
 		} else {
 			const start = Date.now();
 
+			const { perpTier: safestPerpTier, spotTier: safestSpotTier } =
+				user.getSafestTiers();
+			const perpTier = getPerpMarketTierNumber(perpMarketAccount);
+			if (!perpTierIsAsSafeAs(perpTier, safestPerpTier, safestSpotTier)) {
+				logger.info(
+					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on spot market ${depositMarketIndextoLiq} because there is a safer perp/spot tier. perp tier ${perpTier} safestPerpTier ${safestPerpTier} safestSpotTier ${safestSpotTier}`
+				);
+				return;
+			}
+
 			if (!this.spotMarketIndicies.includes(depositMarketIndextoLiq)) {
 				logger.info(
 					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on spot market ${depositMarketIndextoLiq} because it is not in spotMarketIndices`
@@ -1318,14 +1413,35 @@ export class LiquidatorBot implements Bot {
 		const start = Date.now();
 		let ran = false;
 		try {
+			const usersCanBeLiquidated = new Array<{
+				user: User;
+				marginRequirement: BN;
+				canBeLiquidated: boolean;
+			}>();
 			for (const user of this.userMap.values()) {
+				const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
+				if (canBeLiquidated || user.isBeingLiquidated()) {
+					usersCanBeLiquidated.push({
+						user,
+						marginRequirement,
+						canBeLiquidated,
+					});
+				}
+			}
+
+			// sort the usersCanBeLiquidated by marginRequirement, largest to smallest
+			usersCanBeLiquidated.sort((a, b) => {
+				return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
+			});
+
+			for (const { user, canBeLiquidated } of usersCanBeLiquidated) {
 				const userAcc = user.getUserAccount();
 				const auth = userAcc.authority.toBase58();
 				const userKey = user.userAccountPublicKey.toBase58();
 
 				if (isUserBankrupt(user) || user.isBankrupt()) {
 					await this.tryResolveBankruptUser(user);
-				} else if (user.canBeLiquidated()) {
+				} else if (canBeLiquidated) {
 					const lastAttempt = this.throttledUsers.get(userKey);
 					if (lastAttempt) {
 						const now = Date.now();
@@ -1381,78 +1497,12 @@ export class LiquidatorBot implements Bot {
 					let liquidateeHasSpotPos = false;
 					if (borrowMarketIndextoLiq != -1 && depositMarketIndextoLiq != -1) {
 						liquidateeHasSpotPos = true;
-						if (!this.spotMarketIndicies.includes(borrowMarketIndextoLiq)) {
-							logger.info(
-								`Skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because borrowMarketIndextoLiq(${borrowMarketIndextoLiq}) is not in spotMarketIndicies`
-							);
-							continue;
-						} else {
-							const subAccountToUse = this.spotMarketToSubaccount.get(
-								borrowMarketIndextoLiq
-							);
-							if (subAccountToUse === undefined) {
-								logger.info(
-									`skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
-								);
-								continue;
-							}
-							logger.info(
-								`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
-							);
-							this.driftClient.switchActiveUser(subAccountToUse);
-						}
-						const start = Date.now();
-						this.driftClient
-							.liquidateSpot(
-								user.userAccountPublicKey,
-								user.getUserAccount(),
-								depositMarketIndextoLiq,
-								borrowMarketIndextoLiq,
-								borrowAmountToLiq
-							)
-							.then((tx) => {
-								logger.info(
-									`liquidateSpot user = ${user.userAccountPublicKey.toString()}
-(deposit_index = ${depositMarketIndextoLiq} for borrow_index = ${borrowMarketIndextoLiq}
-								maxBorrowAmount = ${borrowAmountToLiq.toString()})
-tx: ${tx} `
-								);
-								webhookMessage(
-									`[${
-										this.name
-									}]: liquidateSpot user = ${user.userAccountPublicKey.toString()}
-(deposit_index = ${depositMarketIndextoLiq} for borrow_index = ${borrowMarketIndextoLiq}
-								maxBorrowAmount = ${borrowAmountToLiq.toString()})
-tx: ${tx} `
-								);
-							})
-							.catch((e) => {
-								logger.error(
-									`Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq} `
-								);
-								logger.error(e);
-								const errorCode = getErrorCode(e);
-
-								if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-									webhookMessage(
-										`[${
-											this.name
-										}]: :x: Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${depositMarketIndextoLiq} for borrow index: ${borrowMarketIndextoLiq}: \n${
-											e.logs ? (e.logs as Array<string>).join('\n') : ''
-										} \n${e.stack ? e.stack : e.message} `
-									);
-								} else {
-									this.throttledUsers.set(
-										user.userAccountPublicKey.toBase58(),
-										Date.now()
-									);
-								}
-							})
-							.finally(() => {
-								this.sdkCallDurationHistogram.record(Date.now() - start, {
-									method: 'liquidateSpot',
-								});
-							});
+						this.liqBorrow(
+							depositMarketIndextoLiq,
+							borrowMarketIndextoLiq,
+							borrowAmountToLiq,
+							user
+						);
 					}
 
 					const usdcMarket = this.driftClient.getSpotMarketAccount(

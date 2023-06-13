@@ -246,10 +246,6 @@ const runBot = async () => {
 		accountSubscription,
 		env: config.global.driftEnv,
 		userStats: true,
-		txSenderConfig: {
-			type: 'retry',
-			timeout: 35000,
-		},
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts,
 	});
