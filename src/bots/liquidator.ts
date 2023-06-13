@@ -1345,7 +1345,26 @@ export class LiquidatorBot implements Bot {
 		const start = Date.now();
 		let ran = false;
 		try {
+			const usersCanBeLiquidated = new Array<{
+				user: User;
+				marginRequirement: BN;
+			}>();
 			for (const user of this.userMap.values()) {
+				const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
+				if (canBeLiquidated) {
+					usersCanBeLiquidated.push({
+						user,
+						marginRequirement,
+					});
+				}
+			}
+
+			// sort the usersCanBeLiquidated by marginRequirement, largest to smallest
+			usersCanBeLiquidated.sort((a, b) => {
+				return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
+			});
+
+			for (const { user } of usersCanBeLiquidated) {
 				const userAcc = user.getUserAccount();
 				const auth = userAcc.authority.toBase58();
 				const userKey = user.userAccountPublicKey.toBase58();
