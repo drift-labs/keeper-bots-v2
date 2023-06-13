@@ -1429,13 +1429,15 @@ tx: ${tx} `
 			const usersCanBeLiquidated = new Array<{
 				user: User;
 				marginRequirement: BN;
+				canBeLiquidated: boolean;
 			}>();
 			for (const user of this.userMap.values()) {
 				const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
-				if (canBeLiquidated) {
+				if (canBeLiquidated || user.isBeingLiquidated()) {
 					usersCanBeLiquidated.push({
 						user,
 						marginRequirement,
+						canBeLiquidated,
 					});
 				}
 			}
@@ -1445,14 +1447,14 @@ tx: ${tx} `
 				return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
 			});
 
-			for (const { user } of usersCanBeLiquidated) {
+			for (const { user, canBeLiquidated } of usersCanBeLiquidated) {
 				const userAcc = user.getUserAccount();
 				const auth = userAcc.authority.toBase58();
 				const userKey = user.userAccountPublicKey.toBase58();
 
 				if (isUserBankrupt(user) || user.isBankrupt()) {
 					await this.tryResolveBankruptUser(user);
-				} else if (user.canBeLiquidated()) {
+				} else if (canBeLiquidated) {
 					const lastAttempt = this.throttledUsers.get(userKey);
 					if (lastAttempt) {
 						const now = Date.now();
