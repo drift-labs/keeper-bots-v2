@@ -20,8 +20,6 @@ import {
 	MarketType,
 	PostOnlyParams,
 	DLOBSubscriber,
-	EventSubscriber,
-	WrappedEvent,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -95,7 +93,6 @@ export class JitMakerBot implements Bot {
 	public readonly defaultIntervalMs: number = 1000;
 
 	private driftClient: DriftClient;
-	private eventSubscriber: EventSubscriber;
 	private slotSubscriber: SlotSubscriber;
 	private dlobSubscriber: DLOBSubscriber;
 	private periodicTaskMutex = new Mutex();
@@ -140,7 +137,6 @@ export class JitMakerBot implements Bot {
 
 	constructor(
 		driftClient: DriftClient,
-		eventSubscriber: EventSubscriber,
 		slotSubscriber: SlotSubscriber,
 		runtimeSpec: RuntimeSpec,
 		config: BaseBotConfig
@@ -148,7 +144,6 @@ export class JitMakerBot implements Bot {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
-		this.eventSubscriber = eventSubscriber;
 		this.slotSubscriber = slotSubscriber;
 		this.runtimeSpec = runtimeSpec;
 
@@ -262,8 +257,6 @@ export class JitMakerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
-
 		await this.dlobSubscriber.unsubscribe();
 		await this.userStatsMap.unsubscribe();
 		await this.userMap.unsubscribe();
@@ -273,14 +266,6 @@ export class JitMakerBot implements Bot {
 		await this.tryMake();
 		const intervalId = setInterval(this.tryMake.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);
-
-		this.eventSubscriber.eventEmitter.on(
-			'newEvent',
-			async (record: WrappedEvent<any>) => {
-				await this.userMap.updateWithEventRecord(record);
-				await this.userStatsMap.updateWithEventRecord(record, this.userMap);
-			}
-		);
 
 		logger.info(`${this.name} Bot started!`);
 	}
