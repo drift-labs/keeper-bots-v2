@@ -59,6 +59,10 @@ import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { getErrorCode } from '../error';
 import { LiquidatorConfig } from '../config';
+import {
+	getPerpMarketTierNumber,
+	perpTierIsAsSafeAs,
+} from '@drift-labs/sdk/lib/math/tiers';
 
 const errorCodesToSuppress = [
 	6004, // Error Number: 6004. Error Message: Sufficient collateral.
@@ -1239,10 +1243,12 @@ export class LiquidatorBot implements Bot {
 		} else {
 			const start = Date.now();
 
-			// TODO only safe assumption if all spot markets are collateral tier
-			if (borrowMarketIndextoLiq !== -1) {
+			const { perpTier: safestPerpTier, spotTier: safestSpotTier } =
+				user.getSafestTiers();
+			const perpTier = getPerpMarketTierNumber(perpMarketAccount);
+			if (!perpTierIsAsSafeAs(perpTier, safestPerpTier, safestSpotTier)) {
 				logger.info(
-					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on spot market ${depositMarketIndextoLiq} because there is a borrow that must be liquidated for spot market ${borrowMarketIndextoLiq}`
+					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on spot market ${depositMarketIndextoLiq} because there is a safer perp/spot tier. perp tier ${perpTier} safestPerpTier ${safestPerpTier} safestSpotTier ${safestSpotTier}`
 				);
 				return;
 			}
