@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import YAML from 'yaml';
 import { loadCommaDelimitToArray } from './utils';
+import { OrderExecutionAlgoType } from './types';
 import { DriftEnv } from '@drift-labs/sdk';
 
 export type BaseBotConfig = {
@@ -28,6 +29,8 @@ export type LiquidatorConfig = BaseBotConfig & {
 	perpSubAccountConfig?: SubaccountConfig;
 	spotSubAccountConfig?: SubaccountConfig;
 	maxSlippagePct?: number;
+	deriskAlgo?: OrderExecutionAlgoType;
+	twapDurationSec?: number;
 };
 
 export type BotConfigMap = {
@@ -206,6 +209,8 @@ export function loadConfigFromOpts(opts: any): Config {
 			spotMarketIndicies: loadCommaDelimitToArray(opts.spotMarketIndicies),
 			runOnce: opts.runOnce ?? false,
 			maxSlippagePct: opts.maxSlippagePct ?? 0.05,
+			deriskAlgo: opts.deriskAlgo ?? OrderExecutionAlgoType.Market,
+			twapDurationSec: parseInt(opts.twapDurationSec) ?? 300,
 		};
 	}
 	if (opts.trigger) {

@@ -26,12 +26,15 @@
 		"yaml": "^2.2.1"
 	},
 	"devDependencies": {
+		"@types/mocha": "^10.0.1",
 		"@typescript-eslint/eslint-plugin": "^4.28.0",
 		"@typescript-eslint/parser": "^4.28.0",
+		"chai": "^4.3.7",
 		"eslint": "^7.29.0",
 		"eslint-config-prettier": "^8.3.0",
 		"eslint-plugin-prettier": "^3.4.0",
 		"husky": "^7.0.4",
+		"mocha": "^10.2.0",
 		"prettier": "^2.4.1",
 		"ts-node": "^10.9.1"
 	},
@@ -52,7 +55,8 @@
 		"lint": "eslint . --ext ts --quiet",
 		"lint:fix": "eslint . --ext ts --fix",
 		"example:restingLimitMaker": "ts-node market_making_examples/restingLimitMaker/index.ts",
-		"example:jitMaker": "ts-node market_making_examples/jitMaker/index.ts"
+		"example:jitMaker": "ts-node market_making_examples/jitMaker/index.ts",
+		"test": "mocha -r ts-node/register ./src/**/*.test.ts"
 	},
 	"engines": {
 		"node": ">=16"

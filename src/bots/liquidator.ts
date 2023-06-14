@@ -34,8 +34,9 @@ import {
 	SwapReduceOnly,
 	getVariant,
 	OraclePriceData,
+	UserAccount,
+	OptionalOrderParams,
 } from '@drift-labs/sdk';
-import { E_ALREADY_LOCKED, Mutex } from 'async-mutex';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import {
@@ -52,7 +53,7 @@ import {
 } from '@opentelemetry/api-metrics';
 
 import { logger } from '../logger';
-import { Bot } from '../types';
+import { Bot, TwapExecutionProgress } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { getErrorCode } from '../error';
@@ -229,7 +230,6 @@ enum METRIC_TYPES {
  * a portion of the endangered account's position, so collateral is required in order to run this bot. The bot
  * will spend at most MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL of its free collateral on any endangered account.
  *
- * The bot will immediately market sell any of its open positions if SELL_OPEN_POSITIONS is true.
  */
 export class LiquidatorBot implements Bot {
 	public readonly name: string;
@@ -264,6 +264,7 @@ export class LiquidatorBot implements Bot {
 	private perpMarketIndicies: number[];
 	private spotMarketIndicies: number[];
 	private activeSubAccountId: number;
+	private allSubaccounts: Set<number>;
 	private perpMarketToSubaccount: Map<number, number>;
 	private spotMarketToSubaccount: Map<number, number>;
 	private intervalIds: Array<NodeJS.Timer> = [];
@@ -272,6 +273,7 @@ export class LiquidatorBot implements Bot {
 	private runtimeSpecs: RuntimeSpec;
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
 	private jupiterClient: JupiterClient;
+	private twapExecutionProgresses: Map<string, TwapExecutionProgress>; // key: subaccountId-marketIndex, value: TwapExecutionProgress
 
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
@@ -279,12 +281,6 @@ export class LiquidatorBot implements Bot {
 	private MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL = new BN(50);
 	private MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM = new BN(100);
 
-	/**
-	 * Immediately sell any open positions.
-	 */
-	private SELL_OPEN_POSITIONS = true;
-
-	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
@@ -293,6 +289,7 @@ export class LiquidatorBot implements Bot {
 		config: LiquidatorConfig,
 		defaultSubaccountId: number
 	) {
+		this.liquidatorConfig = config;
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
@@ -316,8 +313,8 @@ export class LiquidatorBot implements Bot {
 			`${this.name} disableAutoDerisking: ${this.disableAutoDerisking}`
 		);
 
-		const allSubaccounts = new Set<number>();
-		allSubaccounts.add(defaultSubaccountId);
+		this.allSubaccounts = new Set<number>();
+		this.allSubaccounts.add(defaultSubaccountId);
 		this.activeSubAccountId = defaultSubaccountId;
 		this.perpMarketToSubaccount = new Map<number, number>();
 		this.spotMarketToSubaccount = new Map<number, number>();
@@ -327,7 +324,7 @@ export class LiquidatorBot implements Bot {
 			for (const subAccount of Object.keys(config.perpSubAccountConfig)) {
 				for (const market of config.perpSubAccountConfig[subAccount]) {
 					this.perpMarketToSubaccount.set(market, parseInt(subAccount));
-					allSubaccounts.add(parseInt(subAccount));
+					this.allSubaccounts.add(parseInt(subAccount));
 				}
 			}
 			this.perpMarketIndicies = Object.values(
@@ -357,7 +354,7 @@ export class LiquidatorBot implements Bot {
 			for (const subAccount of Object.keys(config.spotSubAccountConfig)) {
 				for (const market of config.spotSubAccountConfig[subAccount]) {
 					this.spotMarketToSubaccount.set(market, parseInt(subAccount));
-					allSubaccounts.add(parseInt(subAccount));
+					this.allSubaccounts.add(parseInt(subAccount));
 				}
 			}
 			this.spotMarketIndicies = Object.values(
@@ -386,7 +383,7 @@ export class LiquidatorBot implements Bot {
 		);
 
 		// ensure driftClient has all subaccounts tracked and subscribed
-		for (const subaccount of allSubaccounts) {
+		for (const subaccount of this.allSubaccounts) {
 			if (!this.driftClient.hasUser(subaccount)) {
 				this.driftClient.addUser(subaccount).then((subscribed) => {
 					logger.info(
@@ -396,14 +393,54 @@ export class LiquidatorBot implements Bot {
 			}
 		}
 
+		if (this.isTwapping) {
+			const nowSec = Math.floor(Date.now() / 1000);
+			this.twapExecutionProgresses = new Map<string, TwapExecutionProgress>();
+			for (const marketIndex of this.perpMarketIndicies) {
+				const subaccount = this.perpMarketToSubaccount.get(marketIndex);
+				this.twapExecutionProgresses.set(
+					this.getTwapProgressKey(MarketType.PERP, subaccount, marketIndex),
+					new TwapExecutionProgress({
+						currentPosition: new BN(0),
+						targetPosition: new BN(0), // target positions to close
+						overallDurationSec: this.liquidatorConfig.twapDurationSec,
+						startTimeSec: nowSec,
+					})
+				);
+			}
+
+			for (const marketIndex of this.spotMarketIndicies) {
+				const subaccount = this.spotMarketToSubaccount.get(marketIndex);
+				this.twapExecutionProgresses.set(
+					this.getTwapProgressKey(MarketType.SPOT, subaccount, marketIndex),
+					new TwapExecutionProgress({
+						currentPosition: new BN(0),
+						targetPosition: new BN(0), // target positions to close
+						overallDurationSec: this.liquidatorConfig.twapDurationSec,
+						startTimeSec: nowSec,
+					})
+				);
+			}
+		}
+
 		// jupiter only works with mainnet
 		if (config.useJupiter && this.runtimeSpecs.driftEnv === 'mainnet-beta') {
 			this.jupiterClient = new JupiterClient({
 				connection: this.driftClient.connection,
 			});
 		}
+	}
 
-		this.liquidatorConfig = config;
+	private isTwapping() {
+		return this.liquidatorConfig.deriskAlgo === 'twap';
+	}
+
+	private getTwapProgressKey(
+		marketType: MarketType,
+		subaccountId: number,
+		marketIndex: number
+	): string {
+		return `${getVariant(marketType)}-${subaccountId}-${marketIndex}`;
 	}
 
 	public async init() {
@@ -439,12 +476,18 @@ export class LiquidatorBot implements Bot {
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
-		this.tryLiquidate();
-		const intervalId = setInterval(this.tryLiquidate.bind(this), intervalMs);
+		this.tryLiquidateStart();
+		const intervalId = setInterval(
+			this.tryLiquidateStart.bind(this),
+			intervalMs
+		);
 		this.intervalIds.push(intervalId);
 
 		if (!this.disableAutoDerisking) {
-			const deRiskIntervalId = setInterval(this.derisk.bind(this), 10000);
+			const deRiskIntervalId = setInterval(
+				this.derisk.bind(this),
+				3.3 * intervalMs
+			); // try to make it not overlap with the normal liquidation loop
 			this.intervalIds.push(deRiskIntervalId);
 		}
 
@@ -467,10 +510,8 @@ export class LiquidatorBot implements Bot {
 		let healthy = false;
 
 		// check if we've ran the main loop recently
-		await this.watchdogTimerMutex.runExclusive(async () => {
-			healthy =
-				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
-		});
+		healthy =
+			this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
 
 		if (!healthy) {
 			logger.error(
@@ -600,6 +641,187 @@ export class LiquidatorBot implements Bot {
 			});
 	}
 
+	private getOrderParamsForPerpDerisk(
+		subaccountId: number,
+		position: PerpPosition
+	): OptionalOrderParams | undefined {
+		const nowSec = Math.floor(Date.now() / 1000);
+
+		let baseAssetAmount: BN;
+		if (this.isTwapping()) {
+			const twapProgress = this.twapExecutionProgresses.get(
+				this.getTwapProgressKey(
+					MarketType.PERP,
+					subaccountId,
+					position.marketIndex
+				)
+			);
+			twapProgress.updateProgress(position.baseAssetAmount, nowSec);
+			baseAssetAmount = twapProgress.getExecutionSlice(nowSec);
+			logger.info(
+				`twap progress for PERP subaccount ${subaccountId} for market ${
+					position.marketIndex
+				}, tradeSize: ${baseAssetAmount.toString()}, amountRemaining: ${twapProgress
+					.getAmountRemaining()
+					.toString()}`
+			);
+		} else {
+			baseAssetAmount = position.baseAssetAmount;
+		}
+
+		const positionPlusOpenOrders = baseAssetAmount.gt(ZERO)
+			? baseAssetAmount.add(position.openAsks)
+			: baseAssetAmount.add(position.openBids);
+
+		// check if open orders already net out with current position before placing new order
+		if (baseAssetAmount.gt(ZERO) && positionPlusOpenOrders.lte(ZERO)) {
+			logger.info(
+				`position already netted out on subaccount ${subaccountId} for market ${position.marketIndex}, skipping`
+			);
+			return undefined;
+		}
+
+		if (baseAssetAmount.lt(ZERO) && positionPlusOpenOrders.gte(ZERO)) {
+			logger.info(
+				`position already netted out on subaccount ${subaccountId} for market ${position.marketIndex}, skipping`
+			);
+			return undefined;
+		}
+
+		baseAssetAmount = standardizeBaseAssetAmount(
+			baseAssetAmount,
+			this.driftClient.getPerpMarketAccount(position.marketIndex).amm
+				.orderStepSize
+		);
+
+		if (baseAssetAmount.eq(ZERO)) {
+			return undefined;
+		}
+
+		const oracle = this.driftClient.getOracleDataForPerpMarket(
+			position.marketIndex
+		);
+		const direction = findDirectionToClose(position);
+		const limitPrice = this.calculateOrderLimitPrice(oracle, direction);
+
+		return getMarketOrderParams({
+			direction,
+			baseAssetAmount,
+			reduceOnly: true,
+			marketIndex: position.marketIndex,
+			price: limitPrice,
+		});
+	}
+
+	private async deriskPerpPositions(userAccount: UserAccount) {
+		for (const position of userAccount.perpPositions) {
+			if (!position.baseAssetAmount.isZero()) {
+				const orderParams = this.getOrderParamsForPerpDerisk(
+					userAccount.subAccountId,
+					position
+				);
+				if (orderParams === undefined) {
+					continue;
+				}
+				const start = Date.now();
+				this.driftClient
+					.placePerpOrder(orderParams)
+					.then((tx) => {
+						logger.info(
+							`placePerpOrder on market ${position.marketIndex.toString()}: ${tx} `
+						);
+					})
+					.catch((e) => {
+						logger.error(e);
+						logger.error(
+							`Error trying to close perp position for market ${position.marketIndex}`
+						);
+						webhookMessage(
+							`[${this.name}]: :x: error in placePerpOrder\n:${
+								e.stack ? e.stack : e.message
+							} `
+						);
+					})
+					.then(() => {
+						this.sdkCallDurationHistogram.record(Date.now() - start, {
+							method: 'placePerpOrder',
+						});
+					});
+			} else if (position.quoteAssetAmount.lt(ZERO)) {
+				const start = Date.now();
+				const userAccountPubkey =
+					await this.driftClient.getUserAccountPublicKey();
+				logger.info(
+					`Settling negative perp pnl for ${userAccountPubkey.toBase58()} on market ${
+						position.marketIndex
+					}`
+				);
+				this.driftClient
+					.settlePNL(userAccountPubkey, userAccount, position.marketIndex)
+					.then((tx) => {
+						logger.info(
+							`settling negative perp pnl on market ${position.marketIndex.toString()}: ${tx} `
+						);
+					})
+					.catch((e) => {
+						logger.error(e);
+						logger.error(
+							`Error trying to settle negative perp pnl for market ${position.marketIndex}`
+						);
+						webhookMessage(
+							`[${this.name}]: :x: error in settlePNL for negative pnl\n:${
+								e.stack ? e.stack : e.message
+							} `
+						);
+					})
+					.finally(() => {
+						this.sdkCallDurationHistogram.record(Date.now() - start, {
+							method: 'settlePNL',
+						});
+					});
+			} else if (position.quoteAssetAmount.gt(ZERO)) {
+				const availablePnl = calculateMarketAvailablePNL(
+					this.driftClient.getPerpMarketAccount(position.marketIndex)!,
+					this.driftClient.getQuoteSpotMarketAccount()
+				);
+
+				if (availablePnl.gt(ZERO)) {
+					const start = Date.now();
+					const userAccountPubkey =
+						await this.driftClient.getUserAccountPublicKey();
+					logger.info(
+						`Settling positive perp pnl for ${userAccountPubkey.toBase58()} on market ${
+							position.marketIndex
+						}`
+					);
+					this.driftClient
+						.settlePNL(userAccountPubkey, userAccount, position.marketIndex)
+						.then((tx) => {
+							logger.info(
+								`settling positive perp pnl on market ${position.marketIndex.toString()}: ${tx} `
+							);
+						})
+						.catch((e) => {
+							logger.error(e);
+							logger.error(
+								`Error trying to settle positive perp pnl for market ${position.marketIndex}`
+							);
+							webhookMessage(
+								`[${this.name}]: :x: error in settlePNL for positive pnl\n:${
+									e.stack ? e.stack : e.message
+								} `
+							);
+						})
+						.finally(() => {
+							this.sdkCallDurationHistogram.record(Date.now() - start, {
+								method: "'settlePNL",
+							});
+						});
+				}
+			}
+		}
+	}
+
 	private async determineBestSpotSwapRoute(
 		spotMarketIndex: number,
 		orderDirection: PositionDirection,
@@ -685,248 +907,161 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
+	private getOrderParamsForSpotDerisk(
+		subaccountId: number,
+		position: SpotPosition
+	):
+		| { tokenAmount: BN; limitPrice: BN; direction: PositionDirection }
+		| undefined {
+		const spotMarket = this.driftClient.getSpotMarketAccount(
+			position.marketIndex
+		);
+		if (!spotMarket) {
+			logger.error(
+				`failed to get spot market account for market ${position.marketIndex}`
+			);
+			return undefined;
+		}
+
+		const nowSec = Math.floor(Date.now() / 1000);
+		let tokenAmount = getSignedTokenAmount(
+			getTokenAmount(position.scaledBalance, spotMarket, position.balanceType),
+			position.balanceType
+		);
+		if (this.isTwapping()) {
+			const twapProgress = this.twapExecutionProgresses.get(
+				this.getTwapProgressKey(
+					MarketType.SPOT,
+					subaccountId,
+					position.marketIndex
+				)
+			);
+			twapProgress.updateProgress(tokenAmount, nowSec);
+			tokenAmount = twapProgress.getExecutionSlice(nowSec);
+			logger.info(
+				`twap progress for SPOT subaccount ${subaccountId} for market ${
+					position.marketIndex
+				}, tradeSize: ${tokenAmount.toString()}, amountRemaining: ${twapProgress
+					.getAmountRemaining()
+					.toString()}`
+			);
+		}
+
+		// need to standardize token amount to check if its closable via market orders
+		tokenAmount = standardizeBaseAssetAmount(
+			tokenAmount,
+			spotMarket.orderStepSize
+		);
+
+		const positionPlusOpenOrders = tokenAmount.gt(ZERO)
+			? tokenAmount.add(position.openAsks)
+			: tokenAmount.add(position.openBids);
+
+		// check if open orders already net out with current position before placing new order
+		// (avoid canceling and placing new order if not necessary)
+		if (positionPlusOpenOrders.eq(ZERO)) {
+			return undefined;
+		}
+
+		let direction: PositionDirection = PositionDirection.LONG;
+		if (isVariant(position.balanceType, 'deposit')) {
+			direction = PositionDirection.SHORT;
+		}
+
+		const oracle = this.driftClient.getOracleDataForSpotMarket(
+			position.marketIndex
+		);
+		const limitPrice = this.calculateOrderLimitPrice(oracle, direction);
+
+		return {
+			tokenAmount,
+			limitPrice,
+			direction,
+		};
+	}
+
+	private async deriskSpotPositions(userAccount: UserAccount) {
+		for (const position of userAccount.spotPositions) {
+			if (position.scaledBalance.eq(ZERO) || position.marketIndex === 0) {
+				continue;
+			}
+
+			const orderParams = this.getOrderParamsForSpotDerisk(
+				userAccount.subAccountId,
+				position
+			);
+			if (orderParams === undefined) {
+				continue;
+			}
+
+			const jupRoute = await this.determineBestSpotSwapRoute(
+				position.marketIndex,
+				orderParams.direction,
+				orderParams.tokenAmount
+			);
+			if (!jupRoute) {
+				this.driftSpotTrade(
+					orderParams.direction,
+					position.marketIndex,
+					orderParams.tokenAmount,
+					orderParams.limitPrice
+				);
+			} else {
+				this.jupiterSpotSwap(
+					orderParams.direction,
+					position.marketIndex,
+					orderParams.tokenAmount,
+					jupRoute
+				);
+			}
+		}
+	}
+
+	private async deriskForSubaccount(subaccountId: number) {
+		this.driftClient.switchActiveUser(subaccountId);
+		const userAccount = this.driftClient.getUserAccount();
+		if (!userAccount) {
+			logger.error('failed to get user account');
+			return;
+		}
+		if (userAccount.subAccountId !== subaccountId) {
+			logger.error('failed to switch user account');
+			return;
+		}
+
+		await this.deriskPerpPositions(userAccount);
+		await this.deriskSpotPositions(userAccount);
+	}
+
+	/**
+	 * attempts to acquire the mutex for derisking. If it is already acquired, it returns false
+	 */
+	private acquireMutex(): boolean {
+		return Atomics.compareExchange(this.deriskMutex, 0, 0, 1) === 0;
+	}
+
+	/**
+	 * releases the mutex.
+	 * Warning: this should only be called after acquireMutex() returns true
+	 */
+	private releaseMutex() {
+		Atomics.store(this.deriskMutex, 0, 0);
+	}
+
 	/**
 	 * attempts to close out any open positions on this account. It starts by cancelling any open orders
 	 */
 	private async derisk() {
-		if (Atomics.compareExchange(this.deriskMutex, 0, 0, 1) === 1) {
-			return;
-		}
-
-		if (!this.SELL_OPEN_POSITIONS) {
+		if (!this.acquireMutex()) {
 			return;
 		}
 
 		try {
-			const userAccount = this.driftClient.getUserAccount();
-			if (!userAccount) {
-				logger.error('failed to get user account');
-				return;
-			}
-
-			// close open positions
-			for (const position of userAccount.perpPositions) {
-				if (!position.baseAssetAmount.isZero()) {
-					const positionPlusOpenOrders = position.baseAssetAmount.gt(ZERO)
-						? position.baseAssetAmount.add(position.openAsks)
-						: position.baseAssetAmount.add(position.openBids);
-
-					// check if open orders already net out with current position before placing new order
-					if (
-						position.baseAssetAmount.gt(ZERO) &&
-						positionPlusOpenOrders.lte(ZERO)
-					) {
-						continue;
-					}
-
-					if (
-						position.baseAssetAmount.lt(ZERO) &&
-						positionPlusOpenOrders.gte(ZERO)
-					) {
-						continue;
-					}
-
-					const oracle = this.driftClient.getOracleDataForPerpMarket(
-						position.marketIndex
-					);
-					const direction = findDirectionToClose(position);
-					const limitPrice = this.calculateOrderLimitPrice(oracle, direction);
-					const start = Date.now();
-					this.driftClient
-						.placePerpOrder(
-							getMarketOrderParams({
-								direction,
-								baseAssetAmount: positionPlusOpenOrders,
-								reduceOnly: true,
-								marketIndex: position.marketIndex,
-								price: limitPrice,
-							})
-						)
-						.then((tx) => {
-							logger.info(
-								`placePerpOrder on market ${position.marketIndex.toString()}: ${tx} `
-							);
-						})
-						.catch((e) => {
-							logger.error(e);
-							logger.error(
-								`Error trying to close perp position for market ${position.marketIndex}`
-							);
-							webhookMessage(
-								`[${this.name}]: :x: error in placePerpOrder\n:${
-									e.stack ? e.stack : e.message
-								} `
-							);
-						})
-						.then(() => {
-							this.sdkCallDurationHistogram.record(Date.now() - start, {
-								method: 'placePerpOrder',
-							});
-						});
-				} else if (position.quoteAssetAmount.lt(ZERO)) {
-					const start = Date.now();
-					this.driftClient
-						.settlePNL(
-							await this.driftClient.getUserAccountPublicKey(),
-							userAccount,
-							position.marketIndex
-						)
-						.then((tx) => {
-							logger.info(
-								`settling negative perp pnl on market ${position.marketIndex.toString()}: ${tx} `
-							);
-						})
-						.catch((e) => {
-							logger.error(e);
-							logger.error(
-								`Error trying to settle negative perp pnl for market ${position.marketIndex}`
-							);
-							webhookMessage(
-								`[${this.name}]: :x: error in settlePNL for negative pnl\n:${
-									e.stack ? e.stack : e.message
-								} `
-							);
-						})
-						.finally(() => {
-							this.sdkCallDurationHistogram.record(Date.now() - start, {
-								method: 'settlePNL',
-							});
-						});
-				} else if (position.quoteAssetAmount.gt(ZERO)) {
-					const availablePnl = calculateMarketAvailablePNL(
-						this.driftClient.getPerpMarketAccount(position.marketIndex)!,
-						this.driftClient.getQuoteSpotMarketAccount()
-					);
-
-					if (availablePnl.gt(ZERO)) {
-						const start = Date.now();
-						this.driftClient
-							.settlePNL(
-								await this.driftClient.getUserAccountPublicKey(),
-								userAccount,
-								position.marketIndex
-							)
-							.then((tx) => {
-								logger.info(
-									`settling positive perp pnl on market ${position.marketIndex.toString()}: ${tx} `
-								);
-							})
-							.catch((e) => {
-								logger.error(e);
-								logger.error(
-									`Error trying to settle positive perp pnl for market ${position.marketIndex}`
-								);
-								webhookMessage(
-									`[${this.name}]: :x: error in settlePNL for positive pnl\n:${
-										e.stack ? e.stack : e.message
-									} `
-								);
-							})
-							.finally(() => {
-								this.sdkCallDurationHistogram.record(Date.now() - start, {
-									method: "'settlePNL",
-								});
-							});
-					}
-				}
-			}
-
-			for (const position of userAccount.spotPositions) {
-				if (position.scaledBalance.eq(ZERO) || position.marketIndex === 0) {
-					continue;
-				}
-
-				const spotMarket = this.driftClient.getSpotMarketAccount(
-					position.marketIndex
-				);
-				if (!spotMarket) {
-					logger.error(
-						`failed to get spot market account for market ${position.marketIndex}`
-					);
-					continue;
-				}
-
-				// need to standardize token amount to check if its closable via market orders
-				const standardizedTokenAmount = getSignedTokenAmount(
-					standardizeBaseAssetAmount(
-						getTokenAmount(
-							position.scaledBalance,
-							spotMarket,
-							position.balanceType
-						),
-						spotMarket.orderStepSize
-					),
-					position.balanceType
-				);
-
-				const positionPlusOpenOrders = standardizedTokenAmount.gt(ZERO)
-					? standardizedTokenAmount.add(position.openAsks)
-					: standardizedTokenAmount.add(position.openBids);
-
-				// check if open orders already net out with current position before placing new order
-				if (positionPlusOpenOrders.eq(ZERO)) {
-					continue;
-				}
-
-				const oracle = this.driftClient.getOracleDataForSpotMarket(
-					position.marketIndex
-				);
-				if (isVariant(position.balanceType, 'deposit')) {
-					// sell out of deposit
-					const jupRoute = await this.determineBestSpotSwapRoute(
-						position.marketIndex,
-						PositionDirection.SHORT,
-						standardizedTokenAmount
-					);
-					if (!jupRoute) {
-						const limitPrice = this.calculateOrderLimitPrice(
-							oracle,
-							PositionDirection.SHORT
-						);
-						this.driftSpotTrade(
-							PositionDirection.SHORT,
-							position.marketIndex,
-							standardizedTokenAmount,
-							limitPrice
-						);
-					} else {
-						this.jupiterSpotSwap(
-							PositionDirection.SHORT,
-							position.marketIndex,
-							standardizedTokenAmount,
-							jupRoute
-						);
-					}
-				} else {
-					// buy back borrow
-					const jupRoute = await this.determineBestSpotSwapRoute(
-						position.marketIndex,
-						PositionDirection.LONG,
-						standardizedTokenAmount
-					);
-					if (!jupRoute) {
-						const limitPrice = this.calculateOrderLimitPrice(
-							oracle,
-							PositionDirection.SHORT
-						);
-						this.driftSpotTrade(
-							PositionDirection.LONG,
-							position.marketIndex,
-							standardizedTokenAmount,
-							limitPrice
-						);
-					} else {
-						this.jupiterSpotSwap(
-							PositionDirection.LONG,
-							position.marketIndex,
-							standardizedTokenAmount,
-							jupRoute
-						);
-					}
-				}
+			for (const subAccountId of this.allSubaccounts) {
+				await this.deriskForSubaccount(subAccountId);
 			}
 		} finally {
-			Atomics.store(this.deriskMutex, 0, 0);
+			this.releaseMutex();
 		}
 	}
 
@@ -1422,371 +1557,369 @@ tx: ${tx} `
 		}
 	}
 
+	private async tryLiquidate(): Promise<boolean> {
+		let ran = false;
+		const usersCanBeLiquidated = new Array<{
+			user: User;
+			marginRequirement: BN;
+			canBeLiquidated: boolean;
+		}>();
+		for (const user of this.userMap.values()) {
+			const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
+			if (canBeLiquidated || user.isBeingLiquidated()) {
+				usersCanBeLiquidated.push({
+					user,
+					marginRequirement,
+					canBeLiquidated,
+				});
+			}
+		}
+
+		// sort the usersCanBeLiquidated by marginRequirement, largest to smallest
+		usersCanBeLiquidated.sort((a, b) => {
+			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
+		});
+
+		for (const { user, canBeLiquidated } of usersCanBeLiquidated) {
+			const userAcc = user.getUserAccount();
+			const auth = userAcc.authority.toBase58();
+			const userKey = user.userAccountPublicKey.toBase58();
+
+			if (isUserBankrupt(user) || user.isBankrupt()) {
+				await this.tryResolveBankruptUser(user);
+			} else if (canBeLiquidated) {
+				const lastAttempt = this.throttledUsers.get(userKey);
+				if (lastAttempt) {
+					const now = Date.now();
+					if (lastAttempt + LIQUIDATE_THROTTLE_BACKOFF > now) {
+						logger.warn(
+							`skipping user(throttled, retry in ${
+								lastAttempt + LIQUIDATE_THROTTLE_BACKOFF - now
+							}ms) ${auth}: ${userKey} `
+						);
+						continue;
+					} else {
+						this.throttledUsers.delete(userKey);
+					}
+				}
+
+				logger.info(`liquidating auth: ${auth}, userAccount: ${userKey}...`);
+				webhookMessage(
+					`[${this.name}]: liquidating auth: ${auth}: userAccount: ${userKey} ...`
+				);
+
+				const liquidatorUser = this.driftClient.getUser();
+				const liquidateeUserAccount = user.getUserAccount();
+
+				// most attractive spot market liq
+				const {
+					bestIndex: depositMarketIndextoLiq,
+					bestAmount: depositAmountToLiq,
+					indexWithMaxAssets,
+					indexWithOpenOrders,
+				} = findBestSpotPosition(
+					this.driftClient,
+					user,
+					liquidatorUser,
+					liquidateeUserAccount.spotPositions,
+					false,
+					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
+					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
+				);
+
+				const {
+					bestIndex: borrowMarketIndextoLiq,
+					bestAmount: borrowAmountToLiq,
+				} = findBestSpotPosition(
+					this.driftClient,
+					user,
+					liquidatorUser,
+					liquidateeUserAccount.spotPositions,
+					true,
+					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
+					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
+				);
+
+				let liquidateeHasSpotPos = false;
+				if (borrowMarketIndextoLiq != -1 && depositMarketIndextoLiq != -1) {
+					liquidateeHasSpotPos = true;
+					this.liqBorrow(
+						depositMarketIndextoLiq,
+						borrowMarketIndextoLiq,
+						borrowAmountToLiq,
+						user
+					);
+				}
+
+				const usdcMarket = this.driftClient.getSpotMarketAccount(
+					QUOTE_SPOT_MARKET_INDEX
+				);
+				if (!usdcMarket) {
+					logger.error(`no usdcMarket for ${QUOTE_SPOT_MARKET_INDEX}`);
+					return;
+				}
+
+				// less attractive, perp / perp pnl liquidations
+				let liquidateeHasPerpPos = false;
+				let liquidateeHasUnsettledPerpPnl = false;
+				let liquidateeHasLpPos = false;
+				let liquidateePerpHasOpenOrders = false;
+				let liquidateePerpIndexWithOpenOrders = -1;
+				for (const liquidateePosition of user.getActivePerpPositions()) {
+					if (liquidateePosition.openOrders > 0) {
+						liquidateePerpHasOpenOrders = true;
+						liquidateePerpIndexWithOpenOrders = liquidateePosition.marketIndex;
+					}
+
+					liquidateeHasUnsettledPerpPnl =
+						liquidateePosition.baseAssetAmount.isZero() &&
+						!liquidateePosition.quoteAssetAmount.isZero();
+					liquidateeHasPerpPos =
+						!liquidateePosition.baseAssetAmount.isZero() ||
+						!liquidateePosition.quoteAssetAmount.isZero();
+					liquidateeHasLpPos = !liquidateePosition.lpShares.isZero();
+
+					if (liquidateeHasUnsettledPerpPnl) {
+						const perpMarket = this.driftClient.getPerpMarketAccount(
+							liquidateePosition.marketIndex
+						);
+						if (!perpMarket) {
+							logger.error(
+								`no perpMarket for ${liquidateePosition.marketIndex}`
+							);
+							continue;
+						}
+						await this.liqPerpPnl(
+							user,
+							perpMarket,
+							usdcMarket,
+							liquidateePosition,
+							depositMarketIndextoLiq,
+							depositAmountToLiq,
+							borrowMarketIndextoLiq,
+							borrowAmountToLiq
+						);
+					}
+
+					const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
+						liquidatorUser,
+						liquidateePosition
+					);
+
+					if (baseAmountToLiquidate.gt(ZERO)) {
+						if (this.dryRun) {
+							logger.warn('--dry run flag enabled - not sending liquidate tx');
+							continue;
+						}
+
+						if (
+							!this.perpMarketIndicies.includes(liquidateePosition.marketIndex)
+						) {
+							logger.info(
+								`Skipping liquidatePerp call for ${user.userAccountPublicKey.toBase58()} because marketIndex(${
+									liquidateePosition.marketIndex
+								}) is not in perpMarketIndicies`
+							);
+							continue;
+						} else {
+							const subAccountToUse = this.perpMarketToSubaccount.get(
+								liquidateePosition.marketIndex
+							);
+							if (subAccountToUse === undefined) {
+								logger.info(
+									`skipping liquidatePerp call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
+								);
+								continue;
+							}
+							logger.info(
+								`Switching to subaccount ${subAccountToUse} for perp market ${liquidateePosition.marketIndex}`
+							);
+							this.driftClient.switchActiveUser(subAccountToUse);
+						}
+
+						const start = Date.now();
+						this.driftClient
+							.liquidatePerp(
+								user.userAccountPublicKey,
+								user.getUserAccount(),
+								liquidateePosition.marketIndex,
+								baseAmountToLiquidate
+							)
+							.then((tx) => {
+								logger.info(`liquidatePerp tx: ${tx} `);
+								webhookMessage(
+									`[${
+										this.name
+									}]: liquidatePerp for ${user.userAccountPublicKey.toBase58()} on market ${
+										liquidateePosition.marketIndex
+									} tx: ${tx} `
+								);
+							})
+							.catch((e) => {
+								logger.error(
+									`Error liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePosition.marketIndex} `
+								);
+								console.error(e);
+								webhookMessage(
+									`[${
+										this.name
+									}]: :x: Error liquidating auth: ${auth}, user: ${userKey} on market ${
+										liquidateePosition.marketIndex
+									} \n${e.logs ? (e.logs as Array<string>).join('\n') : ''} \n${
+										e.stack || e
+									} `
+								);
+							})
+							.finally(() => {
+								this.sdkCallDurationHistogram.record(Date.now() - start, {
+									method: 'liquidatePerp',
+								});
+							});
+					}
+
+					if (liquidateeHasLpPos) {
+						logger.info(
+							`liquidatePerp ${auth}-${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
+							} has lp shares but no perp pos, trying to clear it:`
+						);
+						this.driftClient
+							.liquidatePerp(
+								user.userAccountPublicKey,
+								user.getUserAccount(),
+								liquidateePosition.marketIndex,
+								ZERO
+							)
+							.then((tx) => {
+								logger.info(
+									`liquidatePerp (no perp pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+								);
+							})
+							.catch((e) => {
+								logger.error(
+									`Error liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePosition.marketIndex}\n${e}`
+								);
+							});
+					}
+				}
+
+				if (!liquidateeHasSpotPos && !liquidateeHasPerpPos) {
+					logger.info(
+						`${auth}-${user.userAccountPublicKey.toBase58()} can be liquidated but has no positions`
+					);
+					if (liquidateePerpHasOpenOrders) {
+						logger.info(
+							`${auth}-${user.userAccountPublicKey.toBase58()} liquidatePerp with open orders in ${liquidateePerpIndexWithOpenOrders}`
+						);
+						this.throttledUsers.set(
+							user.userAccountPublicKey.toBase58(),
+							Date.now()
+						);
+						this.driftClient
+							.liquidatePerp(
+								user.userAccountPublicKey,
+								user.getUserAccount(),
+								liquidateePerpIndexWithOpenOrders,
+								ZERO
+							)
+							.then((tx) => {
+								logger.info(
+									`liquidatePerp (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+								);
+							})
+							.catch((e) => {
+								logger.error(
+									`Error in liquidatePerp, liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePerpIndexWithOpenOrders}\n${e}`
+								);
+							});
+					}
+					if (indexWithOpenOrders !== -1) {
+						logger.info(
+							`${auth}-${user.userAccountPublicKey.toBase58()} liquidateSpot with assets in ${indexWithMaxAssets} and open orders in ${indexWithOpenOrders}`
+						);
+						this.throttledUsers.set(
+							user.userAccountPublicKey.toBase58(),
+							Date.now()
+						);
+						this.driftClient
+							.liquidateSpot(
+								user.userAccountPublicKey,
+								user.getUserAccount(),
+								indexWithMaxAssets,
+								indexWithOpenOrders,
+								ZERO
+							)
+							.then((tx) => {
+								logger.info(
+									`liquidateSpot (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
+								);
+							})
+							.catch((e) => {
+								logger.error(
+									`Error in liquidateSpot, liquidating auth: ${auth}, user: ${userKey} on market ${indexWithMaxAssets}\n${e}`
+								);
+							});
+					}
+				}
+			} else if (isVariant(userAcc.status, 'beingLiquidated')) {
+				// liquidate the user to bring them out of liquidation status, can liquidate any market even
+				// if the user doesn't have a position in it
+				logger.info(
+					`[${
+						this.name
+					}]: user stuck in beingLiquidated status, need to clear it for ${user.userAccountPublicKey.toBase58()}`
+				);
+				this.driftClient
+					.liquidatePerp(
+						user.userAccountPublicKey,
+						user.getUserAccount(),
+						0,
+						ZERO
+					)
+					.then((tx) => {
+						logger.info(
+							`liquidatePerp for stuck(beingLiquidated) user tx: ${tx} `
+						);
+					})
+					.catch((e) => {
+						console.error(e);
+					});
+			}
+		}
+
+		ran = true;
+		return ran;
+	}
+
 	/**
 	 * iterates over users in userMap and checks:
 	 * 		1. is user bankrupt? if so, resolve bankruptcy
 	 * 		2. is user in liquidation? If so, endangered position is liquidated
 	 */
-	private async tryLiquidate() {
+	private async tryLiquidateStart() {
 		const start = Date.now();
 		let ran = false;
 		try {
-			const usersCanBeLiquidated = new Array<{
-				user: User;
-				marginRequirement: BN;
-				canBeLiquidated: boolean;
-			}>();
-			for (const user of this.userMap.values()) {
-				const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
-				if (canBeLiquidated || user.isBeingLiquidated()) {
-					usersCanBeLiquidated.push({
-						user,
-						marginRequirement,
-						canBeLiquidated,
-					});
-				}
-			}
-
-			// sort the usersCanBeLiquidated by marginRequirement, largest to smallest
-			usersCanBeLiquidated.sort((a, b) => {
-				return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
-			});
-
-			for (const { user, canBeLiquidated } of usersCanBeLiquidated) {
-				const userAcc = user.getUserAccount();
-				const auth = userAcc.authority.toBase58();
-				const userKey = user.userAccountPublicKey.toBase58();
-
-				if (isUserBankrupt(user) || user.isBankrupt()) {
-					await this.tryResolveBankruptUser(user);
-				} else if (canBeLiquidated) {
-					const lastAttempt = this.throttledUsers.get(userKey);
-					if (lastAttempt) {
-						const now = Date.now();
-						if (lastAttempt + LIQUIDATE_THROTTLE_BACKOFF > now) {
-							logger.warn(
-								`skipping user(throttled, retry in ${
-									lastAttempt + LIQUIDATE_THROTTLE_BACKOFF - now
-								}ms) ${auth}: ${userKey} `
-							);
-							continue;
-						} else {
-							this.throttledUsers.delete(userKey);
-						}
-					}
-
-					logger.info(`liquidating auth: ${auth}, userAccount: ${userKey}...`);
-					webhookMessage(
-						`[${this.name}]: liquidating auth: ${auth}: userAccount: ${userKey} ...`
-					);
-
-					const liquidatorUser = this.driftClient.getUser();
-					const liquidateeUserAccount = user.getUserAccount();
-
-					// most attractive spot market liq
-					const {
-						bestIndex: depositMarketIndextoLiq,
-						bestAmount: depositAmountToLiq,
-						indexWithMaxAssets,
-						indexWithOpenOrders,
-					} = findBestSpotPosition(
-						this.driftClient,
-						user,
-						liquidatorUser,
-						liquidateeUserAccount.spotPositions,
-						false,
-						this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
-						this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
-					);
-
-					const {
-						bestIndex: borrowMarketIndextoLiq,
-						bestAmount: borrowAmountToLiq,
-					} = findBestSpotPosition(
-						this.driftClient,
-						user,
-						liquidatorUser,
-						liquidateeUserAccount.spotPositions,
-						true,
-						this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
-						this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
-					);
-
-					let liquidateeHasSpotPos = false;
-					if (borrowMarketIndextoLiq != -1 && depositMarketIndextoLiq != -1) {
-						liquidateeHasSpotPos = true;
-						this.liqBorrow(
-							depositMarketIndextoLiq,
-							borrowMarketIndextoLiq,
-							borrowAmountToLiq,
-							user
-						);
-					}
-
-					const usdcMarket = this.driftClient.getSpotMarketAccount(
-						QUOTE_SPOT_MARKET_INDEX
-					);
-					if (!usdcMarket) {
-						logger.error(`no usdcMarket for ${QUOTE_SPOT_MARKET_INDEX}`);
-						return;
-					}
-
-					// less attractive, perp / perp pnl liquidations
-					let liquidateeHasPerpPos = false;
-					let liquidateeHasUnsettledPerpPnl = false;
-					let liquidateeHasLpPos = false;
-					let liquidateePerpHasOpenOrders = false;
-					let liquidateePerpIndexWithOpenOrders = -1;
-					for (const liquidateePosition of user.getActivePerpPositions()) {
-						if (liquidateePosition.openOrders > 0) {
-							liquidateePerpHasOpenOrders = true;
-							liquidateePerpIndexWithOpenOrders =
-								liquidateePosition.marketIndex;
-						}
-
-						liquidateeHasUnsettledPerpPnl =
-							liquidateePosition.baseAssetAmount.isZero() &&
-							!liquidateePosition.quoteAssetAmount.isZero();
-						liquidateeHasPerpPos =
-							!liquidateePosition.baseAssetAmount.isZero() ||
-							!liquidateePosition.quoteAssetAmount.isZero();
-						liquidateeHasLpPos = !liquidateePosition.lpShares.isZero();
-
-						if (liquidateeHasUnsettledPerpPnl) {
-							const perpMarket = this.driftClient.getPerpMarketAccount(
-								liquidateePosition.marketIndex
-							);
-							if (!perpMarket) {
-								logger.error(
-									`no perpMarket for ${liquidateePosition.marketIndex}`
-								);
-								continue;
-							}
-							await this.liqPerpPnl(
-								user,
-								perpMarket,
-								usdcMarket,
-								liquidateePosition,
-								depositMarketIndextoLiq,
-								depositAmountToLiq,
-								borrowMarketIndextoLiq,
-								borrowAmountToLiq
-							);
-						}
-
-						const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
-							liquidatorUser,
-							liquidateePosition
-						);
-
-						if (baseAmountToLiquidate.gt(ZERO)) {
-							if (this.dryRun) {
-								logger.warn(
-									'--dry run flag enabled - not sending liquidate tx'
-								);
-								continue;
-							}
-
-							if (
-								!this.perpMarketIndicies.includes(
-									liquidateePosition.marketIndex
-								)
-							) {
-								logger.info(
-									`Skipping liquidatePerp call for ${user.userAccountPublicKey.toBase58()} because marketIndex(${
-										liquidateePosition.marketIndex
-									}) is not in perpMarketIndicies`
-								);
-								continue;
-							} else {
-								const subAccountToUse = this.perpMarketToSubaccount.get(
-									liquidateePosition.marketIndex
-								);
-								if (subAccountToUse === undefined) {
-									logger.info(
-										`skipping liquidatePerp call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
-									);
-									continue;
-								}
-								logger.info(
-									`Switching to subaccount ${subAccountToUse} for perp market ${liquidateePosition.marketIndex}`
-								);
-								this.driftClient.switchActiveUser(subAccountToUse);
-							}
-
-							const start = Date.now();
-							this.driftClient
-								.liquidatePerp(
-									user.userAccountPublicKey,
-									user.getUserAccount(),
-									liquidateePosition.marketIndex,
-									baseAmountToLiquidate
-								)
-								.then((tx) => {
-									logger.info(`liquidatePerp tx: ${tx} `);
-									webhookMessage(
-										`[${
-											this.name
-										}]: liquidatePerp for ${user.userAccountPublicKey.toBase58()} on market ${
-											liquidateePosition.marketIndex
-										} tx: ${tx} `
-									);
-								})
-								.catch((e) => {
-									logger.error(
-										`Error liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePosition.marketIndex} `
-									);
-									console.error(e);
-									webhookMessage(
-										`[${
-											this.name
-										}]: :x: Error liquidating auth: ${auth}, user: ${userKey} on market ${
-											liquidateePosition.marketIndex
-										} \n${
-											e.logs ? (e.logs as Array<string>).join('\n') : ''
-										} \n${e.stack || e} `
-									);
-								})
-								.finally(() => {
-									this.sdkCallDurationHistogram.record(Date.now() - start, {
-										method: 'liquidatePerp',
-									});
-								});
-						}
-
-						if (liquidateeHasLpPos) {
-							logger.info(
-								`liquidatePerp ${auth}-${user.userAccountPublicKey.toBase58()} on market ${
-									liquidateePosition.marketIndex
-								} has lp shares but no perp pos, trying to clear it:`
-							);
-							this.driftClient
-								.liquidatePerp(
-									user.userAccountPublicKey,
-									user.getUserAccount(),
-									liquidateePosition.marketIndex,
-									ZERO
-								)
-								.then((tx) => {
-									logger.info(
-										`liquidatePerp (no perp pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
-									);
-								})
-								.catch((e) => {
-									logger.error(
-										`Error liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePosition.marketIndex}\n${e}`
-									);
-								});
-						}
-					}
-
-					if (!liquidateeHasSpotPos && !liquidateeHasPerpPos) {
-						logger.info(
-							`${auth}-${user.userAccountPublicKey.toBase58()} can be liquidated but has no positions`
-						);
-						if (liquidateePerpHasOpenOrders) {
-							logger.info(
-								`${auth}-${user.userAccountPublicKey.toBase58()} liquidatePerp with open orders in ${liquidateePerpIndexWithOpenOrders}`
-							);
-							this.throttledUsers.set(
-								user.userAccountPublicKey.toBase58(),
-								Date.now()
-							);
-							this.driftClient
-								.liquidatePerp(
-									user.userAccountPublicKey,
-									user.getUserAccount(),
-									liquidateePerpIndexWithOpenOrders,
-									ZERO
-								)
-								.then((tx) => {
-									logger.info(
-										`liquidatePerp (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
-									);
-								})
-								.catch((e) => {
-									logger.error(
-										`Error in liquidatePerp, liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePerpIndexWithOpenOrders}\n${e}`
-									);
-								});
-						}
-						if (indexWithOpenOrders !== -1) {
-							logger.info(
-								`${auth}-${user.userAccountPublicKey.toBase58()} liquidateSpot with assets in ${indexWithMaxAssets} and open orders in ${indexWithOpenOrders}`
-							);
-							this.throttledUsers.set(
-								user.userAccountPublicKey.toBase58(),
-								Date.now()
-							);
-							this.driftClient
-								.liquidateSpot(
-									user.userAccountPublicKey,
-									user.getUserAccount(),
-									indexWithMaxAssets,
-									indexWithOpenOrders,
-									ZERO
-								)
-								.then((tx) => {
-									logger.info(
-										`liquidateSpot (no pos) ${auth}-${user.userAccountPublicKey.toBase58()} tx: ${tx} `
-									);
-								})
-								.catch((e) => {
-									logger.error(
-										`Error in liquidateSpot, liquidating auth: ${auth}, user: ${userKey} on market ${indexWithMaxAssets}\n${e}`
-									);
-								});
-						}
-					}
-				} else if (isVariant(userAcc.status, 'beingLiquidated')) {
-					// liquidate the user to bring them out of liquidation status, can liquidate any market even
-					// if the user doesn't have a position in it
-					logger.info(
-						`[${
-							this.name
-						}]: user stuck in beingLiquidated status, need to clear it for ${user.userAccountPublicKey.toBase58()}`
-					);
-					this.driftClient
-						.liquidatePerp(
-							user.userAccountPublicKey,
-							user.getUserAccount(),
-							0,
-							ZERO
-						)
-						.then((tx) => {
-							logger.info(
-								`liquidatePerp for stuck(beingLiquidated) user tx: ${tx} `
-							);
-						})
-						.catch((e) => {
-							console.error(e);
-						});
-				}
-			}
-
-			if (!this.disableAutoDerisking) {
-				const startDerisk = Date.now();
-				await this.derisk();
-				logger.debug(`derisk took ${Date.now() - startDerisk} ms`);
-			}
-			ran = true;
-		} catch (e) {
-			if (e === E_ALREADY_LOCKED) {
-				console.error("mutex already locked, can't run");
-			} else {
-				console.error(e);
-				webhookMessage(
-					`[${this.name}]: :x: uncaught error: \n${
-						e.stack ? e.stack : e.message
-					} `
+			// need mutex since derisk and tryLiquidate may change the active subaccountId
+			if (!this.acquireMutex()) {
+				logger.info(
+					`${this.name} tryLiquidate ran into locked mutex, skipping run.`
 				);
+				return;
 			}
+			ran = await this.tryLiquidate();
+		} catch (e) {
+			console.error(e);
+			webhookMessage(
+				`[${this.name}]: :x: uncaught error: \n${
+					e.stack ? e.stack : e.message
+				} `
+			);
 		} finally {
+			this.releaseMutex();
 			if (ran) {
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
-				await this.watchdogTimerMutex.runExclusive(async () => {
-					this.watchdogTimerLastPatTime = Date.now();
-				});
+				this.watchdogTimerLastPatTime = Date.now();
 			}
 		}
 	}

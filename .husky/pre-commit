@@ -22,4 +22,5 @@ fi
 
 yarn prettify
 yarn lint
+yarn test
 yarn build

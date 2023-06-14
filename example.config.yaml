@@ -119,6 +119,12 @@ botConfigs:
     # max slippage (from oracle price) to incur allow when derisking
     maxSlippagePct: 0.05
 
+    # what algo to use for derisking. Options are "market" or "twap"
+    deriskAlgo: "market"
+
+    # if deriskAlgo == "twap", must supply these as well
+    # twapDurationSec: 300 # overall duration of to run the twap algo. Aims to derisk the entire position over this duration
+
   trigger:
     botId: "trigger"
     dryRun: false
