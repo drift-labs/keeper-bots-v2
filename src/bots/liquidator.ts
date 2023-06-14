@@ -316,6 +316,8 @@ export class LiquidatorBot implements Bot {
 			`${this.name} disableAutoDerisking: ${this.disableAutoDerisking}`
 		);
 
+		const allSubaccounts = new Set<number>();
+		allSubaccounts.add(defaultSubaccountId);
 		this.activeSubAccountId = defaultSubaccountId;
 		this.perpMarketToSubaccount = new Map<number, number>();
 		this.spotMarketToSubaccount = new Map<number, number>();
@@ -325,6 +327,7 @@ export class LiquidatorBot implements Bot {
 			for (const subAccount of Object.keys(config.perpSubAccountConfig)) {
 				for (const market of config.perpSubAccountConfig[subAccount]) {
 					this.perpMarketToSubaccount.set(market, parseInt(subAccount));
+					allSubaccounts.add(parseInt(subAccount));
 				}
 			}
 			this.perpMarketIndicies = Object.values(
@@ -354,6 +357,7 @@ export class LiquidatorBot implements Bot {
 			for (const subAccount of Object.keys(config.spotSubAccountConfig)) {
 				for (const market of config.spotSubAccountConfig[subAccount]) {
 					this.spotMarketToSubaccount.set(market, parseInt(subAccount));
+					allSubaccounts.add(parseInt(subAccount));
 				}
 			}
 			this.spotMarketIndicies = Object.values(
@@ -375,8 +379,22 @@ export class LiquidatorBot implements Bot {
 			}
 		}
 		logger.info(`${this.name} spotMarketIndicies: ${this.spotMarketIndicies}`);
-		console.log('this.spotMarketToSubaccount:');
-		console.log(this.spotMarketToSubaccount);
+		logger.info(
+			`this.spotMarketToSubaccount: ${JSON.stringify(
+				this.spotMarketToSubaccount
+			)}`
+		);
+
+		// ensure driftClient has all subaccounts tracked and subscribed
+		for (const subaccount of allSubaccounts) {
+			if (!this.driftClient.hasUser(subaccount)) {
+				this.driftClient.addUser(subaccount).then((subscribed) => {
+					logger.info(
+						`Added subaccount ${subaccount} to driftClient since it was missing (subscribed: ${subscribed}))`
+					);
+				});
+			}
+		}
 
 		// jupiter only works with mainnet
 		if (config.useJupiter && this.runtimeSpecs.driftEnv === 'mainnet-beta') {
