@@ -7,6 +7,11 @@ import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
 
+const errorCodesToSuppress = [
+	6040,
+	6251, // FundingWasNotUpdated
+];
+
 function onTheHourUpdate(
 	now: number,
 	lastUpdateTs: number,
@@ -148,7 +153,7 @@ export class FundingRateUpdaterBot implements Bot {
 								`Error code: ${errorCode} while updating funding rates on perp marketIndex=${i}: ${err.message}`
 							);
 							console.error(err);
-							if (errorCode && errorCode === 6040) {
+							if (!errorCodesToSuppress.includes(errorCode)) {
 								await new Promise((resolve) => setTimeout(resolve, 1000));
 								if (retries === maxRetries - 1) {
 									await webhookMessage(
@@ -160,14 +165,6 @@ export class FundingRateUpdaterBot implements Bot {
 									);
 								}
 								continue;
-							} else {
-								await webhookMessage(
-									`[${
-										this.name
-									}]: :x: Error code: ${errorCode} (retries: ${retries}) while updating funding rates on perp marketIndex=${i}:\n${
-										err.logs ? (err.logs as Array<string>).join('\n') : ''
-									}\n${err.stack ? err.stack : err.message}`
-								);
 							}
 						}
 					}
