@@ -15,9 +15,6 @@ import {
 	calculateNetUserPnlImbalance,
 	convertToNumber,
 	isOracleValid,
-	calculateNetUserPnl,
-	getTokenAmount,
-	SpotBalanceType,
 	isVariant,
 	TxSigAndSlot,
 } from '@drift-labs/sdk';
@@ -232,26 +229,17 @@ export class UserPnlSettlerBot implements Bot {
 							continue;
 						}
 
-						const netUserPnl = calculateNetUserPnl(
+						const netUserPnlImbalance = calculateNetUserPnlImbalance(
 							perpMarketAndOracleData[perpMarketIdx].marketAccount,
+							spotMarketAndOracleData[spotMarketIdx].marketAccount,
 							perpMarketAndOracleData[perpMarketIdx].oraclePriceData
 						);
-
-						const pnlPoolTokenAmount = getTokenAmount(
-							perpMarketAndOracleData[perpMarketIdx].marketAccount.pnlPool
-								.scaledBalance,
-							spotMarketAndOracleData[spotMarketIdx].marketAccount,
-							SpotBalanceType.DEPOSIT
-						);
-						const maxPnlPoolExcess = netUserPnl.lt(pnlPoolTokenAmount)
-							? pnlPoolTokenAmount.sub(BN.max(netUserPnl, ZERO))
-							: ZERO;
-						if (maxPnlPoolExcess.gte(ZERO)) {
+						if (netUserPnlImbalance.gt(ZERO)) {
 							logger.warn(
 								`Want to settle positive PnL for user ${user
 									.getUserAccountPublicKey()
-									.toBase58()} in market ${perpMarketIdx}, but there is not enough PnL pool excess (${convertToNumber(
-									maxPnlPoolExcess,
+									.toBase58()} in market ${perpMarketIdx}, protocol's AMM lacks excess PnL (${convertToNumber(
+									netUserPnlImbalance,
 									QUOTE_PRECISION
 								)})`
 							);
@@ -260,9 +248,7 @@ export class UserPnlSettlerBot implements Bot {
 					}
 
 					// only settle user pnl if they have enough collateral
-					if (
-						user.getTotalCollateral().lt(user.getMaintenanceMarginRequirement())
-					) {
+					if (user.canBeLiquidated().canBeLiquidated) {
 						logger.warn(
 							`Want to settle negative PnL for user ${user
 								.getUserAccountPublicKey()
