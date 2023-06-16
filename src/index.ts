@@ -228,7 +228,6 @@ const runBot = async () => {
 			type: 'polling',
 			accountLoader: bulkAccountLoader,
 		};
-
 		logProviderConfig = {
 			type: 'polling',
 			frequency: config.global.eventSubscriberPollingInterval,
@@ -247,10 +246,6 @@ const runBot = async () => {
 		accountSubscription,
 		env: config.global.driftEnv,
 		userStats: true,
-		txSenderConfig: {
-			type: 'retry',
-			timeout: 35000,
-		},
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts,
 	});
@@ -484,7 +479,6 @@ const runBot = async () => {
 		bots.push(
 			new TriggerBot(
 				driftClient,
-				eventSubscriber,
 				slotSubscriber,
 				{
 					rpcEndpoint: endpoint,
@@ -501,7 +495,6 @@ const runBot = async () => {
 		bots.push(
 			new JitMakerBot(
 				driftClient,
-				eventSubscriber,
 				slotSubscriber,
 				{
 					rpcEndpoint: endpoint,
@@ -519,7 +512,6 @@ const runBot = async () => {
 		bots.push(
 			new LiquidatorBot(
 				driftClient,
-				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -551,11 +543,7 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'userPnlSettler')) {
 		bots.push(
-			new UserPnlSettlerBot(
-				driftClient,
-				eventSubscriber,
-				config.botConfigs!.userPnlSettler!
-			)
+			new UserPnlSettlerBot(driftClient, config.botConfigs!.userPnlSettler!)
 		);
 	}
 

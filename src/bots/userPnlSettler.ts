@@ -15,8 +15,6 @@ import {
 	calculateNetUserPnlImbalance,
 	convertToNumber,
 	isOracleValid,
-	EventSubscriber,
-	WrappedEvent,
 	calculateNetUserPnl,
 	getTokenAmount,
 	SpotBalanceType,
@@ -61,7 +59,6 @@ export class UserPnlSettlerBot implements Bot {
 
 	private driftClient: DriftClient;
 	private lookupTableAccount: AddressLookupTableAccount;
-	private eventSubscriber: EventSubscriber;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private perpMarkets: PerpMarketConfig[];
@@ -70,16 +67,11 @@ export class UserPnlSettlerBot implements Bot {
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(
-		driftClient: DriftClient,
-		eventSubscriber: EventSubscriber,
-		config: BaseBotConfig
-	) {
+	constructor(driftClient: DriftClient, config: BaseBotConfig) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
 		this.driftClient = driftClient;
-		this.eventSubscriber = eventSubscriber;
 	}
 
 	public async init() {
@@ -103,8 +95,6 @@ export class UserPnlSettlerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
-
 		await this.userMap.unsubscribe();
 	}
 
@@ -115,13 +105,6 @@ export class UserPnlSettlerBot implements Bot {
 		} else {
 			const intervalId = setInterval(this.trySettlePnl.bind(this), intervalMs);
 			this.intervalIds.push(intervalId);
-
-			this.eventSubscriber.eventEmitter.on(
-				'newEvent',
-				async (record: WrappedEvent<any>) => {
-					this.userMap.updateWithEventRecord(record);
-				}
-			);
 		}
 	}
 
