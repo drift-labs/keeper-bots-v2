@@ -15,9 +15,6 @@ import {
 	calculateNetUserPnlImbalance,
 	convertToNumber,
 	isOracleValid,
-	calculateNetUserPnl,
-	getTokenAmount,
-	SpotBalanceType,
 	isVariant,
 	TxSigAndSlot,
 } from '@drift-labs/sdk';
@@ -251,7 +248,7 @@ export class UserPnlSettlerBot implements Bot {
 					}
 
 					// only settle user pnl if they have enough collateral
-					if (user.canBeLiquidated()) {
+					if (user.canBeLiquidated().canBeLiquidated) {
 						logger.warn(
 							`Want to settle negative PnL for user ${user
 								.getUserAccountPublicKey()
