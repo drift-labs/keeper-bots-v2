@@ -393,17 +393,21 @@ export class LiquidatorBot implements Bot {
 			}
 		}
 
-		if (this.useTwap) {
+		if (this.useTwap()) {
 			const nowSec = Math.floor(Date.now() / 1000);
 			this.twapExecutionProgresses = new Map<string, TwapExecutionProgress>();
 			for (const marketIndex of this.perpMarketIndicies) {
 				const subaccount = this.perpMarketToSubaccount.get(marketIndex);
 				this.twapExecutionProgresses.set(
-					this.getTwapProgressKey(MarketType.PERP, subaccount, marketIndex),
+					this.getTwapProgressKey(
+						MarketType.PERP,
+						subaccount || this.activeSubAccountId,
+						marketIndex
+					),
 					new TwapExecutionProgress({
 						currentPosition: new BN(0),
 						targetPosition: new BN(0), // target positions to close
-						overallDurationSec: this.liquidatorConfig.twapDurationSec,
+						overallDurationSec: this.liquidatorConfig.twapDurationSec!,
 						startTimeSec: nowSec,
 					})
 				);
@@ -412,11 +416,15 @@ export class LiquidatorBot implements Bot {
 			for (const marketIndex of this.spotMarketIndicies) {
 				const subaccount = this.spotMarketToSubaccount.get(marketIndex);
 				this.twapExecutionProgresses.set(
-					this.getTwapProgressKey(MarketType.SPOT, subaccount, marketIndex),
+					this.getTwapProgressKey(
+						MarketType.SPOT,
+						subaccount || this.activeSubAccountId,
+						marketIndex
+					),
 					new TwapExecutionProgress({
 						currentPosition: new BN(0),
 						targetPosition: new BN(0), // target positions to close
-						overallDurationSec: this.liquidatorConfig.twapDurationSec,
+						overallDurationSec: this.liquidatorConfig.twapDurationSec!,
 						startTimeSec: nowSec,
 					})
 				);
@@ -432,7 +440,10 @@ export class LiquidatorBot implements Bot {
 	}
 
 	private useTwap() {
-		return this.liquidatorConfig.deriskAlgo === 'twap';
+		return (
+			this.liquidatorConfig.deriskAlgo === 'twap' &&
+			this.liquidatorConfig.twapDurationSec !== undefined
+		);
 	}
 
 	private getTwapProgressKey(
@@ -528,7 +539,7 @@ export class LiquidatorBot implements Bot {
 		oracle: OraclePriceData,
 		direction: PositionDirection
 	): BN {
-		const slippageBN = new BN(this.liquidatorConfig.maxSlippagePct * 10000);
+		const slippageBN = new BN(this.liquidatorConfig.maxSlippagePct! * 10000);
 		if (isVariant(direction, 'long')) {
 			return oracle.price.mul(new BN(10000).add(slippageBN)).div(new BN(10000));
 		} else {
@@ -612,7 +623,7 @@ export class LiquidatorBot implements Bot {
 				swapMode: jupSwapMode,
 				route,
 				reduceOnly: jupReduceOnly,
-				slippageBps: this.liquidatorConfig.maxSlippagePct * 10000,
+				slippageBps: this.liquidatorConfig.maxSlippagePct! * 10000,
 			})
 			.then((tx) => {
 				logger.info(
@@ -660,7 +671,7 @@ export class LiquidatorBot implements Bot {
 				twapProgress = new TwapExecutionProgress({
 					currentPosition: new BN(0),
 					targetPosition: new BN(0), // target positions to close
-					overallDurationSec: this.liquidatorConfig.twapDurationSec,
+					overallDurationSec: this.liquidatorConfig.twapDurationSec!,
 					startTimeSec: nowSec,
 				});
 				this.twapExecutionProgresses.set(
@@ -707,7 +718,7 @@ export class LiquidatorBot implements Bot {
 
 		baseAssetAmount = standardizeBaseAssetAmount(
 			baseAssetAmount,
-			this.driftClient.getPerpMarketAccount(position.marketIndex).amm
+			this.driftClient.getPerpMarketAccount(position.marketIndex)!.amm
 				.orderStepSize
 		);
 
@@ -958,7 +969,7 @@ export class LiquidatorBot implements Bot {
 				twapProgress = new TwapExecutionProgress({
 					currentPosition: new BN(0),
 					targetPosition: new BN(0), // target positions to close
-					overallDurationSec: this.liquidatorConfig.twapDurationSec,
+					overallDurationSec: this.liquidatorConfig.twapDurationSec!,
 					startTimeSec: nowSec,
 				});
 				this.twapExecutionProgresses.set(
@@ -1438,7 +1449,9 @@ tx: ${tx} `
 					logger.info(
 						`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
 					);
-					this.driftClient.switchActiveUser(subAccountToUse);
+					this.driftClient.switchActiveUser(
+						subAccountToUse || this.activeSubAccountId
+					);
 				}
 				const start = Date.now();
 				this.driftClient
@@ -1694,7 +1707,7 @@ tx: ${tx} `
 				);
 				if (!usdcMarket) {
 					logger.error(`no usdcMarket for ${QUOTE_SPOT_MARKET_INDEX}`);
-					return;
+					continue;
 				}
 
 				// less attractive, perp / perp pnl liquidations
@@ -2125,12 +2138,18 @@ tx: ${tx} `
 					const perpPosition = user.getPerpPosition(accMarketIdx);
 					batchObservableResult.observe(
 						this.perpPositionBase,
-						convertToNumber(perpPosition.baseAssetAmount, BASE_PRECISION),
+						convertToNumber(
+							perpPosition!.baseAssetAmount ?? ZERO,
+							BASE_PRECISION
+						),
 						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
 					);
 					batchObservableResult.observe(
 						this.perpPositionQuote,
-						convertToNumber(perpPosition.quoteAssetAmount, QUOTE_PRECISION),
+						convertToNumber(
+							perpPosition!.quoteAssetAmount ?? ZERO,
+							QUOTE_PRECISION
+						),
 						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
 					);
 
