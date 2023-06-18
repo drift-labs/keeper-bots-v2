@@ -28,6 +28,8 @@ export class TwapExecutionProgress {
 	overallDurationSec: number;
 	startTimeSec: number;
 	lastUpdateSec: number;
+	lastExecSec: number;
+	firstExecDone = false;
 
 	constructor(config: TwapExecutionConfig) {
 		this.amountStart = config.currentPosition;
@@ -36,6 +38,7 @@ export class TwapExecutionProgress {
 		this.overallDurationSec = config.overallDurationSec;
 		this.startTimeSec = config.startTimeSec;
 		this.lastUpdateSec = this.startTimeSec;
+		this.lastExecSec = this.startTimeSec;
 	}
 
 	/**
@@ -45,7 +48,7 @@ export class TwapExecutionProgress {
 	getExecutionSlice(nowSec: number): BN {
 		// twap based on how much time has elapsed since last execution
 		const orderSize = this.amountTarget.sub(this.amountStart);
-		const secElapsed = new BN(nowSec - this.lastUpdateSec);
+		const secElapsed = new BN(nowSec - this.lastExecSec);
 		const slice = orderSize
 			.abs()
 			.mul(secElapsed)
@@ -94,6 +97,11 @@ export class TwapExecutionProgress {
 
 		this.currentPosition = currentPosition;
 		this.lastUpdateSec = nowSec;
+	}
+
+	updateExecution(nowSec: number): void {
+		this.lastExecSec = nowSec;
+		this.firstExecDone = true;
 	}
 
 	updateTarget(newTarget: BN, nowSec: number): void {

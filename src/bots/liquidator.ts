@@ -273,7 +273,7 @@ export class LiquidatorBot implements Bot {
 	private runtimeSpecs: RuntimeSpec;
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
 	private jupiterClient: JupiterClient;
-	private twapExecutionProgresses: Map<string, TwapExecutionProgress>; // key: subaccountId-marketIndex, value: TwapExecutionProgress
+	private twapExecutionProgresses: Map<string, TwapExecutionProgress>; // key: this.getTwapProgressKey, value: TwapExecutionProgress
 
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
@@ -393,7 +393,7 @@ export class LiquidatorBot implements Bot {
 			}
 		}
 
-		if (this.isTwapping) {
+		if (this.useTwap) {
 			const nowSec = Math.floor(Date.now() / 1000);
 			this.twapExecutionProgresses = new Map<string, TwapExecutionProgress>();
 			for (const marketIndex of this.perpMarketIndicies) {
@@ -431,7 +431,7 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
-	private isTwapping() {
+	private useTwap() {
 		return this.liquidatorConfig.deriskAlgo === 'twap';
 	}
 
@@ -648,16 +648,33 @@ export class LiquidatorBot implements Bot {
 		const nowSec = Math.floor(Date.now() / 1000);
 
 		let baseAssetAmount: BN;
-		if (this.isTwapping()) {
-			const twapProgress = this.twapExecutionProgresses.get(
+		if (this.useTwap()) {
+			let twapProgress = this.twapExecutionProgresses.get(
 				this.getTwapProgressKey(
 					MarketType.PERP,
 					subaccountId,
 					position.marketIndex
 				)
 			);
+			if (!twapProgress) {
+				twapProgress = new TwapExecutionProgress({
+					currentPosition: new BN(0),
+					targetPosition: new BN(0), // target positions to close
+					overallDurationSec: this.liquidatorConfig.twapDurationSec,
+					startTimeSec: nowSec,
+				});
+				this.twapExecutionProgresses.set(
+					this.getTwapProgressKey(
+						MarketType.PERP,
+						subaccountId,
+						position.marketIndex
+					),
+					twapProgress
+				);
+			}
 			twapProgress.updateProgress(position.baseAssetAmount, nowSec);
 			baseAssetAmount = twapProgress.getExecutionSlice(nowSec);
+			twapProgress.updateExecution(nowSec);
 			logger.info(
 				`twap progress for PERP subaccount ${subaccountId} for market ${
 					position.marketIndex
@@ -909,7 +926,8 @@ export class LiquidatorBot implements Bot {
 
 	private getOrderParamsForSpotDerisk(
 		subaccountId: number,
-		position: SpotPosition
+		position: SpotPosition,
+		usingJupiter: boolean
 	):
 		| { tokenAmount: BN; limitPrice: BN; direction: PositionDirection }
 		| undefined {
@@ -928,16 +946,33 @@ export class LiquidatorBot implements Bot {
 			getTokenAmount(position.scaledBalance, spotMarket, position.balanceType),
 			position.balanceType
 		);
-		if (this.isTwapping()) {
-			const twapProgress = this.twapExecutionProgresses.get(
+		if (this.useTwap()) {
+			let twapProgress = this.twapExecutionProgresses.get(
 				this.getTwapProgressKey(
 					MarketType.SPOT,
 					subaccountId,
 					position.marketIndex
 				)
 			);
+			if (!twapProgress) {
+				twapProgress = new TwapExecutionProgress({
+					currentPosition: new BN(0),
+					targetPosition: new BN(0), // target positions to close
+					overallDurationSec: this.liquidatorConfig.twapDurationSec,
+					startTimeSec: nowSec,
+				});
+				this.twapExecutionProgresses.set(
+					this.getTwapProgressKey(
+						MarketType.SPOT,
+						subaccountId,
+						position.marketIndex
+					),
+					twapProgress
+				);
+			}
 			twapProgress.updateProgress(tokenAmount, nowSec);
 			tokenAmount = twapProgress.getExecutionSlice(nowSec);
+			twapProgress.updateExecution(nowSec);
 			logger.info(
 				`twap progress for SPOT subaccount ${subaccountId} for market ${
 					position.marketIndex
@@ -948,10 +983,12 @@ export class LiquidatorBot implements Bot {
 		}
 
 		// need to standardize token amount to check if its closable via market orders
-		tokenAmount = standardizeBaseAssetAmount(
-			tokenAmount,
-			spotMarket.orderStepSize
-		);
+		if (!usingJupiter) {
+			tokenAmount = standardizeBaseAssetAmount(
+				tokenAmount,
+				spotMarket.orderStepSize
+			);
+		}
 
 		const positionPlusOpenOrders = tokenAmount.gt(ZERO)
 			? tokenAmount.add(position.openAsks)
@@ -988,7 +1025,8 @@ export class LiquidatorBot implements Bot {
 
 			const orderParams = this.getOrderParamsForSpotDerisk(
 				userAccount.subAccountId,
-				position
+				position,
+				this.jupiterClient !== undefined
 			);
 			if (orderParams === undefined) {
 				continue;
@@ -1029,8 +1067,8 @@ export class LiquidatorBot implements Bot {
 			return;
 		}
 
-		await this.deriskPerpPositions(userAccount);
-		await this.deriskSpotPositions(userAccount);
+		this.deriskPerpPositions(userAccount);
+		this.deriskSpotPositions(userAccount);
 	}
 
 	/**
