@@ -613,6 +613,14 @@ export class LiquidatorBot implements Bot {
 			jupReduceOnly = SwapReduceOnly.In;
 		}
 
+		logger.info(
+			`Jupiter swap: ${getVariant(
+				orderDirection
+			)}: ${standardizedTokenAmount.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex}, jupReduceOnly: ${getVariant(
+				jupReduceOnly
+			)}, jupSwapMode: ${jupSwapMode}`
+		);
+
 		const start = Date.now();
 		this.driftClient
 			.swap({
