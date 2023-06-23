@@ -10,6 +10,7 @@ import { BaseBotConfig } from '../config';
 const errorCodesToSuppress = [
 	6040,
 	6251, // FundingWasNotUpdated
+	6096, // AMMNotUpdatedInSameSlot
 ];
 
 function onTheHourUpdate(
