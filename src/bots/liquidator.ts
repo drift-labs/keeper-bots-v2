@@ -376,11 +376,8 @@ export class LiquidatorBot implements Bot {
 			}
 		}
 		logger.info(`${this.name} spotMarketIndicies: ${this.spotMarketIndicies}`);
-		logger.info(
-			`this.spotMarketToSubaccount: ${JSON.stringify(
-				this.spotMarketToSubaccount
-			)}`
-		);
+		console.log('this.spotMarketToSubaccount:');
+		console.log(this.spotMarketToSubaccount);
 
 		// ensure driftClient has all subaccounts tracked and subscribed
 		for (const subaccount of this.allSubaccounts) {
@@ -553,9 +550,10 @@ export class LiquidatorBot implements Bot {
 		standardizedTokenAmount: BN,
 		limitPrice: BN
 	) {
+		const subaccountIdStart = this.driftClient.activeSubAccountId;
 		const start = Date.now();
-		this.driftClient
-			.placeSpotOrder(
+		try {
+			const tx = await this.driftClient.placeSpotOrder(
 				getMarketOrderParams({
 					marketIndex: marketIndex,
 					direction: orderDirection,
@@ -563,30 +561,27 @@ export class LiquidatorBot implements Bot {
 					reduceOnly: true,
 					price: limitPrice,
 				})
-			)
-			.then((tx) => {
-				logger.info(
-					`closing spot position for market ${marketIndex.toString()}: ${tx} `
-				);
-			})
-			.catch((e) => {
-				logger.error(
-					`Error trying to close spot position for market ${marketIndex}`
-				);
-				console.error(e);
-				webhookMessage(
-					`[${
-						this.name
-					}]: :x: error trying to close spot position on market ${marketIndex} \n:${
-						e.stack ? e.stack : e.message
-					} `
-				);
-			})
-			.finally(() => {
-				this.sdkCallDurationHistogram.record(Date.now() - start, {
-					method: 'placeSpotOrderDrift',
-				});
+			);
+			logger.info(
+				`closed spot position for market ${marketIndex.toString()} on drift (subaccount ${subaccountIdStart}): ${tx} `
+			);
+		} catch (e) {
+			logger.error(
+				`Error trying to close spot position for market ${marketIndex}, subaccount start ${subaccountIdStart}, active subaccount now: ${this.driftClient.activeSubAccountId}`
+			);
+			console.error(e);
+			webhookMessage(
+				`[${
+					this.name
+				}]: :x: error trying to close spot position on market ${marketIndex} \n:${
+					e.stack ? e.stack : e.message
+				} `
+			);
+		} finally {
+			this.sdkCallDurationHistogram.record(Date.now() - start, {
+				method: 'placeSpotOrderDrift',
 			});
+		}
 	}
 
 	private async jupiterSpotSwap(
@@ -622,8 +617,9 @@ export class LiquidatorBot implements Bot {
 		);
 
 		const start = Date.now();
-		this.driftClient
-			.swap({
+		const subaccountIdStart = this.driftClient.activeSubAccountId;
+		try {
+			const tx = await this.driftClient.swap({
 				jupiterClient: this.jupiterClient,
 				outMarketIndex,
 				inMarketIndex,
@@ -632,32 +628,31 @@ export class LiquidatorBot implements Bot {
 				route,
 				reduceOnly: jupReduceOnly,
 				slippageBps: this.liquidatorConfig.maxSlippagePct! * 10000,
-			})
-			.then((tx) => {
-				logger.info(
-					`closing spot position for market ${spotMarketIndex.toString()}: ${tx} `
-				);
-			})
-			.catch((e) => {
-				logger.error(
-					`Error trying to ${getVariant(
-						orderDirection
-					)} spot position for market ${spotMarketIndex} on jupiter`
-				);
-				console.error(e);
-				webhookMessage(
-					`[${this.name}]: :x: error trying to ${getVariant(
-						orderDirection
-					)} spot position on market on jupiter ${spotMarketIndex} \n:${
-						e.stack ? e.stack : e.message
-					} `
-				);
-			})
-			.finally(() => {
-				this.sdkCallDurationHistogram.record(Date.now() - start, {
-					method: 'placeAndTakeSpotOrderJupiter',
-				});
 			});
+			logger.info(
+				`closed spot position for market ${spotMarketIndex.toString()} on subaccount ${subaccountIdStart}: ${tx} `
+			);
+		} catch (e) {
+			logger.error(
+				`Error trying to ${getVariant(
+					orderDirection
+				)} spot position for market ${spotMarketIndex} on jupiter, subaccount start ${subaccountIdStart}, active subaccount now: ${
+					this.driftClient.activeSubAccountId
+				}`
+			);
+			console.error(e);
+			webhookMessage(
+				`[${this.name}]: :x: error trying to ${getVariant(
+					orderDirection
+				)} spot position on market on jupiter ${spotMarketIndex} \n:${
+					e.stack ? e.stack : e.message
+				} `
+			);
+		} finally {
+			this.sdkCallDurationHistogram.record(Date.now() - start, {
+				method: 'driftClientSwap',
+			});
+		}
 	}
 
 	private getOrderParamsForPerpDerisk(
@@ -1057,14 +1052,14 @@ export class LiquidatorBot implements Bot {
 				orderParams.tokenAmount
 			);
 			if (!jupRoute) {
-				this.driftSpotTrade(
+				await this.driftSpotTrade(
 					orderParams.direction,
 					position.marketIndex,
 					orderParams.tokenAmount,
 					orderParams.limitPrice
 				);
 			} else {
-				this.jupiterSpotSwap(
+				await this.jupiterSpotSwap(
 					orderParams.direction,
 					position.marketIndex,
 					orderParams.tokenAmount,
@@ -1086,8 +1081,9 @@ export class LiquidatorBot implements Bot {
 			return;
 		}
 
-		this.deriskPerpPositions(userAccount);
-		this.deriskSpotPositions(userAccount);
+		// need to await, otherwise driftClient.activeUserAccount will get rugged on next iter
+		await this.deriskPerpPositions(userAccount);
+		await this.deriskSpotPositions(userAccount);
 	}
 
 	/**
