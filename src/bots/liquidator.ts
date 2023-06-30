@@ -553,11 +553,25 @@ export class LiquidatorBot implements Bot {
 		const subaccountIdStart = this.driftClient.activeSubAccountId;
 		const start = Date.now();
 		try {
+			const position = this.driftClient.getSpotPosition(marketIndex);
+			const positionPlusOpenOrders = tokenAmount.gt(ZERO)
+				? tokenAmount.add(position.openAsks)
+				: tokenAmount.add(position.openBids);
+
+			// check if open orders already net out with current position before placing new order
+			if (positionPlusOpenOrders.eq(ZERO)) {
+				logger.info(
+					`Skipping drift spot trade, would have traded 0. ${tokenAmount.toString()} -> ${positionPlusOpenOrders.toString()}`
+				);
+				return;
+			}
+
 			const spotMarket = this.driftClient.getSpotMarketAccount(marketIndex);
 			const standardizedTokenAmount = standardizeBaseAssetAmount(
 				tokenAmount,
 				spotMarket.orderStepSize
 			);
+
 			const tx = await this.driftClient.placeSpotOrder(
 				getMarketOrderParams({
 					marketIndex: marketIndex,
@@ -998,16 +1012,6 @@ export class LiquidatorBot implements Bot {
 					.getAmountRemaining()
 					.toString()}`
 			);
-		}
-
-		const positionPlusOpenOrders = tokenAmount.gt(ZERO)
-			? tokenAmount.add(position.openAsks)
-			: tokenAmount.add(position.openBids);
-
-		// check if open orders already net out with current position before placing new order
-		// (avoid canceling and placing new order if not necessary)
-		if (positionPlusOpenOrders.eq(ZERO)) {
-			return undefined;
 		}
 
 		let direction: PositionDirection = PositionDirection.LONG;
