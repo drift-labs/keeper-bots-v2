@@ -554,23 +554,23 @@ export class LiquidatorBot implements Bot {
 		const start = Date.now();
 		try {
 			const position = this.driftClient.getSpotPosition(marketIndex);
-			tokenAmount = tokenAmount.gt(ZERO)
+			const positionNetOpenOrders = tokenAmount.gt(ZERO)
 				? tokenAmount.add(position.openAsks)
 				: tokenAmount.add(position.openBids);
 
+			const spotMarket = this.driftClient.getSpotMarketAccount(marketIndex);
+			const standardizedTokenAmount = standardizeBaseAssetAmount(
+				positionNetOpenOrders,
+				spotMarket.orderStepSize
+			);
+
 			// check if open orders already net out with current position before placing new order
-			if (tokenAmount.eq(ZERO)) {
+			if (standardizedTokenAmount.eq(ZERO)) {
 				logger.info(
-					`Skipping drift spot trade, would have traded 0. ${tokenAmount.toString()} -> ${tokenAmount.toString()}`
+					`Skipping drift spot trade, would have traded 0. ${tokenAmount.toString()} -> ${positionNetOpenOrders.toString()}-> ${standardizedTokenAmount.toString()}`
 				);
 				return;
 			}
-
-			const spotMarket = this.driftClient.getSpotMarketAccount(marketIndex);
-			const standardizedTokenAmount = standardizeBaseAssetAmount(
-				tokenAmount,
-				spotMarket.orderStepSize
-			);
 
 			const tx = await this.driftClient.placeSpotOrder(
 				getMarketOrderParams({
