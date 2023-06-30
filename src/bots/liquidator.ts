@@ -934,6 +934,7 @@ export class LiquidatorBot implements Bot {
 		);
 
 		if (jupiterRoutes.length === 0) {
+			logger.info(`Found no jupiter route`);
 			return undefined;
 		}
 
@@ -942,6 +943,9 @@ export class LiquidatorBot implements Bot {
 			// buying spotMarketIndex, want min in
 			const jupAmountIn = new BN(bestRoute.inAmount);
 			if (dlobFillQuoteAmount?.lt(jupAmountIn)) {
+				logger.info(
+					`Want long, dlob fill amount ${dlobFillQuoteAmount} < jup amount in ${jupAmountIn}, dont trade on jup`
+				);
 				return undefined;
 			} else {
 				return bestRoute;
@@ -950,6 +954,9 @@ export class LiquidatorBot implements Bot {
 			// selling spotMarketIndex, want max out
 			const jupAmountOut = new BN(bestRoute.outAmount);
 			if (dlobFillQuoteAmount?.gt(jupAmountOut)) {
+				logger.info(
+					`Want short , dlob fill amount ${dlobFillQuoteAmount} > jup amount out ${jupAmountOut}, dont trade on jup`
+				);
 				return undefined;
 			} else {
 				return bestRoute;
