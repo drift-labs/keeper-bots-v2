@@ -547,12 +547,17 @@ export class LiquidatorBot implements Bot {
 	private async driftSpotTrade(
 		orderDirection: PositionDirection,
 		marketIndex: number,
-		standardizedTokenAmount: BN,
+		tokenAmount: BN,
 		limitPrice: BN
 	) {
 		const subaccountIdStart = this.driftClient.activeSubAccountId;
 		const start = Date.now();
 		try {
+			const spotMarket = this.driftClient.getSpotMarketAccount(marketIndex);
+			const standardizedTokenAmount = standardizeBaseAssetAmount(
+				tokenAmount,
+				spotMarket.orderStepSize
+			);
 			const tx = await this.driftClient.placeSpotOrder(
 				getMarketOrderParams({
 					marketIndex: marketIndex,
@@ -940,8 +945,7 @@ export class LiquidatorBot implements Bot {
 
 	private getOrderParamsForSpotDerisk(
 		subaccountId: number,
-		position: SpotPosition,
-		usingJupiter: boolean
+		position: SpotPosition
 	):
 		| { tokenAmount: BN; limitPrice: BN; direction: PositionDirection }
 		| undefined {
@@ -996,14 +1000,6 @@ export class LiquidatorBot implements Bot {
 			);
 		}
 
-		// need to standardize token amount to check if its closable via market orders
-		if (!usingJupiter) {
-			tokenAmount = standardizeBaseAssetAmount(
-				tokenAmount,
-				spotMarket.orderStepSize
-			);
-		}
-
 		const positionPlusOpenOrders = tokenAmount.gt(ZERO)
 			? tokenAmount.add(position.openAsks)
 			: tokenAmount.add(position.openBids);
@@ -1039,8 +1035,7 @@ export class LiquidatorBot implements Bot {
 
 			const orderParams = this.getOrderParamsForSpotDerisk(
 				userAccount.subAccountId,
-				position,
-				this.jupiterClient !== undefined
+				position
 			);
 			if (orderParams === undefined) {
 				continue;
