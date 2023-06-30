@@ -554,14 +554,14 @@ export class LiquidatorBot implements Bot {
 		const start = Date.now();
 		try {
 			const position = this.driftClient.getSpotPosition(marketIndex);
-			const positionPlusOpenOrders = tokenAmount.gt(ZERO)
+			tokenAmount = tokenAmount.gt(ZERO)
 				? tokenAmount.add(position.openAsks)
 				: tokenAmount.add(position.openBids);
 
 			// check if open orders already net out with current position before placing new order
-			if (positionPlusOpenOrders.eq(ZERO)) {
+			if (tokenAmount.eq(ZERO)) {
 				logger.info(
-					`Skipping drift spot trade, would have traded 0. ${tokenAmount.toString()} -> ${positionPlusOpenOrders.toString()}`
+					`Skipping drift spot trade, would have traded 0. ${tokenAmount.toString()} -> ${tokenAmount.toString()}`
 				);
 				return;
 			}
