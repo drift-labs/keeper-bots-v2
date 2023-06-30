@@ -939,6 +939,7 @@ export class LiquidatorBot implements Bot {
 		}
 
 		const bestRoute = jupiterRoutes[0];
+		logger.info(`Found jupiter route: ${JSON.stringify(bestRoute)}`);
 		if (isVariant(orderDirection, 'long')) {
 			// buying spotMarketIndex, want min in
 			const jupAmountIn = new BN(bestRoute.inAmount);
