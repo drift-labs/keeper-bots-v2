@@ -765,6 +765,13 @@ export class LiquidatorBot implements Bot {
 
 	private async deriskPerpPositions(userAccount: UserAccount) {
 		for (const position of userAccount.perpPositions) {
+			const perpMarket = this.driftClient.getPerpMarketAccount(
+				position.marketIndex
+			);
+			if (position.baseAssetAmount.abs().lt(perpMarket.amm.minOrderSize)) {
+				continue;
+			}
+
 			if (!position.baseAssetAmount.isZero()) {
 				const orderParams = this.getOrderParamsForPerpDerisk(
 					userAccount.subAccountId,
@@ -986,6 +993,11 @@ export class LiquidatorBot implements Bot {
 			getTokenAmount(position.scaledBalance, spotMarket, position.balanceType),
 			position.balanceType
 		);
+
+		if (tokenAmount.abs().lt(spotMarket.minOrderSize)) {
+			return undefined;
+		}
+
 		if (this.useTwap()) {
 			let twapProgress = this.twapExecutionProgresses.get(
 				this.getTwapProgressKey(
@@ -1045,11 +1057,19 @@ export class LiquidatorBot implements Bot {
 				continue;
 			}
 
+			const spotMarket = this.driftClient.getSpotMarketAccount(
+				position.marketIndex
+			);
+
 			const orderParams = this.getOrderParamsForSpotDerisk(
 				userAccount.subAccountId,
 				position
 			);
 			if (orderParams === undefined) {
+				continue;
+			}
+
+			if (orderParams.tokenAmount.abs().lt(spotMarket.minOrderSize)) {
 				continue;
 			}
 
