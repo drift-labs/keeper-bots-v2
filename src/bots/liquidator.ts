@@ -1057,19 +1057,11 @@ export class LiquidatorBot implements Bot {
 				continue;
 			}
 
-			const spotMarket = this.driftClient.getSpotMarketAccount(
-				position.marketIndex
-			);
-
 			const orderParams = this.getOrderParamsForSpotDerisk(
 				userAccount.subAccountId,
 				position
 			);
 			if (orderParams === undefined) {
-				continue;
-			}
-
-			if (orderParams.tokenAmount.abs().lt(spotMarket.minOrderSize)) {
 				continue;
 			}
 
