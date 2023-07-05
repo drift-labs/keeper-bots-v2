@@ -36,6 +36,7 @@ import {
 	OraclePriceData,
 	UserAccount,
 	OptionalOrderParams,
+	TEN,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -609,16 +610,40 @@ export class LiquidatorBot implements Bot {
 		standardizedTokenAmount: BN,
 		route: Route
 	) {
+		const slippageDenom = 10000;
+		const slippageBps = this.liquidatorConfig.maxSlippagePct! * slippageDenom;
 		let outMarketIndex: number;
 		let inMarketIndex: number;
 		let jupSwapMode: SwapMode;
 		let jupReduceOnly: SwapReduceOnly;
+		let amountIn = standardizedTokenAmount;
 		if (isVariant(orderDirection, 'long')) {
 			// sell USDC, buy spotMarketIndex
 			inMarketIndex = 0;
 			outMarketIndex = spotMarketIndex;
 			jupSwapMode = 'ExactOut';
 			jupReduceOnly = SwapReduceOnly.Out;
+
+			// drift takes input token as amount, so we calculate the max that we're
+			// willing to spend (which is max slippage from the oracle price).
+			const oracle =
+				this.driftClient.getOracleDataForSpotMarket(spotMarketIndex);
+			const outMarket = this.driftClient.getSpotMarketAccount(outMarketIndex);
+			const inMarket = this.driftClient.getSpotMarketAccount(inMarketIndex);
+			const outMarketPrecision = TEN.pow(outMarket.decimals);
+			const inMarketPrecision = TEN.pow(inMarket.decimals);
+			amountIn = standardizedTokenAmount
+				.mul(oracle.price)
+				.mul(inMarketPrecision)
+				.div(outMarketPrecision)
+				.div(PRICE_PRECISION);
+
+			// allow spend up to slippageBps over oracle price
+			const slippageBpsBN = new BN(slippageBps);
+			const slippageDenomBN = new BN(slippageDenom);
+			amountIn = amountIn
+				.mul(slippageBpsBN.add(slippageDenomBN))
+				.div(slippageDenomBN);
 		} else {
 			// sell spotMarketIndex, buy USDC
 			inMarketIndex = spotMarketIndex;
@@ -630,7 +655,7 @@ export class LiquidatorBot implements Bot {
 		logger.info(
 			`Jupiter swap: ${getVariant(
 				orderDirection
-			)}: ${standardizedTokenAmount.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex}, jupReduceOnly: ${getVariant(
+			)}: stdTokenAmount: ${standardizedTokenAmount.toString()} -> amountIn: ${amountIn.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex}, jupReduceOnly: ${getVariant(
 				jupReduceOnly
 			)}, jupSwapMode: ${jupSwapMode}`
 		);
@@ -642,11 +667,11 @@ export class LiquidatorBot implements Bot {
 				jupiterClient: this.jupiterClient,
 				outMarketIndex,
 				inMarketIndex,
-				amount: standardizedTokenAmount,
+				amount: amountIn,
 				swapMode: jupSwapMode,
 				route,
 				reduceOnly: jupReduceOnly,
-				slippageBps: this.liquidatorConfig.maxSlippagePct! * 10000,
+				slippageBps,
 			});
 			logger.info(
 				`closed spot position for market ${spotMarketIndex.toString()} on subaccount ${subaccountIdStart}: ${tx} `
