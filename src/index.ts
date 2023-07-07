@@ -55,7 +55,7 @@ import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
 
-const stateCommitment: Commitment = 'confirmed';
+const stateCommitment: Commitment = 'processed';
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
 
 program
