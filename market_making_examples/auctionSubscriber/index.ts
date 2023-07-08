@@ -28,9 +28,11 @@ import {
 	UserStats,
 	Order,
 	UserAccount,
+	AuctionSubscriber, getUserStatsAccountPublicKey, getLimitPrice, hasAuctionPrice, isAuctionComplete,
 } from '@drift-labs/sdk';
 import { logger, setLogLevel } from '../../src/logger';
 import { getWallet } from '../../src/utils';
+import { JitProxyClient } from '../../../jit-proxy/ts/sdk/lib';
 
 require('dotenv').config();
 
@@ -76,7 +78,7 @@ if (targetLeverage < 0) {
 /// perp market index to market make on
 const perpMarketIndex = intEnvVarWithDefault("PERP_MARKET_INDEX", 0);
 /// subaccount id to use
-const subaccountId = intEnvVarWithDefault("SUBACCOUNT_ID", 0);
+const subaccountId = intEnvVarWithDefault("SUBACCOUNT_ID", 2);
 /// authority private key or path to key.json (numbers array or b58 string)
 const privateKeyOrFilepath = process.env.KEEPER_PRIVATE_KEY;
 if (!privateKeyOrFilepath) {
@@ -162,19 +164,19 @@ const executeJitOrder = async (
 	}
 
 	const tx = await driftClient.placeAndMakePerpOrder({
-		orderType: OrderType.LIMIT,
-		marketIndex: perpMarketIndex,
-		baseAssetAmount: fillSize,
-		price: fillPrice,
-		direction: fillDirection,
-		immediateOrCancel: true,
-		postOnly: PostOnlyParams.MUST_POST_ONLY,
-	}, {
-		taker,
-		takerStats: takerStatsInfo.userStatsAccountPublicKey,
-		takerUserAccount: takerUserAccount,
-		order,
-	},
+			orderType: OrderType.LIMIT,
+			marketIndex: perpMarketIndex,
+			baseAssetAmount: fillSize,
+			price: fillPrice,
+			direction: fillDirection,
+			immediateOrCancel: true,
+			postOnly: PostOnlyParams.MUST_POST_ONLY,
+		}, {
+			taker,
+			takerStats: takerStatsInfo.userStatsAccountPublicKey,
+			takerUserAccount: takerUserAccount,
+			order,
+		},
 		takerStatsInfo.getReferrerInfo());
 	logger.info(tx);
 };
@@ -206,100 +208,58 @@ const main = async () => {
 	await driftClient.subscribe();
 	await driftClient.fetchMarketLookupTableAccount();
 
+	const jitProxy = new JitProxyClient({
+		// @ts-ignore
+		driftClient,
+		programId: new PublicKey("J1TnP8zvVxbtF5KFp5xRmWuvG9McnhzmBd9XGfCyuxFP"),
+	});
+
 	const slotSubscriber = new SlotSubscriber(connection, {});
 	await slotSubscriber.subscribe();
 
-	const userMap = new UserMap(
-		driftClient,
-		driftClient.userAccountSubscriptionConfig,
-		false
-	);
-	await userMap.subscribe();
-	const userStatsMap = new UserStatsMap(
-		driftClient,
-		driftClient.userAccountSubscriptionConfig
-	);
-	await userStatsMap.subscribe();
-
-	const dlobSubscriber = new DLOBSubscriber({
-		driftClient,
-		dlobSource: userMap,
-		slotSource: slotSubscriber,
-		updateFrequency: 1000,
-	});
-	await dlobSubscriber.subscribe();
-
-	const perpMarketAccount = driftClient.getPerpMarketAccount(perpMarketIndex);
-	if (!perpMarketAccount) {
-		throw new Error(`No perp market account found for index ${perpMarketIndex}`);
-	}
-
-	const { currLeverage, accountUsdValue, currPositionbase: currPositionBase } = loadUserPortfolio(driftClient);
-	logger.info(`User account value: ${accountUsdValue}, current leverage: ${currLeverage}, currBasePosition: ${currPositionBase}`);
-
-	// run the market making loop on each update
-	let updatInProgress = false;
-	slotSubscriber.eventEmitter.on('newSlot', async (currSlot: number) => {
-		if (updatInProgress) return;
-		updatInProgress = true;
-		const start = Date.now();
-		const oracleData = driftClient.getOracleDataForPerpMarket(perpMarketIndex);
-
-		const dlobUpdateStart = Date.now();
-		await dlobSubscriber.updateDLOB();
-		const dlob = dlobSubscriber.getDLOB();
-		const dlobUpdateDur = Date.now() - dlobUpdateStart;
-
-		const jitNodes = dlob.findJitAuctionNodesToFill(perpMarketIndex, currSlot, oracleData, MarketType.PERP);
-		logger.info(`Found ${jitNodes.length} jit nodes for slot: ${currSlot}, dlobupdate took : ${dlobUpdateDur}ms`);
-		for (let i = 0; i < jitNodes.length; i++) {
-			const jitNode = jitNodes[i];
-			const taker = jitNode.node.userAccount;
-			if (!taker) {
-				logger.error(`empty taker: ${JSON.stringify(jitNode)}`);
-				continue;
-			}
-			const order = jitNode.node.order;
-			if (!order) {
-				logger.error(`empty order: ${JSON.stringify(jitNode)}`);
+	const auctionSubscriber = new AuctionSubscriber({driftClient});
+	await auctionSubscriber.subscribe();
+	auctionSubscriber.eventEmitter.on('onAccountUpdate', async (taker, takerKey, slot) => {
+		const takerStatsKey = getUserStatsAccountPublicKey(driftClient.program.programId, taker.authority);
+		for (const order of taker.orders) {
+			if (!isVariant(order.status, 'open')) {
 				continue;
 			}
 
-			const vAsk = calculateAskPrice(perpMarketAccount, oracleData);
-			const vBid = calculateBidPrice(perpMarketAccount, oracleData);
-			const vAskNum = convertToNumber(vAsk, PRICE_PRECISION);
-			const vBidNum = convertToNumber(vBid, PRICE_PRECISION);
-			const orderPrice = jitNode.node.getPrice(oracleData, currSlot);
-			const orderPrice1 = jitNode.node.getPrice(oracleData, currSlot + 1);
-			const orderPrice2 = jitNode.node.getPrice(oracleData, currSlot + 2);
-			logger.info(` [${i}]: ${taker?.toBase58()}-${order.orderId}; currSlot: ${currSlot}, slotsLeft: ${(order.slot.toNumber() + order.auctionDuration) - currSlot}; ${getVariant(order.orderType)} ${getVariant(order.direction)} ${convertToNumber(order.baseAssetAmount.sub(order.baseAssetAmountFilled), BASE_PRECISION)} @ ${convertToNumber(orderPrice, PRICE_PRECISION)},${convertToNumber(orderPrice1, PRICE_PRECISION)},${convertToNumber(orderPrice2, PRICE_PRECISION)} vBid: ${vBidNum}, vAsk: ${vAskNum}`);
+			if (!hasAuctionPrice(order, slot)) {
+				continue;
+			}
 
-			// just fill the min trade size
-			const takerAuthority = userMap.getUserAuthority(taker.toBase58());
-			if (!takerAuthority) {
-				logger.error(`empty takerAuthority: ${JSON.stringify(jitNode)}`);
+			if (!isVariant(order.marketType, 'perp')) {
 				continue;
 			}
-			const takerUser = userMap.get(taker.toBase58());
-			if (!takerUser) {
-				logger.error(`empty takerUserAccount: ${JSON.stringify(jitNode)}`);
+
+			if (order.marketIndex !== 0) {
 				continue;
 			}
-			const fillSize = perpMarketAccount.amm.minOrderSize;
-			const takerStatsInfo = await userStatsMap.mustGet(takerAuthority.toBase58());
-			if (jitOrderIncreasesRisk(currPositionBase, order.direction)) {
-				if (canIncreaseRisk(currLeverage)) {
-					await executeJitOrder(driftClient, order, taker, takerUser.getUserAccount(), takerStatsInfo, fillSize, orderPrice);
-				} else {
-					logger.info('max leverage reached, cannot increase risk anymore');
-				}
-			} else {
-				await executeJitOrder(driftClient, order, taker, takerUser.getUserAccount(), takerStatsInfo, fillSize, orderPrice);
+
+			if (isAuctionComplete(order, slot)) {
+				continue;
 			}
+
+			const limitPrice = getLimitPrice(order, driftClient.getOracleDataForPerpMarket(order.marketIndex), slot);
+
+			console.log(`Filler order for: ${takerKey.toBase58()} slot ${slot} price ${convertToNumber(limitPrice, PRICE_PRECISION)}`);
+
+			jitProxy.jit({
+				takerKey,
+				takerStatsKey,
+				taker,
+				takerOrderId: order.orderId,
+				maxPosition: isVariant(order.direction, 'long') ? new BN(-1000).mul(BASE_PRECISION) : new BN(-1000).mul(BASE_PRECISION),
+				worstPrice: isVariant(order.direction, 'long') ? new BN(0) : new BN(1000000).mul(PRICE_PRECISION),
+				postOnly: null
+			}).then(txSig => {
+				console.log(txSig);
+			}).catch(e => {
+				console.error(e);
+			});
 		}
-
-		updatInProgress = false;
-		logger.debug('market making loop took: ' + (Date.now() - start) + 'ms');
 	});
 };
 
