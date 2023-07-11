@@ -251,8 +251,10 @@ const main = async () => {
 				takerStatsKey,
 				taker,
 				takerOrderId: order.orderId,
-				maxPosition: isVariant(order.direction, 'long') ? new BN(-1000).mul(BASE_PRECISION) : new BN(-1000).mul(BASE_PRECISION),
-				worstPrice: isVariant(order.direction, 'long') ? new BN(0) : new BN(1000000).mul(PRICE_PRECISION),
+				maxPosition: new BN(1000).mul(BASE_PRECISION),
+				minPosition: new BN(-1000).mul(BASE_PRECISION),
+				bid: new BN(1000000).mul(PRICE_PRECISION),
+				ask: new BN(0),
 				postOnly: null
 			}).then(txSig => {
 				console.log(txSig);
