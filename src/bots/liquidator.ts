@@ -1842,7 +1842,9 @@ tx: ${tx} `
 								user.userAccountPublicKey,
 								user.getUserAccount(),
 								liquidateePosition.marketIndex,
-								baseAmountToLiquidate
+								baseAmountToLiquidate,
+								undefined,
+								{ computeUnits: 2_000_000 }
 							)
 							.then((tx) => {
 								logger.info(`liquidatePerp tx: ${tx} `);
@@ -1887,7 +1889,9 @@ tx: ${tx} `
 								user.userAccountPublicKey,
 								user.getUserAccount(),
 								liquidateePosition.marketIndex,
-								ZERO
+								ZERO,
+								undefined,
+								{ computeUnits: 2_000_000 }
 							)
 							.then((tx) => {
 								logger.info(
