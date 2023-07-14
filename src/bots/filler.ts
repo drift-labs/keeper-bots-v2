@@ -97,6 +97,7 @@ const errorCodesToSuppress = [
 	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
 	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
+	6003, // 0x1773 Error Number: 6003. Error Message: Insufficient collateral.
 ];
 
 enum METRIC_TYPES {
