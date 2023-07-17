@@ -1802,7 +1802,10 @@ tx: ${tx} `
 
 					const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
 						liquidatorUser,
-						liquidateePosition
+						user.getPerpPositionWithLPSettle(
+							liquidateePosition.marketIndex,
+							liquidateePosition
+						)[0]
 					);
 
 					if (baseAmountToLiquidate.gt(ZERO)) {
