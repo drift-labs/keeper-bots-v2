@@ -33,6 +33,7 @@ import {
 import { logger, setLogLevel } from '../../src/logger';
 import { getWallet } from '../../src/utils';
 import { JitProxyClient } from '../../../jit-proxy/ts/sdk/lib';
+import {sleep} from "jito-ts/dist/sdk/rpc/utils";
 
 require('dotenv').config();
 
@@ -218,51 +219,167 @@ const main = async () => {
 	await slotSubscriber.subscribe();
 
 	const auctionSubscriber = new AuctionSubscriber({driftClient});
-	await auctionSubscriber.subscribe();
-	auctionSubscriber.eventEmitter.on('onAccountUpdate', async (taker, takerKey, slot) => {
-		const takerStatsKey = getUserStatsAccountPublicKey(driftClient.program.programId, taker.authority);
-		for (const order of taker.orders) {
-			if (!isVariant(order.status, 'open')) {
-				continue;
-			}
 
-			if (!hasAuctionPrice(order, slot)) {
-				continue;
-			}
-
-			if (!isVariant(order.marketType, 'perp')) {
-				continue;
-			}
-
-			if (order.marketIndex !== 0) {
-				continue;
-			}
-
-			if (isAuctionComplete(order, slot)) {
-				continue;
-			}
-
-			const limitPrice = getLimitPrice(order, driftClient.getOracleDataForPerpMarket(order.marketIndex), slot);
-
-			console.log(`Filler order for: ${takerKey.toBase58()} slot ${slot} price ${convertToNumber(limitPrice, PRICE_PRECISION)}`);
-
-			jitProxy.jit({
-				takerKey,
-				takerStatsKey,
-				taker,
-				takerOrderId: order.orderId,
-				maxPosition: new BN(1000).mul(BASE_PRECISION),
-				minPosition: new BN(-1000).mul(BASE_PRECISION),
-				bid: new BN(1000000).mul(PRICE_PRECISION),
-				ask: new BN(0),
-				postOnly: null
-			}).then(txSig => {
-				console.log(txSig);
-			}).catch(e => {
-				console.error(e);
-			});
-		}
+	const jitter = new Jitter({
+		auctionSubscriber,
+		driftClient,
+		jitProxyClient: jitProxy,
 	});
+
+	await jitter.subscribe();
+
+	jitter.setUserFilter((userAccount, userKey) => {
+		return userKey === '4kojmr5Xbgrfgg5db9bdEuVrDtb1kjBCcNGHsv8S2TdZ';
+	});
+
+	while (true) {
+		await sleep(5000);
+		const solOracle = jitter.driftClient.getOracleDataForPerpMarket(0);
+		jitter.updatePerpParams(0, {
+			maxPosition: new BN(200).mul(BASE_PRECISION),
+			minPosition: new BN(-200).mul(BASE_PRECISION),
+			bid: solOracle.price.sub(solOracle.price.divn(500)),
+			ask: solOracle.price.add(solOracle.price.divn(500)),
+		});
+	}
 };
+
+type UserFilter = (userAccount: UserAccount, userKey: string) => boolean;
+type JitParams = {bid: BN, ask: BN, minPosition: BN, maxPosition};
+
+class Jitter {
+	auctionSubscriber: AuctionSubscriber;
+	driftClient: DriftClient;
+	jitProxyClient: JitProxyClient;
+
+	perpParams = new Map<number, JitParams>();
+	spotParams = new Map<number, JitParams>();
+
+	onGoingAuctions = new Map<string, Promise<void>>();
+
+	userFilter : UserFilter;
+
+	constructor({
+		auctionSubscriber,
+		jitProxyClient,
+		driftClient,
+				} : {
+		driftClient: DriftClient,
+		auctionSubscriber: AuctionSubscriber,
+		jitProxyClient: JitProxyClient,
+	}) {
+		this.auctionSubscriber = auctionSubscriber;
+		this.driftClient = driftClient;
+		this.jitProxyClient = jitProxyClient;
+	}
+
+	async subscribe() {
+		await this.auctionSubscriber.subscribe();
+		this.auctionSubscriber.eventEmitter.on('onAccountUpdate', async (taker, takerKey, slot) => {
+			const takerKeyString = takerKey.toBase58();
+
+			if (this.userFilter) {
+				if (this.userFilter(taker, takerKeyString)) {
+					return;
+				}
+			}
+
+			const takerStatsKey = getUserStatsAccountPublicKey(this.driftClient.program.programId, taker.authority);
+			for (const order of taker.orders) {
+				if (!isVariant(order.status, 'open')) {
+					continue;
+				}
+
+				if (!hasAuctionPrice(order, slot)) {
+					continue;
+				}
+
+
+				const orderSignature = this.getOrderSignatures(takerKeyString, order.orderId);
+				if (this.onGoingAuctions.has(orderSignature)) {
+					continue;
+				}
+
+
+				if (isVariant(order.marketType, 'perp')) {
+					if (!this.perpParams.has(order.marketIndex)) {
+						return;
+					}
+
+					const promise = this.createTryFill(taker, takerKey, takerStatsKey, order, orderSignature).bind(this)();
+					this.onGoingAuctions.set(orderSignature, promise);
+				} else {
+					if (!this.spotParams.has(order.marketIndex)) {
+						return;
+					}
+
+					const promise = this.createTryFill(taker, takerKey, takerStatsKey, order, orderSignature).bind(this)();
+					this.onGoingAuctions.set(orderSignature, promise);
+				}
+			}
+		});
+	}
+
+	createTryFill(taker: UserAccount, takerKey: PublicKey, takerStatsKey: PublicKey, order: Order, orderSignature: string) {
+		return async () => {
+			let i = 0;
+			while (i < 10) {
+				const params = this.perpParams.get(order.marketIndex);
+				if (!params) {
+					this.onGoingAuctions.delete(orderSignature);
+					return;
+				}
+
+				console.log(`Trying to fill ${orderSignature}`);
+				try {
+					const { txSig } = await this.jitProxyClient.jit({
+						takerKey,
+						takerStatsKey,
+						taker,
+						takerOrderId: order.orderId,
+						maxPosition: params.maxPosition,
+						minPosition: params.minPosition,
+						bid: params.bid,
+						ask: params.ask,
+						postOnly: null
+					});
+
+					console.log(`Filled ${orderSignature} txSig ${txSig}`);
+					await sleep(10000);
+					this.onGoingAuctions.delete(orderSignature);
+					return;
+				} catch (e) {
+					console.error(`Failed to fill ${orderSignature}`);
+					if (e.message.includes('0x1770') || e.message.includes('0x1771')) {
+						console.log('Order does not cross params yet, retrying');
+					} else {
+						await sleep(10000);
+						this.onGoingAuctions.delete(orderSignature);
+						return;
+					}
+				}
+				i++;
+			}
+
+			this.onGoingAuctions.delete(orderSignature);
+		};
+	}
+
+	getOrderSignatures(takerKey: string, orderId: number) {
+		return `${takerKey}-${orderId}`;
+	}
+
+	public updatePerpParams(marketIndex: number, params: JitParams) {
+		this.perpParams.set(marketIndex, params);
+	}
+
+	public updateSpotParams(marketIndex: number, params: JitParams) {
+		this.spotParams.set(marketIndex, params);
+	}
+
+	public setUserFilter(userFilter: UserFilter | undefined) {
+		this.userFilter = userFilter;
+	}
+}
 
 main();
