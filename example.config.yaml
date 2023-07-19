@@ -54,7 +54,7 @@ enabledBots:
   # - spotFiller
 
   # Trigger bot (triggers trigger orders)
-  # - trigger
+  - trigger
 
   # Liquidator bot, liquidates unhealthy positions by taking over the risk (caution, you should manage risk here)
   # - liquidator
@@ -98,7 +98,7 @@ botConfigs:
     botId: "liquidator"
     dryRun: false
     metricsPort: 9465
-    # if true will attempt to sell off any inherited positions
+    # if true will NOT attempt to sell off any inherited positions
     disableAutoDerisking: false
     # if true will swap spot assets on jupiter if the price is better
     useJupiter: true
