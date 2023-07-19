@@ -1,7 +1,12 @@
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import fs from 'fs';
 import { logger } from './logger';
-import { Wallet } from '@drift-labs/sdk';
+import {
+	NodeToFill,
+	NodeToTrigger,
+	Wallet,
+	getOrderSignature,
+} from '@drift-labs/sdk';
 import {
 	createAssociatedTokenAccountInstruction,
 	getAssociatedTokenAddress,
@@ -108,4 +113,22 @@ export function sleepS(s: number) {
 export function decodeName(bytes: number[]): string {
 	const buffer = Buffer.from(bytes);
 	return buffer.toString('utf8').trim();
+}
+
+export function getNodeToFillSignature(node: NodeToFill): string {
+	if (!node.node.userAccount) {
+		return '~';
+	}
+	return `${node.node.userAccount.toBase58()}-${node.node.order.orderId.toString()}`;
+}
+
+export function getFillSignatureFromUserAccountAndOrderId(
+	userAccount: string,
+	orderId: string
+): string {
+	return `${userAccount}-${orderId}`;
+}
+
+export function getNodeToTriggerSignature(node: NodeToTrigger): string {
+	return getOrderSignature(node.node.order.orderId, node.node.userAccount);
 }

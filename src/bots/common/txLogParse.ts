@@ -45,7 +45,7 @@ export function isMakerOrderDoesNotExistLog(log: string): number | null {
 /**
  * parses a maker breached maintenance margin log, returns the maker's userAccount pubkey if it exists
  * @param log
- * @returns
+ * @returns the maker's userAccount pubkey if it exists, null otherwise
  */
 export function isMakerBreachedMaintenanceMarginLog(
 	log: string

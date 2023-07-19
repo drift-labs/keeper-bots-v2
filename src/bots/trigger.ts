@@ -6,7 +6,6 @@ import {
 	NodeToTrigger,
 	UserMap,
 	MarketType,
-	getOrderSignature,
 	DLOBSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -25,6 +24,7 @@ import {
 	View,
 } from '@opentelemetry/sdk-metrics-base';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
+import { getNodeToTriggerSignature } from '../utils';
 
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
@@ -214,8 +214,7 @@ export class TriggerBot implements Bot {
 
 			for (const nodeToTrigger of nodesToTrigger) {
 				const now = Date.now();
-				const nodeToFillSignature =
-					this.getNodeToTriggerSignature(nodeToTrigger);
+				const nodeToFillSignature = getNodeToTriggerSignature(nodeToTrigger);
 				const timeStartedToTriggerNode =
 					this.triggeringNodes.get(nodeToFillSignature);
 				if (timeStartedToTriggerNode) {
@@ -375,13 +374,9 @@ export class TriggerBot implements Bot {
 		}
 	}
 
-	private getNodeToTriggerSignature(node: NodeToTrigger): string {
-		return getOrderSignature(node.node.order.orderId, node.node.userAccount);
-	}
-
 	private removeTriggeringNodes(nodes: Array<NodeToTrigger>) {
 		for (const node of nodes) {
-			this.triggeringNodes.delete(this.getNodeToTriggerSignature(node));
+			this.triggeringNodes.delete(getNodeToTriggerSignature(node));
 		}
 	}
 

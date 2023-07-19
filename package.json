@@ -44,7 +44,7 @@
 		"build": "yarn clean && tsc",
 		"clean": "rm -rf lib",
 		"start": "node lib/index.js",
-		"dev": "ts-node src/index.ts",
+		"dev": "NODE_OPTIONS=--max-old-space-size=3000 ts-node src/index.ts",
 		"dev:inspect": "node --inspect-brk --require ts-node/register",
 		"dev:filler": "ts-node src/index.ts --filler",
 		"dev:trigger": "ts-node src/index.ts --trigger",
