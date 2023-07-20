@@ -42,7 +42,7 @@ Here is a table defining the various fields and their usage/defaults:
 | global.runOnce    | bool   | Set `true` to run only one iteration of the selected bots | `false` |
 | global.debug      | bool   | Set `true` to enable debug logging | `false` |
 | global.subaccounts | list  | (optional) Which subaccount IDs to load | `0` |
-| enabledBots       | list   | list of bots to enable, matching configs must be present under `botConfigs` | - |
+| enabledBots       | list   | list of bots to enable, matching key must be present under `botConfigs` | - |
 | botConfigs        | object | configs for associated bots | - |
 | botConfigs.<bot_type> | object | config for a specific <bot_type> | - |
 
@@ -89,19 +89,32 @@ By default, some [Prometheus](https://prometheus.io/) metrics are exposed on `lo
 
 # Notes on some bots
 
-## JIT Maker Bot
+## Filler Bot
 
-Read the docs: https://docs.drift.trade/just-in-time-jit-auctions
+Include `filler` and/or `spotFiller` under `.enabledBots` in `config.yaml`
 
-⚠ requires collateral
 
-This is mainly to show how to participate in JIT auctions (you dont want to run this as is).
+Read the docs: https://docs.drift.trade/keepers-and-decentralised-orderbook
 
+Fills (matches) crossing orders on the exchange for a small cut of the taker fees. Fillers maintain a copy of the DLOB to look
+for orders that cross.
 
 
 ## Liquidator Bot
 
 Read the docs: https://docs.drift.trade/liquidators
+
+### Notes on derisking (`useJupiter`)
+
+This liquidator implementation includes an option to `useJupiter` to derisk (sell) spot assets into USDC. The derisk loop will use
+the more favorable of Drift spot or Jupiter before executing. Set `useJupiter` under the liquidator config to enable this behavior
+(see below).
+
+You may also set `disableAutoDerisking` to `true`, to disable the derisking loop. You may want to do this as part of a larger strategy
+where you are ok with taking on risk at a favorable to market price (liquidation fee applied).
+
+
+### Notes on configuring subaccount
 
 By default the liquidator will attempt to liqudate (inherit the risk of)
 endangered positions in all markets. Set `botConfigs.liquidator.perpMarketIndicies` and/or `botConfigs.liquidator.spotMarketIndicies`
@@ -114,7 +127,33 @@ of `perpMarketIndicies` and `spotMarketIndicies` to specify a mapping
 from subaccount to list of market indicies. The value of these 2 fields
 are json strings:
 
-i.e.
+### An example `config.yaml`
 ```
-''
+botConfigs:
+  ...
+  liquidator:
+    ...
+    useJupiter: true
+    perpSubAccountConfig:
+      0:
+        - 0
+        - 1
+        - 2
+      1:
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+        - 8
+        - 9
+        - 10
+        - 11
+        - 12
+    spotSubAccountConfig:
+      0:
+        - 0
+        - 1
+        - 2
 ```
+Means the liquidator will liquidate perp markets 0-2 using subaccount 0, perp markets 3-12 using subaccount 1, and spot markets 0-2 using subaccount 0. It will also use jupiter to derisk spot assets into USDC.
