@@ -20,7 +20,6 @@ import {
 	BulkAccountLoader,
 	OrderRecord,
 	convertToNumber,
-	BASE_PRECISION,
 	PRICE_PRECISION,
 	WrappedEvent,
 	DLOBNode,
@@ -32,6 +31,8 @@ import {
 	BN,
 	PhoenixV1FulfillmentConfigAccount,
 	EventSubscriber,
+	TEN,
+	NodeToTrigger,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -74,17 +75,15 @@ import {
 } from './common/txLogParse';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { FillerConfig } from '../config';
-import { decodeName } from '../utils';
+import {
+	decodeName,
+	getNodeToFillSignature,
+	getNodeToTriggerSignature,
+} from '../utils';
 
-/**
- * Size of throttled nodes to get to before pruning the map
- */
-const THROTTLED_NODE_SIZE_TO_PRUNE = 10;
-
-/**
- * Time to wait before trying a node again
- */
-const FILL_ORDER_BACKOFF = 10000;
+const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
+const FILL_ORDER_BACKOFF = 10000; // Time to wait before trying a node again
+const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 
 /**
  * Constants to determine if we should add a priority fee to a transaction
@@ -110,6 +109,7 @@ enum METRIC_TYPES {
 	unrealized_pnl = 'unrealized_pnl',
 	mutex_busy = 'mutex_busy',
 	attempted_fills = 'attempted_fills',
+	attempted_triggers = 'attempted_triggers',
 	successful_fills = 'successful_fills',
 	observed_fills_count = 'observed_fills_count',
 	user_map_user_account_keys = 'user_map_user_account_keys',
@@ -176,6 +176,7 @@ export class SpotFillerBot implements Bot {
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
+	private triggeringNodes = new Map<string, number>();
 	private pendingTransactionsBuffer = new SharedArrayBuffer(16); // 16 byte shared buffer
 	private pendingTransactionsArray = new Uint8Array(
 		this.pendingTransactionsBuffer
@@ -192,6 +193,7 @@ export class SpotFillerBot implements Bot {
 	private runtimeSpec: RuntimeSpec;
 	private mutexBusyCounter: Counter;
 	private attemptedFillsCounter: Counter;
+	private attemptedTriggersCounter: Counter;
 	private observedFillsCountCounter: Counter;
 	private successfulFillsCounter: Counter;
 	private sdkCallDurationHistogram: Histogram;
@@ -340,6 +342,12 @@ export class SpotFillerBot implements Bot {
 			METRIC_TYPES.attempted_fills,
 			{
 				description: 'Count of fills we attempted',
+			}
+		);
+		this.attemptedTriggersCounter = this.meter.createCounter(
+			METRIC_TYPES.attempted_triggers,
+			{
+				description: 'Count of triggers we attempted',
 			}
 		);
 		this.observedFillsCountCounter = this.meter.createCounter(
@@ -584,14 +592,17 @@ export class SpotFillerBot implements Bot {
 		return healthy;
 	}
 
-	private async getSpotFillableNodesForMarket(
+	private getSpotNodesForMarket(
 		market: SpotMarketAccount,
 		dlob: DLOB
-	): Promise<{
-		nodesToFill: Array<NodeToFill>;
-		fallbackAskSource: FallbackLiquiditySource;
-		fallbackBidSource: FallbackLiquiditySource;
-	}> {
+	): {
+		nodesToFill: {
+			nodesToFill: Array<NodeToFill>;
+			fallbackAskSource: FallbackLiquiditySource;
+			fallbackBidSource: FallbackLiquiditySource;
+		};
+		nodesToTrigger: Array<NodeToTrigger>;
+	} {
 		const oraclePriceData = this.driftClient.getOracleDataForSpotMarket(
 			market.marketIndex
 		);
@@ -616,11 +627,13 @@ export class SpotFillerBot implements Bot {
 			'ask'
 		);
 
+		const fillSlot = oraclePriceData.slot.toNumber();
+
 		const nodesToFill = dlob.findNodesToFill(
 			market.marketIndex,
 			fallbackBidPrice,
 			fallbackAskPrice,
-			oraclePriceData.slot.toNumber(),
+			fillSlot,
 			Date.now() / 1000,
 			MarketType.SPOT,
 			oraclePriceData,
@@ -628,7 +641,18 @@ export class SpotFillerBot implements Bot {
 			this.driftClient.getSpotMarketAccount(market.marketIndex)
 		);
 
-		return { nodesToFill, fallbackAskSource, fallbackBidSource };
+		const nodesToTrigger = dlob.findNodesToTrigger(
+			market.marketIndex,
+			fillSlot,
+			oraclePriceData.price,
+			MarketType.SPOT,
+			this.driftClient.getStateAccount()
+		);
+
+		return {
+			nodesToFill: { nodesToFill, fallbackAskSource, fallbackBidSource },
+			nodesToTrigger,
+		};
 	}
 
 	private pickFallbackPrice(
@@ -657,13 +681,6 @@ export class SpotFillerBot implements Bot {
 		}
 
 		return [undefined, undefined];
-	}
-
-	private getNodeToFillSignature(node: NodeToFill): string {
-		if (!node.node.userAccount) {
-			return '~';
-		}
-		return `${node.node.userAccount.toString()}-${node.node.order.orderId.toString()}`;
 	}
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
@@ -722,6 +739,20 @@ export class SpotFillerBot implements Bot {
 
 	private unthrottleNode(nodeSignature: string) {
 		this.throttledNodes.delete(nodeSignature);
+	}
+
+	private pruneThrottledNode() {
+		if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
+			for (const [key, value] of this.throttledNodes.entries()) {
+				if (value + 2 * FILL_ORDER_BACKOFF > Date.now()) {
+					this.throttledNodes.delete(key);
+				}
+			}
+		}
+	}
+
+	private removeTriggeringNodes(node: NodeToTrigger) {
+		this.triggeringNodes.delete(getNodeToTriggerSignature(node));
 	}
 
 	private incPendingTransactions(spotMarketIndex: number): number {
@@ -824,48 +855,6 @@ export class SpotFillerBot implements Bot {
 				if (isFillIxLog(log)) {
 					inFillIx = true;
 					errorThisFillIx = false;
-
-					// can also print this from parsing the log record in upcoming
-					const makerNode = getMakerNodeFromNodeToFill(nodeFilled);
-					if (makerNode) {
-						logger.info(
-							`Processing spot fill tx log:\ntaker: ${nodeFilled.node.userAccount.toBase58()}-${
-								nodeFilled.node.order.orderId
-							} ${convertToNumber(
-								nodeFilled.node.order.baseAssetAmountFilled,
-								BASE_PRECISION
-							)}/${convertToNumber(
-								nodeFilled.node.order.baseAssetAmount,
-								BASE_PRECISION
-							)} @ ${convertToNumber(
-								nodeFilled.node.order.price,
-								PRICE_PRECISION
-							)}\nmaker: ${makerNode.userAccount.toBase58()}-${
-								makerNode.order.orderId
-							} ${convertToNumber(
-								makerNode.order.baseAssetAmountFilled,
-								BASE_PRECISION
-							)}/${convertToNumber(
-								makerNode.order.baseAssetAmount,
-								BASE_PRECISION
-							)} @ ${convertToNumber(makerNode.order.price, PRICE_PRECISION)}`
-						);
-					} else {
-						logger.info(
-							`Processing spot fill tx log:\ntaker: ${nodeFilled.node.userAccount.toBase58()}-${
-								nodeFilled.node.order.orderId
-							} ${convertToNumber(
-								nodeFilled.node.order.baseAssetAmountFilled,
-								BASE_PRECISION
-							)}/${convertToNumber(
-								nodeFilled.node.order.baseAssetAmount,
-								BASE_PRECISION
-							)} @ ${convertToNumber(
-								nodeFilled.node.order.price,
-								PRICE_PRECISION
-							)}\nmaker: OpenBook`
-						);
-					}
 				} else {
 					inFillIx = false;
 				}
@@ -885,7 +874,7 @@ export class SpotFillerBot implements Bot {
 						nodeFilled.node.order.orderId
 					}; does not exist (filled by someone else); ${log}`
 				);
-				this.throttledNodes.delete(this.getNodeToFillSignature(nodeFilled));
+				this.throttledNodes.delete(getNodeToFillSignature(nodeFilled));
 				errorThisFillIx = true;
 				continue;
 			}
@@ -1036,7 +1025,7 @@ export class SpotFillerBot implements Bot {
 		fallbackAskSource: FallbackLiquiditySource,
 		fallbackBidSource: FallbackLiquiditySource
 	) {
-		const nodeSignature = this.getNodeToFillSignature(nodeToFill);
+		const nodeSignature = getNodeToFillSignature(nodeToFill);
 		if (this.nodeIsThrottled(nodeSignature)) {
 			logger.info(`Throttling ${nodeSignature}`);
 			return Promise.resolve(undefined);
@@ -1060,18 +1049,21 @@ export class SpotFillerBot implements Bot {
 			throw new Error('expected spot market type');
 		}
 
-		// TODO: confirm if order.baseAssetAmount can use BASE_PRECISION for spot order
 		const makerNode = getMakerNodeFromNodeToFill(nodeToFill);
+		const spotMarket = this.driftClient.getSpotMarketAccount(
+			nodeToFill.node.order.marketIndex
+		);
+		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
 		if (makerNode) {
 			logger.info(
 				`filling spot node:\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
 					nodeToFill.node.order.orderId
 				} ${convertToNumber(
 					nodeToFill.node.order.baseAssetAmountFilled,
-					BASE_PRECISION
+					spotMarketPrecision
 				)}/${convertToNumber(
 					nodeToFill.node.order.baseAssetAmount,
-					BASE_PRECISION
+					spotMarketPrecision
 				)} @ ${convertToNumber(
 					nodeToFill.node.order.price,
 					PRICE_PRECISION
@@ -1079,10 +1071,10 @@ export class SpotFillerBot implements Bot {
 					makerNode.order.orderId
 				} ${convertToNumber(
 					makerNode.order.baseAssetAmountFilled,
-					BASE_PRECISION
+					spotMarketPrecision
 				)}/${convertToNumber(
 					makerNode.order.baseAssetAmount,
-					BASE_PRECISION
+					spotMarketPrecision
 				)} @ ${convertToNumber(makerNode.order.price, PRICE_PRECISION)}`
 			);
 		} else {
@@ -1091,10 +1083,10 @@ export class SpotFillerBot implements Bot {
 					nodeToFill.node.order.orderId
 				} ${convertToNumber(
 					nodeToFill.node.order.baseAssetAmountFilled,
-					BASE_PRECISION
+					spotMarketPrecision
 				)}/${convertToNumber(
 					nodeToFill.node.order.baseAssetAmount,
-					BASE_PRECISION
+					spotMarketPrecision
 				)} @ ${convertToNumber(
 					nodeToFill.node.order.price,
 					PRICE_PRECISION
@@ -1206,7 +1198,6 @@ export class SpotFillerBot implements Bot {
 
 				logger.info(`sim error - currPendingTxs: ${pendingTxs}`);
 				logger.error(`Failed to fill spot order (errorCode: ${errorCode}):`);
-				console.error(e);
 
 				if (e.logs) {
 					await this.handleTransactionLogs(nodeToFill, e.logs);
@@ -1230,6 +1221,89 @@ export class SpotFillerBot implements Bot {
 			});
 	}
 
+	private filterTriggerableNodes(nodeToTrigger: NodeToTrigger): boolean {
+		if (nodeToTrigger.node.haveTrigger) {
+			return false;
+		}
+
+		const now = Date.now();
+		const nodeToFillSignature = getNodeToTriggerSignature(nodeToTrigger);
+		const timeStartedToTriggerNode =
+			this.triggeringNodes.get(nodeToFillSignature);
+		if (timeStartedToTriggerNode) {
+			if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
+				false;
+			}
+		}
+
+		return true;
+	}
+
+	private async executeFillableSpotNodesForMarket(
+		fillableNodes: Array<NodesToFillWithContext>
+	) {
+		for (const nodesToFillWithContext of fillableNodes) {
+			for (const nodeToFill of nodesToFillWithContext.nodesToFill) {
+				this.tryFillSpotNode(
+					nodeToFill,
+					nodesToFillWithContext.fallbackAskSource,
+					nodesToFillWithContext.fallbackBidSource
+				);
+			}
+		}
+	}
+
+	private async executeTriggerableSpotNodesForMarket(
+		triggerableNodes: Array<NodeToTrigger>
+	) {
+		for (const nodeToTrigger of triggerableNodes) {
+			nodeToTrigger.node.haveTrigger = true;
+
+			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
+			this.triggeringNodes.set(nodeSignature, Date.now());
+
+			const user = await this.userMap.mustGet(
+				nodeToTrigger.node.userAccount.toString()
+			);
+			this.driftClient
+				.triggerOrder(
+					nodeToTrigger.node.userAccount,
+					user.getUserAccount(),
+					nodeToTrigger.node.order
+				)
+				.then((txSig) => {
+					logger.info(
+						`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+					);
+					logger.info(`Tx: ${txSig}`);
+				})
+				.catch((error) => {
+					nodeToTrigger.node.haveTrigger = false;
+
+					const errorCode = getErrorCode(error);
+					if (
+						!errorCodesToSuppress.includes(errorCode) &&
+						!(error as Error).message.includes('Transaction was not confirmed')
+					) {
+						logger.error(
+							`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+						);
+						logger.error(error);
+						webhookMessage(
+							`[${
+								this.name
+							}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+								error.stack ? error.stack : error.message
+							}`
+						);
+					}
+				})
+				.finally(() => {
+					this.removeTriggeringNodes(nodeToTrigger);
+				});
+		}
+	}
+
 	private async trySpotFill(orderRecord?: OrderRecord) {
 		const startTime = Date.now();
 		let ran = false;
@@ -1245,47 +1319,52 @@ export class SpotFillerBot implements Bot {
 					);
 				}
 
-				if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
-					for (const [key, value] of this.throttledNodes.entries()) {
-						if (value + 2 * FILL_ORDER_BACKOFF > Date.now()) {
-							this.throttledNodes.delete(key);
-						}
-					}
-				}
+				this.pruneThrottledNode();
 
 				// 1) get all fillable nodes
-				const marketsNodesToFillWithContext: Array<NodesToFillWithContext> = [];
+				const fillableNodes: Array<NodesToFillWithContext> = [];
+				let triggerableNodes: Array<NodeToTrigger> = [];
 				for (const market of this.driftClient.getSpotMarketAccounts()) {
 					if (market.marketIndex === 0) {
 						continue;
 					}
 
-					marketsNodesToFillWithContext.push(
-						await this.getSpotFillableNodesForMarket(market, dlob)
+					const { nodesToFill, nodesToTrigger } = this.getSpotNodesForMarket(
+						market,
+						dlob
 					);
+					fillableNodes.push(nodesToFill);
+					triggerableNodes = triggerableNodes.concat(nodesToTrigger);
 				}
+
+				// filter out nodes that we know cannot be triggered (spot nodes will be filtered in executeFillableSpotNodesForMarket)
+				const filteredTriggerableNodes = triggerableNodes.filter(
+					this.filterTriggerableNodes.bind(this)
+				);
+				logger.debug(
+					`filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length}`
+				);
+
+				await Promise.all([
+					this.executeFillableSpotNodesForMarket(fillableNodes),
+					this.executeTriggerableSpotNodesForMarket(filteredTriggerableNodes),
+				]);
 
 				const user = this.driftClient.getUser();
 				this.attemptedFillsCounter.add(
-					marketsNodesToFillWithContext.reduce(
-						(acc, curr) => acc + curr.nodesToFill.length,
-						0
-					),
+					fillableNodes.reduce((acc, curr) => acc + curr.nodesToFill.length, 0),
 					metricAttrFromUserAccount(
 						user.userAccountPublicKey,
 						user.getUserAccount()
 					)
 				);
-
-				for (const nodesToFillWithContext of marketsNodesToFillWithContext) {
-					for (const nodeToFill of nodesToFillWithContext.nodesToFill) {
-						this.tryFillSpotNode(
-							nodeToFill,
-							nodesToFillWithContext.fallbackAskSource,
-							nodesToFillWithContext.fallbackBidSource
-						);
-					}
-				}
+				this.attemptedTriggersCounter.add(
+					filteredTriggerableNodes.length,
+					metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					)
+				);
 
 				ran = true;
 			});

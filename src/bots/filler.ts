@@ -31,6 +31,7 @@ import {
 	DLOBSubscriber,
 	EventSubscriber,
 	OrderActionRecord,
+	NodeToTrigger,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -82,7 +83,12 @@ import {
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
 import { getErrorCode } from '../error';
-import { decodeName } from '../utils';
+import {
+	decodeName,
+	getFillSignatureFromUserAccountAndOrderId,
+	getNodeToFillSignature,
+	getNodeToTriggerSignature,
+} from '../utils';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
@@ -90,7 +96,9 @@ const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 10000; // the time to wait before trying to fill a throttled (error filling) node again
-const FILL_ORDER_COOLDOWN_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
+const FILL_ORDER_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
+const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
+const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 
 const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
@@ -98,6 +106,9 @@ const errorCodesToSuppress = [
 	6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
 	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6003, // 0x1773 Error Number: 6003. Error Message: Insufficient collateral.
+
+	6111, // Error Message: OrderNotTriggerable.
+	6112, // Error Message: OrderDidNotSatisfyTriggerCondition.
 ];
 
 enum METRIC_TYPES {
@@ -109,6 +120,7 @@ enum METRIC_TYPES {
 	unrealized_pnl = 'unrealized_pnl',
 	mutex_busy = 'mutex_busy',
 	attempted_fills = 'attempted_fills',
+	attempted_triggers = 'attempted_triggers',
 	successful_fills = 'successful_fills',
 	observed_fills_count = 'observed_fills_count',
 	tx_sim_error_count = 'tx_sim_error_count',
@@ -197,6 +209,8 @@ export class FillerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
 	private fillingNodes = new Map<string, number>();
+	private triggeringNodes = new Map<string, number>();
+
 	private useBurstCULimit = false;
 	private fillTxSinceBurstCU = 0;
 	private fillTxId = 0;
@@ -217,6 +231,7 @@ export class FillerBot implements Bot {
 	private unrealizedPnLGauge: ObservableGauge;
 	private mutexBusyCounter: Counter;
 	private attemptedFillsCounter: Counter;
+	private attemptedTriggersCounter: Counter;
 	private successfulFillsCounter: Counter;
 	private observedFillsCountCounter: Counter;
 	private txSimErrorCounter: Counter;
@@ -406,6 +421,12 @@ export class FillerBot implements Bot {
 				description: 'Count of fills we attempted',
 			}
 		);
+		this.attemptedTriggersCounter = this.meter.createCounter(
+			METRIC_TYPES.attempted_triggers,
+			{
+				description: 'Count of triggers s s s s s s s s we attempted',
+			}
+		);
 		this.observedFillsCountCounter = this.meter.createCounter(
 			METRIC_TYPES.observed_fills_count,
 			{
@@ -589,10 +610,13 @@ export class FillerBot implements Bot {
 		return healthy;
 	}
 
-	private async getPerpFillableNodesForMarket(
+	private getPerpNodesForMarket(
 		market: PerpMarketAccount,
 		dlob: DLOB
-	): Promise<Array<NodeToFill>> {
+	): {
+		nodesToFill: Array<NodeToFill>;
+		nodesToTrigger: Array<NodeToTrigger>;
+	} {
 		const marketIndex = market.marketIndex;
 
 		const oraclePriceData =
@@ -601,34 +625,28 @@ export class FillerBot implements Bot {
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
 
-		return dlob.findNodesToFill(
-			marketIndex,
-			vBid,
-			vAsk,
-			this.slotSubscriber.currentSlot + 2, // add offset to account for latency
-			Date.now() / 1000,
-			MarketType.PERP,
-			oraclePriceData,
-			this.driftClient.getStateAccount(),
-			this.driftClient.getPerpMarketAccount(marketIndex)
-		);
-	}
+		const fillSlot = oraclePriceData.slot.toNumber();
 
-	private getNodeToFillSignature(node: NodeToFill): string {
-		if (!node.node.userAccount) {
-			return '~';
-		}
-		return this.getFillSignatureFromUserAccountAndOrderId(
-			node.node.userAccount.toBase58(),
-			node.node.order.orderId.toString()
-		);
-	}
-
-	private getFillSignatureFromUserAccountAndOrderId(
-		userAccount: string,
-		orderId: string
-	): string {
-		return `${userAccount}-${orderId}`;
+		return {
+			nodesToFill: dlob.findNodesToFill(
+				marketIndex,
+				vBid,
+				vAsk,
+				fillSlot,
+				Date.now() / 1000,
+				MarketType.PERP,
+				oraclePriceData,
+				this.driftClient.getStateAccount(),
+				this.driftClient.getPerpMarketAccount(marketIndex)
+			),
+			nodesToTrigger: dlob.findNodesToTrigger(
+				marketIndex,
+				fillSlot,
+				oraclePriceData.price,
+				MarketType.PERP,
+				this.driftClient.getStateAccount()
+			),
+		};
 	}
 
 	/**
@@ -647,6 +665,7 @@ export class FillerBot implements Bot {
 	}
 
 	private isDLOBNodeThrottled(dlobNode: DLOBNode): boolean {
+		// first check if the userAccount itself is throttled
 		const userAccountPubkey = dlobNode.userAccount.toBase58();
 		if (this.throttledNodes.has(userAccountPubkey)) {
 			if (this.isThrottledNodeStillThrottled(userAccountPubkey)) {
@@ -655,7 +674,9 @@ export class FillerBot implements Bot {
 				return false;
 			}
 		}
-		const orderSignature = this.getFillSignatureFromUserAccountAndOrderId(
+
+		// then check if the specific order is throttled
+		const orderSignature = getFillSignatureFromUserAccountAndOrderId(
 			dlobNode.userAccount.toBase58(),
 			dlobNode.order.orderId.toString()
 		);
@@ -674,6 +695,20 @@ export class FillerBot implements Bot {
 		this.throttledNodes.delete(signature);
 	}
 
+	private removeTriggeringNodes(node: NodeToTrigger) {
+		this.triggeringNodes.delete(getNodeToTriggerSignature(node));
+	}
+
+	private pruneThrottledNode() {
+		if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
+			for (const [key, value] of this.throttledNodes.entries()) {
+				if (value + 2 * FILL_ORDER_BACKOFF > Date.now()) {
+					this.throttledNodes.delete(key);
+				}
+			}
+		}
+	}
+
 	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
 		if (nodeToFill.node.isVammNode()) {
 			logger.warn(
@@ -690,10 +725,10 @@ export class FillerBot implements Bot {
 		}
 
 		const now = Date.now();
-		const nodeToFillSignature = this.getNodeToFillSignature(nodeToFill);
+		const nodeToFillSignature = getNodeToFillSignature(nodeToFill);
 		if (this.fillingNodes.has(nodeToFillSignature)) {
 			const timeStartedToFillNode = this.fillingNodes.get(nodeToFillSignature);
-			if (timeStartedToFillNode + FILL_ORDER_COOLDOWN_BACKOFF > now) {
+			if (timeStartedToFillNode + FILL_ORDER_BACKOFF > now) {
 				// still cooling down on this node, filter it out
 				return false;
 			}
@@ -780,6 +815,24 @@ export class FillerBot implements Bot {
 			if (!oracleIsValid) {
 				logger.error(`Oracle is not valid for market ${marketIndex}`);
 				return false;
+			}
+		}
+
+		return true;
+	}
+
+	private filterTriggerableNodes(nodeToTrigger: NodeToTrigger): boolean {
+		if (nodeToTrigger.node.haveTrigger) {
+			return false;
+		}
+
+		const now = Date.now();
+		const nodeToFillSignature = getNodeToTriggerSignature(nodeToTrigger);
+		const timeStartedToTriggerNode =
+			this.triggeringNodes.get(nodeToFillSignature);
+		if (timeStartedToTriggerNode) {
+			if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
+				false;
 			}
 		}
 
@@ -964,7 +1017,7 @@ export class FillerBot implements Bot {
 						filledNode.node.order.orderId
 					}; does not exist (filled by someone else); ${log}`
 				);
-				this.clearThrottledNode(this.getNodeToFillSignature(filledNode));
+				this.clearThrottledNode(getNodeToFillSignature(filledNode));
 				errorThisFillIx = true;
 				continue;
 			}
@@ -999,7 +1052,7 @@ export class FillerBot implements Bot {
 						);
 					})
 					.catch((e) => {
-						console.error(e);
+						// console.error(e);
 						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
 						webhookMessage(
 							`[${this.name}]: :x: error processing fill tx logs:\n${
@@ -1065,14 +1118,14 @@ export class FillerBot implements Bot {
 			if (errFillingLog) {
 				const orderId = errFillingLog[0];
 				const userAcc = errFillingLog[1];
-				const extractedSig = this.getFillSignatureFromUserAccountAndOrderId(
+				const extractedSig = getFillSignatureFromUserAccountAndOrderId(
 					userAcc,
 					orderId
 				);
 				this.throttledNodes.set(extractedSig, Date.now());
 
 				const filledNode = nodesFilled[ixIdx];
-				const assocNodeSig = this.getNodeToFillSignature(filledNode);
+				const assocNodeSig = getNodeToFillSignature(filledNode);
 				logger.warn(
 					`Throttling node due to fill error. extractedSig: ${extractedSig}, assocNodeSig: ${assocNodeSig}, assocNodeIdx: ${ixIdx}`
 				);
@@ -1124,7 +1177,7 @@ export class FillerBot implements Bot {
 
 	private removeFillingNodes(nodes: Array<NodeToFill>) {
 		for (const node of nodes) {
-			this.fillingNodes.delete(this.getNodeToFillSignature(node));
+			this.fillingNodes.delete(getNodeToFillSignature(node));
 		}
 	}
 
@@ -1257,7 +1310,7 @@ export class FillerBot implements Bot {
 							);
 						})
 						.catch((e) => {
-							console.error(e);
+							// console.error(e);
 							logger.error(
 								`Failed to process fill tx logs (error above) (fillTxId: ${fillTxId}):`
 							);
@@ -1269,7 +1322,7 @@ export class FillerBot implements Bot {
 						});
 				})
 				.catch(async (e) => {
-					console.error(e);
+					// console.error(e);
 					logger.error(
 						`Failed to send packed tx (error above) (fillTxId: ${fillTxId}):`
 					);
@@ -1348,10 +1401,7 @@ export class FillerBot implements Bot {
 				)
 			);
 
-			this.fillingNodes.set(
-				this.getNodeToFillSignature(nodeToFill),
-				Date.now()
-			);
+			this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
 
 			if (this.revertOnFailure) {
 				ixs.push(await this.driftClient.getRevertFillIx());
@@ -1451,10 +1501,7 @@ export class FillerBot implements Bot {
 				break;
 			}
 
-			this.fillingNodes.set(
-				this.getNodeToFillSignature(nodeToFill),
-				Date.now()
-			);
+			this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
 
 			// first estimate new tx size with this additional ix and new accounts
 			const ixKeys = ix.keys.map((key) => key.pubkey);
@@ -1528,6 +1575,124 @@ export class FillerBot implements Bot {
 		return nodesSent.length;
 	}
 
+	private filterPerpNodesForMarket(
+		fillableNodes: Array<NodeToFill>,
+		triggerableNodes: Array<NodeToTrigger>
+	): {
+		filteredFillableNodes: Array<NodeToFill>;
+		filteredTriggerableNodes: Array<NodeToTrigger>;
+	} {
+		const seenFillableNodes = new Set<string>();
+		const filteredFillableNodes = fillableNodes.filter((node) => {
+			const sig = getNodeToFillSignature(node);
+			if (seenFillableNodes.has(sig)) {
+				return false;
+			}
+			seenFillableNodes.add(sig);
+			return this.filterFillableNodes(node);
+		});
+
+		const seenTriggerableNodes = new Set<string>();
+		const filteredTriggerableNodes = triggerableNodes.filter((node) => {
+			const sig = getNodeToTriggerSignature(node);
+			if (seenTriggerableNodes.has(sig)) {
+				return false;
+			}
+			seenTriggerableNodes.add(sig);
+			return this.filterTriggerableNodes(node);
+		});
+
+		return {
+			filteredFillableNodes,
+			filteredTriggerableNodes,
+		};
+	}
+
+	private async executeFillablePerpNodesForMarket(
+		fillableNodes: Array<NodeToFill>
+	) {
+		let filledNodeCount = 0;
+		while (filledNodeCount < fillableNodes.length) {
+			const attemptedFills = await this.tryBulkFillPerpNodes(
+				fillableNodes.slice(filledNodeCount)
+			);
+			filledNodeCount += attemptedFills;
+
+			// record fill attempts
+			const user = this.driftClient.getUser();
+			this.attemptedFillsCounter.add(
+				attemptedFills,
+				metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				)
+			);
+		}
+	}
+
+	private async executeTriggerablePerpNodesForMarket(
+		triggerableNodes: Array<NodeToTrigger>
+	) {
+		for (const nodeToTrigger of triggerableNodes) {
+			nodeToTrigger.node.haveTrigger = true;
+			logger.info(
+				`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) order ${nodeToTrigger.node.order.orderId.toString()}`
+			);
+			const user = await this.userMap.mustGet(
+				nodeToTrigger.node.userAccount.toString()
+			);
+
+			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
+			this.triggeringNodes.set(nodeSignature, Date.now());
+
+			this.driftClient
+				.triggerOrder(
+					nodeToTrigger.node.userAccount,
+					user.getUserAccount(),
+					nodeToTrigger.node.order
+				)
+				.then((txSig) => {
+					logger.info(
+						`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+					);
+					logger.info(`Tx: ${txSig}`);
+				})
+				.catch((error) => {
+					nodeToTrigger.node.haveTrigger = false;
+
+					const errorCode = getErrorCode(error);
+					if (
+						!errorCodesToSuppress.includes(errorCode) &&
+						!(error as Error).message.includes('Transaction was not confirmed')
+					) {
+						logger.error(
+							`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+						);
+						logger.error(error);
+						webhookMessage(
+							`[${
+								this.name
+							}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+								error.stack ? error.stack : error.message
+							}`
+						);
+					}
+				})
+				.finally(() => {
+					this.removeTriggeringNodes(nodeToTrigger);
+				});
+		}
+
+		const user = this.driftClient.getUser();
+		this.attemptedTriggersCounter.add(
+			triggerableNodes.length,
+			metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			)
+		);
+	}
+
 	private async tryFill() {
 		const startTime = Date.now();
 		let ran = false;
@@ -1535,18 +1700,19 @@ export class FillerBot implements Bot {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				const dlob = this.dlobSubscriber.getDLOB();
 
+				this.pruneThrottledNode();
+
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];
+				let triggerableNodes: Array<NodeToTrigger> = [];
 				for (const market of this.driftClient.getPerpMarketAccounts()) {
 					try {
-						const nodesToFill = await this.getPerpFillableNodesForMarket(
+						const { nodesToFill, nodesToTrigger } = this.getPerpNodesForMarket(
 							market,
 							dlob
 						);
 						fillableNodes = fillableNodes.concat(nodesToFill);
-						logger.debug(
-							`got ${nodesToFill.length} fillable nodes on market ${market.marketIndex}`
-						);
+						triggerableNodes = triggerableNodes.concat(nodesToTrigger);
 					} catch (e) {
 						console.error(e);
 						webhookMessage(
@@ -1559,37 +1725,17 @@ export class FillerBot implements Bot {
 				}
 
 				// filter out nodes that we know cannot be filled
-				const seenNodes = new Set<string>();
-				const filteredNodes = fillableNodes.filter((node) => {
-					const sig = this.getNodeToFillSignature(node);
-					if (seenNodes.has(sig)) {
-						return false;
-					}
-					seenNodes.add(sig);
-					return this.filterFillableNodes(node);
-				});
+				const { filteredFillableNodes, filteredTriggerableNodes } =
+					this.filterPerpNodesForMarket(fillableNodes, triggerableNodes);
 				logger.debug(
-					`filtered ${fillableNodes.length} to ${filteredNodes.length}`
+					`filtered fillable nodes from ${fillableNodes.length} to ${filteredFillableNodes.length}, filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length}`
 				);
 
 				// fill the perp nodes
-				let filledNodeCount = 0;
-				while (filledNodeCount < filteredNodes.length) {
-					const attemptedFills = await this.tryBulkFillPerpNodes(
-						filteredNodes.slice(filledNodeCount)
-					);
-					filledNodeCount += attemptedFills;
-
-					// record fill attempts
-					const user = this.driftClient.getUser();
-					this.attemptedFillsCounter.add(
-						attemptedFills,
-						metricAttrFromUserAccount(
-							user.userAccountPublicKey,
-							user.getUserAccount()
-						)
-					);
-				}
+				await Promise.all([
+					this.executeFillablePerpNodesForMarket(filteredFillableNodes),
+					this.executeTriggerablePerpNodesForMarket(filteredTriggerableNodes),
+				]);
 
 				ran = true;
 			});
