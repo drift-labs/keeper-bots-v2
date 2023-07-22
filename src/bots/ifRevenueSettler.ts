@@ -15,6 +15,10 @@ import { sleepS } from '../utils';
 
 const MAX_SETTLE_WAIT_TIME_S = 10 * 60; // 10 minutes
 
+const errorCodesToSuppress = [
+	6177, // NoRevenueToSettleToIF
+];
+
 export class IFRevenueSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
@@ -81,13 +85,16 @@ export class IFRevenueSettlerBot implements Bot {
 				`Error code: ${errorCode} while settling revenue to IF for marketIndex=${spotMarketIndex}: ${err.message}`
 			);
 			console.error(err);
-			await webhookMessage(
-				`[${
-					this.name
-				}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${spotMarketIndex}:\n${
-					err.logs ? (err.logs as Array<string>).join('\n') : ''
-				}\n${err.stack ? err.stack : err.message}`
-			);
+
+			if (!errorCodesToSuppress.includes(errorCode)) {
+				await webhookMessage(
+					`[${
+						this.name
+					}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${spotMarketIndex}:\n${
+						err.logs ? (err.logs as Array<string>).join('\n') : ''
+					}\n${err.stack ? err.stack : err.message}`
+				);
+			}
 		}
 	}
 
