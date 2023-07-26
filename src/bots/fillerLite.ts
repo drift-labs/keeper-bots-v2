@@ -833,10 +833,12 @@ export class FillerLiteBot implements Bot {
 					continue;
 				}
 
-				// TODO: come up with equivalent of must get
+				// Is must get still necessary here? NodeToFill is coming from orderSubscriber,
+				// which also caches the userAccounts in a Map. So get SHOULD be sufficient.
 				const makerUserAccount =
 					this.orderSubscriber.usersAccounts.get(makerAccount).userAccount;
 				const makerAuthority = makerUserAccount.authority;
+
 				const makerUserStats = (
 					await this.userStatsMap.mustGet(makerAuthority.toString())
 				).userStatsAccountPublicKey;
@@ -853,12 +855,6 @@ export class FillerLiteBot implements Bot {
 		const takerUser = this.orderSubscriber.usersAccounts.get(
 			nodeToFill.node.userAccount.toString()
 		);
-		if (!takerUser) {
-			console.log(nodeToFill.node.userAccount.toString());
-			console.log(
-				JSON.stringify(Array.from(this.orderSubscriber.usersAccounts.keys()))
-			);
-		}
 
 		const referrerInfo = (
 			await this.userStatsMap.mustGet(
@@ -1627,9 +1623,10 @@ export class FillerLiteBot implements Bot {
 			logger.info(
 				`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) order ${nodeToTrigger.node.order.orderId.toString()}`
 			);
-			const user = await this.userMap.mustGet(
+
+			const userAccount = this.orderSubscriber.usersAccounts.get(
 				nodeToTrigger.node.userAccount.toString()
-			);
+			).userAccount;
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
 			this.triggeringNodes.set(nodeSignature, Date.now());
@@ -1637,7 +1634,7 @@ export class FillerLiteBot implements Bot {
 			this.driftClient
 				.triggerOrder(
 					nodeToTrigger.node.userAccount,
-					user.getUserAccount(),
+					userAccount,
 					nodeToTrigger.node.order
 				)
 				.then((txSig) => {

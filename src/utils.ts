@@ -132,3 +132,19 @@ export function getFillSignatureFromUserAccountAndOrderId(
 export function getNodeToTriggerSignature(node: NodeToTrigger): string {
 	return getOrderSignature(node.node.order.orderId, node.node.userAccount);
 }
+
+export async function waitForAllSubscribesToFinish(
+	subscriptionPromises: Promise<boolean>[]
+): Promise<boolean> {
+	const results = await Promise.all(subscriptionPromises);
+	const falsePromises = subscriptionPromises.filter(
+		(_, index) => !results[index]
+	);
+	if (falsePromises.length > 0) {
+		logger.info('waiting to subscribe to DriftClient and User');
+		await sleepMs(1000);
+		return waitForAllSubscribesToFinish(falsePromises);
+	} else {
+		return true;
+	}
+}
