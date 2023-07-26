@@ -3,8 +3,8 @@ global:
   driftEnv: mainnet-beta
 
   # RPC endpoint to use
-  # endpoint: https://rpc.helius.xyz/?api-key=91020679-6d19-4e39-a1db-e61df95c729f
-  endpoint: https://api.mainnet-beta.solana.com
+  endpoint: https://rpc.helius.xyz/?api-key=91020679-6d19-4e39-a1db-e61df95c729f
+  # endpoint: https://api.mainnet-beta.solana.com
   # custom websocket endpoint to use (if null will be determined from rpc endpoint)
   wsEndpoint:
 

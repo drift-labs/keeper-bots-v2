@@ -30,7 +30,6 @@ import {
 	OrderActionRecord,
 	NodeToTrigger,
 	OrderSubscriber,
-	UserMap,
 	UserAccount,
 	getUserAccountPublicKey,
 } from '@drift-labs/sdk';
@@ -196,7 +195,6 @@ export class FillerLiteBot implements Bot {
 	private jitoLeaderNextSlotMutex = new Mutex();
 	private tipPayerKeypair?: Keypair;
 
-	private userMap: UserMap;
 	private userStatsMap: UserStatsMap;
 	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 
@@ -517,6 +515,7 @@ export class FillerLiteBot implements Bot {
 			subscriptionConfig: { type: 'websocket', skipInitialLoad: true },
 		});
 		await this.orderSubscriber.subscribe();
+		await this.sleep(1200); // Wait a few slots to build up order book
 
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
