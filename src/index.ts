@@ -51,6 +51,7 @@ import {
 	loadConfigFromOpts,
 } from './config';
 import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
+import { FillerLiteBot } from './bots/fillerLite';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -65,6 +66,7 @@ program
 		'calls driftClient.initializeUserAccount if no user account exists'
 	)
 	.option('--filler', 'Enable filler bot')
+	.option('--fillerLite', 'Enable filler lite bot')
 	.option('--spot-filler', 'Enable spot filler bot')
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
@@ -451,6 +453,27 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				config.botConfigs!.filler!,
+				jitoSearcherClient,
+				jitoAuthKeypair,
+				keypair
+			)
+		);
+	}
+	if (configHasBot(config, 'fillerLite')) {
+		logger.info(`Starting filler lite bot`);
+		bots.push(
+			new FillerLiteBot(
+				slotSubscriber,
+				driftClient,
+				eventSubscriber,
+				{
+					rpcEndpoint: endpoint,
+					commit: commitHash,
+					driftEnv: config.global.driftEnv!,
+					driftPid: driftPublicKey.toBase58(),
+					walletAuthority: wallet.publicKey.toBase58(),
+				},
+				config.botConfigs!.fillerLite!,
 				jitoSearcherClient,
 				jitoAuthKeypair,
 				keypair
