@@ -23,6 +23,7 @@ import {
 	DriftClientSubscriptionConfig,
 	LogProviderConfig,
 	getMarketsAndOraclesForSubscription,
+	RetryTxSender,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -212,6 +213,12 @@ const runBot = async () => {
 		commitment: stateCommitment,
 	});
 
+	const sendTxConnection = new Connection(endpoint, {
+		wsEndpoint: wsEndpoint,
+		commitment: stateCommitment,
+		disableRetryOnRateLimit: true,
+	});
+
 	let bulkAccountLoader: BulkAccountLoader | undefined;
 	let lastBulkAccountLoaderSlot: number | undefined;
 	let accountSubscription: DriftClientSubscriptionConfig = {
@@ -240,15 +247,21 @@ const runBot = async () => {
 
 	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 		getMarketsAndOraclesForSubscription(config.global.driftEnv);
+	const opts = {
+		commitment: stateCommitment,
+		skipPreflight: false,
+		preflightCommitment: stateCommitment,
+	};
+	const txSender = new RetryTxSender({
+		connection: sendTxConnection,
+		wallet,
+		opts,
+	});
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
 		programID: driftPublicKey,
-		opts: {
-			commitment: stateCommitment,
-			skipPreflight: false,
-			preflightCommitment: stateCommitment,
-		},
+		opts,
 		accountSubscription,
 		env: config.global.driftEnv,
 		userStats: true,
@@ -257,6 +270,7 @@ const runBot = async () => {
 		oracleInfos,
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts ?? [0],
+		txSender,
 	});
 
 	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {
