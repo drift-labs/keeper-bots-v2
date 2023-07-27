@@ -232,7 +232,6 @@ export class FillerLiteBot implements Bot {
 	private successfulFillsCounter: Counter;
 	private observedFillsCountCounter: Counter;
 	private txSimErrorCounter: Counter;
-	private userMapUserAccountKeysGauge: ObservableGauge;
 	private userStatsMapAuthorityKeysGauge: ObservableGauge;
 
 	constructor(
@@ -254,7 +253,7 @@ export class FillerLiteBot implements Bot {
 			type: 'polling',
 			accountLoader: new BulkAccountLoader(
 				this.driftClient.connection,
-				'processed', // TODO: change this to use the actual commitment level
+				'processed', // No polling so value is irrelevant
 				0 // no polling, just for using mustGet
 			),
 		};
@@ -430,16 +429,6 @@ export class FillerLiteBot implements Bot {
 				description: 'Count of errors from simulating transactions',
 			}
 		);
-		this.userMapUserAccountKeysGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.user_map_user_account_keys,
-			{
-				description: 'number of user account keys in UserMap',
-			}
-		);
-		// this.userMapUserAccountKeysGauge.addCallback(async (obs) => {
-		// 	obs.observe(this.userMap.size());
-		// });
-
 		this.userStatsMapAuthorityKeysGauge = this.meter.createObservableGauge(
 			METRIC_TYPES.user_stats_map_authority_keys,
 			{
@@ -1186,7 +1175,6 @@ export class FillerLiteBot implements Bot {
 					'processed'
 				);
 
-			// const tx = new Transaction();
 			const tx = new Transaction();
 			for (const ix of ixs) {
 				tx.add(ix);
