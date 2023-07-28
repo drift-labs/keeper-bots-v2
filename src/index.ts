@@ -484,6 +484,7 @@ const runBot = async () => {
 		bots.push(
 			new FillerLiteBot(
 				slotSubscriber,
+				undefined,
 				driftClient,
 				eventSubscriber,
 				{

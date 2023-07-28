@@ -1,50 +1,36 @@
 import {
 	ReferrerInfo,
-	isOracleValid,
 	DriftClient,
-	PerpMarketAccount,
-	calculateAskPrice,
-	calculateBidPrice,
 	MakerInfo,
-	isFillableByVAMM,
-	calculateBaseAssetAmountForAmmToFulfill,
 	isVariant,
-	DLOB,
 	NodeToFill,
 	UserStatsMap,
 	MarketType,
-	isOrderExpired,
 	getVariant,
 	PRICE_PRECISION,
 	convertToNumber,
 	BASE_PRECISION,
 	QUOTE_PRECISION,
-	WrappedEvent,
 	BulkAccountLoader,
 	SlotSubscriber,
 	PublicKey,
-	DLOBNode,
-	UserSubscriptionConfig,
-	isOneOfVariant,
 	EventSubscriber,
-	OrderActionRecord,
 	NodeToTrigger,
 	OrderSubscriber,
 	UserAccount,
 	getUserAccountPublicKey,
+	OrderActionRecord,
+	WrappedEvent,
+	decodeName,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
-import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
+import { tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
 	SendTransactionError,
 	Transaction,
-	TransactionResponse,
-	TransactionSignature,
 	TransactionInstruction,
 	ComputeBudgetProgram,
-	GetVersionedTransactionConfig,
-	AddressLookupTableAccount,
 	Keypair,
 	VersionedTransaction,
 } from '@solana/web3.js';
@@ -59,16 +45,9 @@ import {
 	MeterProvider,
 	View,
 } from '@opentelemetry/sdk-metrics-base';
-import {
-	Meter,
-	ObservableGauge,
-	Counter,
-	BatchObservableResult,
-	Histogram,
-} from '@opentelemetry/api-metrics';
+import { BatchObservableResult } from '@opentelemetry/api-metrics';
 
 import { logger } from '../logger';
-import { Bot } from '../types';
 import { FillerConfig } from '../config';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
@@ -84,21 +63,17 @@ import {
 } from './common/txLogParse';
 import { getErrorCode } from '../error';
 import {
-	decodeName,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
 } from '../utils';
+import { FillerBot } from './filler';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
 const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
-const FILL_ORDER_THROTTLE_BACKOFF = 10000; // the time to wait before trying to fill a throttled (error filling) node again
-const FILL_ORDER_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
-const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
-const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 
 const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
@@ -175,67 +150,12 @@ function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
 	return msg;
 }
 
-export class FillerLiteBot implements Bot {
-	public readonly name: string;
-	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 6000;
-
-	private slotSubscriber: SlotSubscriber;
+export class FillerLiteBot extends FillerBot {
 	private orderSubscriber: OrderSubscriber;
-	private driftClient: DriftClient;
-	private eventSubscriber: EventSubscriber;
-	private pollingIntervalMs: number;
-	private transactionVersion?: number;
-	private revertOnFailure?: boolean;
-	private lookupTableAccount: AddressLookupTableAccount;
-	private jitoSearcherClient?: SearcherClient;
-	private jitoAuthKeypair?: Keypair;
-	private jitoTipAccount?: PublicKey;
-	private jitoLeaderNextSlot?: number;
-	private jitoLeaderNextSlotMutex = new Mutex();
-	private tipPayerKeypair?: Keypair;
-
-	private userStatsMap: UserStatsMap;
-	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
-
-	private periodicTaskMutex = new Mutex();
-
-	private watchdogTimerMutex = new Mutex();
-	private watchdogTimerLastPatTime = Date.now();
-
-	private intervalIds: Array<NodeJS.Timer> = [];
-	private throttledNodes = new Map<string, number>();
-	private fillingNodes = new Map<string, number>();
-	private triggeringNodes = new Map<string, number>();
-
-	private useBurstCULimit = false;
-	private fillTxSinceBurstCU = 0;
-	private fillTxId = 0;
-
-	// metrics
-	private metricsInitialized = false;
-	private metricsPort: number | undefined;
-	private meter: Meter;
-	private exporter: PrometheusExporter;
-	private bootTimeMs: number;
-
-	private runtimeSpecsGauge: ObservableGauge;
-	private runtimeSpec: RuntimeSpec;
-	private sdkCallDurationHistogram: Histogram;
-	private tryFillDurationHistogram: Histogram;
-	private lastTryFillTimeGauge: ObservableGauge;
-	private totalCollateralGauge: ObservableGauge;
-	private unrealizedPnLGauge: ObservableGauge;
-	private mutexBusyCounter: Counter;
-	private attemptedFillsCounter: Counter;
-	private attemptedTriggersCounter: Counter;
-	private successfulFillsCounter: Counter;
-	private observedFillsCountCounter: Counter;
-	private txSimErrorCounter: Counter;
-	private userStatsMapAuthorityKeysGauge: ObservableGauge;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
+		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		eventSubscriber: EventSubscriber,
 		runtimeSpec: RuntimeSpec,
@@ -244,11 +164,18 @@ export class FillerLiteBot implements Bot {
 		jitoAuthKeypair?: Keypair,
 		tipPayerKeypair?: Keypair
 	) {
-		this.name = config.botId;
-		this.dryRun = config.dryRun;
-		this.slotSubscriber = slotSubscriber;
-		this.driftClient = driftClient;
-		this.eventSubscriber = eventSubscriber;
+		super(
+			slotSubscriber,
+			bulkAccountLoader,
+			driftClient,
+			eventSubscriber,
+			runtimeSpec,
+			config,
+			jitoSearcherClient,
+			jitoAuthKeypair,
+			tipPayerKeypair
+		);
+
 		this.userStatsMapSubscriptionConfig = {
 			type: 'polling',
 			accountLoader: new BulkAccountLoader(
@@ -258,69 +185,13 @@ export class FillerLiteBot implements Bot {
 			),
 		};
 
-		this.runtimeSpec = runtimeSpec;
-		this.pollingIntervalMs =
-			config.fillerPollingInterval ?? this.defaultIntervalMs;
-
-		this.metricsPort = config.metricsPort;
-		if (this.metricsPort) {
-			this.initializeMetrics();
-		}
-
-		this.transactionVersion = config.transactionVersion ?? undefined;
-		logger.info(
-			`${this.name}: using transactionVersion: ${this.transactionVersion}`
-		);
-
-		this.revertOnFailure = config.revertOnFailure ?? true;
-		logger.info(`${this.name}: revertOnFailure: ${this.revertOnFailure}`);
-
-		this.jitoSearcherClient = jitoSearcherClient;
-		this.jitoAuthKeypair = jitoAuthKeypair;
-		this.tipPayerKeypair = tipPayerKeypair;
-		const jitoEnabled = this.jitoSearcherClient && this.jitoAuthKeypair;
-		if (jitoEnabled) {
-			this.jitoSearcherClient.getTipAccounts().then(async (tipAccounts) => {
-				this.jitoTipAccount = new PublicKey(
-					tipAccounts[Math.floor(Math.random() * tipAccounts.length)]
-				);
-				logger.info(
-					`${this.name}: jito tip account: ${this.jitoTipAccount.toBase58()}`
-				);
-				this.jitoLeaderNextSlot = (
-					await this.jitoSearcherClient.getNextScheduledLeader()
-				).nextLeaderSlot;
-			});
-
-			this.slotSubscriber.eventEmitter.on('newSlot', async (slot: number) => {
-				if (this.jitoLeaderNextSlot) {
-					if (slot > this.jitoLeaderNextSlot) {
-						try {
-							await tryAcquire(this.jitoLeaderNextSlotMutex).runExclusive(
-								async () => {
-									logger.warn('LEADER REACHEd, GETTING NEXT SLOT');
-									this.jitoLeaderNextSlot = (
-										await this.jitoSearcherClient.getNextScheduledLeader()
-									).nextLeaderSlot;
-								}
-							);
-						} catch (e) {
-							if (e !== E_ALREADY_LOCKED) {
-								throw new Error(e);
-							}
-						}
-					}
-				}
-			});
-		}
-		logger.info(
-			`${this.name}: jito enabled: ${
-				!!this.jitoSearcherClient && !!this.jitoAuthKeypair
-			}`
-		);
+		this.orderSubscriber = new OrderSubscriber({
+			driftClient: this.driftClient,
+			subscriptionConfig: { type: 'websocket', skipInitialLoad: true },
+		});
 	}
 
-	private initializeMetrics() {
+	initializeMetrics() {
 		if (this.metricsInitialized) {
 			logger.error('Tried to initilaize metrics multiple times');
 			return;
@@ -499,10 +370,6 @@ export class FillerLiteBot implements Bot {
 			this.userStatsMapSubscriptionConfig
 		);
 
-		this.orderSubscriber = new OrderSubscriber({
-			driftClient: this.driftClient,
-			subscriptionConfig: { type: 'websocket', skipInitialLoad: true },
-		});
 		await this.orderSubscriber.subscribe();
 		await this.sleep(1200); // Wait a few slots to build up order book
 
@@ -510,18 +377,6 @@ export class FillerLiteBot implements Bot {
 			await this.driftClient.fetchMarketLookupTableAccount();
 
 		await webhookMessage(`[${this.name}]: started`);
-	}
-
-	public async reset() {
-		for (const intervalId of this.intervalIds) {
-			clearInterval(intervalId);
-		}
-		this.intervalIds = [];
-
-		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
-
-		await this.orderSubscriber.unsubscribe();
-		await this.userStatsMap.unsubscribe();
 	}
 
 	public async startIntervalLoop(_intervalMs: number) {
@@ -553,254 +408,22 @@ export class FillerLiteBot implements Bot {
 			}
 		);
 
-		logger.info(`${this.name} Bot started!`);
+		logger.info(`${this.name} Bot started! (websocket: true)`);
 	}
 
-	public async healthCheck(): Promise<boolean> {
-		let healthy = false;
-		await this.watchdogTimerMutex.runExclusive(async () => {
-			healthy =
-				this.watchdogTimerLastPatTime > Date.now() - 5 * this.pollingIntervalMs;
-			if (!healthy) {
-				logger.warn(
-					`watchdog timer last pat time ${this.watchdogTimerLastPatTime} is too old`
-				);
-			}
-		});
+	public async reset() {
+		for (const intervalId of this.intervalIds) {
+			clearInterval(intervalId);
+		}
+		this.intervalIds = [];
 
-		return healthy;
+		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
+
+		await this.orderSubscriber.unsubscribe();
+		await this.userStatsMap.unsubscribe();
 	}
 
-	private getPerpNodesForMarket(
-		market: PerpMarketAccount,
-		dlob: DLOB
-	): {
-		nodesToFill: Array<NodeToFill>;
-		nodesToTrigger: Array<NodeToTrigger>;
-	} {
-		const marketIndex = market.marketIndex;
-
-		const oraclePriceData =
-			this.driftClient.getOracleDataForPerpMarket(marketIndex);
-
-		const vAsk = calculateAskPrice(market, oraclePriceData);
-		const vBid = calculateBidPrice(market, oraclePriceData);
-
-		const fillSlot = oraclePriceData.slot.toNumber();
-
-		return {
-			nodesToFill: dlob.findNodesToFill(
-				marketIndex,
-				vBid,
-				vAsk,
-				fillSlot,
-				Date.now() / 1000,
-				MarketType.PERP,
-				oraclePriceData,
-				this.driftClient.getStateAccount(),
-				this.driftClient.getPerpMarketAccount(marketIndex)
-			),
-			nodesToTrigger: dlob.findNodesToTrigger(
-				marketIndex,
-				fillSlot,
-				oraclePriceData.price,
-				MarketType.PERP,
-				this.driftClient.getStateAccount()
-			),
-		};
-	}
-
-	/**
-	 * Checks if the node is still throttled, if not, clears it from the throttledNodes map
-	 * @param throttleKey key in throttleMap
-	 * @returns  true if throttleKey is still throttled, false if throttleKey is no longer throttled
-	 */
-	private isThrottledNodeStillThrottled(throttleKey: string): boolean {
-		const lastFillAttempt = this.throttledNodes.get(throttleKey);
-		if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
-			return true;
-		} else {
-			this.clearThrottledNode(throttleKey);
-			return false;
-		}
-	}
-
-	private isDLOBNodeThrottled(dlobNode: DLOBNode): boolean {
-		// first check if the userAccount itself is throttled
-		const userAccountPubkey = dlobNode.userAccount.toBase58();
-		if (this.throttledNodes.has(userAccountPubkey)) {
-			if (this.isThrottledNodeStillThrottled(userAccountPubkey)) {
-				return true;
-			} else {
-				return false;
-			}
-		}
-
-		// then check if the specific order is throttled
-		const orderSignature = getFillSignatureFromUserAccountAndOrderId(
-			dlobNode.userAccount.toBase58(),
-			dlobNode.order.orderId.toString()
-		);
-		if (this.throttledNodes.has(orderSignature)) {
-			if (this.isThrottledNodeStillThrottled(orderSignature)) {
-				return true;
-			} else {
-				return false;
-			}
-		}
-
-		return false;
-	}
-
-	private clearThrottledNode(signature: string) {
-		this.throttledNodes.delete(signature);
-	}
-
-	private removeTriggeringNodes(node: NodeToTrigger) {
-		this.triggeringNodes.delete(getNodeToTriggerSignature(node));
-	}
-
-	private pruneThrottledNode() {
-		if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
-			for (const [key, value] of this.throttledNodes.entries()) {
-				if (value + 2 * FILL_ORDER_BACKOFF > Date.now()) {
-					this.throttledNodes.delete(key);
-				}
-			}
-		}
-	}
-
-	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
-		if (nodeToFill.node.isVammNode()) {
-			logger.warn(
-				`filtered out a vAMM node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
-			);
-			return false;
-		}
-
-		if (nodeToFill.node.haveFilled) {
-			logger.warn(
-				`filtered out filled node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
-			);
-			return false;
-		}
-
-		const now = Date.now();
-		const nodeToFillSignature = getNodeToFillSignature(nodeToFill);
-		if (this.fillingNodes.has(nodeToFillSignature)) {
-			const timeStartedToFillNode = this.fillingNodes.get(nodeToFillSignature);
-			if (timeStartedToFillNode + FILL_ORDER_BACKOFF > now) {
-				// still cooling down on this node, filter it out
-				return false;
-			}
-		}
-
-		// check if taker node is throttled
-		if (this.isDLOBNodeThrottled(nodeToFill.node)) {
-			return false;
-		}
-
-		const marketIndex = nodeToFill.node.order.marketIndex;
-		const oraclePriceData =
-			this.driftClient.getOracleDataForPerpMarket(marketIndex);
-
-		if (isOrderExpired(nodeToFill.node.order, Date.now() / 1000)) {
-			if (isOneOfVariant(nodeToFill.node.order.orderType, ['limit'])) {
-				// do not try to fill (expire) limit orders b/c they will auto expire when filled against
-				// or the user places a new order
-				return false;
-			}
-			logger.warn(
-				`order is expired on market ${
-					nodeToFill.node.order.marketIndex
-				} for user ${nodeToFill.node.userAccount}-${
-					nodeToFill.node.order.orderId
-				} (${getVariant(nodeToFill.node.order.orderType)})`
-			);
-			return true;
-		}
-
-		if (
-			nodeToFill.makerNodes.length === 0 &&
-			isVariant(nodeToFill.node.order.marketType, 'perp') &&
-			!isFillableByVAMM(
-				nodeToFill.node.order,
-				this.driftClient.getPerpMarketAccount(
-					nodeToFill.node.order.marketIndex
-				),
-				oraclePriceData,
-				this.slotSubscriber.currentSlot,
-				Date.now() / 1000
-			)
-		) {
-			logger.warn(
-				`filtered out unfillable node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
-			);
-			logger.warn(` . no maker node: ${nodeToFill.makerNodes.length === 0}`);
-			logger.warn(
-				` . is perp: ${isVariant(nodeToFill.node.order.marketType, 'perp')}`
-			);
-			logger.warn(
-				` . is not fillable by vamm: ${!isFillableByVAMM(
-					nodeToFill.node.order,
-					this.driftClient.getPerpMarketAccount(
-						nodeToFill.node.order.marketIndex
-					),
-					oraclePriceData,
-					this.slotSubscriber.currentSlot,
-					Date.now() / 1000
-				)}`
-			);
-			logger.warn(
-				` .     calculateBaseAssetAmountForAmmToFulfill: ${calculateBaseAssetAmountForAmmToFulfill(
-					nodeToFill.node.order,
-					this.driftClient.getPerpMarketAccount(
-						nodeToFill.node.order.marketIndex
-					),
-					oraclePriceData,
-					this.slotSubscriber.currentSlot
-				).toString()}`
-			);
-			return false;
-		}
-
-		// if making with vAMM, ensure valid oracle
-		if (nodeToFill.makerNodes.length === 0) {
-			const oracleIsValid = isOracleValid(
-				this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex)
-					.amm,
-				oraclePriceData,
-				this.driftClient.getStateAccount().oracleGuardRails,
-				this.slotSubscriber.currentSlot
-			);
-			if (!oracleIsValid) {
-				logger.error(`Oracle is not valid for market ${marketIndex}`);
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	private filterTriggerableNodes(nodeToTrigger: NodeToTrigger): boolean {
-		if (nodeToTrigger.node.haveTrigger) {
-			return false;
-		}
-
-		const now = Date.now();
-		const nodeToFillSignature = getNodeToTriggerSignature(nodeToTrigger);
-		const timeStartedToTriggerNode =
-			this.triggeringNodes.get(nodeToFillSignature);
-		if (timeStartedToTriggerNode) {
-			if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
-				false;
-			}
-		}
-
-		return true;
-	}
-
-	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
+	protected async getNodeToFillInfo(nodeToFill: NodeToFill): Promise<{
 		makerInfos: Array<MakerInfo> | undefined;
 		takerUser: UserAccount;
 		referrerInfo: ReferrerInfo;
@@ -859,53 +482,6 @@ export class FillerLiteBot implements Bot {
 	}
 
 	/**
-	 * Returns the number of bytes occupied by this array if it were serialized in compact-u16-format.
-	 * NOTE: assumes each element of the array is 1 byte (not sure if this holds?)
-	 *
-	 * https://docs.solana.com/developing/programming-model/transactions#compact-u16-format
-	 *
-	 * https://stackoverflow.com/a/69951832
-	 *  hex     |  compact-u16
-	 *  --------+------------
-	 *  0x0000  |  [0x00]
-	 *  0x0001  |  [0x01]
-	 *  0x007f  |  [0x7f]
-	 *  0x0080  |  [0x80 0x01]
-	 *  0x3fff  |  [0xff 0x7f]
-	 *  0x4000  |  [0x80 0x80 0x01]
-	 *  0xc000  |  [0x80 0x80 0x03]
-	 *  0xffff  |  [0xff 0xff 0x03])
-	 */
-	private calcCompactU16EncodedSize(array: any[], elemSize = 1): number {
-		if (array.length > 0x3fff) {
-			return 3 + array.length * elemSize;
-		} else if (array.length > 0x7f) {
-			return 2 + array.length * elemSize;
-		} else {
-			return 1 + (array.length * elemSize || 1);
-		}
-	}
-
-	/**
-	 * Instruction are made of 3 parts:
-	 * - index of accounts where programId resides (1 byte)
-	 * - affected accounts    (compact-u16-format byte array)
-	 * - raw instruction data (compact-u16-format byte array)
-	 * @param ix The instruction to calculate size for.
-	 */
-	private calcIxEncodedSize(ix: TransactionInstruction): number {
-		return (
-			1 +
-			this.calcCompactU16EncodedSize(new Array(ix.keys.length), 1) +
-			this.calcCompactU16EncodedSize(new Array(ix.data.byteLength), 1)
-		);
-	}
-
-	private async sleep(ms: number) {
-		return new Promise((resolve) => setTimeout(resolve, ms));
-	}
-
-	/**
 	 * Iterates through a tx's logs and handles it appropriately 3e.g. throttling users, updating metrics, etc.)
 	 *
 	 * @param nodesFilled nodes that we sent a transaction to fill
@@ -913,7 +489,7 @@ export class FillerLiteBot implements Bot {
 	 *
 	 * @returns number of nodes successfully filled
 	 */
-	private async handleTransactionLogs(
+	protected async handleTransactionLogs(
 		nodesFilled: Array<NodeToFill>,
 		logs: string[]
 	): Promise<number> {
@@ -1114,38 +690,7 @@ export class FillerLiteBot implements Bot {
 		return successCount;
 	}
 
-	private async processBulkFillTxLogs(
-		nodesFilled: Array<NodeToFill>,
-		txSig: TransactionSignature
-	): Promise<number> {
-		let tx: TransactionResponse | null = null;
-		let attempts = 0;
-		const config: GetVersionedTransactionConfig = {
-			commitment: 'confirmed',
-			maxSupportedTransactionVersion: 0,
-		};
-		while (tx === null && attempts < 10) {
-			logger.info(`waiting for ${txSig} to be confirmed`);
-			tx = await this.driftClient.connection.getTransaction(txSig, config);
-			attempts++;
-			await this.sleep(1000);
-		}
-
-		if (tx === null) {
-			logger.error(`tx ${txSig} not found`);
-			return 0;
-		}
-
-		return this.handleTransactionLogs(nodesFilled, tx.meta.logMessages);
-	}
-
-	private removeFillingNodes(nodes: Array<NodeToFill>) {
-		for (const node of nodes) {
-			this.fillingNodes.delete(getNodeToFillSignature(node));
-		}
-	}
-
-	private async sendFillTx(
+	protected async sendFillTx(
 		fillTxId: number,
 		nodesSent: Array<NodeToFill>,
 		ixs: Array<TransactionInstruction>
@@ -1329,7 +874,7 @@ export class FillerLiteBot implements Bot {
 	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
 	 * @param node node with multiple makers
 	 */
-	private async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
+	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
 		const ixs: Array<TransactionInstruction> = [];
 		const fillTxId = this.fillTxId++;
 		logger.info(
@@ -1348,7 +893,7 @@ export class FillerLiteBot implements Bot {
 			ixs.push(computeBudgetIx);
 
 			const { makerInfos, takerUser, referrerInfo, marketType } =
-				await this.getNodeFillInfo(nodeToFill);
+				await this.getNodeToFillInfo(nodeToFill);
 
 			if (!isVariant(marketType, 'perp')) {
 				throw new Error('expected perp market type');
@@ -1383,9 +928,7 @@ export class FillerLiteBot implements Bot {
 		}
 	}
 
-	private async tryBulkFillPerpNodes(
-		nodesToFill: Array<NodeToFill>
-	): Promise<number> {
+	async tryBulkFillPerpNodes(nodesToFill: Array<NodeToFill>): Promise<number> {
 		const ixs: Array<TransactionInstruction> = [];
 
 		/**
@@ -1448,7 +991,7 @@ export class FillerLiteBot implements Bot {
 			);
 
 			const { makerInfos, takerUser, referrerInfo, marketType } =
-				await this.getNodeFillInfo(nodeToFill);
+				await this.getNodeToFillInfo(nodeToFill);
 
 			if (!isVariant(marketType, 'perp')) {
 				throw new Error('expected perp market type');
@@ -1547,7 +1090,7 @@ export class FillerLiteBot implements Bot {
 		return nodesSent.length;
 	}
 
-	private filterPerpNodesForMarket(
+	protected filterPerpNodesForMarket(
 		fillableNodes: Array<NodeToFill>,
 		triggerableNodes: Array<NodeToTrigger>
 	): {
@@ -1580,29 +1123,7 @@ export class FillerLiteBot implements Bot {
 		};
 	}
 
-	private async executeFillablePerpNodesForMarket(
-		fillableNodes: Array<NodeToFill>
-	) {
-		let filledNodeCount = 0;
-		while (filledNodeCount < fillableNodes.length) {
-			const attemptedFills = await this.tryBulkFillPerpNodes(
-				fillableNodes.slice(filledNodeCount)
-			);
-			filledNodeCount += attemptedFills;
-
-			// record fill attempts
-			const user = this.driftClient.getUser();
-			this.attemptedFillsCounter.add(
-				attemptedFills,
-				metricAttrFromUserAccount(
-					user.userAccountPublicKey,
-					user.getUserAccount()
-				)
-			);
-		}
-	}
-
-	private async executeTriggerablePerpNodesForMarket(
+	protected async executeTriggerablePerpNodesForMarket(
 		triggerableNodes: Array<NodeToTrigger>
 	) {
 		for (const nodeToTrigger of triggerableNodes) {
@@ -1666,7 +1187,7 @@ export class FillerLiteBot implements Bot {
 		);
 	}
 
-	private async tryFill() {
+	protected async tryFill() {
 		const startTime = Date.now();
 		let ran = false;
 		try {
