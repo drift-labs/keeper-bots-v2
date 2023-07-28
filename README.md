@@ -22,7 +22,7 @@ This repo has two main branches:
 
 ### yaml Config file:
 
-A `.yaml` file can be used to configure the bot setup now. See `config.example.yaml` for a commented example.
+A `.yaml` file can be used to configure the bot setup now. See `example.config.yaml` for a commented example.
 
 Then you can run the bot by loading the config file:
 ```shell
