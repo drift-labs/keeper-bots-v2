@@ -91,8 +91,9 @@ By default, some [Prometheus](https://prometheus.io/) metrics are exposed on `lo
 
 ## Filler Bot
 
-Include `filler` and/or `spotFiller` under `.enabledBots` in `config.yaml`
-
+Include `filler` and/or `spotFiller` under `.enabledBots` in `config.yaml`. For a lightweight version
+of a filler bot for perp markets, include `fillerLite` rather than `filler` in `config.yaml`. The lighter 
+version of the filler can be run on public RPCs for testing, but is not as stable.
 
 Read the docs: https://docs.drift.trade/keepers-and-decentralised-orderbook
 
