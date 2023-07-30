@@ -69,7 +69,7 @@ program
 		'calls driftClient.initializeUserAccount if no user account exists'
 	)
 	.option('--filler', 'Enable filler bot')
-	.option('--fillerLite', 'Enable filler lite bot')
+	.option('--filler-lite', 'Enable filler lite bot')
 	.option('--spot-filler', 'Enable spot filler bot')
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
@@ -245,8 +245,6 @@ const runBot = async () => {
 		};
 	}
 
-	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
-		getMarketsAndOraclesForSubscription(config.global.driftEnv);
 	const opts = {
 		commitment: stateCommitment,
 		skipPreflight: false,
@@ -257,6 +255,12 @@ const runBot = async () => {
 		wallet,
 		opts,
 	});
+
+	let perpMarketIndexes, spotMarketIndexes, oracleInfos;
+	if (configHasBot(config, 'fillerLite')) {
+		({ perpMarketIndexes, spotMarketIndexes, oracleInfos } =
+			getMarketsAndOraclesForSubscription(config.global.driftEnv));
+	}
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
@@ -313,11 +317,14 @@ const runBot = async () => {
 	}
 	const driftUser = driftClient.getUser();
 	const driftUserStats = driftClient.getUserStats();
-	await waitForAllSubscribesToFinish([
-		driftUser.subscribe(),
-		driftUserStats.subscribe(),
-		eventSubscriber.subscribe(),
-	]);
+	const subscribePromises = configHasBot(config, 'fillerLite')
+		? [driftUser.subscribe(), driftUserStats.subscribe()]
+		: [
+				driftUser.subscribe(),
+				driftUserStats.subscribe(),
+				eventSubscriber.subscribe(),
+		  ];
+	await waitForAllSubscribesToFinish(subscribePromises);
 
 	// await driftClient.subscribe();
 	driftClient.eventEmitter.on('error', (e) => {
@@ -484,9 +491,7 @@ const runBot = async () => {
 		bots.push(
 			new FillerLiteBot(
 				slotSubscriber,
-				undefined,
 				driftClient,
-				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,

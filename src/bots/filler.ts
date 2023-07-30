@@ -1,5 +1,4 @@
 import {
-	User,
 	ReferrerInfo,
 	isOracleValid,
 	DriftClient,
@@ -32,6 +31,8 @@ import {
 	EventSubscriber,
 	OrderActionRecord,
 	NodeToTrigger,
+	UserAccount,
+	getUserAccountPublicKey,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -610,6 +611,14 @@ export class FillerBot implements Bot {
 		return healthy;
 	}
 
+	protected async getUserAccountFromMap(key: string): Promise<UserAccount> {
+		return (await this.userMap.mustGet(key)).getUserAccount();
+	}
+
+	protected async getDLOB(): Promise<DLOB> {
+		return this.dlobSubscriber.getDLOB();
+	}
+
 	protected getPerpNodesForMarket(
 		market: PerpMarketAccount,
 		dlob: DLOB
@@ -841,7 +850,7 @@ export class FillerBot implements Bot {
 
 	protected async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
 		makerInfos: Array<MakerInfo> | undefined;
-		takerUser: User;
+		takerUser: UserAccount;
 		referrerInfo: ReferrerInfo;
 		marketType: MarketType;
 	}> {
@@ -860,9 +869,7 @@ export class FillerBot implements Bot {
 					continue;
 				}
 
-				const makerUserAccount = (
-					await this.userMap.mustGet(makerAccount)
-				).getUserAccount();
+				const makerUserAccount = await this.getUserAccountFromMap(makerAccount);
 				const makerAuthority = makerUserAccount.authority;
 				const makerUserStats = (
 					await this.userStatsMap.mustGet(makerAuthority.toString())
@@ -877,18 +884,16 @@ export class FillerBot implements Bot {
 			}
 		}
 
-		const takerUser = await this.userMap.mustGet(
+		const takerUserAcct = await this.getUserAccountFromMap(
 			nodeToFill.node.userAccount.toString()
 		);
 		const referrerInfo = (
-			await this.userStatsMap.mustGet(
-				takerUser.getUserAccount().authority.toString()
-			)
+			await this.userStatsMap.mustGet(takerUserAcct.authority.toString())
 		).getReferrerInfo();
 
 		return Promise.resolve({
 			makerInfos,
-			takerUser,
+			takerUser: takerUserAcct,
 			referrerInfo,
 			marketType: nodeToFill.node.order.marketType,
 		});
@@ -1039,9 +1044,7 @@ export class FillerBot implements Bot {
 				tx.add(
 					await this.driftClient.getForceCancelOrdersIx(
 						new PublicKey(makerBreachedMaintenanceMargin),
-						(
-							await this.userMap.mustGet(makerBreachedMaintenanceMargin)
-						).getUserAccount()
+						await this.getUserAccountFromMap(makerBreachedMaintenanceMargin)
 					)
 				);
 				this.driftClient.txSender
@@ -1088,9 +1091,9 @@ export class FillerBot implements Bot {
 				tx.add(
 					await this.driftClient.getForceCancelOrdersIx(
 						filledNode.node.userAccount,
-						(
-							await this.userMap.mustGet(filledNode.node.userAccount.toString())
-						).getUserAccount()
+						await this.getUserAccountFromMap(
+							filledNode.node.userAccount.toString()
+						)
 					)
 				);
 
@@ -1393,8 +1396,12 @@ export class FillerBot implements Bot {
 
 			ixs.push(
 				await this.driftClient.getFillPerpOrderIx(
-					takerUser.getUserAccountPublicKey(),
-					takerUser.getUserAccount(),
+					await getUserAccountPublicKey(
+						this.driftClient.program.programId,
+						takerUser.authority,
+						takerUser.subAccountId
+					),
+					takerUser,
 					nodeToFill.node.order,
 					makerInfos,
 					referrerInfo
@@ -1489,8 +1496,12 @@ export class FillerBot implements Bot {
 			}
 
 			const ix = await this.driftClient.getFillPerpOrderIx(
-				takerUser.getUserAccountPublicKey(),
-				takerUser.getUserAccount(),
+				await getUserAccountPublicKey(
+					this.driftClient.program.programId,
+					takerUser.authority,
+					takerUser.subAccountId
+				),
+				takerUser,
 				nodeToFill.node.order,
 				makerInfos,
 				referrerInfo
@@ -1537,9 +1548,13 @@ export class FillerBot implements Bot {
 
 			// add to tx
 			logger.info(
-				`including taker ${takerUser
-					.getUserAccountPublicKey()
-					.toString()}-${nodeToFill.node.order.orderId.toString()} (fillTxId: ${fillTxId})`
+				`including taker ${(
+					await getUserAccountPublicKey(
+						this.driftClient.program.programId,
+						takerUser.authority,
+						takerUser.subAccountId
+					)
+				).toString()}-${nodeToFill.node.order.orderId.toString()} (fillTxId: ${fillTxId})`
 			);
 			ixs.push(ix);
 			runningTxSize += newIxCost + additionalAccountsCost;
@@ -1638,7 +1653,7 @@ export class FillerBot implements Bot {
 			logger.info(
 				`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) order ${nodeToTrigger.node.order.orderId.toString()}`
 			);
-			const user = await this.userMap.mustGet(
+			const user = await this.getUserAccountFromMap(
 				nodeToTrigger.node.userAccount.toString()
 			);
 
@@ -1648,7 +1663,7 @@ export class FillerBot implements Bot {
 			this.driftClient
 				.triggerOrder(
 					nodeToTrigger.node.userAccount,
-					user.getUserAccount(),
+					user,
 					nodeToTrigger.node.order
 				)
 				.then((txSig) => {
@@ -1698,7 +1713,7 @@ export class FillerBot implements Bot {
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				const dlob = this.dlobSubscriber.getDLOB();
+				const dlob = await this.getDLOB();
 
 				this.pruneThrottledNode();
 
