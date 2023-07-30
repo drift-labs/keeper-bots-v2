@@ -316,14 +316,9 @@ const runBot = async () => {
 		await sleepMs(1000);
 	}
 	const driftUser = driftClient.getUser();
-	const driftUserStats = driftClient.getUserStats();
 	const subscribePromises = configHasBot(config, 'fillerLite')
-		? [driftUser.subscribe(), driftUserStats.subscribe()]
-		: [
-				driftUser.subscribe(),
-				driftUserStats.subscribe(),
-				eventSubscriber.subscribe(),
-		  ];
+		? [driftUser.subscribe()]
+		: [driftUser.subscribe(), eventSubscriber.subscribe()];
 	await waitForAllSubscribesToFinish(subscribePromises);
 
 	// await driftClient.subscribe();

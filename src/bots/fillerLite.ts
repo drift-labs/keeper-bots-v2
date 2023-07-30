@@ -92,7 +92,6 @@ export class FillerLiteBot extends FillerBot {
 		this.intervalIds = [];
 
 		await this.orderSubscriber.unsubscribe();
-		await this.userStatsMap.unsubscribe();
 	}
 
 	protected async getUserAccountFromMap(key: string): Promise<UserAccount> {
