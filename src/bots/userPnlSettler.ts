@@ -17,6 +17,7 @@ import {
 	isOracleValid,
 	isVariant,
 	TxSigAndSlot,
+	timeRemainingUntilUpdate,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -166,6 +167,7 @@ export class UserPnlSettlerBot implements Bot {
 			}
 
 			const usersToSettle: SettlePnlIxParams[] = [];
+			const nowTs = await this.driftClient.connection.getBlockTime(slot);
 
 			for (const user of this.userMap.values()) {
 				const userAccount = user.getUserAccount();
@@ -173,15 +175,26 @@ export class UserPnlSettlerBot implements Bot {
 					userAccount.spotPositions[0].balanceType,
 					'borrow'
 				);
-				for (const settleePosition of userAccount.perpPositions) {
+				console.log(user.userAccountPublicKey.toString());
+				for (const settleePosition of user.getActivePerpPositions()) {
 					if (
 						settleePosition.quoteAssetAmount.eq(ZERO) &&
-						settleePosition.baseAssetAmount.eq(ZERO)
+						settleePosition.baseAssetAmount.eq(ZERO) &&
+						settleePosition.lpShares.eq(ZERO)
 					) {
 						continue;
 					}
 
 					const perpMarketIdx = settleePosition.marketIndex;
+
+					let settleePositionWithLp = settleePosition;
+
+					if (!settleePosition.lpShares.eq(ZERO)) {
+						settleePositionWithLp = user.getPerpPositionWithLPSettle(
+							perpMarketIdx,
+							settleePosition
+						)[0];
+					}
 					const spotMarketIdx = 0;
 
 					const oracleValid = validOracleMarketMap.get(perpMarketIdx);
@@ -198,16 +211,33 @@ export class UserPnlSettlerBot implements Bot {
 					const unsettledPnl = calculateClaimablePnl(
 						perpMarketAndOracleData[perpMarketIdx].marketAccount,
 						spotMarketAndOracleData[spotMarketIdx].marketAccount, // always liquidating the USDC spot market
-						settleePosition,
+						settleePositionWithLp,
 						perpMarketAndOracleData[perpMarketIdx].oraclePriceData
 					);
+
+					const shouldSettleLp =
+						settleePosition.lpShares.gt(ZERO) &&
+						timeRemainingUntilUpdate(
+							new BN(nowTs),
+							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
+								.lastFundingRateTs,
+							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
+								.fundingPeriod
+						).ltn(120);
+
+					console.log('shouldSettleLp:', shouldSettleLp);
 
 					// only settle for $10 or more negative pnl
 					if (
 						unsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
-						!settleePosition.baseAssetAmount.eq(ZERO) &&
-						!isUsdcBorrow
+						!settleePositionWithLp.baseAssetAmount.eq(ZERO) &&
+						!isUsdcBorrow &&
+						settleePositionWithLp.lpShares.eq(ZERO)
 					) {
+						continue;
+					}
+
+					if (settleePositionWithLp.lpShares.gt(ZERO) && !shouldSettleLp) {
 						continue;
 					}
 
