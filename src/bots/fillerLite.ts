@@ -5,9 +5,10 @@ import {
 	SlotSubscriber,
 	OrderSubscriber,
 	UserAccount,
+	User,
 } from '@drift-labs/sdk';
 
-import { Keypair } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
 
 import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
 
@@ -95,7 +96,25 @@ export class FillerLiteBot extends FillerBot {
 	}
 
 	protected async getUserAccountFromMap(key: string): Promise<UserAccount> {
-		return this.orderSubscriber.usersAccounts.get(key).userAccount;
+		if (!this.orderSubscriber.usersAccounts.has(key)) {
+			const user = new User({
+				driftClient: this.driftClient,
+				userAccountPublicKey: new PublicKey(key),
+				accountSubscription: {
+					type: 'polling',
+					accountLoader: new BulkAccountLoader(
+						this.driftClient.connection,
+						'processed',
+						0
+					),
+				},
+			});
+			await user.subscribe();
+			const userAccount = user.getUserAccount();
+			return userAccount;
+		} else {
+			return this.orderSubscriber.usersAccounts.get(key).userAccount;
+		}
 	}
 
 	protected async getDLOB() {

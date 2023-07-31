@@ -73,7 +73,7 @@ botConfigs:
   fillerLite:
     botId: "fillerLite"
     dryRun: false
-    fillerPollingInterval: 2000
+    fillerPollingInterval: 500
     metricsPort: 9464
 
     # disable for jito transactions
