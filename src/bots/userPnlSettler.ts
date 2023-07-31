@@ -175,7 +175,6 @@ export class UserPnlSettlerBot implements Bot {
 					userAccount.spotPositions[0].balanceType,
 					'borrow'
 				);
-				console.log(user.userAccountPublicKey.toString());
 				for (const settleePosition of user.getActivePerpPositions()) {
 					if (
 						settleePosition.quoteAssetAmount.eq(ZERO) &&
@@ -224,8 +223,6 @@ export class UserPnlSettlerBot implements Bot {
 							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
 								.fundingPeriod
 						).ltn(120);
-
-					console.log('shouldSettleLp:', shouldSettleLp);
 
 					// only settle for $10 or more negative pnl
 					if (
