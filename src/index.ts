@@ -51,6 +51,7 @@ import {
 	loadConfigFromOpts,
 } from './config';
 import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
+import { MarketBidAskTwapCrank } from './bots/marketBidAskTwapCrank';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -76,6 +77,8 @@ program
 	)
 	.option('--funding-rate-updater', 'Enable Funding Rate updater bot')
 	.option('--user-pnl-settler', 'Enable User PnL settler bot')
+	.option('--mark-twap-crank', 'Enable bid/ask twap crank bot')
+
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option('--close-open-positions', 'close all open positions')
 	.option('--test-liveness', 'Purposefully fail liveness test after 1 minute')
@@ -504,6 +507,17 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				config.botConfigs!.trigger!
+			)
+		);
+	}
+
+	if (configHasBot(config, 'markTwapCrank')) {
+		bots.push(
+			new MarketBidAskTwapCrank(
+				driftClient,
+				slotSubscriber,
+				config.global.driftEnv,
+				config.botConfigs!.markTwapCrank!
 			)
 		);
 	}
