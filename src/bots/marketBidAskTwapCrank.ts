@@ -3,11 +3,11 @@ import {
 	DriftClient,
 	DriftEnv,
 	UserMap,
-	DLOBOrdersCoder,
 	SlotSubscriber,
 	MarketType,
 	PositionDirection,
 	getUserStatsAccountPublicKey,
+	promiseTimeout,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -15,56 +15,39 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { BaseBotConfig } from '../config';
 import {
-	Connection,
 	TransactionSignature,
+	VersionedTransaction,
 	AddressLookupTableAccount,
 } from '@solana/web3.js';
+import { ConfirmOptions, Signer } from '@solana/web3.js';
 
-export async function printTxLogs(
-	connection: Connection,
-	txSig: TransactionSignature
-): Promise<void> {
-	console.log(
-		'tx logs',
-		(await connection.getTransaction(txSig, { commitment: 'confirmed' })).meta
-			.logMessages
-	);
-}
+export async function sendVersionedTransaction(
+	driftClient: DriftClient,
+	tx: VersionedTransaction,
+	additionalSigners?: Array<Signer>,
+	opts?: ConfirmOptions,
+	timeoutMs = 5000
+): Promise<TransactionSignature | null> {
+	// @ts-ignore
+	tx.sign((additionalSigners ?? []).concat(driftClient.provider.wallet.payer));
 
-export function driftEnvToDlobServerUrl(driftEnv: DriftEnv) {
-	switch (driftEnv) {
-		case 'devnet':
-			return 'https://master.dlob.drift.trade/orders/idlWithSlot';
-		case 'mainnet-beta':
-			return 'https://dlob.drift.trade/orders/idlWithSlot';
+	if (opts === undefined) {
+		opts = driftClient.provider.opts;
 	}
-}
 
-export async function loadDlob(
-	driftEnv: DriftEnv,
-	currentDlob: DLOB,
-	currentDlobSlot: number
-): Promise<[DLOB, number]> {
-	const dlobServerUrl = driftEnvToDlobServerUrl(driftEnv);
-	const resp = await fetch(dlobServerUrl);
-	if (resp.status !== 200) {
-		logger.error(
-			`Failed to fetch DLOB IDL with slot from ${dlobServerUrl}: ${resp.statusText}`
+	const rawTransaction = tx.serialize();
+	let txid: TransactionSignature;
+	try {
+		txid = await promiseTimeout(
+			driftClient.provider.connection.sendRawTransaction(rawTransaction, opts),
+			timeoutMs
 		);
-		return [currentDlob, currentDlobSlot];
+	} catch (e) {
+		console.error(e);
+		throw e;
 	}
 
-	const dlob = new DLOB();
-	const dlobCoder = DLOBOrdersCoder.create();
-	const respBody = await resp.json();
-	const dlobOrdersBuffer = Buffer.from(respBody['data'], 'base64');
-	const dlobOrders = dlobCoder.decode(Buffer.from(dlobOrdersBuffer));
-	if (!dlob.initFromOrders(dlobOrders, currentDlobSlot)) {
-		logger.error(`Failed to initialize DLOB from orders`);
-		return [currentDlob, currentDlobSlot];
-	}
-
-	return [dlob, respBody['slot']];
+	return txid;
 }
 
 export class MarketBidAskTwapCrank implements Bot {
@@ -146,13 +129,10 @@ export class MarketBidAskTwapCrank implements Bot {
 		return healthy;
 	}
 
-	private async initDlob() {
+	private async initDlob2() {
 		try {
-			[this.dlob, this.latestDlobSlot] = await loadDlob(
-				this.driftEnv,
-				this.dlob,
-				this.latestDlobSlot
-			);
+			this.latestDlobSlot = this.slotSubscriber.currentSlot;
+			this.dlob = await this.userMap.getDLOB(this.slotSubscriber.currentSlot);
 			this.lastDlobRefreshTime = Date.now();
 		} catch (e) {
 			logger.error(`Error loading dlob: ${e}`);
@@ -187,49 +167,78 @@ export class MarketBidAskTwapCrank implements Bot {
 
 	private async tryTwapCrank() {
 		await this.init();
-		await this.initDlob();
+		await this.initDlob2();
 
-		const mi = 7;
+		const ixs = [];
 
-		const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
+		const crankMarkets = [0, 1, 2, 5, 8];
+		for (let i = 0; i < crankMarkets.length; i++) {
+			const mi = crankMarkets[i];
 
-		const bidMakers = this.dlob.getBestMakers({
-			marketIndex: mi,
-			marketType: MarketType.PERP,
-			direction: PositionDirection.LONG,
-			slot: this.latestDlobSlot,
-			oraclePriceData,
-			numMakers: 5,
-		});
+			const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
 
-		const askMakers = this.dlob.getBestMakers({
-			marketIndex: mi,
-			marketType: MarketType.PERP,
-			direction: PositionDirection.LONG,
-			slot: this.latestDlobSlot,
-			oraclePriceData,
-			numMakers: 5,
-		});
-		console.log(
-			'loaded makers... bid/ask length:',
-			bidMakers.length,
-			askMakers.length
+			const bidMakers = this.dlob.getBestMakers({
+				marketIndex: mi,
+				marketType: MarketType.PERP,
+				direction: PositionDirection.LONG,
+				slot: this.latestDlobSlot,
+				oraclePriceData,
+				numMakers: 5,
+			});
+
+			const askMakers = this.dlob.getBestMakers({
+				marketIndex: mi,
+				marketType: MarketType.PERP,
+				direction: PositionDirection.LONG,
+				slot: this.latestDlobSlot,
+				oraclePriceData,
+				numMakers: 5,
+			});
+			console.log(
+				'loaded makers... bid/ask length:',
+				bidMakers.length,
+				askMakers.length
+			);
+
+			const concatenatedList = [
+				...this.getCombinedList(bidMakers),
+				...this.getCombinedList(askMakers),
+			];
+
+			// console.log(concatenatedList);
+			// console.log(concatenatedList[0]);
+			const ix = await this.driftClient.getUpdatePerpBidAskTwapIx(
+				mi,
+				concatenatedList
+			);
+
+			ixs.push(ix);
+		}
+
+		const chunkedTx = await promiseTimeout(
+			this.driftClient.txSender.getVersionedTransaction(
+				ixs,
+				[this.lookupTableAccount],
+				[],
+				this.driftClient.opts
+			),
+			1000
+		);
+		if (chunkedTx === null) {
+			logger.error(`Timed out getting versioned Transaction for tx chunk`);
+			return;
+		}
+
+		const txSig = await sendVersionedTransaction(
+			this.driftClient,
+			chunkedTx,
+			[],
+			// {}, // { skipPreflight: true },
+			this.driftClient.opts,
+			1000
 		);
 
-		const concatenatedList = [
-			...this.getCombinedList(bidMakers),
-			...this.getCombinedList(askMakers),
-		];
-
-		// console.log(concatenatedList);
-		// console.log(concatenatedList[0]);
-
-		const txSig = await this.driftClient.updatePerpBidAskTwap(
-			mi,
-			concatenatedList
-		);
-		console.log(txSig);
-
-		await printTxLogs(this.driftClient.connection, txSig);
+		console.log('txSig:', txSig);
+		console.log(`https://solscan.io/tx/${txSig}`);
 	}
 }
