@@ -129,7 +129,7 @@ export class MarketBidAskTwapCrank implements Bot {
 		return healthy;
 	}
 
-	private async initDlob2() {
+	private async initDlob() {
 		try {
 			this.latestDlobSlot = this.slotSubscriber.currentSlot;
 			this.dlob = await this.userMap.getDLOB(this.slotSubscriber.currentSlot);
@@ -167,7 +167,7 @@ export class MarketBidAskTwapCrank implements Bot {
 
 	private async tryTwapCrank() {
 		await this.init();
-		await this.initDlob2();
+		await this.initDlob();
 
 		const ixs = [];
 
