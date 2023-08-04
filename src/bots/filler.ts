@@ -1,5 +1,4 @@
 import {
-	User,
 	ReferrerInfo,
 	isOracleValid,
 	DriftClient,
@@ -32,6 +31,8 @@ import {
 	EventSubscriber,
 	OrderActionRecord,
 	NodeToTrigger,
+	UserAccount,
+	getUserAccountPublicKey,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -180,63 +181,63 @@ export class FillerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 6000;
 
-	private slotSubscriber: SlotSubscriber;
+	protected slotSubscriber: SlotSubscriber;
 	private bulkAccountLoader: BulkAccountLoader | undefined;
-	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
-	private driftClient: DriftClient;
-	private eventSubscriber: EventSubscriber;
-	private pollingIntervalMs: number;
-	private transactionVersion?: number;
-	private revertOnFailure?: boolean;
-	private lookupTableAccount: AddressLookupTableAccount;
-	private jitoSearcherClient?: SearcherClient;
-	private jitoAuthKeypair?: Keypair;
-	private jitoTipAccount?: PublicKey;
-	private jitoLeaderNextSlot?: number;
-	private jitoLeaderNextSlotMutex = new Mutex();
-	private tipPayerKeypair?: Keypair;
+	protected userStatsMapSubscriptionConfig: UserSubscriptionConfig;
+	protected driftClient: DriftClient;
+	protected eventSubscriber: EventSubscriber;
+	protected pollingIntervalMs: number;
+	protected transactionVersion?: number;
+	protected revertOnFailure?: boolean;
+	protected lookupTableAccount: AddressLookupTableAccount;
+	protected jitoSearcherClient?: SearcherClient;
+	protected jitoAuthKeypair?: Keypair;
+	protected jitoTipAccount?: PublicKey;
+	protected jitoLeaderNextSlot?: number;
+	protected jitoLeaderNextSlotMutex = new Mutex();
+	protected tipPayerKeypair?: Keypair;
 
 	private dlobSubscriber: DLOBSubscriber;
 
 	private userMap: UserMap;
-	private userStatsMap: UserStatsMap;
+	protected userStatsMap: UserStatsMap;
 
-	private periodicTaskMutex = new Mutex();
+	protected periodicTaskMutex = new Mutex();
 
-	private watchdogTimerMutex = new Mutex();
-	private watchdogTimerLastPatTime = Date.now();
+	protected watchdogTimerMutex = new Mutex();
+	protected watchdogTimerLastPatTime = Date.now();
 
-	private intervalIds: Array<NodeJS.Timer> = [];
-	private throttledNodes = new Map<string, number>();
-	private fillingNodes = new Map<string, number>();
-	private triggeringNodes = new Map<string, number>();
+	protected intervalIds: Array<NodeJS.Timer> = [];
+	protected throttledNodes = new Map<string, number>();
+	protected fillingNodes = new Map<string, number>();
+	protected triggeringNodes = new Map<string, number>();
 
-	private useBurstCULimit = false;
-	private fillTxSinceBurstCU = 0;
-	private fillTxId = 0;
+	protected useBurstCULimit = false;
+	protected fillTxSinceBurstCU = 0;
+	protected fillTxId = 0;
 
 	// metrics
-	private metricsInitialized = false;
-	private metricsPort: number | undefined;
-	private meter: Meter;
-	private exporter: PrometheusExporter;
-	private bootTimeMs: number;
+	protected metricsInitialized = false;
+	protected metricsPort: number | undefined;
+	protected meter: Meter;
+	protected exporter: PrometheusExporter;
+	protected bootTimeMs: number;
 
-	private runtimeSpecsGauge: ObservableGauge;
-	private runtimeSpec: RuntimeSpec;
-	private sdkCallDurationHistogram: Histogram;
-	private tryFillDurationHistogram: Histogram;
-	private lastTryFillTimeGauge: ObservableGauge;
-	private totalCollateralGauge: ObservableGauge;
-	private unrealizedPnLGauge: ObservableGauge;
-	private mutexBusyCounter: Counter;
-	private attemptedFillsCounter: Counter;
-	private attemptedTriggersCounter: Counter;
-	private successfulFillsCounter: Counter;
-	private observedFillsCountCounter: Counter;
-	private txSimErrorCounter: Counter;
-	private userMapUserAccountKeysGauge: ObservableGauge;
-	private userStatsMapAuthorityKeysGauge: ObservableGauge;
+	protected runtimeSpecsGauge: ObservableGauge;
+	protected runtimeSpec: RuntimeSpec;
+	protected sdkCallDurationHistogram: Histogram;
+	protected tryFillDurationHistogram: Histogram;
+	protected lastTryFillTimeGauge: ObservableGauge;
+	protected totalCollateralGauge: ObservableGauge;
+	protected unrealizedPnLGauge: ObservableGauge;
+	protected mutexBusyCounter: Counter;
+	protected attemptedFillsCounter: Counter;
+	protected attemptedTriggersCounter: Counter;
+	protected successfulFillsCounter: Counter;
+	protected observedFillsCountCounter: Counter;
+	protected txSimErrorCounter: Counter;
+	protected userMapUserAccountKeysGauge: ObservableGauge;
+	protected userStatsMapAuthorityKeysGauge: ObservableGauge;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -330,7 +331,7 @@ export class FillerBot implements Bot {
 		);
 	}
 
-	private initializeMetrics() {
+	protected initializeMetrics() {
 		if (this.metricsInitialized) {
 			logger.error('Tried to initilaize metrics multiple times');
 			return;
@@ -610,7 +611,15 @@ export class FillerBot implements Bot {
 		return healthy;
 	}
 
-	private getPerpNodesForMarket(
+	protected async getUserAccountFromMap(key: string): Promise<UserAccount> {
+		return (await this.userMap.mustGet(key)).getUserAccount();
+	}
+
+	protected async getDLOB(): Promise<DLOB> {
+		return this.dlobSubscriber.getDLOB();
+	}
+
+	protected getPerpNodesForMarket(
 		market: PerpMarketAccount,
 		dlob: DLOB
 	): {
@@ -654,7 +663,7 @@ export class FillerBot implements Bot {
 	 * @param throttleKey key in throttleMap
 	 * @returns  true if throttleKey is still throttled, false if throttleKey is no longer throttled
 	 */
-	private isThrottledNodeStillThrottled(throttleKey: string): boolean {
+	protected isThrottledNodeStillThrottled(throttleKey: string): boolean {
 		const lastFillAttempt = this.throttledNodes.get(throttleKey);
 		if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
 			return true;
@@ -664,7 +673,7 @@ export class FillerBot implements Bot {
 		}
 	}
 
-	private isDLOBNodeThrottled(dlobNode: DLOBNode): boolean {
+	protected isDLOBNodeThrottled(dlobNode: DLOBNode): boolean {
 		// first check if the userAccount itself is throttled
 		const userAccountPubkey = dlobNode.userAccount.toBase58();
 		if (this.throttledNodes.has(userAccountPubkey)) {
@@ -691,15 +700,15 @@ export class FillerBot implements Bot {
 		return false;
 	}
 
-	private clearThrottledNode(signature: string) {
+	protected clearThrottledNode(signature: string) {
 		this.throttledNodes.delete(signature);
 	}
 
-	private removeTriggeringNodes(node: NodeToTrigger) {
+	protected removeTriggeringNodes(node: NodeToTrigger) {
 		this.triggeringNodes.delete(getNodeToTriggerSignature(node));
 	}
 
-	private pruneThrottledNode() {
+	protected pruneThrottledNode() {
 		if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
 			for (const [key, value] of this.throttledNodes.entries()) {
 				if (value + 2 * FILL_ORDER_BACKOFF > Date.now()) {
@@ -709,7 +718,7 @@ export class FillerBot implements Bot {
 		}
 	}
 
-	private filterFillableNodes(nodeToFill: NodeToFill): boolean {
+	protected filterFillableNodes(nodeToFill: NodeToFill): boolean {
 		if (nodeToFill.node.isVammNode()) {
 			logger.warn(
 				`filtered out a vAMM node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
@@ -821,7 +830,7 @@ export class FillerBot implements Bot {
 		return true;
 	}
 
-	private filterTriggerableNodes(nodeToTrigger: NodeToTrigger): boolean {
+	protected filterTriggerableNodes(nodeToTrigger: NodeToTrigger): boolean {
 		if (nodeToTrigger.node.haveTrigger) {
 			return false;
 		}
@@ -839,9 +848,9 @@ export class FillerBot implements Bot {
 		return true;
 	}
 
-	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
+	protected async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
 		makerInfos: Array<MakerInfo> | undefined;
-		takerUser: User;
+		takerUser: UserAccount;
 		referrerInfo: ReferrerInfo;
 		marketType: MarketType;
 	}> {
@@ -860,9 +869,7 @@ export class FillerBot implements Bot {
 					continue;
 				}
 
-				const makerUserAccount = (
-					await this.userMap.mustGet(makerAccount)
-				).getUserAccount();
+				const makerUserAccount = await this.getUserAccountFromMap(makerAccount);
 				const makerAuthority = makerUserAccount.authority;
 				const makerUserStats = (
 					await this.userStatsMap.mustGet(makerAuthority.toString())
@@ -877,18 +884,16 @@ export class FillerBot implements Bot {
 			}
 		}
 
-		const takerUser = await this.userMap.mustGet(
+		const takerUserAcct = await this.getUserAccountFromMap(
 			nodeToFill.node.userAccount.toString()
 		);
 		const referrerInfo = (
-			await this.userStatsMap.mustGet(
-				takerUser.getUserAccount().authority.toString()
-			)
+			await this.userStatsMap.mustGet(takerUserAcct.authority.toString())
 		).getReferrerInfo();
 
 		return Promise.resolve({
 			makerInfos,
-			takerUser,
+			takerUser: takerUserAcct,
 			referrerInfo,
 			marketType: nodeToFill.node.order.marketType,
 		});
@@ -912,7 +917,7 @@ export class FillerBot implements Bot {
 	 *  0xc000  |  [0x80 0x80 0x03]
 	 *  0xffff  |  [0xff 0xff 0x03])
 	 */
-	private calcCompactU16EncodedSize(array: any[], elemSize = 1): number {
+	protected calcCompactU16EncodedSize(array: any[], elemSize = 1): number {
 		if (array.length > 0x3fff) {
 			return 3 + array.length * elemSize;
 		} else if (array.length > 0x7f) {
@@ -929,7 +934,7 @@ export class FillerBot implements Bot {
 	 * - raw instruction data (compact-u16-format byte array)
 	 * @param ix The instruction to calculate size for.
 	 */
-	private calcIxEncodedSize(ix: TransactionInstruction): number {
+	protected calcIxEncodedSize(ix: TransactionInstruction): number {
 		return (
 			1 +
 			this.calcCompactU16EncodedSize(new Array(ix.keys.length), 1) +
@@ -937,7 +942,7 @@ export class FillerBot implements Bot {
 		);
 	}
 
-	private async sleep(ms: number) {
+	protected async sleep(ms: number) {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
@@ -949,7 +954,7 @@ export class FillerBot implements Bot {
 	 *
 	 * @returns number of nodes successfully filled
 	 */
-	private async handleTransactionLogs(
+	protected async handleTransactionLogs(
 		nodesFilled: Array<NodeToFill>,
 		logs: string[]
 	): Promise<number> {
@@ -1039,9 +1044,7 @@ export class FillerBot implements Bot {
 				tx.add(
 					await this.driftClient.getForceCancelOrdersIx(
 						new PublicKey(makerBreachedMaintenanceMargin),
-						(
-							await this.userMap.mustGet(makerBreachedMaintenanceMargin)
-						).getUserAccount()
+						await this.getUserAccountFromMap(makerBreachedMaintenanceMargin)
 					)
 				);
 				this.driftClient.txSender
@@ -1088,9 +1091,9 @@ export class FillerBot implements Bot {
 				tx.add(
 					await this.driftClient.getForceCancelOrdersIx(
 						filledNode.node.userAccount,
-						(
-							await this.userMap.mustGet(filledNode.node.userAccount.toString())
-						).getUserAccount()
+						await this.getUserAccountFromMap(
+							filledNode.node.userAccount.toString()
+						)
 					)
 				);
 
@@ -1150,7 +1153,7 @@ export class FillerBot implements Bot {
 		return successCount;
 	}
 
-	private async processBulkFillTxLogs(
+	protected async processBulkFillTxLogs(
 		nodesFilled: Array<NodeToFill>,
 		txSig: TransactionSignature
 	): Promise<number> {
@@ -1175,13 +1178,13 @@ export class FillerBot implements Bot {
 		return this.handleTransactionLogs(nodesFilled, tx.meta.logMessages);
 	}
 
-	private removeFillingNodes(nodes: Array<NodeToFill>) {
+	protected removeFillingNodes(nodes: Array<NodeToFill>) {
 		for (const node of nodes) {
 			this.fillingNodes.delete(getNodeToFillSignature(node));
 		}
 	}
 
-	private async sendFillTx(
+	protected async sendFillTx(
 		fillTxId: number,
 		nodesSent: Array<NodeToFill>,
 		ixs: Array<TransactionInstruction>
@@ -1366,7 +1369,7 @@ export class FillerBot implements Bot {
 	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
 	 * @param node node with multiple makers
 	 */
-	private async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
+	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
 		const ixs: Array<TransactionInstruction> = [];
 		const fillTxId = this.fillTxId++;
 		logger.info(
@@ -1393,8 +1396,12 @@ export class FillerBot implements Bot {
 
 			ixs.push(
 				await this.driftClient.getFillPerpOrderIx(
-					takerUser.getUserAccountPublicKey(),
-					takerUser.getUserAccount(),
+					await getUserAccountPublicKey(
+						this.driftClient.program.programId,
+						takerUser.authority,
+						takerUser.subAccountId
+					),
+					takerUser,
 					nodeToFill.node.order,
 					makerInfos,
 					referrerInfo
@@ -1417,7 +1424,7 @@ export class FillerBot implements Bot {
 		}
 	}
 
-	private async tryBulkFillPerpNodes(
+	protected async tryBulkFillPerpNodes(
 		nodesToFill: Array<NodeToFill>
 	): Promise<number> {
 		const ixs: Array<TransactionInstruction> = [];
@@ -1489,8 +1496,12 @@ export class FillerBot implements Bot {
 			}
 
 			const ix = await this.driftClient.getFillPerpOrderIx(
-				takerUser.getUserAccountPublicKey(),
-				takerUser.getUserAccount(),
+				await getUserAccountPublicKey(
+					this.driftClient.program.programId,
+					takerUser.authority,
+					takerUser.subAccountId
+				),
+				takerUser,
 				nodeToFill.node.order,
 				makerInfos,
 				referrerInfo
@@ -1537,9 +1548,13 @@ export class FillerBot implements Bot {
 
 			// add to tx
 			logger.info(
-				`including taker ${takerUser
-					.getUserAccountPublicKey()
-					.toString()}-${nodeToFill.node.order.orderId.toString()} (fillTxId: ${fillTxId})`
+				`including taker ${(
+					await getUserAccountPublicKey(
+						this.driftClient.program.programId,
+						takerUser.authority,
+						takerUser.subAccountId
+					)
+				).toString()}-${nodeToFill.node.order.orderId.toString()} (fillTxId: ${fillTxId})`
 			);
 			ixs.push(ix);
 			runningTxSize += newIxCost + additionalAccountsCost;
@@ -1575,7 +1590,7 @@ export class FillerBot implements Bot {
 		return nodesSent.length;
 	}
 
-	private filterPerpNodesForMarket(
+	protected filterPerpNodesForMarket(
 		fillableNodes: Array<NodeToFill>,
 		triggerableNodes: Array<NodeToTrigger>
 	): {
@@ -1608,7 +1623,7 @@ export class FillerBot implements Bot {
 		};
 	}
 
-	private async executeFillablePerpNodesForMarket(
+	protected async executeFillablePerpNodesForMarket(
 		fillableNodes: Array<NodeToFill>
 	) {
 		let filledNodeCount = 0;
@@ -1630,7 +1645,7 @@ export class FillerBot implements Bot {
 		}
 	}
 
-	private async executeTriggerablePerpNodesForMarket(
+	protected async executeTriggerablePerpNodesForMarket(
 		triggerableNodes: Array<NodeToTrigger>
 	) {
 		for (const nodeToTrigger of triggerableNodes) {
@@ -1638,7 +1653,7 @@ export class FillerBot implements Bot {
 			logger.info(
 				`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) order ${nodeToTrigger.node.order.orderId.toString()}`
 			);
-			const user = await this.userMap.mustGet(
+			const user = await this.getUserAccountFromMap(
 				nodeToTrigger.node.userAccount.toString()
 			);
 
@@ -1648,7 +1663,7 @@ export class FillerBot implements Bot {
 			this.driftClient
 				.triggerOrder(
 					nodeToTrigger.node.userAccount,
-					user.getUserAccount(),
+					user,
 					nodeToTrigger.node.order
 				)
 				.then((txSig) => {
@@ -1693,12 +1708,12 @@ export class FillerBot implements Bot {
 		);
 	}
 
-	private async tryFill() {
+	protected async tryFill() {
 		const startTime = Date.now();
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				const dlob = this.dlobSubscriber.getDLOB();
+				const dlob = await this.getDLOB();
 
 				this.pruneThrottledNode();
 

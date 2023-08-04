@@ -22,6 +22,8 @@ import {
 	TokenFaucet,
 	DriftClientSubscriptionConfig,
 	LogProviderConfig,
+	getMarketsAndOraclesForSubscription,
+	RetryTxSender,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -43,6 +45,7 @@ import {
 	TOKEN_FAUCET_PROGRAM_ID,
 	getWallet,
 	loadKeypair,
+	waitForAllSubscribesToFinish,
 } from './utils';
 import {
 	Config,
@@ -51,6 +54,7 @@ import {
 	loadConfigFromOpts,
 } from './config';
 import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
+import { FillerLiteBot } from './bots/fillerLite';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -65,6 +69,7 @@ program
 		'calls driftClient.initializeUserAccount if no user account exists'
 	)
 	.option('--filler', 'Enable filler bot')
+	.option('--filler-lite', 'Enable filler lite bot')
 	.option('--spot-filler', 'Enable spot filler bot')
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
@@ -208,6 +213,12 @@ const runBot = async () => {
 		commitment: stateCommitment,
 	});
 
+	const sendTxConnection = new Connection(endpoint, {
+		wsEndpoint: wsEndpoint,
+		commitment: stateCommitment,
+		disableRetryOnRateLimit: true,
+	});
+
 	let bulkAccountLoader: BulkAccountLoader | undefined;
 	let lastBulkAccountLoaderSlot: number | undefined;
 	let accountSubscription: DriftClientSubscriptionConfig = {
@@ -234,20 +245,36 @@ const runBot = async () => {
 		};
 	}
 
+	const opts = {
+		commitment: stateCommitment,
+		skipPreflight: false,
+		preflightCommitment: stateCommitment,
+	};
+	const txSender = new RetryTxSender({
+		connection: sendTxConnection,
+		wallet,
+		opts,
+	});
+
+	let perpMarketIndexes, spotMarketIndexes, oracleInfos;
+	if (configHasBot(config, 'fillerLite')) {
+		({ perpMarketIndexes, spotMarketIndexes, oracleInfos } =
+			getMarketsAndOraclesForSubscription(config.global.driftEnv));
+	}
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
 		programID: driftPublicKey,
-		opts: {
-			commitment: stateCommitment,
-			skipPreflight: false,
-			preflightCommitment: stateCommitment,
-		},
+		opts,
 		accountSubscription,
 		env: config.global.driftEnv,
 		userStats: true,
+		perpMarketIndexes,
+		spotMarketIndexes,
+		oracleInfos,
 		activeSubAccountId: config.global.subaccounts![0],
-		subAccountIds: config.global.subaccounts,
+		subAccountIds: config.global.subaccounts ?? [0],
+		txSender,
 	});
 
 	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {
@@ -284,7 +311,17 @@ const runBot = async () => {
 		logger.info(`Failed to load USDC token account: ${e}`);
 	}
 
-	await driftClient.subscribe();
+	while (!(await driftClient.subscribe())) {
+		logger.info('waiting to subscribe to DriftClient');
+		await sleepMs(1000);
+	}
+	const driftUser = driftClient.getUser();
+	const subscribePromises = configHasBot(config, 'fillerLite')
+		? [driftUser.subscribe()]
+		: [driftUser.subscribe(), eventSubscriber.subscribe()];
+	await waitForAllSubscribesToFinish(subscribePromises);
+
+	// await driftClient.subscribe();
 	driftClient.eventEmitter.on('error', (e) => {
 		logger.info('clearing house error');
 		logger.error(e);
@@ -308,22 +345,9 @@ const runBot = async () => {
 		}
 	}
 
-	// subscribe will fail if there is no clearing house user
-	const driftUser = driftClient.getUser();
-	const driftUserStats = driftClient.getUserStats();
-	while (
-		!(await driftClient.subscribe()) ||
-		!(await driftUser.subscribe()) ||
-		!(await driftUserStats.subscribe()) ||
-		!(await eventSubscriber.subscribe())
-	) {
-		logger.info('waiting to subscribe to DriftClient and User');
-		await sleepMs(1000);
-	}
 	logger.info(
 		`User PublicKey: ${driftUser.getUserAccountPublicKey().toBase58()}`
 	);
-	await driftClient.fetchAccounts();
 	await driftClient.getUser().fetchAccounts();
 
 	printUserAccountStats(driftUser);
@@ -451,6 +475,26 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				config.botConfigs!.filler!,
+				jitoSearcherClient,
+				jitoAuthKeypair,
+				keypair
+			)
+		);
+	}
+	if (configHasBot(config, 'fillerLite')) {
+		logger.info(`Starting filler lite bot`);
+		bots.push(
+			new FillerLiteBot(
+				slotSubscriber,
+				driftClient,
+				{
+					rpcEndpoint: endpoint,
+					commit: commitHash,
+					driftEnv: config.global.driftEnv!,
+					driftPid: driftPublicKey.toBase58(),
+					walletAuthority: wallet.publicKey.toBase58(),
+				},
+				config.botConfigs!.fillerLite!,
 				jitoSearcherClient,
 				jitoAuthKeypair,
 				keypair
