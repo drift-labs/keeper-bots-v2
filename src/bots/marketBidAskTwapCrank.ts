@@ -54,7 +54,7 @@ export class MarketBidAskTwapCrank implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly runOnce: boolean;
-	public readonly defaultIntervalMs: number = 60000; // once a minute
+	public readonly defaultIntervalMs: number = 60000 * 5; // once every 5 minute
 
 	private slotSubscriber: SlotSubscriber;
 	private driftClient: DriftClient;
@@ -190,7 +190,7 @@ export class MarketBidAskTwapCrank implements Bot {
 		for (const chunk of chunkedLists) {
 			const ixs = [];
 			for (let i = 0; i < chunk.length; i++) {
-				const mi = crankMarkets[i];
+				const mi = chunk[i];
 
 				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
 
