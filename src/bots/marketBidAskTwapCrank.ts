@@ -155,7 +155,7 @@ export class MarketBidAskTwapCrank implements Bot {
 				const combinedItem = [maker, uStats];
 				combinedList.push(combinedItem);
 			} else {
-				console.log(
+				logger.warn(
 					'skipping maker... cannot find authority for userAccount=',
 					maker.toString()
 				);
@@ -211,10 +211,8 @@ export class MarketBidAskTwapCrank implements Bot {
 					oraclePriceData,
 					numMakers: 5,
 				});
-				console.log(
-					'loaded makers... bid/ask length:',
-					bidMakers.length,
-					askMakers.length
+				logger.info(
+					`loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
 				);
 
 				const concatenatedList = [
@@ -222,8 +220,6 @@ export class MarketBidAskTwapCrank implements Bot {
 					...this.getCombinedList(askMakers),
 				];
 
-				// console.log(concatenatedList);
-				// console.log(concatenatedList[0]);
 				const ix = await this.driftClient.getUpdatePerpBidAskTwapIx(
 					mi,
 					concatenatedList
@@ -256,8 +252,7 @@ export class MarketBidAskTwapCrank implements Bot {
 					5000
 				);
 
-				console.log('txSig:', txSig);
-				console.log(`https://solscan.io/tx/${txSig}`);
+				logger.info(`https://solscan.io/tx/${txSig}`);
 			} catch (e) {
 				console.error(e);
 			}
