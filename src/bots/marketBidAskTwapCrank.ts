@@ -54,7 +54,7 @@ export class MarketBidAskTwapCrank implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly runOnce: boolean;
-	public readonly defaultIntervalMs: number = 600000;
+	public readonly defaultIntervalMs: number = 60000; // once a minute
 
 	private slotSubscriber: SlotSubscriber;
 	private driftClient: DriftClient;
@@ -169,76 +169,98 @@ export class MarketBidAskTwapCrank implements Bot {
 		await this.init();
 		await this.initDlob();
 
-		const ixs = [];
+		const state = await this.driftClient.getStateAccount();
 
-		const crankMarkets = [0, 1, 2, 5, 8];
-		for (let i = 0; i < crankMarkets.length; i++) {
-			const mi = crankMarkets[i];
-
-			const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
-
-			const bidMakers = this.dlob.getBestMakers({
-				marketIndex: mi,
-				marketType: MarketType.PERP,
-				direction: PositionDirection.LONG,
-				slot: this.latestDlobSlot,
-				oraclePriceData,
-				numMakers: 5,
-			});
-
-			const askMakers = this.dlob.getBestMakers({
-				marketIndex: mi,
-				marketType: MarketType.PERP,
-				direction: PositionDirection.LONG,
-				slot: this.latestDlobSlot,
-				oraclePriceData,
-				numMakers: 5,
-			});
-			console.log(
-				'loaded makers... bid/ask length:',
-				bidMakers.length,
-				askMakers.length
-			);
-
-			const concatenatedList = [
-				...this.getCombinedList(bidMakers),
-				...this.getCombinedList(askMakers),
-			];
-
-			// console.log(concatenatedList);
-			// console.log(concatenatedList[0]);
-			const ix = await this.driftClient.getUpdatePerpBidAskTwapIx(
-				mi,
-				concatenatedList
-			);
-
-			ixs.push(ix);
-		}
-
-		const chunkedTx = await promiseTimeout(
-			this.driftClient.txSender.getVersionedTransaction(
-				ixs,
-				[this.lookupTableAccount],
-				[],
-				this.driftClient.opts
-			),
-			1000
-		);
-		if (chunkedTx === null) {
-			logger.error(`Timed out getting versioned Transaction for tx chunk`);
-			return;
-		}
-
-		const txSig = await sendVersionedTransaction(
-			this.driftClient,
-			chunkedTx,
-			[],
-			// {}, // { skipPreflight: true },
-			this.driftClient.opts,
-			1000
+		const crankMarkets: number[] = Array.from(
+			{ length: state.numberOfMarkets },
+			(_, index) => index
 		);
 
-		console.log('txSig:', txSig);
-		console.log(`https://solscan.io/tx/${txSig}`);
+		// Function to split the list into chunks
+		function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
+			const chunks: T[][] = [];
+			for (let i = 0; i < arr.length; i += chunkSize) {
+				chunks.push(arr.slice(i, i + chunkSize));
+			}
+			return chunks;
+		}
+		const chunkSize = 4; // You can change this to any desired chunk size
+		const chunkedLists: number[][] = chunkArray(crankMarkets, chunkSize);
+
+		for (const chunk of chunkedLists) {
+			const ixs = [];
+			for (let i = 0; i < chunk.length; i++) {
+				const mi = crankMarkets[i];
+
+				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
+
+				const bidMakers = this.dlob.getBestMakers({
+					marketIndex: mi,
+					marketType: MarketType.PERP,
+					direction: PositionDirection.LONG,
+					slot: this.latestDlobSlot,
+					oraclePriceData,
+					numMakers: 5,
+				});
+
+				const askMakers = this.dlob.getBestMakers({
+					marketIndex: mi,
+					marketType: MarketType.PERP,
+					direction: PositionDirection.LONG,
+					slot: this.latestDlobSlot,
+					oraclePriceData,
+					numMakers: 5,
+				});
+				console.log(
+					'loaded makers... bid/ask length:',
+					bidMakers.length,
+					askMakers.length
+				);
+
+				const concatenatedList = [
+					...this.getCombinedList(bidMakers),
+					...this.getCombinedList(askMakers),
+				];
+
+				// console.log(concatenatedList);
+				// console.log(concatenatedList[0]);
+				const ix = await this.driftClient.getUpdatePerpBidAskTwapIx(
+					mi,
+					concatenatedList
+				);
+
+				ixs.push(ix);
+			}
+
+			const chunkedTx = await promiseTimeout(
+				this.driftClient.txSender.getVersionedTransaction(
+					ixs,
+					[this.lookupTableAccount],
+					[],
+					this.driftClient.opts
+				),
+				5000
+			);
+			if (chunkedTx === null) {
+				logger.error(`Timed out getting versioned Transaction for tx chunk`);
+				return;
+			}
+
+			try {
+				const txSig = await sendVersionedTransaction(
+					this.driftClient,
+					chunkedTx,
+					[],
+					// {}, // { skipPreflight: true },
+					this.driftClient.opts,
+					5000
+				);
+
+				console.log('txSig:', txSig);
+				console.log(`https://solscan.io/tx/${txSig}`);
+			} catch (e) {
+				console.error(e);
+			}
+		}
 	}
 }
