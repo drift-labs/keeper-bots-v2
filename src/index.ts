@@ -55,7 +55,7 @@ import {
 } from './config';
 import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
 import { FillerLiteBot } from './bots/fillerLite';
-import { MarketBidAskTwapCrank } from './bots/marketBidAskTwapCrank';
+import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -557,7 +557,7 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'markTwapCrank')) {
 		bots.push(
-			new MarketBidAskTwapCrank(
+			new MakerBidAskTwapCrank(
 				driftClient,
 				slotSubscriber,
 				config.global.driftEnv,

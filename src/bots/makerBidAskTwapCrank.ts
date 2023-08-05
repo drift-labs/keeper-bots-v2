@@ -50,7 +50,7 @@ export async function sendVersionedTransaction(
 	return txid;
 }
 
-export class MarketBidAskTwapCrank implements Bot {
+export class MakerBidAskTwapCrank implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly runOnce: boolean;
