@@ -80,10 +80,10 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/sdk@v2.35.1-beta.3":
-  version "2.35.1-beta.3"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.35.1-beta.3.tgz#1d42640024c769816a04cb44d7a44c07d242d969"
-  integrity sha512-z3D2VOBIyM1+omHo7X766qk2Ip+GDXSWumcUfiO8SVzAntFOX/GqwMLgnR6wG1UIfCDPM53gK3huFEvS41LU5w==
+"@drift-labs/sdk@^2.37.1-beta.3":
+  version "2.37.1-beta.3"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.37.1-beta.3.tgz#c2db555d89b8917b07b2e0ca97409258e00d6ddf"
+  integrity sha512-duVuQalZWcSk9NKI+GB6AvM4kZ9D3LMo0aGy2i30NqdZesfFb1jGAKxAHDZI6M7ElRJZF+b5dE7/jUtIfV2N6A==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
     "@ellipsis-labs/phoenix-sdk" "^1.4.2"

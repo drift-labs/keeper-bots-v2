@@ -11,6 +11,11 @@ export type BaseBotConfig = {
 	runOnce?: boolean;
 };
 
+export type JitMakerConfig = BaseBotConfig & {
+	perpMarketIndicies?: Array<number>;
+	subaccounts?: Array<number>;
+};
+
 export type FillerConfig = BaseBotConfig & {
 	fillerPollingInterval?: number;
 	transactionVersion: number | null;
@@ -40,7 +45,7 @@ export type BotConfigMap = {
 	trigger?: BaseBotConfig;
 	liquidator?: LiquidatorConfig;
 	floatingMaker?: BaseBotConfig;
-	jitMaker?: BaseBotConfig;
+	jitMaker?: JitMakerConfig;
 	ifRevenueSettler?: BaseBotConfig;
 	fundingRateUpdater?: BaseBotConfig;
 	userPnlSettler?: BaseBotConfig;
@@ -241,6 +246,10 @@ export function loadConfigFromOpts(opts: any): Config {
 			botId: process.env.BOT_ID ?? 'jitMaker',
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
+			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies) ?? [
+				0,
+			],
+			subaccounts: loadCommaDelimitToArray(opts.subaccounts) ?? [0],
 		};
 	}
 	if (opts.ifRevenueSettler) {

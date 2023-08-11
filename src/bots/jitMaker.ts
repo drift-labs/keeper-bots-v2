@@ -1,275 +1,163 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import {
-	BN,
-	isVariant,
-	DriftClient,
-	PerpMarketAccount,
-	SlotSubscriber,
-	PositionDirection,
-	OrderType,
-	BASE_PRECISION,
-	QUOTE_PRECISION,
-	convertToNumber,
-	PRICE_PRECISION,
-	PerpPosition,
-	SpotPosition,
 	DLOB,
-	DLOBNode,
-	UserMap,
-	UserStatsMap,
-	getOrderSignature,
+	DriftEnv,
+	BASE_PRECISION,
+	BN,
+	DriftClient,
+	JupiterClient,
+	getSignedTokenAmount,
+	getTokenAmount,
+	convertToNumber,
+	promiseTimeout,
+	PositionDirection,
 	MarketType,
-	PostOnlyParams,
+	ZERO,
+	PRICE_PRECISION,
 	DLOBSubscriber,
+	UserMap,
+	SlotSubscriber,
+	QUOTE_PRECISION,
+	DLOBNode,
+	OraclePriceData,
+	SwapMode,
+	getVariant,
+	isVariant,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
-
-import { TransactionSignature, PublicKey } from '@solana/web3.js';
-
-import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
-
-import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
-import { Counter, Histogram, Meter, ObservableGauge } from '@opentelemetry/api';
 import {
-	ExplicitBucketHistogramAggregation,
-	InstrumentType,
-	MeterProvider,
-	View,
-} from '@opentelemetry/sdk-metrics-base';
-import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
-import { BaseBotConfig } from '../config';
+	calculateBaseAmountToMarketMake,
+	decodeName,
+	getBestLimitAskExcludePubKey,
+	getBestLimitBidExcludePubKey,
+	isMarketVolatile,
+	sleepMs,
+} from '../utils';
+import {
+	JitterShotgun,
+	JitterSniper,
+	PriceType,
+} from '@drift-labs/jit-proxy/lib';
+import { assert } from '@drift-labs/sdk/lib/assert/assert';
+import dotenv = require('dotenv');
 
-type Action = {
-	baseAssetAmount: BN;
-	marketIndex: number;
-	direction: PositionDirection;
-	price: BN;
-	node: DLOBNode;
-};
-
-// State enum
-enum StateType {
-	/** Flat there is no open position */
-	NEUTRAL = 'neutral',
-
-	/** Long position on this market */
-	LONG = 'long',
-
-	/** Short position on market */
-	SHORT = 'short',
-
-	/** Current closing a long position (shorts only) */
-	CLOSING_LONG = 'closing-long',
-
-	/** Current closing a short position (long only) */
-	CLOSING_SHORT = 'closing-short',
-}
-
-type State = {
-	stateType: Map<number, StateType>;
-	spotMarketPosition: Map<number, SpotPosition>;
-	perpMarketPosition: Map<number, PerpPosition>;
-};
-
-enum METRIC_TYPES {
-	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
-	try_jit_duration_histogram = 'try_jit_duration_histogram',
-	runtime_specs = 'runtime_specs',
-	mutex_busy = 'mutex_busy',
-	errors = 'errors',
-}
+dotenv.config();
+import {
+	ComputeBudgetProgram,
+	AddressLookupTableAccount,
+	VersionedTransaction,
+	Connection,
+	PublicKey,
+	TransactionInstruction,
+	Signer,
+	ConfirmOptions,
+	TransactionSignature,
+} from '@solana/web3.js';
+import { BaseBotConfig, JitMakerConfig } from 'src/config';
 
 /**
- *
- * This bot is responsible for placing small trades during an order's JIT auction
- * in order to partially fill orders and collect maker fees. The bot also tracks
- * its position on all available markets in order to limit the size of open positions.
- *
+ * This is an example of a bot that implements the Bot interface.
  */
-export class JitMakerBot implements Bot {
+export class JitMaker implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 1000;
 
-	private driftClient: DriftClient;
-	private slotSubscriber: SlotSubscriber;
-	private dlobSubscriber: DLOBSubscriber;
+	private driftEnv: DriftEnv;
 	private periodicTaskMutex = new Mutex();
-	private userMap: UserMap;
-	private userStatsMap: UserStatsMap;
-	private orderLastSeenBaseAmount: Map<string, BN> = new Map(); // need some way to trim this down over time
+
+	private jitter: JitterSniper | JitterShotgun;
+	private driftClient: DriftClient;
+	private jupiterClient: JupiterClient;
+	// private subaccountConfig: SubaccountConfig;
+	private subAccountIds: Array<number>;
+	private marketIndexes: Array<number>;
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 
-	private agentState: State;
-
-	// metrics
-	private metricsInitialized = false;
-	private metricsPort: number | undefined;
-	private exporter: PrometheusExporter;
-	private meter: Meter;
-	private bootTimeMs = Date.now();
-	private runtimeSpecsGauge: ObservableGauge;
-	private runtimeSpec: RuntimeSpec;
-	private mutexBusyCounter: Counter;
-	private errorCounter: Counter;
-	private tryJitDurationHistogram: Histogram;
-
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
+	private lookupTableAccount: AddressLookupTableAccount;
 
-	/**
-	 * Set true to enforce max position size
-	 */
-	private RESTRICT_POSITION_SIZE = false;
-
-	/**
-	 * if a position's notional value passes this percentage of account
-	 * collateral, the position enters a CLOSING_* state.
-	 */
-	private MAX_POSITION_EXPOSURE = 0.1;
-
-	/**
-	 * The max amount of quote to spend on each order.
-	 */
-	private MAX_TRADE_SIZE_QUOTE = 1000;
+	private dlobSubscriber: DLOBSubscriber;
+	private slotSubscriber: SlotSubscriber;
+	private userMap: UserMap;
 
 	constructor(
-		driftClient: DriftClient,
-		slotSubscriber: SlotSubscriber,
-		runtimeSpec: RuntimeSpec,
-		config: BaseBotConfig
+		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
+		jitter: JitterSniper | JitterShotgun,
+		config: JitMakerConfig,
+		driftEnv: DriftEnv
 	) {
+		this.subAccountIds = config.subaccounts ?? [0];
+		this.marketIndexes = config.perpMarketIndicies ?? [0];
+		this.jitter = jitter;
+		this.driftClient = driftClient;
+		this.jupiterClient = new JupiterClient({
+			connection: this.driftClient.connection,
+		});
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
-		this.driftClient = driftClient;
-		this.slotSubscriber = slotSubscriber;
-		this.runtimeSpec = runtimeSpec;
-
-		this.metricsPort = config.metricsPort;
-		if (this.metricsPort) {
-			this.initializeMetrics();
-		}
-	}
-
-	private initializeMetrics() {
-		if (this.metricsInitialized) {
-			logger.error('Tried to initilaize metrics multiple times');
-			return;
-		}
-		this.metricsInitialized = true;
-
-		const { endpoint: defaultEndpoint } = PrometheusExporter.DEFAULT_OPTIONS;
-		this.exporter = new PrometheusExporter(
-			{
-				port: this.metricsPort,
-				endpoint: defaultEndpoint,
-			},
-			() => {
-				logger.info(
-					`prometheus scrape endpoint started: http://localhost:${this.metricsPort}${defaultEndpoint}`
-				);
-			}
-		);
-		const meterName = this.name;
-		const meterProvider = new MeterProvider({
-			views: [
-				new View({
-					instrumentName: METRIC_TYPES.try_jit_duration_histogram,
-					instrumentType: InstrumentType.HISTOGRAM,
-					meterName: meterName,
-					aggregation: new ExplicitBucketHistogramAggregation(
-						Array.from(new Array(20), (_, i) => 0 + i * 5),
-						true
-					),
-				}),
-			],
-		});
-
-		meterProvider.addMetricReader(this.exporter);
-		this.meter = meterProvider.getMeter(meterName);
-
-		this.bootTimeMs = Date.now();
-
-		this.runtimeSpecsGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.runtime_specs,
-			{
-				description: 'Runtime sepcification of this program',
-			}
-		);
-		this.runtimeSpecsGauge.addCallback((obs) => {
-			obs.observe(this.bootTimeMs, this.runtimeSpec);
-		});
-		this.mutexBusyCounter = this.meter.createCounter(METRIC_TYPES.mutex_busy, {
-			description: 'Count of times the mutex was busy',
-		});
-		this.errorCounter = this.meter.createCounter(METRIC_TYPES.errors, {
-			description: 'Count of errors',
-		});
-		this.tryJitDurationHistogram = this.meter.createHistogram(
-			METRIC_TYPES.try_jit_duration_histogram,
-			{
-				description: 'Distribution of tryTrigger',
-				unit: 'ms',
-			}
-		);
-	}
-
-	public async init() {
-		logger.info(`${this.name} initing`);
-		const initPromises: Array<Promise<any>> = [];
+		this.driftEnv = driftEnv;
 
 		this.userMap = new UserMap(
 			this.driftClient,
 			this.driftClient.userAccountSubscriptionConfig,
 			false
 		);
-		initPromises.push(this.userMap.sync());
-
-		this.userStatsMap = new UserStatsMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig
-		);
-		initPromises.push(this.userStatsMap.sync());
-
+		this.slotSubscriber = new SlotSubscriber(this.driftClient.connection);
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
 			slotSource: this.slotSubscriber,
-			updateFrequency: this.defaultIntervalMs - 500,
+			updateFrequency: 1000,
 			driftClient: this.driftClient,
 		});
-		await this.dlobSubscriber.subscribe();
-
-		this.agentState = {
-			stateType: new Map<number, StateType>(),
-			spotMarketPosition: new Map<number, SpotPosition>(),
-			perpMarketPosition: new Map<number, PerpPosition>(),
-		};
-		initPromises.push(this.updateAgentState());
-
-		await Promise.all(initPromises);
 	}
 
-	public async reset() {
+	/**
+	 * Run initialization procedures for the bot.
+	 */
+	public async init(): Promise<void> {
+		logger.info(`${this.name} initing`);
+
+		// do stuff that takes some time
+		await this.userMap.subscribe();
+		await this.slotSubscriber.subscribe();
+		await this.dlobSubscriber.subscribe();
+
+		this.lookupTableAccount =
+			await this.driftClient.fetchMarketLookupTableAccount();
+
+		logger.info(`${this.name} init done`);
+	}
+
+	/**
+	 * Reset the bot - usually you will reset any periodic tasks here
+	 */
+	public async reset(): Promise<void> {
+		// reset any periodic tasks
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId);
 		}
 		this.intervalIds = [];
-
-		await this.dlobSubscriber.unsubscribe();
-		await this.userStatsMap.unsubscribe();
-		await this.userMap.unsubscribe();
 	}
 
-	public async startIntervalLoop(intervalMs: number) {
-		await this.tryMake();
-		const intervalId = setInterval(this.tryMake.bind(this), intervalMs);
+	public async startIntervalLoop(intervalMs: number): Promise<void> {
+		const intervalId = setInterval(
+			this.runPeriodicTasks.bind(this),
+			intervalMs
+		);
 		this.intervalIds.push(intervalId);
 
-		logger.info(`${this.name} Bot started!`);
+		logger.info(`${this.name} Bot started! driftEnv: ${this.driftEnv}`);
 	}
 
+	/**
+	 * Typically used for monitoring liveness.
+	 * @returns true if bot is healthy, else false.
+	 */
 	public async healthCheck(): Promise<boolean> {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
@@ -280,447 +168,406 @@ export class JitMakerBot implements Bot {
 	}
 
 	/**
-	 * This function creates a distribution of the values in array based on the
-	 * weights array. The returned array should be used in randomIndex to make
-	 * a random draw from the distribution.
+	 * Typical bot loop that runs periodically and pats the watchdog timer on completion.
 	 *
 	 */
-	private createDistribution(
-		array: Array<any>,
-		weights: Array<number>,
-		size: number
-	): Array<number> {
-		const distribution = [];
-		const sum = weights.reduce((a: number, b: number) => a + b);
-		const quant = size / sum;
-		for (let i = 0; i < array.length; ++i) {
-			const limit = quant * weights[i];
-			for (let j = 0; j < limit; ++j) {
-				distribution.push(i);
-			}
-		}
-		return distribution;
-	}
-
-	/**
-	 * Make a random choice from distribution
-	 * @param distribution array of values that can be drawn from
-	 * @returns
-	 */
-	private randomIndex(distribution: Array<number>): number {
-		const index = Math.floor(distribution.length * Math.random()); // random index
-		return distribution[index];
-	}
-
-	/**
-	 * Generates a random number between [min, max]
-	 * @param min minimum value to generate random number from
-	 * @param max maximum value to generate random number from
-	 * @returns the random number
-	 */
-	private randomIntFromInterval(min: number, max: number): number {
-		return Math.floor(Math.random() * (max - min + 1) + min);
-	}
-
-	/**
-	 * Updates the agent state based on its current market positions.
-	 *
-	 * Our goal is to participate in JIT auctions while limiting the delta
-	 * exposure of the bot.
-	 *
-	 * We achieve this by allowing deltas to increase until MAX_POSITION_EXPOSURE
-	 * is hit, after which orders will only reduce risk until the position is
-	 * closed.
-	 *
-	 * @returns {Promise<void>}
-	 */
-	private async updateAgentState(): Promise<void> {
-		// TODO: SPOT
-		for await (const p of this.driftClient.getUserAccount().perpPositions) {
-			if (p.baseAssetAmount.isZero()) {
-				continue;
-			}
-
-			// update current position based on market position
-			this.agentState.perpMarketPosition.set(p.marketIndex, p);
-
-			// update state
-			let currentState = this.agentState.stateType.get(p.marketIndex);
-			if (!currentState) {
-				this.agentState.stateType.set(p.marketIndex, StateType.NEUTRAL);
-				currentState = StateType.NEUTRAL;
-			}
-
-			let canUpdateStateBasedOnPosition = true;
-			if (
-				(currentState === StateType.CLOSING_LONG &&
-					p.baseAssetAmount.gt(new BN(0))) ||
-				(currentState === StateType.CLOSING_SHORT &&
-					p.baseAssetAmount.lt(new BN(0)))
-			) {
-				canUpdateStateBasedOnPosition = false;
-			}
-
-			if (canUpdateStateBasedOnPosition) {
-				// check if need to enter a closing state
-				const accountCollateral = convertToNumber(
-					this.driftClient.getUser().getTotalCollateral(),
-					QUOTE_PRECISION
-				);
-				const positionValue = convertToNumber(
-					p.quoteAssetAmount,
-					QUOTE_PRECISION
-				);
-				const exposure = positionValue / accountCollateral;
-
-				if (exposure >= this.MAX_POSITION_EXPOSURE) {
-					// state becomes closing only
-					if (p.baseAssetAmount.gt(new BN(0))) {
-						this.agentState.stateType.set(
-							p.marketIndex,
-							StateType.CLOSING_LONG
-						);
-					} else {
-						this.agentState.stateType.set(
-							p.marketIndex,
-							StateType.CLOSING_SHORT
-						);
-					}
-				} else {
-					// update state to be whatever our current position is
-					if (p.baseAssetAmount.gt(new BN(0))) {
-						this.agentState.stateType.set(p.marketIndex, StateType.LONG);
-					} else if (p.baseAssetAmount.lt(new BN(0))) {
-						this.agentState.stateType.set(p.marketIndex, StateType.SHORT);
-					} else {
-						this.agentState.stateType.set(p.marketIndex, StateType.NEUTRAL);
-					}
-				}
-			}
-		}
-	}
-
-	private nodeCanBeFilled(
-		node: DLOBNode,
-		userAccountPublicKey: PublicKey
-	): boolean {
-		if (node.haveFilled) {
-			logger.error(
-				`already made the JIT auction for ${node.userAccount} - ${node.order.orderId}`
-			);
-			return false;
-		}
-
-		// jitter can't fill its own orders
-		if (node.userAccount.equals(userAccountPublicKey)) {
-			return false;
-		}
-
-		const orderSignature = getOrderSignature(
-			node.order.orderId,
-			node.userAccount
-		);
-		const lastBaseAmountFilledSeen =
-			this.orderLastSeenBaseAmount.get(orderSignature);
-		if (lastBaseAmountFilledSeen?.eq(node.order.baseAssetAmountFilled)) {
-			return false;
-		}
-
-		return true;
-	}
-
-	/**
-	 *
-	 */
-	private determineJitAuctionBaseFillAmount(
-		orderBaseAmountAvailable: BN,
-		orderPrice: BN
-	): BN {
-		const priceNumber = convertToNumber(orderPrice, PRICE_PRECISION);
-		const worstCaseQuoteSpend = orderBaseAmountAvailable
-			.mul(orderPrice)
-			.div(BASE_PRECISION.mul(PRICE_PRECISION))
-			.mul(QUOTE_PRECISION);
-
-		const minOrderQuote = 20;
-		let orderQuote = minOrderQuote;
-		let maxOrderQuote = convertToNumber(worstCaseQuoteSpend, QUOTE_PRECISION);
-
-		if (maxOrderQuote > this.MAX_TRADE_SIZE_QUOTE) {
-			maxOrderQuote = this.MAX_TRADE_SIZE_QUOTE;
-		}
-
-		if (maxOrderQuote >= minOrderQuote) {
-			orderQuote = this.randomIntFromInterval(minOrderQuote, maxOrderQuote);
-		}
-
-		const baseFillAmountNumber = orderQuote / priceNumber;
-		let baseFillAmountBN = new BN(
-			baseFillAmountNumber * BASE_PRECISION.toNumber()
-		);
-		if (baseFillAmountBN.gt(orderBaseAmountAvailable)) {
-			baseFillAmountBN = orderBaseAmountAvailable;
-		}
-		logger.info(
-			`jitMaker will fill base amount: ${convertToNumber(
-				baseFillAmountBN,
-				BASE_PRECISION
-			).toString()} of remaining order ${convertToNumber(
-				orderBaseAmountAvailable,
-				BASE_PRECISION
-			)}.`
-		);
-
-		return baseFillAmountBN;
-	}
-
-	/**
-	 * Draws an action based on the current state of the bot.
-	 *
-	 */
-	private async drawAndExecuteAction(market: PerpMarketAccount, dlob: DLOB) {
-		// get nodes available to fill in the jit auction
-		const nodesToFill = dlob.findJitAuctionNodesToFill(
-			market.marketIndex,
-			this.slotSubscriber.getSlot(),
-			this.driftClient.getOracleDataForPerpMarket(market.marketIndex),
-			MarketType.PERP
-		);
-
-		for (const nodeToFill of nodesToFill) {
-			if (
-				!this.nodeCanBeFilled(
-					nodeToFill.node,
-					await this.driftClient.getUserAccountPublicKey()
-				)
-			) {
-				continue;
-			}
-
-			logger.info(
-				`node slot: ${
-					nodeToFill.node.order.slot
-				}, cur slot: ${this.slotSubscriber.getSlot()}`
-			);
-			this.orderLastSeenBaseAmount.set(
-				getOrderSignature(
-					nodeToFill.node.order.orderId,
-					nodeToFill.node.userAccount
-				),
-				nodeToFill.node.order.baseAssetAmountFilled
-			);
-
-			logger.info(
-				`${
-					this.name
-				} quoting order for node: ${nodeToFill.node.userAccount.toBase58()} - ${nodeToFill.node.order.orderId.toString()}, orderBaseFilled: ${convertToNumber(
-					nodeToFill.node.order.baseAssetAmountFilled,
-					BASE_PRECISION
-				)}/${convertToNumber(
-					nodeToFill.node.order.baseAssetAmount,
-					BASE_PRECISION
-				)}`
-			);
-
-			// calculate jit maker order params
-			const orderMarketIdx = nodeToFill.node.order.marketIndex;
-			const orderDirection = nodeToFill.node.order.direction;
-			const jitMakerDirection = isVariant(orderDirection, 'long')
-				? PositionDirection.SHORT
-				: PositionDirection.LONG;
-
-			// prevent potential jit makers from shooting themselves in the foot, fill closer to end price which
-			// is more favorable to the jit maker
-			const jitMakerPrice = nodeToFill.node.order.auctionStartPrice
-				.add(nodeToFill.node.order.auctionEndPrice)
-				.div(new BN(2));
-
-			const jitMakerBaseAssetAmount = this.determineJitAuctionBaseFillAmount(
-				nodeToFill.node.order.baseAssetAmount.sub(
-					nodeToFill.node.order.baseAssetAmountFilled
-				),
-				jitMakerPrice
-			);
-
-			const orderSlot = nodeToFill.node.order.slot.toNumber();
-			const currSlot = this.slotSubscriber.getSlot();
-			const aucDur = nodeToFill.node.order.auctionDuration;
-			const aucEnd = orderSlot + aucDur;
-
-			logger.info(
-				`${
-					this.name
-				} propose to fill jit auction on market ${orderMarketIdx}: ${JSON.stringify(
-					jitMakerDirection
-				)}: ${convertToNumber(jitMakerBaseAssetAmount, BASE_PRECISION).toFixed(
-					4
-				)}, limit price: ${convertToNumber(
-					jitMakerPrice,
-					PRICE_PRECISION
-				).toFixed(4)}, it has been ${
-					currSlot - orderSlot
-				} slots since order, auction ends in ${aucEnd - currSlot} slots`
-			);
-
-			try {
-				const txSig = await this.executeAction({
-					baseAssetAmount: jitMakerBaseAssetAmount,
-					marketIndex: nodeToFill.node.order.marketIndex,
-					direction: jitMakerDirection,
-					price: jitMakerPrice,
-					node: nodeToFill.node,
-				});
-
-				logger.info(
-					`${
-						this.name
-					}: JIT auction filled (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()}), Tx: ${txSig}`
-				);
-				return txSig;
-			} catch (error) {
-				nodeToFill.node.haveFilled = false;
-
-				// If we get an error that order does not exist, assume its been filled by somebody else and we
-				// have received the history record yet
-				// TODO this might not hold if events arrive out of order
-				const errorCode = getErrorCode(error);
-				this.errorCounter.add(1, { errorCode: errorCode.toString() });
-
-				logger.error(
-					`Error (${errorCode}) filling JIT auction (account: ${nodeToFill.node.userAccount.toString()} - ${nodeToFill.node.order.orderId.toString()})`
-				);
-
-				/* todo remove this, fix error handling
-				if (errorCode === 6042) {
-					this.dlob.remove(
-						nodeToFill.node.order,
-						nodeToFill.node.userAccount,
-						() => {
-							logger.error(
-								`Order ${nodeToFill.node.order.orderId.toString()} not found when trying to fill. Removing from order list`
-							);
-						}
-					);
-				}
-				*/
-
-				// console.error(error);
-			}
-		}
-	}
-
-	private async executeAction(action: Action): Promise<TransactionSignature> {
-		const currentState = this.agentState.stateType.get(action.marketIndex);
-
-		if (this.RESTRICT_POSITION_SIZE) {
-			if (
-				currentState === StateType.CLOSING_LONG &&
-				action.direction === PositionDirection.LONG
-			) {
-				logger.info(
-					`${this.name}: Skipping long action on market ${action.marketIndex}, since currently CLOSING_LONG`
-				);
-				return;
-			}
-			if (
-				currentState === StateType.CLOSING_SHORT &&
-				action.direction === PositionDirection.SHORT
-			) {
-				logger.info(
-					`${this.name}: Skipping short action on market ${action.marketIndex}, since currently CLOSING_SHORT`
-				);
-				return;
-			}
-		}
-
-		const takerUserAccount = (
-			await this.userMap.mustGet(action.node.userAccount.toString())
-		).getUserAccount();
-		const takerAuthority = takerUserAccount.authority;
-
-		const takerUserStats = await this.userStatsMap.mustGet(
-			takerAuthority.toString()
-		);
-		const takerUserStatsPublicKey = takerUserStats.userStatsAccountPublicKey;
-		const referrerInfo = takerUserStats.getReferrerInfo();
-
-		return await this.driftClient.placeAndMakePerpOrder(
-			{
-				orderType: OrderType.LIMIT,
-				marketIndex: action.marketIndex,
-				baseAssetAmount: action.baseAssetAmount,
-				direction: action.direction,
-				price: action.price,
-				postOnly: PostOnlyParams.TRY_POST_ONLY,
-				immediateOrCancel: true,
-			},
-			{
-				taker: action.node.userAccount,
-				order: action.node.order,
-				takerStats: takerUserStatsPublicKey,
-				takerUserAccount: takerUserAccount,
-			},
-			referrerInfo
-		);
-	}
-
-	private async tryMakeJitAuctionForMarket(
-		market: PerpMarketAccount,
-		dlob: DLOB
-	) {
-		await this.updateAgentState();
-		await this.drawAndExecuteAction(market, dlob);
-	}
-
-	private async tryMake() {
+	private async runPeriodicTasks() {
 		const start = Date.now();
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				const dlob = this.dlobSubscriber.getDLOB();
-				if (!dlob) {
-					logger.info(`${this.name}: DLOB not initialized yet`);
-					return;
-				}
-
-				await Promise.all(
-					// TODO: spot
-					this.driftClient.getPerpMarketAccounts().map((marketAccount) => {
-						this.tryMakeJitAuctionForMarket(marketAccount, dlob);
-					})
+				console.log(
+					`[${new Date().toISOString()}] Running JIT periodic tasks...`
 				);
+				for (let i = 0; i < this.marketIndexes.length; i++) {
+					const perpIdx = this.marketIndexes[i];
+					const subId = this.subAccountIds[i];
+					this.driftClient.switchActiveUser(subId);
+					console.log(perpIdx, subId);
 
+					let spotMarketIndex = 0;
+					const driftUser = this.driftClient.getUser(subId);
+					const perpMarketAccount =
+						this.driftClient.getPerpMarketAccount(perpIdx);
+					const oraclePriceData =
+						this.driftClient.getOracleDataForPerpMarket(perpIdx);
+
+					const maxBase: number = calculateBaseAmountToMarketMake(
+						perpMarketAccount,
+						driftUser.getNetSpotMarketValue(),
+						1
+					);
+
+					const dollarDepth = 1000; // todo
+
+					// const baseDepth = new BN(dollarDepth * QUOTE_PRECISION.toNumber()).mul(BASE_PRECISION).div(oraclePriceData.price);
+					// const userPerpPos: PerpPosition = driftUser.getPerpPosition(perpIdx);
+
+					const perpMarketIndex = perpIdx;
+
+					if (perpIdx == 0) {
+						spotMarketIndex = 1;
+					} else if (perpIdx == 1) {
+						spotMarketIndex = 3;
+					} else if (perpIdx == 2) {
+						spotMarketIndex = 4;
+					}
+
+					this.jitter.setUserFilter((userAccount, userKey) => {
+						let skip = false;
+						if (
+							isMarketVolatile(
+								perpMarketAccount,
+								oraclePriceData,
+								0.01 // 100 bps
+							)
+						) {
+							console.log('skipping, market is volatile');
+							skip = true;
+						}
+						if (skip) {
+							console.log('skipping user:', userKey);
+						}
+
+						return skip;
+					});
+
+					const bestDriftBid = getBestLimitBidExcludePubKey(
+						this.dlobSubscriber.dlob,
+						perpMarketAccount.marketIndex,
+						MarketType.PERP,
+						oraclePriceData.slot.toNumber(),
+						oraclePriceData,
+						driftUser.userAccountPublicKey
+					);
+
+					const bestDriftAsk = getBestLimitAskExcludePubKey(
+						this.dlobSubscriber.dlob,
+						perpMarketAccount.marketIndex,
+						MarketType.PERP,
+						oraclePriceData.slot.toNumber(),
+						oraclePriceData,
+						driftUser.userAccountPublicKey
+					);
+
+					// const bestDriftBid = this.dlob.estimateFillWithExactBaseAmount(
+					// 	{marketIndex: perpMarketAccount.marketIndex,
+					// 	marketType: MarketType.SPOT,
+					// 	baseAmount: baseDepth,
+					// 	orderDirection: PositionDirection.SHORT,
+					// 	slot: oraclePriceData.slot.toNumber(),
+					// 	oraclePriceData
+					// 	}
+					// ).mul(BASE_PRECISION).div(baseDepth);
+
+					// const bestDriftAsk = this.dlob.estimateFillWithExactBaseAmount(
+					// 	{marketIndex: perpMarketAccount.marketIndex,
+					// 	marketType: MarketType.PERP,
+					// 	baseAmount: baseDepth,
+					// 	orderDirection: PositionDirection.LONG,
+					// 	slot: oraclePriceData.slot.toNumber(),
+					// 	oraclePriceData
+					// 	}
+					// ).mul(BASE_PRECISION).div(baseDepth);
+
+					const bidOffset = oraclePriceData.price.sub(
+						bestDriftBid.getPrice(
+							oraclePriceData,
+							this.dlobSubscriber.slotSource.getSlot()
+						)
+					);
+
+					const askOffset = bestDriftAsk
+						.getPrice(oraclePriceData, this.dlobSubscriber.slotSource.getSlot())
+						.sub(oraclePriceData.price);
+
+					this.jitter.updatePerpParams(perpMarketIndex, {
+						maxPosition: new BN(maxBase * BASE_PRECISION.toNumber()),
+						minPosition: new BN(-maxBase * BASE_PRECISION.toNumber()),
+						bid: bidOffset,
+						ask: askOffset,
+						// ask: new BN(1),
+						priceType: PriceType.ORACLE,
+						subAccountId: subId,
+					});
+
+					if (spotMarketIndex != 0) {
+						this.jitter.updateSpotParams(spotMarketIndex, {
+							maxPosition: new BN((maxBase / 7) * BASE_PRECISION.toNumber()),
+							minPosition: new BN((-maxBase / 7) * BASE_PRECISION.toNumber()),
+							bid: BN.min(bidOffset, new BN(-1)),
+							ask: BN.max(askOffset, new BN(1)),
+							priceType: PriceType.ORACLE,
+							subAccountId: subId,
+						});
+						console.log(
+							'sub account:',
+							this.driftClient.activeSubAccountId,
+							'vs',
+							this.subAccountIds[i]
+						);
+						if (this.driftClient.activeSubAccountId == this.subAccountIds[i]) {
+							let maxSize = 200;
+							if (spotMarketIndex == 1) {
+								maxSize *= 2;
+							}
+							await this.doBasisRebalance(
+								this.driftClient,
+								this.jupiterClient,
+								driftUser,
+								perpMarketIndex,
+								spotMarketIndex,
+								maxSize //todo: $200-$400 max rebalance to start
+							);
+						}
+					}
+				}
+				await sleepMs(5000); // 30 seconds
+
+				console.log(`done: ${Date.now() - start}ms`);
 				ran = true;
 			});
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
-				const user = this.driftClient.getUser();
-				this.mutexBusyCounter.add(
-					1,
-					metricAttrFromUserAccount(
-						user.getUserAccountPublicKey(),
-						user.getUserAccount()
-					)
-				);
+				return;
 			} else {
 				throw e;
 			}
 		} finally {
 			if (ran) {
 				const duration = Date.now() - start;
-				const user = this.driftClient.getUser();
-				this.tryJitDurationHistogram.record(
-					duration,
-					metricAttrFromUserAccount(
-						user.getUserAccountPublicKey(),
-						user.getUserAccount()
-					)
-				);
-				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
+				logger.debug(`${this.name} Bot took ${duration}ms to run`);
+
 				await this.watchdogTimerMutex.runExclusive(async () => {
 					this.watchdogTimerLastPatTime = Date.now();
 				});
 			}
 		}
 	}
+
+	private async doBasisRebalance(
+		driftClient,
+		jupiterClient,
+		u,
+		perpIndex,
+		spotIndex,
+		maxDollarSize = 0
+	) {
+		const solPerpMarket = await driftClient.getPerpMarketAccount(perpIndex);
+		const solSpotMarket = await driftClient.getSpotMarketAccount(spotIndex);
+		const uSpotPosition = u.getSpotPosition(spotIndex);
+		assert(
+			solPerpMarket.amm.oracle.toString() === solSpotMarket.oracle.toString()
+		);
+
+		const perpSize =
+			u.getPerpPositionWithLPSettle(perpIndex)[0].baseAssetAmount;
+
+		let spotSize = ZERO;
+		if (uSpotPosition) {
+			spotSize = getSignedTokenAmount(
+				getTokenAmount(
+					uSpotPosition.scaledBalance,
+					solSpotMarket,
+					uSpotPosition.balanceType
+				),
+				uSpotPosition.balanceType
+			);
+		}
+		const spotSizeNum = convertToNumber(
+			spotSize,
+			new BN(10 ** solSpotMarket.decimals)
+		);
+		const perpSizeNum = convertToNumber(perpSize, BASE_PRECISION);
+		const mismatch = perpSizeNum + spotSizeNum;
+
+		// only do $10
+		if (
+			Math.abs(
+				mismatch *
+					(solPerpMarket.amm.historicalOracleData.lastOraclePrice.toNumber() /
+						1e6)
+			) > 10
+		) {
+			let direction;
+			let tradeSize;
+			if (perpSizeNum > spotSizeNum) {
+				direction =
+					mismatch < 0 ? PositionDirection.LONG : PositionDirection.SHORT;
+				tradeSize = new BN(Math.abs(mismatch) * BASE_PRECISION.toNumber());
+			} else {
+				direction =
+					mismatch < 0 ? PositionDirection.LONG : PositionDirection.SHORT;
+				tradeSize = new BN(Math.abs(mismatch) * BASE_PRECISION.toNumber());
+			}
+
+			if (maxDollarSize != 0) {
+				tradeSize = BN.min(
+					new BN(
+						(maxDollarSize /
+							(solPerpMarket.amm.historicalOracleData.lastOraclePrice.toNumber() /
+								1e6)) *
+							BASE_PRECISION.toNumber()
+					),
+					tradeSize
+				);
+			}
+
+			if (perpIndex != 0) {
+				tradeSize = tradeSize.div(new BN(10)); //1e8 decimal
+			}
+
+			console.log('direction=', direction, tradeSize.toNumber() / 1e9, 'base');
+			try {
+				const dd = await this.doSpotHedgeTrades(
+					spotIndex,
+					driftClient,
+					jupiterClient,
+					tradeSize,
+					new BN(maxDollarSize * 1e6 * 1.001),
+					direction
+				);
+
+				await this.sendBasisTx(driftClient, dd.ixs, dd.lookupTables);
+			} catch (e) {
+				console.error(e);
+			}
+		}
+	}
+
+	async sendBasisTx(driftClient, theInstr, lookupTablesToUse) {
+		const cuEstimate = 2_000_000;
+		const chunk = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: cuEstimate,
+			}),
+			ComputeBudgetProgram.setComputeUnitPrice({
+				microLamports: Math.floor(1000 / (cuEstimate * 1e-6)),
+			}),
+			...theInstr,
+		];
+		try {
+			const chunkedTx: VersionedTransaction = await promiseTimeout(
+				driftClient.txSender.getVersionedTransaction(
+					chunk,
+					lookupTablesToUse,
+					[],
+					driftClient.opts
+				),
+				1000
+			);
+			if (chunkedTx === null) {
+				logger.error(`Timed out getting versioned Transaction for tx chunk`);
+				return;
+			}
+			const tx = await sendVersionedTransaction(
+				driftClient,
+				chunkedTx,
+				[],
+				// { skipPreflight: true },
+				driftClient.opts,
+				1000
+			);
+			logger.info(`tx signature: https://solscan.io/tx/${tx}`);
+		} catch (e) {
+			logger.error(`Failed to send chunked placeOrder tx: ${e}`);
+			return;
+		}
+	}
+
+	async doSpotHedgeTrades(
+		spotMarketIndex: number,
+		driftClient: DriftClient,
+		jupiterClient: JupiterClient,
+		tradeSize: BN,
+		maxDollarSize: BN,
+		direction: PositionDirection
+	): Promise<
+		| {
+				ixs: TransactionInstruction[];
+				lookupTables: AddressLookupTableAccount[];
+		  }
+		| undefined
+	> {
+		let jupSwapMode: SwapMode;
+		let tsize: BN;
+		let inMarketIndex: number;
+		let outMarketIndex: number;
+		// let jupReduceOnly: SwapReduceOnly;
+		if (isVariant(direction, 'long')) {
+			// sell USDC, buy spotMarketIndex
+			inMarketIndex = 0;
+			outMarketIndex = spotMarketIndex;
+			jupSwapMode = 'ExactIn';
+			tsize = maxDollarSize;
+			// jupReduceOnly = SwapReduceOnly.In;
+		} else {
+			// sell spotMarketIndex, buy USDC
+			inMarketIndex = spotMarketIndex;
+			outMarketIndex = 0;
+			jupSwapMode = 'ExactIn';
+			tsize = tradeSize;
+			// jupReduceOnly = SwapReduceOnly.In;
+		}
+
+		logger.info(
+			`Jupiter swap: ${getVariant(
+				direction
+			)}: ${tradeSize.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex}, 
+			jupSwapMode: ${jupSwapMode}`
+		);
+
+		const inMarket = driftClient.getSpotMarketAccount(inMarketIndex);
+		const outMarket = driftClient.getSpotMarketAccount(outMarketIndex);
+		const routes = await jupiterClient.getRoutes({
+			inputMint: inMarket.mint,
+			outputMint: outMarket.mint,
+			amount: tsize,
+			swapMode: jupSwapMode,
+		});
+
+		if (routes.length === 0) {
+			return undefined;
+		}
+
+		return driftClient.getJupiterSwapIx({
+			jupiterClient,
+			outMarketIndex,
+			inMarketIndex,
+			amount: tsize,
+			swapMode: jupSwapMode,
+			route: routes[0],
+			// reduceOnly: jupReduceOnly,
+			slippageBps: 10,
+		});
+	}
+}
+
+export async function sendVersionedTransaction(
+	driftClient: DriftClient,
+	tx: VersionedTransaction,
+	additionalSigners?: Array<Signer>,
+	opts?: ConfirmOptions,
+	timeoutMs = 5000
+): Promise<TransactionSignature | null> {
+	// @ts-ignore
+	tx.sign((additionalSigners ?? []).concat(driftClient.provider.wallet.payer));
+
+	if (opts === undefined) {
+		opts = driftClient.provider.opts;
+	}
+
+	const rawTransaction = tx.serialize();
+	let txid: TransactionSignature;
+	try {
+		txid = await promiseTimeout(
+			driftClient.provider.connection.sendRawTransaction(rawTransaction, opts),
+			timeoutMs
+		);
+	} catch (e) {
+		console.error(e);
+		throw e;
+	}
+
+	return txid;
 }

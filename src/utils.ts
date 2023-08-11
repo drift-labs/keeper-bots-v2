@@ -2,9 +2,19 @@ import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import fs from 'fs';
 import { logger } from './logger';
 import {
+	BN,
+	DLOB,
+	DLOBNode,
+	MarketType,
 	NodeToFill,
 	NodeToTrigger,
+	OraclePriceData,
+	PERCENTAGE_PRECISION,
+	PRICE_PRECISION,
+	PerpMarketAccount,
+	QUOTE_PRECISION,
 	Wallet,
+	convertToNumber,
 	getOrderSignature,
 } from '@drift-labs/sdk';
 import {
@@ -147,4 +157,129 @@ export async function waitForAllSubscribesToFinish(
 	} else {
 		return true;
 	}
+}
+
+export function getBestLimitBidExcludePubKey(
+	dlob: DLOB,
+	marketIndex: number,
+	marketType: MarketType,
+	slot: number,
+	oraclePriceData: OraclePriceData,
+	excludedUserAccount: PublicKey
+): DLOBNode | undefined {
+	const bids = dlob.getMakerLimitBids(
+		marketIndex,
+		slot,
+		marketType,
+		oraclePriceData
+	);
+
+	for (const bid of bids) {
+		if (bid.userAccount.equals(excludedUserAccount)) {
+			continue;
+		}
+		return bid;
+	}
+
+	return undefined;
+}
+
+export function getBestLimitAskExcludePubKey(
+	dlob: DLOB,
+	marketIndex: number,
+	marketType: MarketType,
+	slot: number,
+	oraclePriceData: OraclePriceData,
+	excludedUserAccount: PublicKey
+): DLOBNode | undefined {
+	const asks = dlob.getMakerLimitAsks(
+		marketIndex,
+		slot,
+		marketType,
+		oraclePriceData
+	);
+	for (const ask of asks) {
+		if (ask.userAccount.equals(excludedUserAccount)) {
+			continue;
+		}
+
+		return ask;
+	}
+
+	return undefined;
+}
+
+function roundDownToNearest(num, nearest = 100) {
+	return Math.floor(num / nearest) * nearest;
+}
+
+export function calculateBaseAmountToMarketMake(
+	perpMarketAccount: PerpMarketAccount,
+	netSpotMarketValue: BN,
+	targetLeverage = 1
+) {
+	const basePriceNormed = convertToNumber(
+		perpMarketAccount.amm.historicalOracleData.lastOraclePriceTwap
+	);
+
+	let basePriceNormedTick = basePriceNormed;
+	while (basePriceNormedTick > 100) {
+		basePriceNormedTick /= 10;
+	}
+
+	const tcNormed = Math.min(
+		roundDownToNearest(
+			convertToNumber(netSpotMarketValue, QUOTE_PRECISION),
+			basePriceNormedTick
+		),
+		800000 // hard coded limit
+	);
+	logger.info(netSpotMarketValue.toString() + '->' + tcNormed.toString());
+
+	targetLeverage *= 0.95;
+
+	const maxBase = (tcNormed / basePriceNormed) * targetLeverage;
+	const marketSymbol = decodeName(perpMarketAccount.name);
+
+	logger.info(
+		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${tcNormed.toString()} / ${basePriceNormed.toString()} * ${targetLeverage.toString()}`
+	);
+
+	return maxBase;
+}
+
+export function isMarketVolatile(
+	perpMarketAccount: PerpMarketAccount,
+	oraclePriceData: OraclePriceData,
+	volatileThreshold = 0.005 // 50 bps
+) {
+	const twapPrice =
+		perpMarketAccount.amm.historicalOracleData.lastOraclePriceTwap5Min;
+	const lastPrice = perpMarketAccount.amm.historicalOracleData.lastOraclePrice;
+	const currentPrice = oraclePriceData.price;
+	const minDenom = BN.min(BN.min(currentPrice, lastPrice), twapPrice);
+	const cVsL =
+		Math.abs(
+			currentPrice.sub(lastPrice).mul(PRICE_PRECISION).div(minDenom).toNumber()
+		) / PERCENTAGE_PRECISION.toNumber();
+	const cVsT =
+		Math.abs(
+			currentPrice.sub(twapPrice).mul(PRICE_PRECISION).div(minDenom).toNumber()
+		) / PERCENTAGE_PRECISION.toNumber();
+
+	const recentStd =
+		perpMarketAccount.amm.oracleStd
+			.mul(PRICE_PRECISION)
+			.div(minDenom)
+			.toNumber() / PERCENTAGE_PRECISION.toNumber();
+
+	if (
+		recentStd > volatileThreshold ||
+		cVsT > volatileThreshold ||
+		cVsL > volatileThreshold
+	) {
+		return true;
+	}
+
+	return false;
 }
