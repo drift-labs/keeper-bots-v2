@@ -58,6 +58,8 @@ import {
 import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
 import { FillerLiteBot } from './bots/fillerLite';
 import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
+import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
+
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -84,6 +86,8 @@ program
 	)
 	.option('--funding-rate-updater', 'Enable Funding Rate updater bot')
 	.option('--user-pnl-settler', 'Enable User PnL settler bot')
+	.option('--mark-twap-crank', 'Enable bid/ask twap crank bot')
+
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
 	.option('--close-open-positions', 'close all open positions')
 	.option('--test-liveness', 'Purposefully fail liveness test after 1 minute')
@@ -566,6 +570,17 @@ const runBot = async () => {
 				jitter,
 				config.botConfigs!.jitMaker!,
 				config.global.driftEnv!
+			)
+		);
+	}
+
+	if (configHasBot(config, 'markTwapCrank')) {
+		bots.push(
+			new MakerBidAskTwapCrank(
+				driftClient,
+				slotSubscriber,
+				config.global.driftEnv,
+				config.botConfigs!.markTwapCrank!
 			)
 		);
 	}
