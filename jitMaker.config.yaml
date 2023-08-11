@@ -41,7 +41,7 @@ global:
   jitoAuthPrivateKey: /path/to/jito/bundle/signing/key/auth.json
 
   # which subaccounts to load, if null will load subaccount 0 (default)
-  subaccounts: [0, 1, 2]
+  subaccounts: [0]
 
 # Which bots to run, be careful with this, running multiple bots in one instance
 # might use more resources than expected.
@@ -76,5 +76,5 @@ botConfigs:
   jitMaker:
     botId: "jitMaker"
     dryRun: false
-    subaccounts: [0, 1, 2]
-    perpMarketIndicies: [0, 1, 2]
+    subaccounts: [0]
+    perpMarketIndicies: [0]

@@ -270,16 +270,23 @@ export class JitMaker implements Bot {
 					// 	}
 					// ).mul(BASE_PRECISION).div(baseDepth);
 
-					const bidOffset = oraclePriceData.price.sub(
-						bestDriftBid.getPrice(
-							oraclePriceData,
-							this.dlobSubscriber.slotSource.getSlot()
-						)
-					);
+					const bidOffset = bestDriftBid
+						.getPrice(oraclePriceData, this.dlobSubscriber.slotSource.getSlot())
+						.sub(oraclePriceData.price);
 
 					const askOffset = bestDriftAsk
 						.getPrice(oraclePriceData, this.dlobSubscriber.slotSource.getSlot())
 						.sub(oraclePriceData.price);
+
+					console.log(
+						`${convertToNumber(bidOffset, PRICE_PRECISION)}@${convertToNumber(
+							askOffset,
+							PRICE_PRECISION
+						)}`
+					);
+					if (bidOffset.gt(askOffset)) {
+						console.log('AHHHHHHHHHHHHHH');
+					}
 
 					this.jitter.updatePerpParams(perpMarketIndex, {
 						maxPosition: new BN(maxBase * BASE_PRECISION.toNumber()),
