@@ -3,7 +3,7 @@ global:
   driftEnv: mainnet-beta
 
   # RPC endpoint to use
-  endpoint: https://rpc.helius.xyz/?api-key=91020679-6d19-4e39-a1db-e61df95c729f
+  endpoint: 
   # custom websocket endpoint to use (if null will be determined from rpc endpoint)
   wsEndpoint:
 
@@ -73,63 +73,6 @@ enabledBots:
 
 # below are bot configs
 botConfigs:
-  filler:
-    botId: "filler"
-    dryRun: false
-    fillerPollingInterval: 6000
-    metricsPort: 9464
-
-    # disable for jito transactions
-    # transactionVersion: 0
-
-    # will revert a transaction during simulation if a fill fails, this will save on tx fees,
-    # and be friendlier for use with services like Jito.
-    # Default is true
-    revertOnFailure: true
-
-  spotFiller:
-    botId: "spot-filler"
-    dryRun: false
-    fillerPollingInterval: 6000
-    metricsPort: 9464
-    transactionVersion: 0
-
-  liquidator:
-    botId: "liquidator"
-    dryRun: false
-    metricsPort: 9465
-    # if true will NOT attempt to sell off any inherited positions
-    disableAutoDerisking: false
-    # if true will swap spot assets on jupiter if the price is better
-    useJupiter: true
-    # null will handle all markets
-    perpMarketIndicies:
-    spotMarketIndicies:
-
-    # this replaces perpMarketIndicies and spotMarketIndicies by allowing you to specify
-    # which subaccount is responsible for liquidating markets
-    # Note: you must set global.subaccounts with all the subaccounts you want to load
-    perpSubAccountConfig:
-      0: # subaccount 0 will watch perp markets 0 and 1
-        - 0
-        - 1
-    spotSubAccountConfig:
-      0: # subaccount 0 will watch all spot markets
-
-    # max slippage (from oracle price) to incur allow when derisking
-    maxSlippagePct: 0.05
-
-    # what algo to use for derisking. Options are "market" or "twap"
-    deriskAlgo: "market"
-
-    # if deriskAlgo == "twap", must supply these as well
-    # twapDurationSec: 300 # overall duration of to run the twap algo. Aims to derisk the entire position over this duration
-
-  trigger:
-    botId: "trigger"
-    dryRun: false
-    metricsPort: 9465
-
   jitMaker:
     botId: "jitMaker"
     dryRun: false
