@@ -943,8 +943,8 @@ export class FillerBot implements Bot {
 		);
 	}
 
-    /**
-	 * Iterates through a tx's logs and handles it appropriately 3e.g. throttling users, updating metrics, etc.)
+	/**
+	 * Iterates through a tx's logs and handles it appropriately (e.g. throttling users, updating metrics, etc.)
 	 *
 	 * @param nodesFilled nodes that we sent a transaction to fill
 	 * @param logs logs from tx.meta.logMessages or this.clearingHouse.program._events._eventParser.parseLogs
