@@ -60,7 +60,6 @@ import { FillerLiteBot } from './bots/fillerLite';
 import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
 import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 
-
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
 
