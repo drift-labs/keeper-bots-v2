@@ -214,7 +214,8 @@ export class JitMaker implements Bot {
 					}
 
 					this.jitter.setUserFilter((userAccount, userKey) => {
-						let skip = false;
+						let skip = userKey == driftUser.userAccountPublicKey.toBase58();
+
 						if (
 							isMarketVolatile(
 								perpMarketAccount,
@@ -277,16 +278,6 @@ export class JitMaker implements Bot {
 					const askOffset = bestDriftAsk
 						.getPrice(oraclePriceData, this.dlobSubscriber.slotSource.getSlot())
 						.sub(oraclePriceData.price);
-
-					console.log(
-						`${convertToNumber(bidOffset, PRICE_PRECISION)}@${convertToNumber(
-							askOffset,
-							PRICE_PRECISION
-						)}`
-					);
-					if (bidOffset.gt(askOffset)) {
-						console.log('AHHHHHHHHHHHHHH');
-					}
 
 					this.jitter.updatePerpParams(perpMarketIndex, {
 						maxPosition: new BN(maxBase * BASE_PRECISION.toNumber()),
@@ -396,17 +387,11 @@ export class JitMaker implements Bot {
 						1e6)
 			) > 10
 		) {
-			let direction;
 			let tradeSize;
-			if (perpSizeNum > spotSizeNum) {
-				direction =
-					mismatch < 0 ? PositionDirection.LONG : PositionDirection.SHORT;
-				tradeSize = new BN(Math.abs(mismatch) * BASE_PRECISION.toNumber());
-			} else {
-				direction =
-					mismatch < 0 ? PositionDirection.LONG : PositionDirection.SHORT;
-				tradeSize = new BN(Math.abs(mismatch) * BASE_PRECISION.toNumber());
-			}
+
+			const direction =
+				mismatch < 0 ? PositionDirection.LONG : PositionDirection.SHORT;
+			tradeSize = new BN(Math.abs(mismatch) * BASE_PRECISION.toNumber());
 
 			if (maxDollarSize != 0) {
 				tradeSize = BN.min(
@@ -533,6 +518,7 @@ export class JitMaker implements Bot {
 			swapMode: jupSwapMode,
 		});
 
+		// TODO: check if price of route is not too far from oracle price
 		if (routes.length === 0) {
 			return undefined;
 		}
