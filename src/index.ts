@@ -24,6 +24,8 @@ import {
 	LogProviderConfig,
 	getMarketsAndOraclesForSubscription,
 	RetryTxSender,
+	AuctionSubscriber,
+	FastSingleTxSender,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 import { Mutex } from 'async-mutex';
@@ -33,7 +35,7 @@ import { constants } from './types';
 import { FillerBot } from './bots/filler';
 import { SpotFillerBot } from './bots/spotFiller';
 import { TriggerBot } from './bots/trigger';
-import { JitMakerBot } from './bots/jitMaker';
+import { JitMaker } from './bots/jitMaker';
 import { LiquidatorBot } from './bots/liquidator';
 import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
@@ -55,6 +57,7 @@ import {
 } from './config';
 import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
 import { FillerLiteBot } from './bots/fillerLite';
+import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
 import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 
 require('dotenv').config();
@@ -539,18 +542,33 @@ const runBot = async () => {
 		);
 	}
 	if (configHasBot(config, 'jitMaker')) {
+		const jitProxyClient = new JitProxyClient({
+			driftClient,
+			programId: new PublicKey('J1TnP8zvVxbtF5KFp5xRmWuvG9McnhzmBd9XGfCyuxFP'),
+		});
+
+		const auctionSubscriber = new AuctionSubscriber({ driftClient });
+		await auctionSubscriber.subscribe();
+
+		const jitter = new JitterSniper({
+			auctionSubscriber,
+			driftClient,
+			slotSubscriber,
+			jitProxyClient,
+		});
+		await jitter.subscribe();
+
+		driftClient.txSender = new FastSingleTxSender({
+			connection,
+			wallet,
+		});
+
 		bots.push(
-			new JitMakerBot(
+			new JitMaker(
 				driftClient,
-				slotSubscriber,
-				{
-					rpcEndpoint: endpoint,
-					commit: commitHash,
-					driftEnv: config.global.driftEnv!,
-					driftPid: driftPublicKey.toBase58(),
-					walletAuthority: wallet.publicKey.toBase58(),
-				},
-				config.botConfigs!.jitMaker!
+				jitter,
+				config.botConfigs!.jitMaker!,
+				config.global.driftEnv!
 			)
 		);
 	}
