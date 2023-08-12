@@ -544,7 +544,7 @@ const runBot = async () => {
 	if (configHasBot(config, 'jitMaker')) {
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
-			programId: driftClient.program.programId,
+			programId: new PublicKey('J1TnP8zvVxbtF5KFp5xRmWuvG9McnhzmBd9XGfCyuxFP'),
 		});
 
 		const auctionSubscriber = new AuctionSubscriber({ driftClient });

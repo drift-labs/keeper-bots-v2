@@ -23,6 +23,7 @@ import {
 	SwapMode,
 	getVariant,
 	isVariant,
+	User,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -344,15 +345,15 @@ export class JitMaker implements Bot {
 	}
 
 	private async doBasisRebalance(
-		driftClient,
+		driftClient: DriftClient,
 		jupiterClient,
-		u,
+		u: User,
 		perpIndex,
 		spotIndex,
 		maxDollarSize = 0
 	) {
-		const solPerpMarket = await driftClient.getPerpMarketAccount(perpIndex);
-		const solSpotMarket = await driftClient.getSpotMarketAccount(spotIndex);
+		const solPerpMarket = driftClient.getPerpMarketAccount(perpIndex);
+		const solSpotMarket = driftClient.getSpotMarketAccount(spotIndex);
 		const uSpotPosition = u.getSpotPosition(spotIndex);
 		assert(
 			solPerpMarket.amm.oracle.toString() === solSpotMarket.oracle.toString()
@@ -379,14 +380,13 @@ export class JitMaker implements Bot {
 		const perpSizeNum = convertToNumber(perpSize, BASE_PRECISION);
 		const mismatch = perpSizeNum + spotSizeNum;
 
+		const lastOraclePrice = convertToNumber(
+			solPerpMarket.amm.historicalOracleData.lastOraclePrice,
+			PRICE_PRECISION
+		);
+
 		// only do $10
-		if (
-			Math.abs(
-				mismatch *
-					(solPerpMarket.amm.historicalOracleData.lastOraclePrice.toNumber() /
-						1e6)
-			) > 10
-		) {
+		if (Math.abs(mismatch * lastOraclePrice) > 10) {
 			let tradeSize;
 
 			const direction =
