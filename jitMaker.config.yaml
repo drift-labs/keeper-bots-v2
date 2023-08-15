@@ -24,15 +24,6 @@ global:
   runOnce: false # Set true to run once and exit, useful for testing or one off bot runs
   debug: false # Enable debug logging
 
-  # subaccountIDs to load, if null will load subaccount 0 (default).
-  # Even if bot specific configs requires subaccountIDs, you should still
-  # specify it here, since we load the subaccounts before loading individual
-  # bots.
-  # subaccounts:
-  # - 0
-  # - 1
-  # - 2
-
   eventSubscriberPollingInterval: 0
   bulkAccountLoaderPollingInterval: 0
 
@@ -40,7 +31,7 @@ global:
   jitoBlockEngineUrl: frankfurt.mainnet.block-engine.jito.wtf
   jitoAuthPrivateKey: /path/to/jito/bundle/signing/key/auth.json
 
-  # which subaccounts to load, if null will load subaccount 0 (default)
+  # which subaccounts to load and get info for, if null will load subaccount 0 (default)
   subaccounts: [0]
 
 # Which bots to run, be careful with this, running multiple bots in one instance
@@ -76,5 +67,9 @@ botConfigs:
   jitMaker:
     botId: "jitMaker"
     dryRun: false
-    subaccounts: [0]
+    # below, ordering is important: match the subaccountIds to perpMarketindices.
+    # e.g. to MM perp markets 0, 1 both on subaccount 0, then subaccounts=[0,0], perpMarketIndicies=[0,1]
+    #      to MM perp market 0 on subaccount 0 and perp market 1 on subaccount 1, then subaccounts=[0, 1], perpMarketIndicies=[0, 1]
+    # also, make sure all subaccounts are loaded in the global config subaccounts above to avoid errors
+    subaccounts: [0] 
     perpMarketIndicies: [0]
