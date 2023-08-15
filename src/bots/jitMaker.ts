@@ -58,6 +58,8 @@ import {
 } from '@solana/web3.js';
 import { BaseBotConfig, JitMakerConfig } from 'src/config';
 
+const TARGET_LEVERAGE_PER_ACCOUNT = 1;
+
 /**
  * This is an example of a bot that implements the Bot interface.
  */
@@ -193,16 +195,17 @@ export class JitMaker implements Bot {
 					const oraclePriceData =
 						this.driftClient.getOracleDataForPerpMarket(perpIdx);
 
+					const numMarketsForSubaccount = this.subAccountIds.filter(
+						(num) => num === subId
+					).length;
 					const maxBase: number = calculateBaseAmountToMarketMake(
 						perpMarketAccount,
 						driftUser.getNetSpotMarketValue(),
-						1
+						TARGET_LEVERAGE_PER_ACCOUNT / numMarketsForSubaccount // target leverage split amongst markets w/in a subacct
 					);
 
-					const dollarDepth = 1000; // todo
-
+					// const dollarDepth = 1000; // todo
 					// const baseDepth = new BN(dollarDepth * QUOTE_PRECISION.toNumber()).mul(BASE_PRECISION).div(oraclePriceData.price);
-					// const userPerpPos: PerpPosition = driftUser.getPerpPosition(perpIdx);
 
 					const perpMarketIndex = perpIdx;
 
