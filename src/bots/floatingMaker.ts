@@ -187,7 +187,7 @@ export class FloatingPerpMakerBot implements Bot {
 
 	public async reset() {
 		for (const intervalId of this.intervalIds) {
-			clearInterval(intervalId);
+			clearInterval(intervalId as NodeJS.Timeout);
 		}
 		this.intervalIds = [];
 	}
