@@ -140,7 +140,7 @@ export class JitMaker implements Bot {
 	public async reset(): Promise<void> {
 		// reset any periodic tasks
 		for (const intervalId of this.intervalIds) {
-			clearInterval(intervalId);
+			clearInterval(intervalId as NodeJS.Timeout);
 		}
 		this.intervalIds = [];
 	}
