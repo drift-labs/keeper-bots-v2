@@ -133,6 +133,12 @@ botConfigs:
       1: 10
       2: 1000
 
+    # Filter out un-liquidateable accounts that just create log noise
+    excludedAccounts:
+    - 9CJLgd5f9nmTp7KRV37RFcQrfEmJn6TU87N7VQAe2Pcq
+    - Edh39zr8GnQFNYwyvxhPngTJHrr29H3vVup8e8ZD4Hwu
+
+
   trigger:
     botId: "trigger"
     dryRun: false
