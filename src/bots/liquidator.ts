@@ -276,6 +276,7 @@ export class LiquidatorBot implements Bot {
 	private jupiterClient: JupiterClient;
 	private twapExecutionProgresses: Map<string, TwapExecutionProgress>; // key: this.getTwapProgressKey, value: TwapExecutionProgress
 	private minDepositToLiq: Map<number, number>;
+	private excludedAccounts: Set<string>;
 
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
@@ -382,6 +383,13 @@ export class LiquidatorBot implements Bot {
 		console.log(this.spotMarketToSubaccount);
 
 		this.minDepositToLiq = config.minDepositToLiq || new Map<number, number>();
+
+		// Load a list of accounts that we will *not* bother trying to liquidate
+		// For whatever reason, this value is being parsed as an array even though
+		// it is declared as a set, so if we merely assign it, then we'd end up
+		// with a compile error later saying `has is not a function`.
+		this.excludedAccounts = new Set<string>(config.excludedAccounts);
+		logger.info(`Liquidator disregarding accounts: ${config.excludedAccounts}`);
 
 		// ensure driftClient has all subaccounts tracked and subscribed
 		for (const subaccount of this.allSubaccounts) {
@@ -1706,6 +1714,14 @@ tx: ${tx} `
 			const userAcc = user.getUserAccount();
 			const auth = userAcc.authority.toBase58();
 			const userKey = user.userAccountPublicKey.toBase58();
+
+			if (this.excludedAccounts.has(userKey)) {
+				// Debug log precisely because the intent is to avoid noise
+				logger.debug(
+					`Skipping liquidation for ${userKey} due to configuration`
+				);
+				continue;
+			}
 
 			if (isUserBankrupt(user) || user.isBankrupt()) {
 				await this.tryResolveBankruptUser(user);

@@ -37,6 +37,7 @@ export type LiquidatorConfig = BaseBotConfig & {
 	deriskAlgo?: OrderExecutionAlgoType;
 	twapDurationSec?: number;
 	minDepositToLiq?: Map<number, number>;
+	excludedAccounts?: Set<string>;
 };
 
 export type BotConfigMap = {
