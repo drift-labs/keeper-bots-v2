@@ -275,6 +275,7 @@ export class LiquidatorBot implements Bot {
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
 	private jupiterClient: JupiterClient;
 	private twapExecutionProgresses: Map<string, TwapExecutionProgress>; // key: this.getTwapProgressKey, value: TwapExecutionProgress
+	private minDepositToLiq: Map<number, number>;
 
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
@@ -379,6 +380,8 @@ export class LiquidatorBot implements Bot {
 		logger.info(`${this.name} spotMarketIndicies: ${this.spotMarketIndicies}`);
 		console.log('this.spotMarketToSubaccount:');
 		console.log(this.spotMarketToSubaccount);
+
+		this.minDepositToLiq = config.minDepositToLiq || new Map<number, number>();
 
 		// ensure driftClient has all subaccounts tracked and subscribed
 		for (const subaccount of this.allSubaccounts) {
@@ -1342,6 +1345,10 @@ export class LiquidatorBot implements Bot {
 		borrowAmountToLiq: BN,
 		user: User
 	) {
+		logger.debug(
+			`liqBorrow: ${user.userAccountPublicKey.toBase58()} value ${borrowAmountToLiq}`
+		);
+
 		if (!this.spotMarketIndicies.includes(borrowMarketIndextoLiq)) {
 			logger.info(
 				`Skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because borrowMarketIndextoLiq(${borrowMarketIndextoLiq}) is not in spotMarketIndicies`
@@ -1427,6 +1434,22 @@ tx: ${tx} `
 		borrowMarketIndextoLiq: number,
 		borrowAmountToLiq: BN
 	) {
+		const minAmount = this.minDepositToLiq[depositMarketIndextoLiq] || 0;
+
+		logger.debug(
+			`liqPerpPnl: Min liquidation for market ${depositMarketIndextoLiq} is ${minAmount}`
+		);
+		if (depositAmountToLiq < minAmount) {
+			logger.debug(
+				`liqPerpPnl: Amount ${depositAmountToLiq} below ${minAmount} liquidation threshold`
+			);
+			return;
+		}
+
+		logger.debug(
+			`liqPerpPnl: ${user.userAccountPublicKey.toBase58()} deposit: ${depositAmountToLiq}, from ${depositMarketIndextoLiq} borrow: ${borrowAmountToLiq} from ${borrowMarketIndextoLiq}`
+		);
+
 		if (liquidateePosition.quoteAssetAmount.gt(ZERO)) {
 			const claimablePnl = calculateClaimablePnl(
 				perpMarketAccount,

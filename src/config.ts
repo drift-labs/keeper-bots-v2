@@ -36,6 +36,7 @@ export type LiquidatorConfig = BaseBotConfig & {
 	maxSlippagePct?: number;
 	deriskAlgo?: OrderExecutionAlgoType;
 	twapDurationSec?: number;
+	minDepositToLiq?: Map<number, number>;
 };
 
 export type BotConfigMap = {
