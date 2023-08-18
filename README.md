@@ -120,7 +120,7 @@ For perps:
 
 ## Liquidator Bot
 
-Read the docs: https://docs.drift.trade/liquidators
+The liquidator bot monitors spot and perp markets for bankrupt accounts, and attempts to liquidate positions according to the protocol's [liquidation process](https://docs.drift.trade/liquidators).
 
 ### Notes on derisking (`useJupiter`)
 
@@ -130,7 +130,6 @@ the more favorable of Drift spot or Jupiter before executing. Set `useJupiter` u
 
 You may also set `disableAutoDerisking` to `true`, to disable the derisking loop. You may want to do this as part of a larger strategy
 where you are ok with taking on risk at a favorable to market price (liquidation fee applied).
-
 
 ### Notes on configuring subaccount
 
@@ -174,7 +173,13 @@ botConfigs:
         - 1
         - 2
 ```
-Means the liquidator will liquidate perp markets 0-2 using subaccount 0, perp markets 3-12 using subaccount 1, and spot markets 0-2 using subaccount 0. It will also use jupiter to derisk spot assets into USDC.
+Means the liquidator will liquidate perp markets 0-2 using subaccount 0, perp markets 3-12 using subaccount 1, and spot markets 0-2 using subaccount 0. It will also use jupiter to derisk spot assets into USDC. Make sure that for all subaccounts specified in the botConfigs, that they are also listed in the global configs. So for the above example config:
+
+```
+global:
+  ...
+  subaccounts: [0, 1]
+```
 
 ### Common errors
 
@@ -183,6 +188,37 @@ When running the liquidator, you might see the following error codes in the tran
 | Error             | Description |   
 | ----------------- | ------ |
 | SufficientCollateral | The account you're trying to liquidate has sufficient collateral and can't be liquidated |
-| InvalidSpotPosition | Outcompeted: the liqudated account's spot position was already liquidated and is now 0. |
-| InvalidLiquidation | 
+| InvalidSpotPosition | Outcompeted: the liqudated account's spot position was already liquidated. |
+| InvalidPerpPosition | Outcompeted: the liqudated account's perp position was already liquidated. |
+
+## Jit Maker
+
+The jit maker bot supplies liquidity to the protocol by participating in jit acutions for perp markets. Before running a jit maker bot, be sure to read the documentation below:
+
+Read the docs on jit auctions: https://docs.drift.trade/just-in-time-jit-auctions
+
+Read the docs on the jit proxy client: https://github.com/drift-labs/jit-proxy/blob/master/ts/sdk/Readme.md
+
+Be aware that running a jit maker means taking on positional risk, so be sure to manage your risk properly!
+
+### Implementation 
+
+This sample jit maker implementation uses the jit proxy client, and updates ```JitParams``` for the markets specified in the config. The bot will update it's bid and ask to be at the top level bid/ask in the DLOB, and specifies its maximum position size to keep leverage at 1. The jit maker will attempt to fill taker orders that cross its market that's specified in the ```JitParams```. For order execution, the jit maker currently uses the JitterSniper -- read more on the jitters and different options in the jit proxy client documentation (link above). 
+
+This bot is meant to serve as a starting off point for participating in jit auctions. To increase competitiveness, consider different strategies for updating your markets.
+
+### Common errors
+
+| Error             | Description |   
+| ----------------- | ------ |
+| BidNotCrossed/AskNotCrossed | The jit proxy program simulation fails if the auction price is not lower than the jit param bid or higher than jit param ask. Bot's market, oracle price, or auction price changed during execution. Can be a latency issue, either slow order submission or slow websocket/polling connection. |
+| OrderNotFound | Outcompeted: the taker order was already filled. |
+
+### Running the bot and notes on configs
+
+```jitMaker.config.yaml``` is supplied as an example, and a jit maker can be run with ```yarn run dev --config-file=jitMaker.config.yaml```. Jit maker bots require colleteral, so make sure to specify depositing collateral in the config file using ```forceDeposit```, or deposit collateral using the app or SDK before running the bot. 
+
+To avoid errors being thrown, remember to specify the subaccounts being used in the global configs. An example below:
+
+
 
