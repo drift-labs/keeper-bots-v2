@@ -65,7 +65,7 @@ yarn run dev --init-user
 
 Alternatively, you can put the private key into a browser wallet and use the UI at https://app.drift.trade to initialize the user.
 
-## Depositing Collateral
+## Collateral
 
 Some bots (i.e. trading, liquidator and JIT makers) require collateral in order to keep positions open, a helper function is included to help with depositing collateral.
 A user must be initialized first before collateral may be deposited.
@@ -76,6 +76,9 @@ yarn run dev --force-deposit 10000
 ```
 
 Alternatively, you can put the private key into a browser wallet and use the UI at https://app.drift.trade to deposit collateral.
+
+Free collateral is what is determines the size of borrows and perp positions that an account can have. Free collateral = total collateral - initial margin requirement. Total collateral is the value of the spot assets in your account + unrealized perp pnl. The initial margin requirement is the total weighted value of the perp positions and spot liabilities in your account. The initial margin requirement weights are determined [here](https://docs.drift.trade/cross-collateral-deposits). In simple terms, free collateral is essentially the amount of total collateral that is not being used up by borrows and existing perp positions and open orders.
+
 
 # Run Bots
 
@@ -98,8 +101,22 @@ version of the filler can be run on public RPCs for testing, but is not as stabl
 Read the docs: https://docs.drift.trade/keepers-and-decentralised-orderbook
 
 Fills (matches) crossing orders on the exchange for a small cut of the taker fees. Fillers maintain a copy of the DLOB to look
-for orders that cross.
+for orders that cross. Fillers will also attempt to execute triggerable orders. 
 
+### Common errors
+
+When running the filler bots, you might see the following error codes in the transaction logs on a failed in pre-flight simulation:
+
+For perps:
+
+| Error             | Description |   
+| ----------------- | ------ |
+| OrderNotTriggerable | Outcompeted: order was already triggered by someone else |
+| RevertFill |  Outcompeted: order was already filled by someone else|
+
+| Error             | Description |   
+| ----------------- | ------ |
+| OrderDoesNotExist | Outcompeted: Order was already filled by someone else|
 
 ## Liquidator Bot
 
@@ -158,3 +175,14 @@ botConfigs:
         - 2
 ```
 Means the liquidator will liquidate perp markets 0-2 using subaccount 0, perp markets 3-12 using subaccount 1, and spot markets 0-2 using subaccount 0. It will also use jupiter to derisk spot assets into USDC.
+
+### Common errors
+
+When running the liquidator, you might see the following error codes in the transaction logs on a failed in pre-flight simulation:
+
+| Error             | Description |   
+| ----------------- | ------ |
+| SufficientCollateral | The account you're trying to liquidate has sufficient collateral and can't be liquidated |
+| InvalidSpotPosition | Outcompeted: the liqudated account's spot position was already liquidated and is now 0. |
+| InvalidLiquidation | 
+
