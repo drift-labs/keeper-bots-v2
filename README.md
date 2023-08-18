@@ -203,9 +203,9 @@ Be aware that running a jit maker means taking on positional risk, so be sure to
 
 ### Implementation 
 
-This sample jit maker implementation uses the jit proxy client, and updates ```JitParams``` for the markets specified in the config. The bot will update it's bid and ask to be at the top level bid/ask in the DLOB, and specifies its maximum position size to keep leverage at 1. The jit maker will attempt to fill taker orders that cross its market that's specified in the ```JitParams```. For order execution, the jit maker currently uses the JitterSniper -- read more on the jitters and different options in the jit proxy client documentation (link above). 
+This sample jit maker uses the jit proxy client, and updates ```JitParams``` for the markets specified in the config. The bot will update its bid and ask to match the current top level market in the DLOB, and specifies its maximum position size to keep leverage at 1. The jit maker will attempt to fill taker orders that cross its market that's specified in the ```JitParams```. If the current auction price does not cross the bid/ask the transaction will fail during pre-flight simulation, because for the purposes of the jit proxy program, the market is considered the market maker's worst acceptable price of execution. For order execution, the jit maker currently uses the ```JitterSniper``` -- read more on the jitters and different options in the jit proxy client documentation (link above). 
 
-This bot is meant to serve as a starting off point for participating in jit auctions. To increase competitiveness, consider different strategies for updating your markets.
+This bot is meant to serve as a starting off point for participating in jit auctions. To increase strategy complexity, consider different strategies for updating your markets. To change the amount of leverage, change the constant ```TARGET_LEVERAGE_PER_ACCOUNT``` before running.
 
 ### Common errors
 
@@ -218,7 +218,23 @@ This bot is meant to serve as a starting off point for participating in jit auct
 
 ```jitMaker.config.yaml``` is supplied as an example, and a jit maker can be run with ```yarn run dev --config-file=jitMaker.config.yaml```. Jit maker bots require colleteral, so make sure to specify depositing collateral in the config file using ```forceDeposit```, or deposit collateral using the app or SDK before running the bot. 
 
-To avoid errors being thrown, remember to specify the subaccounts being used in the global configs. An example below:
+To avoid errors being thrown during initialization, remember to enumerate in the global configs the subaccounts being used in the bot configs. An example below in a config.yaml file:
+
+```
+global:
+  ...
+  subaccounts: [0, 1] <----- bot configs specify subaccounts of [0, 1, 1], so make sure we load in [0, 1] in global configs to properly initialize driftClient!
 
 
+botConfigs:
+  jitMaker:
+    botId: "jitMaker"
+    dryRun: false
+    # below, ordering is important: match the subaccountIds to perpMarketindices.
+    # e.g. to MM perp markets 0, 1 both on subaccount 0, then subaccounts=[0,0], perpMarketIndicies=[0,1]
+    #      to MM perp market 0 on subaccount 0 and perp market 1 on subaccount 1, then subaccounts=[0, 1], perpMarketIndicies=[0, 1]
+    # also, make sure all subaccounts are loaded in the global config subaccounts above to avoid errors
+    subaccounts: [0, 1, 1] <--------------- the subaccount set should be specified above too!
+    perpMarketIndicies: [0, 1, 2]
 
+```
