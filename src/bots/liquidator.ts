@@ -352,10 +352,15 @@ export class LiquidatorBot implements Bot {
 		console.log('this.perpMarketToSubaccount:');
 		console.log(this.perpMarketToSubaccount);
 
+		const allSpotMarkets = this.driftClient.getSpotMarketAccounts().map((m) => {
+			return m.marketIndex;
+		});
 		if (config.spotSubAccountConfig) {
 			logger.info('Loading spot markets to watch from spotSubAccountConfig');
 			for (const subAccount of Object.keys(config.spotSubAccountConfig)) {
-				for (const market of config.spotSubAccountConfig[subAccount]) {
+				const marketsForAccount =
+					config.spotSubAccountConfig[subAccount] || allSpotMarkets;
+				for (const market of marketsForAccount) {
 					this.spotMarketToSubaccount.set(market, parseInt(subAccount));
 					this.allSubaccounts.add(parseInt(subAccount));
 				}
@@ -367,17 +372,13 @@ export class LiquidatorBot implements Bot {
 			logger.info('Loading spot markets to watch from spotMarketIndicies');
 			this.spotMarketIndicies = config.spotMarketIndicies || [];
 			if (!this.spotMarketIndicies || this.spotMarketIndicies.length === 0) {
-				this.spotMarketIndicies = this.driftClient
-					.getSpotMarketAccounts()
-					.map((m) => {
-						this.spotMarketToSubaccount.set(
-							m.marketIndex,
-							this.activeSubAccountId
-						);
-						return m.marketIndex;
-					});
+				this.spotMarketIndicies = allSpotMarkets;
+			}
+			for (const market of this.spotMarketIndicies) {
+				this.spotMarketToSubaccount.set(market, this.activeSubAccountId);
 			}
 		}
+
 		logger.info(`${this.name} spotMarketIndicies: ${this.spotMarketIndicies}`);
 		console.log('this.spotMarketToSubaccount:');
 		console.log(this.spotMarketToSubaccount);
