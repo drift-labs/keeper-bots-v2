@@ -1,4 +1,9 @@
-import { DriftClient, ZERO, PerpMarketAccount } from '@drift-labs/sdk';
+import {
+	DriftClient,
+	ZERO,
+	PerpMarketAccount,
+	isVariant,
+} from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
 import { getErrorCode } from '../error';
@@ -113,6 +118,9 @@ export class FundingRateUpdaterBot implements Bot {
 				const maxRetries = 5;
 				for (let retries = 0; retries < maxRetries; retries++) {
 					const perpMarket = perpMarketAndOracleData[i].marketAccount;
+					if (isVariant(perpMarket.status, 'initialized')) {
+						break;
+					}
 					if (perpMarket.amm.fundingPeriod.eq(ZERO)) {
 						break;
 					}
