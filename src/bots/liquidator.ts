@@ -2045,9 +2045,10 @@ tx: ${tx} `
 	private async tryLiquidateStart() {
 		const start = Date.now();
 		let ran = false;
+		const needMutex = this.allSubaccounts.size > 1;
 		try {
 			// need mutex since derisk and tryLiquidate may change the active subaccountId
-			if (!this.acquireMutex()) {
+			if (needMutex && !this.acquireMutex()) {
 				logger.info(
 					`${this.name} tryLiquidate ran into locked mutex, skipping run.`
 				);
@@ -2062,7 +2063,9 @@ tx: ${tx} `
 				} `
 			);
 		} finally {
-			this.releaseMutex();
+			if (needMutex) {
+				this.releaseMutex();
+			}
 			if (ran) {
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
 				this.watchdogTimerLastPatTime = Date.now();
