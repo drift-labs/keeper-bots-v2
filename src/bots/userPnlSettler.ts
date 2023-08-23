@@ -18,6 +18,9 @@ import {
 	isVariant,
 	TxSigAndSlot,
 	timeRemainingUntilUpdate,
+	getTokenAmount,
+	SpotBalanceType,
+	calculateNetUserPnl,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -41,7 +44,7 @@ type SettlePnlIxParams = {
 };
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
-const SETTLE_USER_CHUNKS = 2;
+const SETTLE_USER_CHUNKS = 5;
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -207,7 +210,7 @@ export class UserPnlSettlerBot implements Bot {
 						continue;
 					}
 
-					const unsettledPnl = calculateClaimablePnl(
+					const userUnsettledPnl = calculateClaimablePnl(
 						perpMarketAndOracleData[perpMarketIdx].marketAccount,
 						spotMarketAndOracleData[spotMarketIdx].marketAccount, // always liquidating the USDC spot market
 						settleePositionWithLp,
@@ -226,7 +229,7 @@ export class UserPnlSettlerBot implements Bot {
 
 					// only settle for $10 or more negative pnl
 					if (
-						unsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
+						userUnsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
 						!settleePositionWithLp.baseAssetAmount.eq(ZERO) &&
 						!isUsdcBorrow &&
 						settleePositionWithLp.lpShares.eq(ZERO)
@@ -238,19 +241,38 @@ export class UserPnlSettlerBot implements Bot {
 						continue;
 					}
 
-					if (unsettledPnl.gt(ZERO)) {
-						const pnlImbalance = calculateNetUserPnlImbalance(
-							perpMarketAndOracleData[perpMarketIdx].marketAccount,
-							spotMarketAndOracleData[spotMarketIdx].marketAccount,
-							perpMarketAndOracleData[perpMarketIdx].oraclePriceData
-						).mul(new BN(-1));
+					const pnlPool =
+						perpMarketAndOracleData[perpMarketIdx].marketAccount.pnlPool;
+					let pnlToSettleWithUser = ZERO;
+					let pnlPoolTookenAmount = ZERO;
+					if (userUnsettledPnl.gt(ZERO)) {
+						pnlPoolTookenAmount = getTokenAmount(
+							pnlPool.scaledBalance,
+							spotMarketAndOracleData[pnlPool.marketIndex].marketAccount,
+							SpotBalanceType.DEPOSIT
+						);
+						pnlToSettleWithUser = BN.min(userUnsettledPnl, pnlPoolTookenAmount);
+					}
 
-						if (pnlImbalance.lte(ZERO)) {
+					if (pnlToSettleWithUser.gt(ZERO)) {
+						const netUserPnl = calculateNetUserPnl(
+							perpMarketAndOracleData[perpMarketIdx].marketAccount,
+							perpMarketAndOracleData[perpMarketIdx].oraclePriceData
+						);
+						let maxPnlPoolExcess = ZERO;
+						if (netUserPnl.lt(pnlPoolTookenAmount)) {
+							maxPnlPoolExcess = pnlPoolTookenAmount.sub(
+								BN.max(netUserPnl, ZERO)
+							);
+						}
+
+						// we're only allowed to settle positive pnl if pnl pool is in excess
+						if (maxPnlPoolExcess.lte(ZERO)) {
 							logger.warn(
 								`Want to settle positive PnL for user ${user
 									.getUserAccountPublicKey()
-									.toBase58()} in market ${perpMarketIdx}, but there is a pnl imbalance (${convertToNumber(
-									pnlImbalance,
+									.toBase58()} in market ${perpMarketIdx}, but maxPnlPoolExcess is: (${convertToNumber(
+									maxPnlPoolExcess,
 									QUOTE_PRECISION
 								)})`
 							);
