@@ -347,7 +347,7 @@ export class UserPnlSettlerBot implements Bot {
 					try {
 						const ixs = [
 							ComputeBudgetProgram.setComputeUnitLimit({
-								units: 1_000_000,
+								units: 2_000_000,
 							}),
 						];
 						ixs.push(
