@@ -1448,7 +1448,7 @@ tx: ${tx} `
 		logger.debug(
 			`liqPerpPnl: Min liquidation for market ${depositMarketIndextoLiq} is ${minAmount}`
 		);
-		if (depositAmountToLiq < minAmount) {
+		if (depositAmountToLiq.ltn(minAmount)) {
 			logger.debug(
 				`liqPerpPnl: Amount ${depositAmountToLiq} below ${minAmount} liquidation threshold`
 			);
@@ -1456,7 +1456,7 @@ tx: ${tx} `
 		}
 
 		logger.debug(
-			`liqPerpPnl: ${user.userAccountPublicKey.toBase58()} deposit: ${depositAmountToLiq}, from ${depositMarketIndextoLiq} borrow: ${borrowAmountToLiq} from ${borrowMarketIndextoLiq}`
+			`liqPerpPnl: ${user.userAccountPublicKey.toBase58()} deposit: ${depositAmountToLiq.toString()}, from ${depositMarketIndextoLiq} borrow: ${borrowAmountToLiq.toString()} from ${borrowMarketIndextoLiq}`
 		);
 
 		if (liquidateePosition.quoteAssetAmount.gt(ZERO)) {
