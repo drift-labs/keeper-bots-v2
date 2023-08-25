@@ -1692,17 +1692,27 @@ tx: ${tx} `
 		let ran = false;
 		const usersCanBeLiquidated = new Array<{
 			user: User;
+			userKey: string;
 			marginRequirement: BN;
 			canBeLiquidated: boolean;
 		}>();
 		for (const user of this.userMap.values()) {
 			const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
 			if (canBeLiquidated || user.isBeingLiquidated()) {
-				usersCanBeLiquidated.push({
-					user,
-					marginRequirement,
-					canBeLiquidated,
-				});
+				const userKey = user.userAccountPublicKey.toBase58();
+				if (this.excludedAccounts.has(userKey)) {
+					// Debug log precisely because the intent is to avoid noise
+					logger.debug(
+						`Skipping liquidation for ${userKey} due to configuration`
+					);
+				} else {
+					usersCanBeLiquidated.push({
+						user,
+						userKey,
+						marginRequirement,
+						canBeLiquidated,
+					});
+				}
 			}
 		}
 
@@ -1711,18 +1721,9 @@ tx: ${tx} `
 			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
 		});
 
-		for (const { user, canBeLiquidated } of usersCanBeLiquidated) {
+		for (const { user, userKey, canBeLiquidated } of usersCanBeLiquidated) {
 			const userAcc = user.getUserAccount();
 			const auth = userAcc.authority.toBase58();
-			const userKey = user.userAccountPublicKey.toBase58();
-
-			if (this.excludedAccounts.has(userKey)) {
-				// Debug log precisely because the intent is to avoid noise
-				logger.debug(
-					`Skipping liquidation for ${userKey} due to configuration`
-				);
-				continue;
-			}
 
 			if (isUserBankrupt(user) || user.isBankrupt()) {
 				await this.tryResolveBankruptUser(user);
