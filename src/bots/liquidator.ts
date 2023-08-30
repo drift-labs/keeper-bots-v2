@@ -336,10 +336,18 @@ export class LiquidatorBot implements Bot {
 		this.perpMarketToSubaccount = new Map<number, number>();
 		this.spotMarketToSubaccount = new Map<number, number>();
 
-		if (config.perpSubAccountConfig) {
+		const allPerpMarkets = this.driftClient.getPerpMarketAccounts().map((m) => {
+			return m.marketIndex;
+		});
+		if (
+			config.perpSubAccountConfig &&
+			Object.keys(config.perpSubAccountConfig).length != 0
+		) {
 			logger.info('Loading perp markets to watch from perpSubAccountConfig');
 			for (const subAccount of Object.keys(config.perpSubAccountConfig)) {
-				for (const market of config.perpSubAccountConfig[subAccount]) {
+				const marketsForAccount =
+					config.perpSubAccountConfig[subAccount] || allPerpMarkets;
+				for (const market of marketsForAccount) {
 					this.perpMarketToSubaccount.set(market, parseInt(subAccount));
 					this.allSubaccounts.add(parseInt(subAccount));
 				}
@@ -351,15 +359,10 @@ export class LiquidatorBot implements Bot {
 			logger.info('Loading perp markets to watch from perpMarketIndicies');
 			this.perpMarketIndicies = config.perpMarketIndicies || [];
 			if (!this.perpMarketIndicies || this.perpMarketIndicies.length === 0) {
-				this.perpMarketIndicies = this.driftClient
-					.getPerpMarketAccounts()
-					.map((m) => {
-						this.perpMarketToSubaccount.set(
-							m.marketIndex,
-							this.activeSubAccountId
-						);
-						return m.marketIndex;
-					});
+				this.perpMarketIndicies = allPerpMarkets;
+			}
+			for (const market of this.perpMarketIndicies) {
+				this.perpMarketToSubaccount.set(market, this.activeSubAccountId);
 			}
 		}
 		logger.info(`${this.name} perpMarketIndicies: ${this.perpMarketIndicies}`);
