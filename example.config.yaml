@@ -128,7 +128,7 @@ botConfigs:
 
     # Minimum deposit amount to try to liquidiate, per spot market, in lamports.
     # If null, or a spot market isn't here, it will liquidate any amount
-    # See perpMarkets.ts on the prodocol codebase for the indices
+    # See perpMarkets.ts on the protocol codebase for the indices
     minDepositToLiq:
       1: 10
       2: 1000
