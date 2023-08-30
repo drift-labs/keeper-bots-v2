@@ -121,7 +121,8 @@ function findBestSpotPosition(
 	spotPositions: SpotPosition[],
 	isBorrow: boolean,
 	positionTakerOverPctNumerator: BN,
-	positionTakerOverPctDenominator: BN
+	positionTakerOverPctDenominator: BN,
+	minDepositToLiq: Map<number, number>
 ): {
 	bestIndex: number;
 	bestAmount: BN;
@@ -138,6 +139,19 @@ function findBestSpotPosition(
 
 	for (const position of spotPositions) {
 		if (position.scaledBalance.eq(ZERO)) {
+			continue;
+		}
+
+		// Skip any position that is less than the configured minimum amount
+		// for the specific market
+		const minAmount = minDepositToLiq.get(position.marketIndex) ?? 0;
+		logger.debug(
+			`liqPerpPnl: Min liquidation for market ${position.marketIndex} is ${minAmount}`
+		);
+		if (position.scaledBalance.ltn(minAmount)) {
+			logger.debug(
+				`liqPerpPnl: Amount ${position.scaledBalance} below ${minAmount} liquidation threshold`
+			);
 			continue;
 		}
 
@@ -383,7 +397,13 @@ export class LiquidatorBot implements Bot {
 		console.log('this.spotMarketToSubaccount:');
 		console.log(this.spotMarketToSubaccount);
 
-		this.minDepositToLiq = config.minDepositToLiq || new Map<number, number>();
+		this.minDepositToLiq = new Map<number, number>();
+		if (config.minDepositToLiq != null) {
+			// We might get the keys parsed as strings
+			for (const [k, v] of Object.entries(config.minDepositToLiq)) {
+				this.minDepositToLiq.set(Number.parseInt(k), v);
+			}
+		}
 
 		// Load a list of accounts that we will *not* bother trying to liquidate
 		// For whatever reason, this value is being parsed as an array even though
@@ -1443,18 +1463,6 @@ tx: ${tx} `
 		borrowMarketIndextoLiq: number,
 		borrowAmountToLiq: BN
 	) {
-		const minAmount = this.minDepositToLiq[depositMarketIndextoLiq] || 0;
-
-		logger.debug(
-			`liqPerpPnl: Min liquidation for market ${depositMarketIndextoLiq} is ${minAmount}`
-		);
-		if (depositAmountToLiq.ltn(minAmount)) {
-			logger.debug(
-				`liqPerpPnl: Amount ${depositAmountToLiq} below ${minAmount} liquidation threshold`
-			);
-			return;
-		}
-
 		logger.debug(
 			`liqPerpPnl: ${user.userAccountPublicKey.toBase58()} deposit: ${depositAmountToLiq.toString()}, from ${depositMarketIndextoLiq} borrow: ${borrowAmountToLiq.toString()} from ${borrowMarketIndextoLiq}`
 		);
@@ -1764,7 +1772,8 @@ tx: ${tx} `
 					liquidateeUserAccount.spotPositions,
 					false,
 					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
-					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
+					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM,
+					this.minDepositToLiq
 				);
 
 				const {
@@ -1777,7 +1786,8 @@ tx: ${tx} `
 					liquidateeUserAccount.spotPositions,
 					true,
 					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
-					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
+					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM,
+					this.minDepositToLiq
 				);
 
 				let liquidateeHasSpotPos = false;
