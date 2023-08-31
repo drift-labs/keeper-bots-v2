@@ -184,7 +184,10 @@ export class MakerBidAskTwapCrank implements Bot {
 			}
 			return chunks;
 		}
-		const chunkSize = 4; // You can change this to any desired chunk size
+
+		// 4 is too large some times with error:
+		// SendTransactionError: failed to send transaction: encoded solana_sdk::transaction::versioned::VersionedTransaction too large: 1664 bytes (max: encoded/raw 1644/1232)
+		const chunkSize = 3;
 		const chunkedLists: number[][] = chunkArray(crankMarkets, chunkSize);
 
 		for (const chunk of chunkedLists) {
