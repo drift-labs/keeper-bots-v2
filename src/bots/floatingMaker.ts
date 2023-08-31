@@ -65,17 +65,16 @@ export class FloatingPerpMakerBot implements Bot {
 
 	// metrics
 	private metricsInitialized = false;
-	private metricsPort: number | undefined;
-	private exporter: PrometheusExporter;
-	private meter: Meter;
+	private metricsPort?: number;
+	private exporter?: PrometheusExporter;
+	private meter?: Meter;
 	private bootTimeMs = Date.now();
-	private runtimeSpecsGauge: ObservableGauge;
-	private runtimeSpec: RuntimeSpec;
-	private mutexBusyCounter: Counter;
-	private errorCounter: Counter;
-	private tryMakeDurationHistogram: Histogram;
+	private runtimeSpecsGauge?: ObservableGauge;
+	private runtimeSpec?: RuntimeSpec;
+	private mutexBusyCounter?: Counter;
+	private tryMakeDurationHistogram?: Histogram;
 
-	private agentState: State;
+	private agentState?: State;
 
 	/**
 	 * Set true to enforce max position size
@@ -164,9 +163,6 @@ export class FloatingPerpMakerBot implements Bot {
 		this.mutexBusyCounter = this.meter.createCounter(METRIC_TYPES.mutex_busy, {
 			description: 'Count of times the mutex was busy',
 		});
-		this.errorCounter = this.meter.createCounter(METRIC_TYPES.errors, {
-			description: 'Count of errors',
-		});
 		this.tryMakeDurationHistogram = this.meter.createHistogram(
 			METRIC_TYPES.try_make_duration_histogram,
 			{
@@ -225,25 +221,25 @@ export class FloatingPerpMakerBot implements Bot {
 	 * @returns {Promise<void>}
 	 */
 	private updateAgentState(): void {
-		this.driftClient.getUserAccount().perpPositions.map((p) => {
+		this.driftClient.getUserAccount()!.perpPositions.map((p) => {
 			if (p.baseAssetAmount.isZero()) {
 				return;
 			}
-			this.agentState.marketPosition.set(p.marketIndex, p);
+			this.agentState!.marketPosition.set(p.marketIndex, p);
 		});
 
 		// zero out the open orders
 		for (const market of this.driftClient.getPerpMarketAccounts()) {
-			this.agentState.openOrders.set(market.marketIndex, []);
+			this.agentState!.openOrders.set(market.marketIndex, []);
 		}
 
-		this.driftClient.getUserAccount().orders.map((o) => {
+		this.driftClient.getUserAccount()!.orders.map((o) => {
 			if (isVariant(o.status, 'init')) {
 				return;
 			}
 			const marketIndex = o.marketIndex;
-			this.agentState.openOrders.set(marketIndex, [
-				...this.agentState.openOrders.get(marketIndex),
+			this.agentState!.openOrders.set(marketIndex, [
+				...(this.agentState!.openOrders.get(marketIndex) ?? []),
 				o,
 			]);
 		});
@@ -253,14 +249,14 @@ export class FloatingPerpMakerBot implements Bot {
 		const currSlot = this.slotSubscriber.currentSlot;
 		const marketIndex = marketAccount.marketIndex;
 		const nextUpdateSlot =
-			this.lastSlotMarketUpdated.get(marketIndex) +
-			MARKET_UPDATE_COOLDOWN_SLOTS;
+			this.lastSlotMarketUpdated.get(marketIndex) ??
+			0 + MARKET_UPDATE_COOLDOWN_SLOTS;
 
 		if (nextUpdateSlot > currSlot) {
 			return;
 		}
 
-		const openOrders = this.agentState.openOrders.get(marketIndex);
+		const openOrders = this.agentState!.openOrders.get(marketIndex) || [];
 		const oracle = this.driftClient.getOracleDataForPerpMarket(marketIndex);
 		const vAsk = calculateAskPrice(marketAccount, oracle);
 		const vBid = calculateBidPrice(marketAccount, oracle);
@@ -310,7 +306,7 @@ export class FloatingPerpMakerBot implements Bot {
 				const tx = await this.driftClient.cancelOrder(o.orderId);
 				console.log(
 					`${this.name} cancelling order ${this.driftClient
-						.getUserAccount()
+						.getUserAccount()!
 						.authority.toBase58()}-${o.orderId}: ${tx}`
 				);
 			}
@@ -373,7 +369,7 @@ export class FloatingPerpMakerBot implements Bot {
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
 				const user = this.driftClient.getUser();
-				this.mutexBusyCounter.add(
+				this.mutexBusyCounter!.add(
 					1,
 					metricAttrFromUserAccount(
 						user.getUserAccountPublicKey(),
@@ -387,7 +383,7 @@ export class FloatingPerpMakerBot implements Bot {
 			if (ran) {
 				const duration = Date.now() - start;
 				const user = this.driftClient.getUser();
-				this.tryMakeDurationHistogram.record(
+				this.tryMakeDurationHistogram!.record(
 					duration,
 					metricAttrFromUserAccount(
 						user.getUserAccountPublicKey(),

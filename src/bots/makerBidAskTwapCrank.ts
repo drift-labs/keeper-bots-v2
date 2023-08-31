@@ -18,6 +18,7 @@ import {
 	TransactionSignature,
 	VersionedTransaction,
 	AddressLookupTableAccount,
+	PublicKey,
 } from '@solana/web3.js';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
 
@@ -36,7 +37,7 @@ export async function sendVersionedTransaction(
 	}
 
 	const rawTransaction = tx.serialize();
-	let txid: TransactionSignature;
+	let txid: TransactionSignature | null;
 	try {
 		txid = await promiseTimeout(
 			driftClient.provider.connection.sendRawTransaction(rawTransaction, opts),
@@ -59,14 +60,11 @@ export class MakerBidAskTwapCrank implements Bot {
 	private slotSubscriber: SlotSubscriber;
 	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private userMap: UserMap;
-	private driftEnv: DriftEnv;
+	private userMap?: UserMap;
 
-	private dlob: DLOB;
-	private latestDlobSlot: number;
-	private lastDlobRefreshTime = 0;
-	private lookupTableAccount: AddressLookupTableAccount;
-	private pollingIntervalMs: number;
+	private dlob?: DLOB;
+	private latestDlobSlot?: number;
+	private lookupTableAccount?: AddressLookupTableAccount;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -82,7 +80,6 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
 		this.driftClient = driftClient;
-		this.driftEnv = driftEnv;
 	}
 
 	public async init() {
@@ -97,8 +94,6 @@ export class MakerBidAskTwapCrank implements Bot {
 			false
 		);
 		await this.userMap.subscribe();
-
-		this.pollingIntervalMs = 1000;
 	}
 
 	public async reset() {
@@ -107,7 +102,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		}
 		this.intervalIds = [];
 
-		await this.userMap.unsubscribe();
+		await this.userMap?.unsubscribe();
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
@@ -132,19 +127,17 @@ export class MakerBidAskTwapCrank implements Bot {
 	private async initDlob() {
 		try {
 			this.latestDlobSlot = this.slotSubscriber.currentSlot;
-			this.dlob = await this.userMap.getDLOB(this.slotSubscriber.currentSlot);
-			this.lastDlobRefreshTime = Date.now();
+			this.dlob = await this.userMap!.getDLOB(this.slotSubscriber.currentSlot);
 		} catch (e) {
 			logger.error(`Error loading dlob: ${e}`);
-			this.lastDlobRefreshTime = 0;
 		}
 	}
 
-	private getCombinedList(makersArray) {
+	private getCombinedList(makersArray: PublicKey[]) {
 		const combinedList = [];
 
 		for (const maker of makersArray) {
-			const uA = this.userMap.getUserAuthority(maker.toString());
+			const uA = this.userMap!.getUserAuthority(maker.toString());
 			if (uA !== undefined) {
 				const uStats = getUserStatsAccountPublicKey(
 					this.driftClient.program.programId,
@@ -197,20 +190,20 @@ export class MakerBidAskTwapCrank implements Bot {
 
 				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
 
-				const bidMakers = this.dlob.getBestMakers({
+				const bidMakers = this.dlob!.getBestMakers({
 					marketIndex: mi,
 					marketType: MarketType.PERP,
 					direction: PositionDirection.LONG,
-					slot: this.latestDlobSlot,
+					slot: this.latestDlobSlot!,
 					oraclePriceData,
 					numMakers: 5,
 				});
 
-				const askMakers = this.dlob.getBestMakers({
+				const askMakers = this.dlob!.getBestMakers({
 					marketIndex: mi,
 					marketType: MarketType.PERP,
 					direction: PositionDirection.LONG,
-					slot: this.latestDlobSlot,
+					slot: this.latestDlobSlot!,
 					oraclePriceData,
 					numMakers: 5,
 				});
@@ -225,7 +218,7 @@ export class MakerBidAskTwapCrank implements Bot {
 
 				const ix = await this.driftClient.getUpdatePerpBidAskTwapIx(
 					mi,
-					concatenatedList
+					concatenatedList as [PublicKey, PublicKey][]
 				);
 
 				ixs.push(ix);
@@ -234,7 +227,7 @@ export class MakerBidAskTwapCrank implements Bot {
 			const chunkedTx = await promiseTimeout(
 				this.driftClient.txSender.getVersionedTransaction(
 					ixs,
-					[this.lookupTableAccount],
+					[this.lookupTableAccount!],
 					[],
 					this.driftClient.opts
 				),

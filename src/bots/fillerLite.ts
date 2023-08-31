@@ -113,7 +113,7 @@ export class FillerLiteBot extends FillerBot {
 			const userAccount = user.getUserAccount();
 			return userAccount;
 		} else {
-			return this.orderSubscriber.usersAccounts.get(key).userAccount;
+			return this.orderSubscriber.usersAccounts.get(key)!.userAccount;
 		}
 	}
 

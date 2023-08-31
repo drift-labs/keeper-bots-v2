@@ -265,7 +265,7 @@ const runBot = async () => {
 	let perpMarketIndexes, spotMarketIndexes, oracleInfos;
 	if (configHasBot(config, 'fillerLite')) {
 		({ perpMarketIndexes, spotMarketIndexes, oracleInfos } =
-			getMarketsAndOraclesForSubscription(config.global.driftEnv));
+			getMarketsAndOraclesForSubscription(config.global.driftEnv!));
 	}
 	const driftClient = new DriftClient({
 		connection,
@@ -578,7 +578,7 @@ const runBot = async () => {
 			new MakerBidAskTwapCrank(
 				driftClient,
 				slotSubscriber,
-				config.global.driftEnv,
+				config.global.driftEnv!,
 				config.botConfigs!.markTwapCrank!
 			)
 		);

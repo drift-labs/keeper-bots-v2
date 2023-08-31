@@ -156,20 +156,21 @@ export class FundingRateUpdaterBot implements Bot {
 							logger.info(
 								`funding rate updated successfully on perp marketIndex=${i}. TxSig: ${txSig}`
 							);
-						} catch (err) {
+						} catch (e: any) {
+							const err = e as Error;
 							const errorCode = getErrorCode(err);
 							logger.error(
 								`Error code: ${errorCode} while updating funding rates on perp marketIndex=${i}: ${err.message}`
 							);
 							console.error(err);
-							if (!errorCodesToSuppress.includes(errorCode)) {
+							if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 								await new Promise((resolve) => setTimeout(resolve, 1000));
 								if (retries === maxRetries - 1) {
 									await webhookMessage(
 										`[${
 											this.name
 										}]: :x: Error code: ${errorCode} (retries: ${retries}) while updating funding rates on perp marketIndex=${i}:\n${
-											err.logs ? (err.logs as Array<string>).join('\n') : ''
+											e.logs ? (e.logs as Array<string>).join('\n') : ''
 										}\n${err.stack ? err.stack : err.message}`
 									);
 								}
@@ -182,9 +183,13 @@ export class FundingRateUpdaterBot implements Bot {
 			}
 		} catch (e) {
 			console.error(e);
-			await webhookMessage(
-				`[${this.name}]: :x: uncaught error:\n${e.stack ? e.stack : e.message}`
-			);
+			if (e instanceof Error) {
+				await webhookMessage(
+					`[${this.name}]: :x: uncaught error:\n${
+						e.stack ? e.stack : e.message
+					}`
+				);
+			}
 		} finally {
 			logger.info('Update Funding Rates finished');
 			await this.watchdogTimerMutex.runExclusive(async () => {

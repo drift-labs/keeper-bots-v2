@@ -150,18 +150,18 @@ export class SpotFillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 5000;
 
 	private slotSubscriber: SlotSubscriber;
-	private bulkAccountLoader: BulkAccountLoader | undefined;
+	private bulkAccountLoader?: BulkAccountLoader;
 	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	private driftClient: DriftClient;
 	private eventSubscriber: EventSubscriber;
 	private pollingIntervalMs: number;
-	private transactionVersion: number;
-	private lookupTableAccount: AddressLookupTableAccount;
+	private transactionVersion?: number;
+	private lookupTableAccount?: AddressLookupTableAccount;
 
-	private dlobSubscriber: DLOBSubscriber;
+	private dlobSubscriber?: DLOBSubscriber;
 
-	private userMap: UserMap;
-	private userStatsMap: UserStatsMap;
+	private userMap?: UserMap;
+	private userStatsMap?: UserStatsMap;
 
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
 	private serumSubscribers: Map<number, SerumSubscriber>;
@@ -184,24 +184,24 @@ export class SpotFillerBot implements Bot {
 
 	// metrics
 	private metricsInitialized = false;
-	private metricsPort: number | undefined;
-	private meter: Meter;
-	private exporter: PrometheusExporter;
-	private bootTimeMs: number;
+	private metricsPort?: number;
+	private meter?: Meter;
+	private exporter?: PrometheusExporter;
+	private bootTimeMs?: number;
 
-	private runtimeSpecsGauge: ObservableGauge;
+	private runtimeSpecsGauge?: ObservableGauge;
 	private runtimeSpec: RuntimeSpec;
-	private mutexBusyCounter: Counter;
-	private attemptedFillsCounter: Counter;
-	private attemptedTriggersCounter: Counter;
-	private observedFillsCountCounter: Counter;
-	private successfulFillsCounter: Counter;
-	private sdkCallDurationHistogram: Histogram;
-	private tryFillDurationHistogram: Histogram;
-	private lastTryFillTimeGauge: ObservableGauge;
-	private userMapUserAccountKeysGauge: ObservableGauge;
-	private userStatsMapAuthorityKeysGauge: ObservableGauge;
-	private pendingTransactionsGauge: ObservableGauge;
+	private mutexBusyCounter?: Counter;
+	private attemptedFillsCounter?: Counter;
+	private attemptedTriggersCounter?: Counter;
+	private observedFillsCountCounter?: Counter;
+	private successfulFillsCounter?: Counter;
+	private sdkCallDurationHistogram?: Histogram;
+	private tryFillDurationHistogram?: Histogram;
+	private lastTryFillTimeGauge?: ObservableGauge;
+	private userMapUserAccountKeysGauge?: ObservableGauge;
+	private userStatsMapAuthorityKeysGauge?: ObservableGauge;
+	private pendingTransactionsGauge?: ObservableGauge;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -320,7 +320,7 @@ export class SpotFillerBot implements Bot {
 			}
 		);
 		this.runtimeSpecsGauge.addCallback((obs) => {
-			obs.observe(this.bootTimeMs, this.runtimeSpec);
+			obs.observe(this.bootTimeMs!, this.runtimeSpec);
 		});
 		this.lastTryFillTimeGauge = this.meter.createObservableGauge(
 			METRIC_TYPES.last_try_fill_time,
@@ -363,7 +363,7 @@ export class SpotFillerBot implements Bot {
 			}
 		);
 		this.userMapUserAccountKeysGauge.addCallback(async (obs) => {
-			obs.observe(this.userMap.size());
+			obs.observe(this.userMap!.size());
 		});
 
 		this.userStatsMapAuthorityKeysGauge = this.meter.createObservableGauge(
@@ -373,7 +373,7 @@ export class SpotFillerBot implements Bot {
 			}
 		);
 		this.userStatsMapAuthorityKeysGauge.addCallback(async (obs) => {
-			obs.observe(this.userStatsMap.size());
+			obs.observe(this.userStatsMap!.size());
 		});
 
 		this.pendingTransactionsGauge = this.meter.createObservableGauge(
@@ -531,9 +531,9 @@ export class SpotFillerBot implements Bot {
 
 		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
 
-		await this.dlobSubscriber.unsubscribe();
-		await this.userStatsMap.unsubscribe();
-		await this.userMap.unsubscribe();
+		await this.dlobSubscriber!.unsubscribe();
+		await this.userStatsMap!.unsubscribe();
+		await this.userMap!.unsubscribe();
 
 		for (const serumSubscriber of this.serumSubscribers.values()) {
 			await serumSubscriber.unsubscribe();
@@ -554,8 +554,8 @@ export class SpotFillerBot implements Bot {
 		this.eventSubscriber.eventEmitter.on(
 			'newEvent',
 			async (record: WrappedEvent<any>) => {
-				await this.userMap.updateWithEventRecord(record);
-				await this.userStatsMap.updateWithEventRecord(record, this.userMap);
+				await this.userMap!.updateWithEventRecord(record);
+				await this.userStatsMap!.updateWithEventRecord(record, this.userMap);
 
 				if (record.eventType === 'OrderActionRecord') {
 					const actionRecord = record as OrderActionRecord;
@@ -566,7 +566,7 @@ export class SpotFillerBot implements Bot {
 								actionRecord.marketIndex
 							);
 							if (spotMarket) {
-								this.observedFillsCountCounter.add(1, {
+								this.observedFillsCountCounter!.add(1, {
 									market: spotMarket.name,
 								});
 							}
@@ -638,7 +638,7 @@ export class SpotFillerBot implements Bot {
 			MarketType.SPOT,
 			oraclePriceData,
 			this.driftClient.getStateAccount(),
-			this.driftClient.getSpotMarketAccount(market.marketIndex)
+			this.driftClient.getSpotMarketAccount(market.marketIndex)!
 		);
 
 		const nodesToTrigger = dlob.findNodesToTrigger(
@@ -659,7 +659,7 @@ export class SpotFillerBot implements Bot {
 		serumPrice: BN | undefined,
 		phoenixPrice: BN | undefined,
 		side: 'bid' | 'ask'
-	): [BN | undefined, FallbackLiquiditySource | undefined] {
+	): [BN, FallbackLiquiditySource] {
 		if (serumPrice && phoenixPrice) {
 			if (side === 'bid') {
 				return serumPrice.gt(phoenixPrice)
@@ -680,38 +680,41 @@ export class SpotFillerBot implements Bot {
 			return [phoenixPrice, 'phoenix'];
 		}
 
-		return [undefined, undefined];
+		throw new Error(
+			`Failed to find fallback price, serumPrice: ${serumPrice}, phoenixPrice: ${phoenixPrice}, side: ${side}`
+		);
 	}
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
 		makerInfo: MakerInfo | undefined;
 		chUser: User;
-		referrerInfo: ReferrerInfo;
+		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
 	}> {
 		let makerInfo: MakerInfo | undefined;
 		const makerNode = getMakerNodeFromNodeToFill(nodeToFill);
 		if (makerNode) {
 			const makerUserAccount = (
-				await this.userMap.mustGet(makerNode.userAccount.toString())
+				await this.userMap!.mustGet(makerNode.userAccount!.toString())
 			).getUserAccount();
 			const makerAuthority = makerUserAccount.authority;
 			const makerUserStats = (
-				await this.userStatsMap.mustGet(makerAuthority.toString())
+				await this.userStatsMap!.mustGet(makerAuthority.toString())
 			).userStatsAccountPublicKey;
 			makerInfo = {
-				maker: makerNode.userAccount,
+				maker: makerNode.userAccount!,
 				makerUserAccount: makerUserAccount,
 				order: makerNode.order,
 				makerStats: makerUserStats,
 			};
 		}
 
-		const chUser = await this.userMap.mustGet(
-			nodeToFill.node.userAccount.toString()
-		);
+		const node = nodeToFill.node;
+		const order = node.order!;
+
+		const chUser = await this.userMap!.mustGet(node.userAccount!.toString());
 		const referrerInfo = (
-			await this.userStatsMap.mustGet(
+			await this.userStatsMap!.mustGet(
 				chUser.getUserAccount().authority.toString()
 			)
 		).getReferrerInfo();
@@ -720,13 +723,13 @@ export class SpotFillerBot implements Bot {
 			makerInfo,
 			chUser,
 			referrerInfo,
-			marketType: nodeToFill.node.order.marketType,
+			marketType: order.marketType,
 		});
 	}
 
 	private nodeIsThrottled(nodeSignature: string): boolean {
 		if (this.throttledNodes.has(nodeSignature)) {
-			const lastFillAttempt = this.throttledNodes.get(nodeSignature);
+			const lastFillAttempt = this.throttledNodes.get(nodeSignature) ?? 0;
 			if (lastFillAttempt + FILL_ORDER_BACKOFF > Date.now()) {
 				return true;
 			}
@@ -836,12 +839,14 @@ export class SpotFillerBot implements Bot {
 				continue;
 			}
 
+			const node = nodeFilled.node;
+			const order = node.order!;
+
 			if (isEndIxLog(this.driftClient.program.programId.toBase58(), log)) {
 				if (!errorThisFillIx) {
-					this.successfulFillsCounter.add(1, {
-						market: this.driftClient.getSpotMarketAccount(
-							nodeFilled.node.order.marketIndex
-						).name,
+					this.successfulFillsCounter!.add(1, {
+						market: this.driftClient.getSpotMarketAccount(order.marketIndex)!
+							.name,
 					});
 					successCount++;
 				}
@@ -870,8 +875,8 @@ export class SpotFillerBot implements Bot {
 			const orderIdDoesNotExist = isOrderDoesNotExistLog(log);
 			if (orderIdDoesNotExist) {
 				logger.error(
-					`spot node filled: ${nodeFilled.node.userAccount.toString()}, ${
-						nodeFilled.node.order.orderId
+					`spot node filled: ${node.userAccount!.toString()}, ${
+						order.orderId
 					}; does not exist (filled by someone else); ${log}`
 				);
 				this.throttledNodes.delete(getNodeToFillSignature(nodeFilled));
@@ -893,14 +898,15 @@ export class SpotFillerBot implements Bot {
 					);
 					continue;
 				}
+				const order = makerNode.order!;
 				const makerNodeSignature =
 					this.getFillSignatureFromUserAccountAndOrderId(
-						makerNode.userAccount.toString(),
-						makerNode.order.orderId.toString()
+						makerNode.userAccount!.toString(),
+						order.orderId.toString()
 					);
 				logger.error(
-					`maker breach maint. margin, assoc node: ${makerNode.userAccount.toString()}, ${
-						makerNode.order.orderId
+					`maker breach maint. margin, assoc node: ${makerNode.userAccount!.toString()}, ${
+						order.orderId
 					}; (throttling ${makerNodeSignature}); ${log}`
 				);
 				this.throttledNodes.set(makerNodeSignature, Date.now());
@@ -915,9 +921,9 @@ export class SpotFillerBot implements Bot {
 				);
 				tx.add(
 					await this.driftClient.getForceCancelOrdersIx(
-						makerNode.userAccount,
+						makerNode.userAccount!,
 						(
-							await this.userMap.mustGet(makerNode.userAccount.toString())
+							await this.userMap!.mustGet(makerNode.userAccount!.toString())
 						).getUserAccount()
 					)
 				);
@@ -925,7 +931,7 @@ export class SpotFillerBot implements Bot {
 					.send(tx, [], this.driftClient.opts)
 					.then((txSig) => {
 						logger.info(
-							`Force cancelled orders for maker ${makerNode.userAccount.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
+							`Force cancelled orders for maker ${makerNode.userAccount!.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
 						);
 					})
 					.catch((e) => {
@@ -944,14 +950,16 @@ export class SpotFillerBot implements Bot {
 			const takerBreachedMaintenanceMargin =
 				isTakerBreachedMaintenanceMarginLog(log);
 			if (takerBreachedMaintenanceMargin) {
+				const node = nodeFilled.node!;
+				const order = node.order!;
 				const takerNodeSignature =
 					this.getFillSignatureFromUserAccountAndOrderId(
-						nodeFilled.node.userAccount.toString(),
-						nodeFilled.node.order.orderId.toString()
+						node.userAccount!.toString(),
+						order.orderId.toString()
 					);
 				logger.error(
-					`taker breach maint. margin, assoc node: ${nodeFilled.node.userAccount.toString()}, ${
-						nodeFilled.node.order.orderId
+					`taker breach maint. margin, assoc node: ${node.userAccount!.toString()}, ${
+						order.orderId
 					}; (throttling ${takerNodeSignature} and force cancelling orders); ${log}`
 				);
 				this.throttledNodes.set(takerNodeSignature, Date.now());
@@ -966,9 +974,9 @@ export class SpotFillerBot implements Bot {
 				);
 				tx.add(
 					await this.driftClient.getForceCancelOrdersIx(
-						nodeFilled.node.userAccount,
+						node.userAccount!,
 						(
-							await this.userMap.mustGet(nodeFilled.node.userAccount.toString())
+							await this.userMap!.mustGet(node.userAccount!.toString())
 						).getUserAccount()
 					)
 				);
@@ -977,7 +985,7 @@ export class SpotFillerBot implements Bot {
 					.send(tx, [], this.driftClient.opts)
 					.then((txSig) => {
 						logger.info(
-							`Force cancelled orders for user ${nodeFilled.node.userAccount.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
+							`Force cancelled orders for user ${node.userAccount!.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
 						);
 					})
 					.catch((e) => {
@@ -1017,7 +1025,7 @@ export class SpotFillerBot implements Bot {
 			return 0;
 		}
 
-		return this.handleTransactionLogs(nodeToFill, tx.meta.logMessages);
+		return this.handleTransactionLogs(nodeToFill, tx.meta!.logMessages!);
 	}
 
 	private async tryFillSpotNode(
@@ -1032,13 +1040,14 @@ export class SpotFillerBot implements Bot {
 		}
 		this.throttleNode(nodeSignature);
 
+		const node = nodeToFill.node!;
+		const order = node.order!;
+
 		logger.info(
-			`filling spot node: ${nodeToFill.node.userAccount.toString()}, ${
-				nodeToFill.node.order.orderId
-			}`
+			`filling spot node: ${node.userAccount!.toString()}, ${order.orderId}`
 		);
 
-		const fallbackSource = isVariant(nodeToFill.node.order.direction, 'short')
+		const fallbackSource = isVariant(order.direction, 'short')
 			? fallbackBidSource
 			: fallbackAskSource;
 
@@ -1051,44 +1060,44 @@ export class SpotFillerBot implements Bot {
 
 		const makerNode = getMakerNodeFromNodeToFill(nodeToFill);
 		const spotMarket = this.driftClient.getSpotMarketAccount(
-			nodeToFill.node.order.marketIndex
-		);
+			order.marketIndex
+		)!;
 		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
 		if (makerNode) {
 			logger.info(
-				`filling spot node:\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
-					nodeToFill.node.order.orderId
+				`filling spot node:\ntaker: ${node.userAccount!.toBase58()}-${
+					order.orderId
 				} ${convertToNumber(
-					nodeToFill.node.order.baseAssetAmountFilled,
+					order.baseAssetAmountFilled,
 					spotMarketPrecision
 				)}/${convertToNumber(
-					nodeToFill.node.order.baseAssetAmount,
+					order.baseAssetAmount,
 					spotMarketPrecision
 				)} @ ${convertToNumber(
-					nodeToFill.node.order.price,
+					order.price,
 					PRICE_PRECISION
-				)}\nmaker: ${makerNode.userAccount.toBase58()}-${
-					makerNode.order.orderId
+				)}\nmaker: ${makerNode.userAccount!.toBase58()}-${
+					makerNode.order!.orderId
 				} ${convertToNumber(
-					makerNode.order.baseAssetAmountFilled,
+					makerNode.order!.baseAssetAmountFilled,
 					spotMarketPrecision
 				)}/${convertToNumber(
-					makerNode.order.baseAssetAmount,
+					makerNode.order!.baseAssetAmount,
 					spotMarketPrecision
-				)} @ ${convertToNumber(makerNode.order.price, PRICE_PRECISION)}`
+				)} @ ${convertToNumber(makerNode.order!.price, PRICE_PRECISION)}`
 			);
 		} else {
 			logger.info(
-				`filling spot node\ntaker: ${nodeToFill.node.userAccount.toBase58()}-${
-					nodeToFill.node.order.orderId
+				`filling spot node\ntaker: ${node.userAccount!.toBase58()}-${
+					order.orderId
 				} ${convertToNumber(
-					nodeToFill.node.order.baseAssetAmountFilled,
+					order.baseAssetAmountFilled,
 					spotMarketPrecision
 				)}/${convertToNumber(
-					nodeToFill.node.order.baseAssetAmount,
+					order.baseAssetAmount,
 					spotMarketPrecision
 				)} @ ${convertToNumber(
-					nodeToFill.node.order.price,
+					order.price,
 					PRICE_PRECISION
 				)}\nmaker: ${fallbackSource}`
 			);
@@ -1096,15 +1105,16 @@ export class SpotFillerBot implements Bot {
 
 		let fulfillmentConfig:
 			| SerumV3FulfillmentConfigAccount
-			| PhoenixV1FulfillmentConfigAccount = undefined;
+			| PhoenixV1FulfillmentConfigAccount
+			| undefined = undefined;
 		if (makerInfo === undefined) {
 			if (fallbackSource === 'serum') {
 				fulfillmentConfig = this.serumFulfillmentConfigMap.get(
-					nodeToFill.node.order.marketIndex
+					nodeToFill.node.order!.marketIndex
 				);
 			} else if (fallbackSource === 'phoenix') {
 				fulfillmentConfig = this.phoenixFulfillmentConfigMap.get(
-					nodeToFill.node.order.marketIndex
+					nodeToFill.node.order!.marketIndex
 				);
 			} else {
 				logger.error(
@@ -1114,7 +1124,7 @@ export class SpotFillerBot implements Bot {
 		}
 
 		const currPendingTxs = this.incPendingTransactions(
-			nodeToFill.node.order.marketIndex
+			nodeToFill.node.order!.marketIndex
 		);
 		const computeUnits = 1_000_000;
 		const computeUnitsPrice = this.calcComputeUnitPrice(
@@ -1145,7 +1155,7 @@ export class SpotFillerBot implements Bot {
 
 		let txResp: Promise<TxSigAndSlot>;
 		const txStart = Date.now();
-		if (isNaN(this.transactionVersion)) {
+		if (isNaN(this.transactionVersion!)) {
 			const tx = new Transaction();
 			for (const ix of ixs) {
 				tx.add(ix);
@@ -1155,7 +1165,7 @@ export class SpotFillerBot implements Bot {
 			txResp = this.driftClient.txSender.sendVersionedTransaction(
 				await this.driftClient.txSender.getVersionedTransaction(
 					ixs,
-					[this.lookupTableAccount],
+					[this.lookupTableAccount!],
 					[],
 					this.driftClient.opts
 				),
@@ -1174,13 +1184,13 @@ export class SpotFillerBot implements Bot {
 				);
 
 				const pendingTxs = this.decPendingTransactions(
-					nodeToFill.node.order.marketIndex
+					nodeToFill.node.order!.marketIndex
 				);
 				logger.info(`done - currPendingTxs: ${pendingTxs}`);
 
 				const duration = Date.now() - txStart;
 				const user = this.driftClient.getUser();
-				this.sdkCallDurationHistogram.record(duration, {
+				this.sdkCallDurationHistogram!.record(duration, {
 					...metricAttrFromUserAccount(
 						user.getUserAccountPublicKey(),
 						user.getUserAccount()
@@ -1192,7 +1202,7 @@ export class SpotFillerBot implements Bot {
 			})
 			.catch(async (e) => {
 				const pendingTxs = this.decPendingTransactions(
-					nodeToFill.node.order.marketIndex
+					nodeToFill.node.order!.marketIndex
 				);
 				const errorCode = getErrorCode(e);
 
@@ -1204,6 +1214,7 @@ export class SpotFillerBot implements Bot {
 				}
 
 				if (
+					errorCode &&
 					!errorCodesToSuppress.includes(errorCode) &&
 					!(e as Error).message.includes('Transaction was not confirmed')
 				) {
@@ -1262,7 +1273,7 @@ export class SpotFillerBot implements Bot {
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
 			this.triggeringNodes.set(nodeSignature, Date.now());
 
-			const user = await this.userMap.mustGet(
+			const user = await this.userMap!.mustGet(
 				nodeToTrigger.node.userAccount.toString()
 			);
 			this.driftClient
@@ -1282,6 +1293,7 @@ export class SpotFillerBot implements Bot {
 
 					const errorCode = getErrorCode(error);
 					if (
+						errorCode &&
 						!errorCodesToSuppress.includes(errorCode) &&
 						!(error as Error).message.includes('Transaction was not confirmed')
 					) {
@@ -1310,7 +1322,7 @@ export class SpotFillerBot implements Bot {
 
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				const dlob = this.dlobSubscriber.getDLOB();
+				const dlob = this.dlobSubscriber!.getDLOB();
 				if (orderRecord && dlob) {
 					dlob.insertOrder(
 						orderRecord.order,
@@ -1351,14 +1363,14 @@ export class SpotFillerBot implements Bot {
 				]);
 
 				const user = this.driftClient.getUser();
-				this.attemptedFillsCounter.add(
+				this.attemptedFillsCounter!.add(
 					fillableNodes.reduce((acc, curr) => acc + curr.nodesToFill.length, 0),
 					metricAttrFromUserAccount(
 						user.userAccountPublicKey,
 						user.getUserAccount()
 					)
 				);
-				this.attemptedTriggersCounter.add(
+				this.attemptedTriggersCounter!.add(
 					filteredTriggerableNodes.length,
 					metricAttrFromUserAccount(
 						user.userAccountPublicKey,
@@ -1371,7 +1383,7 @@ export class SpotFillerBot implements Bot {
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
 				const user = this.driftClient.getUser();
-				this.mutexBusyCounter.add(
+				this.mutexBusyCounter!.add(
 					1,
 					metricAttrFromUserAccount(
 						user.getUserAccountPublicKey(),
@@ -1381,17 +1393,19 @@ export class SpotFillerBot implements Bot {
 			} else {
 				logger.error('some other error:');
 				console.error(e);
-				webhookMessage(
-					`[${this.name}]: :x: error trying to run main loop:\n${
-						e.stack ? e.stack : e.message
-					}`
-				);
+				if (e instanceof Error) {
+					webhookMessage(
+						`[${this.name}]: :x: error trying to run main loop:\n${
+							e.stack ? e.stack : e.message
+						}`
+					);
+				}
 			}
 		} finally {
 			if (ran) {
 				const duration = Date.now() - startTime;
 				const user = this.driftClient.getUser();
-				this.tryFillDurationHistogram.record(
+				this.tryFillDurationHistogram!.record(
 					duration,
 					metricAttrFromUserAccount(
 						user.getUserAccountPublicKey(),

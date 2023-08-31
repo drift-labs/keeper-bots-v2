@@ -238,28 +238,27 @@ export class LiquidatorBot implements Bot {
 	public readonly defaultIntervalMs: number = 5000;
 
 	private metricsInitialized = false;
-	private metricsPort: number | undefined;
-	private meter: Meter;
-	private exporter: PrometheusExporter;
-	private bootTimeMs: number;
+	private metricsPort?: number;
+	private meter?: Meter;
+	private exporter?: PrometheusExporter;
 	private throttledUsers = new Map<string, number>();
 	private disableAutoDerisking: boolean;
 	private liquidatorConfig: LiquidatorConfig;
 
 	// metrics
-	private runtimeSpecsGauge: ObservableGauge;
-	private totalLeverage: ObservableGauge;
-	private totalCollateral: ObservableGauge;
-	private freeCollateral: ObservableGauge;
-	private perpPositionValue: ObservableGauge;
-	private perpPositionBase: ObservableGauge;
-	private perpPositionQuote: ObservableGauge;
-	private initialMarginRequirement: ObservableGauge;
-	private maintenanceMarginRequirement: ObservableGauge;
-	private unrealizedPnL: ObservableGauge;
-	private unrealizedFundingPnL: ObservableGauge;
-	private sdkCallDurationHistogram: Histogram;
-	private userMapUserAccountKeysGauge: ObservableGauge;
+	private runtimeSpecsGauge?: ObservableGauge;
+	private totalLeverage?: ObservableGauge;
+	private totalCollateral?: ObservableGauge;
+	private freeCollateral?: ObservableGauge;
+	private perpPositionValue?: ObservableGauge;
+	private perpPositionBase?: ObservableGauge;
+	private perpPositionQuote?: ObservableGauge;
+	private initialMarginRequirement?: ObservableGauge;
+	private maintenanceMarginRequirement?: ObservableGauge;
+	private unrealizedPnL?: ObservableGauge;
+	private unrealizedFundingPnL?: ObservableGauge;
+	private sdkCallDurationHistogram?: Histogram;
+	private userMapUserAccountKeysGauge?: ObservableGauge;
 
 	private driftClient: DriftClient;
 	private perpMarketIndicies: number[];
@@ -269,12 +268,12 @@ export class LiquidatorBot implements Bot {
 	private perpMarketToSubaccount: Map<number, number>;
 	private spotMarketToSubaccount: Map<number, number>;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private userMap: UserMap;
+	private userMap?: UserMap;
 	private deriskMutex = new Uint8Array(new SharedArrayBuffer(1));
 	private runtimeSpecs: RuntimeSpec;
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
-	private jupiterClient: JupiterClient;
-	private twapExecutionProgresses: Map<string, TwapExecutionProgress>; // key: this.getTwapProgressKey, value: TwapExecutionProgress
+	private jupiterClient?: JupiterClient;
+	private twapExecutionProgresses?: Map<string, TwapExecutionProgress>; // key: this.getTwapProgressKey, value: TwapExecutionProgress
 
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
@@ -298,7 +297,6 @@ export class LiquidatorBot implements Bot {
 		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
 			this.driftClient
 		);
-		this.bootTimeMs = Date.now();
 
 		this.metricsPort = config.metricsPort;
 		if (this.metricsPort) {
@@ -323,7 +321,9 @@ export class LiquidatorBot implements Bot {
 		if (config.perpSubAccountConfig) {
 			logger.info('Loading perp markets to watch from perpSubAccountConfig');
 			for (const subAccount of Object.keys(config.perpSubAccountConfig)) {
-				for (const market of config.perpSubAccountConfig[subAccount]) {
+				for (const market of config.perpSubAccountConfig[
+					parseInt(subAccount)
+				]) {
 					this.perpMarketToSubaccount.set(market, parseInt(subAccount));
 					this.allSubaccounts.add(parseInt(subAccount));
 				}
@@ -353,7 +353,9 @@ export class LiquidatorBot implements Bot {
 		if (config.spotSubAccountConfig) {
 			logger.info('Loading spot markets to watch from spotSubAccountConfig');
 			for (const subAccount of Object.keys(config.spotSubAccountConfig)) {
-				for (const market of config.spotSubAccountConfig[subAccount]) {
+				for (const market of config.spotSubAccountConfig[
+					parseInt(subAccount)
+				]) {
 					this.spotMarketToSubaccount.set(market, parseInt(subAccount));
 					this.allSubaccounts.add(parseInt(subAccount));
 				}
@@ -481,7 +483,7 @@ export class LiquidatorBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		await this.userMap.unsubscribe();
+		await this.userMap!.unsubscribe();
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
@@ -555,11 +557,14 @@ export class LiquidatorBot implements Bot {
 		const start = Date.now();
 		try {
 			const position = this.driftClient.getSpotPosition(marketIndex);
+			if (!position) {
+				return;
+			}
 			const positionNetOpenOrders = tokenAmount.gt(ZERO)
 				? tokenAmount.add(position.openAsks)
 				: tokenAmount.add(position.openBids);
 
-			const spotMarket = this.driftClient.getSpotMarketAccount(marketIndex);
+			const spotMarket = this.driftClient.getSpotMarketAccount(marketIndex)!;
 			const standardizedTokenAmount = standardizeBaseAssetAmount(
 				positionNetOpenOrders,
 				spotMarket.orderStepSize
@@ -590,15 +595,17 @@ export class LiquidatorBot implements Bot {
 				`Error trying to close spot position for market ${marketIndex}, subaccount start ${subaccountIdStart}, active subaccount now: ${this.driftClient.activeSubAccountId}`
 			);
 			console.error(e);
-			webhookMessage(
-				`[${
-					this.name
-				}]: :x: error trying to close spot position on market ${marketIndex} \n:${
-					e.stack ? e.stack : e.message
-				} `
-			);
+			if (e instanceof Error) {
+				webhookMessage(
+					`[${
+						this.name
+					}]: :x: error trying to close spot position on market ${marketIndex} \n:${
+						e.stack ? e.stack : e.message
+					} `
+				);
+			}
 		} finally {
-			this.sdkCallDurationHistogram.record(Date.now() - start, {
+			this.sdkCallDurationHistogram!.record(Date.now() - start, {
 				method: 'placeSpotOrderDrift',
 			});
 		}
@@ -630,8 +637,8 @@ export class LiquidatorBot implements Bot {
 				this.driftClient.getOracleDataForSpotMarket(spotMarketIndex);
 			const outMarket = this.driftClient.getSpotMarketAccount(outMarketIndex);
 			const inMarket = this.driftClient.getSpotMarketAccount(inMarketIndex);
-			const outMarketPrecision = TEN.pow(new BN(outMarket.decimals));
-			const inMarketPrecision = TEN.pow(new BN(inMarket.decimals));
+			const outMarketPrecision = TEN.pow(outMarket!.decimals);
+			const inMarketPrecision = TEN.pow(new BN(inMarket!.decimals));
 			amountIn = standardizedTokenAmount
 				.mul(oracle.price)
 				.mul(inMarketPrecision)
@@ -664,7 +671,7 @@ export class LiquidatorBot implements Bot {
 		const subaccountIdStart = this.driftClient.activeSubAccountId;
 		try {
 			const tx = await this.driftClient.swap({
-				jupiterClient: this.jupiterClient,
+				jupiterClient: this.jupiterClient!,
 				outMarketIndex,
 				inMarketIndex,
 				amount: amountIn,
@@ -685,15 +692,17 @@ export class LiquidatorBot implements Bot {
 				}`
 			);
 			console.error(e);
-			webhookMessage(
-				`[${this.name}]: :x: error trying to ${getVariant(
-					orderDirection
-				)} spot position on market on jupiter ${spotMarketIndex} \n:${
-					e.stack ? e.stack : e.message
-				} `
-			);
+			if (e instanceof Error) {
+				webhookMessage(
+					`[${this.name}]: :x: error trying to ${getVariant(
+						orderDirection
+					)} spot position on market on jupiter ${spotMarketIndex} \n:${
+						e.stack ? e.stack : e.message
+					} `
+				);
+			}
 		} finally {
-			this.sdkCallDurationHistogram.record(Date.now() - start, {
+			this.sdkCallDurationHistogram!.record(Date.now() - start, {
 				method: 'driftClientSwap',
 			});
 		}
@@ -707,7 +716,7 @@ export class LiquidatorBot implements Bot {
 
 		let baseAssetAmount: BN;
 		if (this.useTwap()) {
-			let twapProgress = this.twapExecutionProgresses.get(
+			let twapProgress = this.twapExecutionProgresses!.get(
 				this.getTwapProgressKey(
 					MarketType.PERP,
 					subaccountId,
@@ -721,7 +730,7 @@ export class LiquidatorBot implements Bot {
 					overallDurationSec: this.liquidatorConfig.twapDurationSec!,
 					startTimeSec: nowSec,
 				});
-				this.twapExecutionProgresses.set(
+				this.twapExecutionProgresses!.set(
 					this.getTwapProgressKey(
 						MarketType.PERP,
 						subaccountId,
@@ -792,7 +801,7 @@ export class LiquidatorBot implements Bot {
 		for (const position of userAccount.perpPositions) {
 			const perpMarket = this.driftClient.getPerpMarketAccount(
 				position.marketIndex
-			);
+			)!;
 			if (position.baseAssetAmount.abs().lt(perpMarket.amm.minOrderSize)) {
 				continue;
 			}
@@ -825,7 +834,7 @@ export class LiquidatorBot implements Bot {
 						);
 					})
 					.then(() => {
-						this.sdkCallDurationHistogram.record(Date.now() - start, {
+						this.sdkCallDurationHistogram!.record(Date.now() - start, {
 							method: 'placePerpOrder',
 						});
 					});
@@ -857,7 +866,7 @@ export class LiquidatorBot implements Bot {
 						);
 					})
 					.finally(() => {
-						this.sdkCallDurationHistogram.record(Date.now() - start, {
+						this.sdkCallDurationHistogram!.record(Date.now() - start, {
 							method: 'settlePNL',
 						});
 					});
@@ -895,7 +904,7 @@ export class LiquidatorBot implements Bot {
 							);
 						})
 						.finally(() => {
-							this.sdkCallDurationHistogram.record(Date.now() - start, {
+							this.sdkCallDurationHistogram!.record(Date.now() - start, {
 								method: "'settlePNL",
 							});
 						});
@@ -914,7 +923,7 @@ export class LiquidatorBot implements Bot {
 		}
 		const oraclePriceData =
 			this.driftClient.getOracleDataForSpotMarket(spotMarketIndex);
-		const dlob = await this.userMap.getDLOB(oraclePriceData.slot.toNumber());
+		const dlob = await this.userMap!.getDLOB(oraclePriceData.slot.toNumber());
 		if (!dlob) {
 			logger.error('failed to load DLOB');
 		}
@@ -1024,7 +1033,7 @@ export class LiquidatorBot implements Bot {
 		}
 
 		if (this.useTwap()) {
-			let twapProgress = this.twapExecutionProgresses.get(
+			let twapProgress = this.twapExecutionProgresses!.get(
 				this.getTwapProgressKey(
 					MarketType.SPOT,
 					subaccountId,
@@ -1038,7 +1047,7 @@ export class LiquidatorBot implements Bot {
 					overallDurationSec: this.liquidatorConfig.twapDurationSec!,
 					startTimeSec: nowSec,
 				});
-				this.twapExecutionProgresses.set(
+				this.twapExecutionProgresses!.set(
 					this.getTwapProgressKey(
 						MarketType.SPOT,
 						subaccountId,
@@ -1287,7 +1296,7 @@ export class LiquidatorBot implements Bot {
 					);
 				})
 				.finally(() => {
-					this.sdkCallDurationHistogram.record(Date.now() - start, {
+					this.sdkCallDurationHistogram!.record(Date.now() - start, {
 						method: 'resolvePerpBankruptcy',
 					});
 				});
@@ -1329,7 +1338,7 @@ export class LiquidatorBot implements Bot {
 					);
 				})
 				.finally(() => {
-					this.sdkCallDurationHistogram.record(Date.now() - start, {
+					this.sdkCallDurationHistogram!.record(Date.now() - start, {
 						method: 'resolveSpotBankruptcy',
 					});
 				});
@@ -1411,7 +1420,7 @@ tx: ${tx} `
 				}
 			})
 			.finally(() => {
-				this.sdkCallDurationHistogram.record(Date.now() - start, {
+				this.sdkCallDurationHistogram!.record(Date.now() - start, {
 					method: 'liquidateSpot',
 				});
 			});
@@ -1532,7 +1541,7 @@ tx: ${tx} `
 						);
 						logger.error(e);
 						const errorCode = getErrorCode(e);
-						if (!errorCodesToSuppress.includes(errorCode)) {
+						if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 							webhookMessage(
 								`[${
 									this.name
@@ -1550,7 +1559,7 @@ tx: ${tx} `
 						}
 					})
 					.finally(() => {
-						this.sdkCallDurationHistogram.record(Date.now() - start, {
+						this.sdkCallDurationHistogram!.record(Date.now() - start, {
 							method: 'liquidateBorrowForPerpPnl',
 						});
 					});
@@ -1649,7 +1658,7 @@ tx: ${tx} `
 					}
 				})
 				.finally(() => {
-					this.sdkCallDurationHistogram.record(Date.now() - start, {
+					this.sdkCallDurationHistogram!.record(Date.now() - start, {
 						method: 'liquidatePerpPnlForDeposit',
 					});
 				});
@@ -1663,7 +1672,7 @@ tx: ${tx} `
 			marginRequirement: BN;
 			canBeLiquidated: boolean;
 		}>();
-		for (const user of this.userMap.values()) {
+		for (const user of this.userMap!.values()) {
 			const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
 			if (canBeLiquidated || user.isBeingLiquidated()) {
 				usersCanBeLiquidated.push({
@@ -1875,7 +1884,7 @@ tx: ${tx} `
 								);
 							})
 							.finally(() => {
-								this.sdkCallDurationHistogram.record(Date.now() - start, {
+								this.sdkCallDurationHistogram!.record(Date.now() - start, {
 									method: 'liquidatePerp',
 								});
 							});
@@ -2016,11 +2025,13 @@ tx: ${tx} `
 			ran = await this.tryLiquidate();
 		} catch (e) {
 			console.error(e);
-			webhookMessage(
-				`[${this.name}]: :x: uncaught error: \n${
-					e.stack ? e.stack : e.message
-				} `
-			);
+			if (e instanceof Error) {
+				webhookMessage(
+					`[${this.name}]: :x: uncaught error: \n${
+						e.stack ? e.stack : e.message
+					} `
+				);
+			}
 		} finally {
 			this.releaseMutex();
 			if (ran) {
@@ -2153,7 +2164,7 @@ tx: ${tx} `
 			}
 		);
 		this.userMapUserAccountKeysGauge.addCallback(async (obs) => {
-			obs.observe(this.userMap.size());
+			obs.observe(this.userMap!.size());
 		});
 
 		this.meter.addBatchObservableCallback(
@@ -2167,22 +2178,22 @@ tx: ${tx} `
 						this.driftClient.getOracleDataForPerpMarket(accMarketIdx);
 
 					batchObservableResult.observe(
-						this.totalLeverage,
+						this.totalLeverage!,
 						convertToNumber(user.getLeverage(), TEN_THOUSAND),
 						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
 					);
 					batchObservableResult.observe(
-						this.totalCollateral,
+						this.totalCollateral!,
 						convertToNumber(user.getTotalCollateral(), QUOTE_PRECISION),
 						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
 					);
 					batchObservableResult.observe(
-						this.freeCollateral,
+						this.freeCollateral!,
 						convertToNumber(user.getFreeCollateral(), QUOTE_PRECISION),
 						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
 					);
 					batchObservableResult.observe(
-						this.perpPositionValue,
+						this.perpPositionValue!,
 						convertToNumber(
 							user.getPerpPositionValue(accMarketIdx, oracle),
 							QUOTE_PRECISION
@@ -2192,7 +2203,7 @@ tx: ${tx} `
 
 					const perpPosition = user.getPerpPosition(accMarketIdx);
 					batchObservableResult.observe(
-						this.perpPositionBase,
+						this.perpPositionBase!,
 						convertToNumber(
 							perpPosition!.baseAssetAmount ?? ZERO,
 							BASE_PRECISION
@@ -2200,7 +2211,7 @@ tx: ${tx} `
 						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
 					);
 					batchObservableResult.observe(
-						this.perpPositionQuote,
+						this.perpPositionQuote!,
 						convertToNumber(
 							perpPosition!.quoteAssetAmount ?? ZERO,
 							QUOTE_PRECISION
@@ -2209,7 +2220,7 @@ tx: ${tx} `
 					);
 
 					batchObservableResult.observe(
-						this.initialMarginRequirement,
+						this.initialMarginRequirement!,
 						convertToNumber(
 							user.getInitialMarginRequirement(),
 							QUOTE_PRECISION
@@ -2217,7 +2228,7 @@ tx: ${tx} `
 						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
 					);
 					batchObservableResult.observe(
-						this.maintenanceMarginRequirement,
+						this.maintenanceMarginRequirement!,
 						convertToNumber(
 							user.getMaintenanceMarginRequirement(),
 							QUOTE_PRECISION
@@ -2225,12 +2236,12 @@ tx: ${tx} `
 						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
 					);
 					batchObservableResult.observe(
-						this.unrealizedPnL,
+						this.unrealizedPnL!,
 						convertToNumber(user.getUnrealizedPNL(), QUOTE_PRECISION),
 						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
 					);
 					batchObservableResult.observe(
-						this.unrealizedFundingPnL,
+						this.unrealizedFundingPnL!,
 						convertToNumber(user.getUnrealizedFundingPNL(), QUOTE_PRECISION),
 						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
 					);
