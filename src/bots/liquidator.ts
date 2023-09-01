@@ -643,10 +643,10 @@ export class LiquidatorBot implements Bot {
 		orderDirection: PositionDirection,
 		spotMarketIndex: number,
 		standardizedTokenAmount: BN,
-		route: Route
+		route: Route,
+		slippageBps: number,
+		slippageDenom: number
 	) {
-		const slippageDenom = 10000;
-		const slippageBps = this.liquidatorConfig.maxSlippagePct! * slippageDenom;
 		let outMarketIndex: number;
 		let inMarketIndex: number;
 		let jupSwapMode: SwapMode;
@@ -989,9 +989,12 @@ export class LiquidatorBot implements Bot {
 		let jupiterRoutes = await this.jupiterClient.getRoutes({
 			inputMint: inMarket.mint,
 			outputMint: outMarket.mint,
-			amount: baseAmountIn,
+			amount: baseAmountIn.abs(),
 			swapMode: jupSwapMode,
 		});
+
+		console.log('routes');
+		console.log(JSON.stringify(jupiterRoutes, null, 2));
 
 		// fills containing Openbook will be too big, filter them out
 		jupiterRoutes = jupiterRoutes.filter((route: Route) =>
@@ -1010,7 +1013,10 @@ export class LiquidatorBot implements Bot {
 		if (isVariant(orderDirection, 'long')) {
 			// buying spotMarketIndex, want min in
 			const jupAmountIn = new BN(bestRoute.inAmount);
-			if (dlobFillQuoteAmount?.lt(jupAmountIn)) {
+			if (
+				dlobFillQuoteAmount.gt(ZERO) &&
+				dlobFillQuoteAmount?.lt(jupAmountIn)
+			) {
 				logger.info(
 					`Want long, dlob fill amount ${dlobFillQuoteAmount} < jup amount in ${jupAmountIn}, dont trade on jup`
 				);
@@ -1125,6 +1131,8 @@ export class LiquidatorBot implements Bot {
 				continue;
 			}
 
+			const slippageDenom = 10000;
+			const slippageBps = this.liquidatorConfig.maxSlippagePct! * slippageDenom;
 			const jupRoute = await this.determineBestSpotSwapRoute(
 				position.marketIndex,
 				orderParams.direction,
@@ -1142,7 +1150,9 @@ export class LiquidatorBot implements Bot {
 					orderParams.direction,
 					position.marketIndex,
 					orderParams.tokenAmount,
-					jupRoute
+					jupRoute,
+					slippageBps,
+					slippageDenom
 				);
 			}
 		}

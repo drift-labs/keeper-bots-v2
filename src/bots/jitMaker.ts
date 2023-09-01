@@ -508,7 +508,7 @@ export class JitMaker implements Bot {
 		logger.info(
 			`Jupiter swap: ${getVariant(
 				direction
-			)}: ${tradeSize.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex}, 
+			)}: ${tradeSize.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex},
 			jupSwapMode: ${jupSwapMode}`
 		);
 
