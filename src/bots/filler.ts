@@ -89,6 +89,7 @@ import {
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
+	sleepMs,
 } from '../utils';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
@@ -942,12 +943,8 @@ export class FillerBot implements Bot {
 		);
 	}
 
-	protected async sleep(ms: number) {
-		return new Promise((resolve) => setTimeout(resolve, ms));
-	}
-
 	/**
-	 * Iterates through a tx's logs and handles it appropriately 3e.g. throttling users, updating metrics, etc.)
+	 * Iterates through a tx's logs and handles it appropriately (e.g. throttling users, updating metrics, etc.)
 	 *
 	 * @param nodesFilled nodes that we sent a transaction to fill
 	 * @param logs logs from tx.meta.logMessages or this.clearingHouse.program._events._eventParser.parseLogs
@@ -1167,7 +1164,7 @@ export class FillerBot implements Bot {
 			logger.info(`waiting for ${txSig} to be confirmed`);
 			tx = await this.driftClient.connection.getTransaction(txSig, config);
 			attempts++;
-			await this.sleep(1000);
+			await sleepMs(1000);
 		}
 
 		if (tx === null) {
