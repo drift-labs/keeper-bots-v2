@@ -140,14 +140,14 @@ type FallbackLiquiditySource = 'serum' | 'phoenix';
 
 type NodesToFillWithContext = {
 	nodesToFill: NodeToFill[];
-	fallbackAskSource: FallbackLiquiditySource;
-	fallbackBidSource: FallbackLiquiditySource;
+	fallbackAskSource?: FallbackLiquiditySource;
+	fallbackBidSource?: FallbackLiquiditySource;
 };
 
 export class SpotFillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 5000;
+	public readonly defaultIntervalMs: number = 2000;
 
 	private slotSubscriber: SlotSubscriber;
 	private bulkAccountLoader?: BulkAccountLoader;
@@ -596,11 +596,7 @@ export class SpotFillerBot implements Bot {
 		market: SpotMarketAccount,
 		dlob: DLOB
 	): {
-		nodesToFill: {
-			nodesToFill: Array<NodeToFill>;
-			fallbackAskSource: FallbackLiquiditySource;
-			fallbackBidSource: FallbackLiquiditySource;
-		};
+		nodesToFill: NodesToFillWithContext;
 		nodesToTrigger: Array<NodeToTrigger>;
 	} {
 		const oraclePriceData = this.driftClient.getOracleDataForSpotMarket(
@@ -659,7 +655,7 @@ export class SpotFillerBot implements Bot {
 		serumPrice: BN | undefined,
 		phoenixPrice: BN | undefined,
 		side: 'bid' | 'ask'
-	): [BN, FallbackLiquiditySource] {
+	): [BN | undefined, FallbackLiquiditySource | undefined] {
 		if (serumPrice && phoenixPrice) {
 			if (side === 'bid') {
 				return serumPrice.gt(phoenixPrice)
@@ -680,9 +676,7 @@ export class SpotFillerBot implements Bot {
 			return [phoenixPrice, 'phoenix'];
 		}
 
-		throw new Error(
-			`Failed to find fallback price, serumPrice: ${serumPrice}, phoenixPrice: ${phoenixPrice}, side: ${side}`
-		);
+		return [undefined, undefined];
 	}
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
@@ -1030,8 +1024,8 @@ export class SpotFillerBot implements Bot {
 
 	private async tryFillSpotNode(
 		nodeToFill: NodeToFill,
-		fallbackAskSource: FallbackLiquiditySource,
-		fallbackBidSource: FallbackLiquiditySource
+		fallbackAskSource?: FallbackLiquiditySource,
+		fallbackBidSource?: FallbackLiquiditySource
 	) {
 		const nodeSignature = getNodeToFillSignature(nodeToFill);
 		if (this.nodeIsThrottled(nodeSignature)) {
