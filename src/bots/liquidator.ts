@@ -144,7 +144,7 @@ function findBestSpotPosition(
 
 		// Skip any position that is less than the configured minimum amount
 		// for the specific market
-		const minAmount = minDepositToLiq.get(position.marketIndex) ?? ZERO;
+		const minAmount = new BN(minDepositToLiq.get(position.marketIndex)) ?? ZERO;
 		logger.debug(
 			`liqPerpPnl: Min liquidation for market ${position.marketIndex} is ${minAmount}`
 		);
