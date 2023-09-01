@@ -22,7 +22,7 @@ This repo has two main branches:
 
 ### yaml Config file:
 
-A `.yaml` file can be used to configure the bot setup now. See `config.example.yaml` for a commented example.
+A `.yaml` file can be used to configure the bot setup now. See `example.config.yaml` for a commented example.
 
 Then you can run the bot by loading the config file:
 ```shell
@@ -107,16 +107,21 @@ for orders that cross. Fillers will also attempt to execute triggerable orders.
 
 When running the filler bots, you might see the following error codes in the transaction logs on a failed in pre-flight simulation:
 
-For perps:
-
-| Error             | Description |   
-| ----------------- | ------ |
-| OrderNotTriggerable | Outcompeted: order was already triggered by someone else |
-| RevertFill |  Outcompeted: order was already filled by someone else|
+#### For perps
 
 | Error             | Description |   
 | ----------------- | ------ |
 | OrderDoesNotExist | Outcompeted: Order was already filled by someone else|
+| OrderNotTriggerable | Outcompeted: order was already triggered by someone else |
+| RevertFill |  Outcompeted: order was already filled by someone else|
+
+
+#### Other messages
+
+| Message | Description |
+| --------|--------------|
+| filler last active slot != current slot | You might see this when outcompeted on a fill. The *filler last active slot* was the last slot that the filler had a successful fill in, so it may diverge *current slot* if the filler has not placed a successful order.
+
 
 ## Liquidator Bot
 

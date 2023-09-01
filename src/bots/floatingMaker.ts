@@ -267,7 +267,7 @@ export class FloatingPerpMakerBot implements Bot {
 				`${Object.keys(o.orderType)[0]} ${Object.keys(o.direction)[0]}`
 			);
 			console.log(
-				`[${idx}]: baa: ${convertToNumber(
+				`[${idx}]: baseAmountFilled: ${convertToNumber(
 					o.baseAssetAmountFilled,
 					BASE_PRECISION
 				)}/${convertToNumber(o.baseAssetAmount, BASE_PRECISION)}`

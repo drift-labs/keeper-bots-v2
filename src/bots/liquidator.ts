@@ -121,7 +121,8 @@ function findBestSpotPosition(
 	spotPositions: SpotPosition[],
 	isBorrow: boolean,
 	positionTakerOverPctNumerator: BN,
-	positionTakerOverPctDenominator: BN
+	positionTakerOverPctDenominator: BN,
+	minDepositToLiq: Map<number, number>
 ): {
 	bestIndex: number;
 	bestAmount: BN;
@@ -138,6 +139,19 @@ function findBestSpotPosition(
 
 	for (const position of spotPositions) {
 		if (position.scaledBalance.eq(ZERO)) {
+			continue;
+		}
+
+		// Skip any position that is less than the configured minimum amount
+		// for the specific market
+		const minAmount = new BN(minDepositToLiq.get(position.marketIndex) ?? 0);
+		logger.debug(
+			`liqPerpPnl: Min liquidation for market ${position.marketIndex} is ${minAmount}`
+		);
+		if (position.scaledBalance.abs().lt(minAmount)) {
+			logger.debug(
+				`liqPerpPnl: Amount ${position.scaledBalance} below ${minAmount} liquidation threshold`
+			);
 			continue;
 		}
 
@@ -274,6 +288,8 @@ export class LiquidatorBot implements Bot {
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
 	private jupiterClient?: JupiterClient;
 	private twapExecutionProgresses?: Map<string, TwapExecutionProgress>; // key: this.getTwapProgressKey, value: TwapExecutionProgress
+	private minDepositToLiq: Map<number, number>;
+	private excludedAccounts: Set<string>;
 
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
@@ -318,12 +334,18 @@ export class LiquidatorBot implements Bot {
 		this.perpMarketToSubaccount = new Map<number, number>();
 		this.spotMarketToSubaccount = new Map<number, number>();
 
-		if (config.perpSubAccountConfig) {
+		const allPerpMarkets = this.driftClient.getPerpMarketAccounts().map((m) => {
+			return m.marketIndex;
+		});
+		if (
+			config.perpSubAccountConfig &&
+			Object.keys(config.perpSubAccountConfig).length != 0
+		) {
 			logger.info('Loading perp markets to watch from perpSubAccountConfig');
 			for (const subAccount of Object.keys(config.perpSubAccountConfig)) {
-				for (const market of config.perpSubAccountConfig[
-					parseInt(subAccount)
-				]) {
+				const marketsForAccount =
+					config.perpSubAccountConfig[parseInt(subAccount)] || allPerpMarkets;
+				for (const market of marketsForAccount) {
 					this.perpMarketToSubaccount.set(market, parseInt(subAccount));
 					this.allSubaccounts.add(parseInt(subAccount));
 				}
@@ -335,27 +357,25 @@ export class LiquidatorBot implements Bot {
 			logger.info('Loading perp markets to watch from perpMarketIndicies');
 			this.perpMarketIndicies = config.perpMarketIndicies || [];
 			if (!this.perpMarketIndicies || this.perpMarketIndicies.length === 0) {
-				this.perpMarketIndicies = this.driftClient
-					.getPerpMarketAccounts()
-					.map((m) => {
-						this.perpMarketToSubaccount.set(
-							m.marketIndex,
-							this.activeSubAccountId
-						);
-						return m.marketIndex;
-					});
+				this.perpMarketIndicies = allPerpMarkets;
+			}
+			for (const market of this.perpMarketIndicies) {
+				this.perpMarketToSubaccount.set(market, this.activeSubAccountId);
 			}
 		}
 		logger.info(`${this.name} perpMarketIndicies: ${this.perpMarketIndicies}`);
 		console.log('this.perpMarketToSubaccount:');
 		console.log(this.perpMarketToSubaccount);
 
+		const allSpotMarkets = this.driftClient.getSpotMarketAccounts().map((m) => {
+			return m.marketIndex;
+		});
 		if (config.spotSubAccountConfig) {
 			logger.info('Loading spot markets to watch from spotSubAccountConfig');
 			for (const subAccount of Object.keys(config.spotSubAccountConfig)) {
-				for (const market of config.spotSubAccountConfig[
-					parseInt(subAccount)
-				]) {
+				const marketsForAccount =
+					config.spotSubAccountConfig[parseInt(subAccount)] || allSpotMarkets;
+				for (const market of marketsForAccount) {
 					this.spotMarketToSubaccount.set(market, parseInt(subAccount));
 					this.allSubaccounts.add(parseInt(subAccount));
 				}
@@ -367,20 +387,31 @@ export class LiquidatorBot implements Bot {
 			logger.info('Loading spot markets to watch from spotMarketIndicies');
 			this.spotMarketIndicies = config.spotMarketIndicies || [];
 			if (!this.spotMarketIndicies || this.spotMarketIndicies.length === 0) {
-				this.spotMarketIndicies = this.driftClient
-					.getSpotMarketAccounts()
-					.map((m) => {
-						this.spotMarketToSubaccount.set(
-							m.marketIndex,
-							this.activeSubAccountId
-						);
-						return m.marketIndex;
-					});
+				this.spotMarketIndicies = allSpotMarkets;
+			}
+			for (const market of this.spotMarketIndicies) {
+				this.spotMarketToSubaccount.set(market, this.activeSubAccountId);
 			}
 		}
+
 		logger.info(`${this.name} spotMarketIndicies: ${this.spotMarketIndicies}`);
 		console.log('this.spotMarketToSubaccount:');
 		console.log(this.spotMarketToSubaccount);
+
+		this.minDepositToLiq = new Map<number, number>();
+		if (config.minDepositToLiq != null) {
+			// We might get the keys parsed as strings
+			for (const [k, v] of Object.entries(config.minDepositToLiq)) {
+				this.minDepositToLiq.set(Number.parseInt(k), v);
+			}
+		}
+
+		// Load a list of accounts that we will *not* bother trying to liquidate
+		// For whatever reason, this value is being parsed as an array even though
+		// it is declared as a set, so if we merely assign it, then we'd end up
+		// with a compile error later saying `has is not a function`.
+		this.excludedAccounts = new Set<string>(config.excludedAccounts);
+		logger.info(`Liquidator disregarding accounts: ${config.excludedAccounts}`);
 
 		// ensure driftClient has all subaccounts tracked and subscribed
 		for (const subaccount of this.allSubaccounts) {
@@ -615,10 +646,10 @@ export class LiquidatorBot implements Bot {
 		orderDirection: PositionDirection,
 		spotMarketIndex: number,
 		standardizedTokenAmount: BN,
-		route: Route
+		route: Route,
+		slippageBps: number,
+		slippageDenom: number
 	) {
-		const slippageDenom = 10000;
-		const slippageBps = this.liquidatorConfig.maxSlippagePct! * slippageDenom;
 		let outMarketIndex: number;
 		let inMarketIndex: number;
 		let jupSwapMode: SwapMode;
@@ -963,9 +994,12 @@ export class LiquidatorBot implements Bot {
 		let jupiterRoutes = await this.jupiterClient.getRoutes({
 			inputMint: inMarket.mint,
 			outputMint: outMarket.mint,
-			amount: baseAmountIn,
+			amount: baseAmountIn.abs(),
 			swapMode: jupSwapMode,
 		});
+
+		console.log('routes');
+		console.log(JSON.stringify(jupiterRoutes, null, 2));
 
 		// fills containing Openbook will be too big, filter them out
 		jupiterRoutes = jupiterRoutes.filter((route: Route) =>
@@ -984,7 +1018,10 @@ export class LiquidatorBot implements Bot {
 		if (isVariant(orderDirection, 'long')) {
 			// buying spotMarketIndex, want min in
 			const jupAmountIn = new BN(bestRoute.inAmount);
-			if (dlobFillQuoteAmount?.lt(jupAmountIn)) {
+			if (
+				dlobFillQuoteAmount?.gt(ZERO) &&
+				dlobFillQuoteAmount?.lt(jupAmountIn)
+			) {
 				logger.info(
 					`Want long, dlob fill amount ${dlobFillQuoteAmount} < jup amount in ${jupAmountIn}, dont trade on jup`
 				);
@@ -1099,6 +1136,8 @@ export class LiquidatorBot implements Bot {
 				continue;
 			}
 
+			const slippageDenom = 10000;
+			const slippageBps = this.liquidatorConfig.maxSlippagePct! * slippageDenom;
 			const jupRoute = await this.determineBestSpotSwapRoute(
 				position.marketIndex,
 				orderParams.direction,
@@ -1116,7 +1155,9 @@ export class LiquidatorBot implements Bot {
 					orderParams.direction,
 					position.marketIndex,
 					orderParams.tokenAmount,
-					jupRoute
+					jupRoute,
+					slippageBps,
+					slippageDenom
 				);
 			}
 		}
@@ -1351,6 +1392,10 @@ export class LiquidatorBot implements Bot {
 		borrowAmountToLiq: BN,
 		user: User
 	) {
+		logger.debug(
+			`liqBorrow: ${user.userAccountPublicKey.toBase58()} value ${borrowAmountToLiq}`
+		);
+
 		if (!this.spotMarketIndicies.includes(borrowMarketIndextoLiq)) {
 			logger.info(
 				`Skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because borrowMarketIndextoLiq(${borrowMarketIndextoLiq}) is not in spotMarketIndicies`
@@ -1436,6 +1481,10 @@ tx: ${tx} `
 		borrowMarketIndextoLiq: number,
 		borrowAmountToLiq: BN
 	) {
+		logger.debug(
+			`liqPerpPnl: ${user.userAccountPublicKey.toBase58()} deposit: ${depositAmountToLiq.toString()}, from ${depositMarketIndextoLiq} borrow: ${borrowAmountToLiq.toString()} from ${borrowMarketIndextoLiq}`
+		);
+
 		if (liquidateePosition.quoteAssetAmount.gt(ZERO)) {
 			const claimablePnl = calculateClaimablePnl(
 				perpMarketAccount,
@@ -1669,17 +1718,27 @@ tx: ${tx} `
 		let ran = false;
 		const usersCanBeLiquidated = new Array<{
 			user: User;
+			userKey: string;
 			marginRequirement: BN;
 			canBeLiquidated: boolean;
 		}>();
 		for (const user of this.userMap!.values()) {
 			const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
 			if (canBeLiquidated || user.isBeingLiquidated()) {
-				usersCanBeLiquidated.push({
-					user,
-					marginRequirement,
-					canBeLiquidated,
-				});
+				const userKey = user.userAccountPublicKey.toBase58();
+				if (this.excludedAccounts.has(userKey)) {
+					// Debug log precisely because the intent is to avoid noise
+					logger.debug(
+						`Skipping liquidation for ${userKey} due to configuration`
+					);
+				} else {
+					usersCanBeLiquidated.push({
+						user,
+						userKey,
+						marginRequirement,
+						canBeLiquidated,
+					});
+				}
 			}
 		}
 
@@ -1688,10 +1747,9 @@ tx: ${tx} `
 			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
 		});
 
-		for (const { user, canBeLiquidated } of usersCanBeLiquidated) {
+		for (const { user, userKey, canBeLiquidated } of usersCanBeLiquidated) {
 			const userAcc = user.getUserAccount();
 			const auth = userAcc.authority.toBase58();
-			const userKey = user.userAccountPublicKey.toBase58();
 
 			if (isUserBankrupt(user) || user.isBankrupt()) {
 				await this.tryResolveBankruptUser(user);
@@ -1732,7 +1790,8 @@ tx: ${tx} `
 					liquidateeUserAccount.spotPositions,
 					false,
 					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
-					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
+					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM,
+					this.minDepositToLiq
 				);
 
 				const {
@@ -1745,7 +1804,8 @@ tx: ${tx} `
 					liquidateeUserAccount.spotPositions,
 					true,
 					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
-					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM
+					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM,
+					this.minDepositToLiq
 				);
 
 				let liquidateeHasSpotPos = false;
@@ -2014,9 +2074,10 @@ tx: ${tx} `
 	private async tryLiquidateStart() {
 		const start = Date.now();
 		let ran = false;
+		const needMutex = this.allSubaccounts.size > 1;
 		try {
 			// need mutex since derisk and tryLiquidate may change the active subaccountId
-			if (!this.acquireMutex()) {
+			if (needMutex && !this.acquireMutex()) {
 				logger.info(
 					`${this.name} tryLiquidate ran into locked mutex, skipping run.`
 				);
@@ -2033,7 +2094,9 @@ tx: ${tx} `
 				);
 			}
 		} finally {
-			this.releaseMutex();
+			if (needMutex) {
+				this.releaseMutex();
+			}
 			if (ran) {
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
 				this.watchdogTimerLastPatTime = Date.now();

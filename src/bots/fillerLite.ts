@@ -18,6 +18,8 @@ import { RuntimeSpec } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { FillerBot } from './filler';
 
+import { sleepMs } from '../utils';
+
 export class FillerLiteBot extends FillerBot {
 	private orderSubscriber: OrderSubscriber;
 
@@ -68,7 +70,7 @@ export class FillerLiteBot extends FillerBot {
 		);
 
 		await this.orderSubscriber.subscribe();
-		await this.sleep(1200); // Wait a few slots to build up order book
+		await sleepMs(1200); // Wait a few slots to build up order book
 
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();

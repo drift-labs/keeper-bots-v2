@@ -286,7 +286,7 @@ const runBot = async () => {
 	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {
 		maxTx: 4096,
 		maxEventsPerType: 4096,
-		orderBy: 'blockchain',
+		orderBy: 'blockchain', // Possible options are 'blockchain' or 'client'
 		orderDir: 'desc',
 		commitment: stateCommitment,
 		logProviderConfig,
