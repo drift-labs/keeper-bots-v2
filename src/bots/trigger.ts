@@ -48,23 +48,23 @@ export class TriggerBot implements Bot {
 
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
-	private dlobSubscriber: DLOBSubscriber;
+	private dlobSubscriber?: DLOBSubscriber;
 	private triggeringNodes = new Map<string, number>();
 	private periodicTaskMutex = new Mutex();
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private userMap: UserMap;
+	private userMap?: UserMap;
 
 	// metrics
 	private metricsInitialized = false;
-	private metricsPort: number | undefined;
-	private exporter: PrometheusExporter;
-	private meter: Meter;
+	private metricsPort?: number;
+	private exporter?: PrometheusExporter;
+	private meter?: Meter;
 	private bootTimeMs = Date.now();
-	private runtimeSpecsGauge: ObservableGauge;
+	private runtimeSpecsGauge?: ObservableGauge;
 	private runtimeSpec: RuntimeSpec;
-	private mutexBusyCounter: Counter;
-	private errorCounter: Counter;
-	private tryTriggerDurationHistogram: Histogram;
+	private mutexBusyCounter?: Counter;
+	private errorCounter?: Counter;
+	private tryTriggerDurationHistogram?: Histogram;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -174,8 +174,8 @@ export class TriggerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		await this.dlobSubscriber.unsubscribe();
-		await this.userMap.unsubscribe();
+		await this.dlobSubscriber!.unsubscribe();
+		await this.userMap!.unsubscribe();
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
@@ -203,7 +203,7 @@ export class TriggerBot implements Bot {
 			const oraclePriceData =
 				this.driftClient.getOracleDataForPerpMarket(marketIndex);
 
-			const dlob = this.dlobSubscriber.getDLOB();
+			const dlob = this.dlobSubscriber!.getDLOB();
 			const nodesToTrigger = dlob.findNodesToTrigger(
 				marketIndex,
 				this.slotSubscriber.getSlot(),
@@ -241,7 +241,7 @@ export class TriggerBot implements Bot {
 					} (account: ${nodeToTrigger.node.userAccount.toString()}) perp order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
-				const user = await this.userMap.mustGet(
+				const user = await this.userMap!.mustGet(
 					nodeToTrigger.node.userAccount.toString()
 				);
 				this.driftClient
@@ -261,13 +261,14 @@ export class TriggerBot implements Bot {
 
 						const errorCode = getErrorCode(error);
 						if (
+							errorCode &&
 							!errorCodesToSuppress.includes(errorCode) &&
 							!(error as Error).message.includes(
 								'Transaction was not confirmed'
 							)
 						) {
 							if (errorCode) {
-								this.errorCounter.add(1, { errorCode: errorCode.toString() });
+								this.errorCounter!.add(1, { errorCode: errorCode.toString() });
 							}
 							logger.error(
 								`Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
@@ -291,9 +292,13 @@ export class TriggerBot implements Bot {
 				`Unexpected error for market ${marketIndex.toString()} during triggers`
 			);
 			console.error(e);
-			webhookMessage(
-				`[${this.name}]: :x: Uncaught error:\n${e.stack ? e.stack : e.message}}`
-			);
+			if (e instanceof Error) {
+				webhookMessage(
+					`[${this.name}]: :x: Uncaught error:\n${
+						e.stack ? e.stack : e.message
+					}}`
+				);
+			}
 		}
 	}
 
@@ -304,7 +309,7 @@ export class TriggerBot implements Bot {
 			const oraclePriceData =
 				this.driftClient.getOracleDataForSpotMarket(marketIndex);
 
-			const dlob = this.dlobSubscriber.getDLOB();
+			const dlob = this.dlobSubscriber!.getDLOB();
 			const nodesToTrigger = dlob.findNodesToTrigger(
 				marketIndex,
 				this.slotSubscriber.getSlot(),
@@ -324,7 +329,7 @@ export class TriggerBot implements Bot {
 					`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) spot order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
-				const user = await this.userMap.mustGet(
+				const user = await this.userMap!.mustGet(
 					nodeToTrigger.node.userAccount.toString()
 				);
 				this.driftClient
@@ -344,13 +349,14 @@ export class TriggerBot implements Bot {
 
 						const errorCode = getErrorCode(error);
 						if (
+							errorCode &&
 							!errorCodesToSuppress.includes(errorCode) &&
 							!(error as Error).message.includes(
 								'Transaction was not confirmed'
 							)
 						) {
 							if (errorCode) {
-								this.errorCounter.add(1, { errorCode: errorCode.toString() });
+								this.errorCounter!.add(1, { errorCode: errorCode.toString() });
 							}
 							logger.error(
 								`Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
@@ -398,7 +404,7 @@ export class TriggerBot implements Bot {
 		} catch (e) {
 			if (e === E_ALREADY_LOCKED) {
 				const user = this.driftClient.getUser();
-				this.mutexBusyCounter.add(
+				this.mutexBusyCounter!.add(
 					1,
 					metricAttrFromUserAccount(
 						user.getUserAccountPublicKey(),
@@ -406,11 +412,13 @@ export class TriggerBot implements Bot {
 					)
 				);
 			} else {
-				webhookMessage(
-					`[${this.name}]: :x: Uncaught error in main loop:\n${
-						e.stack ? e.stack : e.message
-					}`
-				);
+				if (e instanceof Error) {
+					webhookMessage(
+						`[${this.name}]: :x: Uncaught error in main loop:\n${
+							e.stack ? e.stack : e.message
+						}`
+					);
+				}
 				throw e;
 			}
 		} finally {
@@ -418,7 +426,7 @@ export class TriggerBot implements Bot {
 				const user = this.driftClient.getUser();
 
 				const duration = Date.now() - start;
-				this.tryTriggerDurationHistogram.record(
+				this.tryTriggerDurationHistogram!.record(
 					duration,
 					metricAttrFromUserAccount(
 						user.getUserAccountPublicKey(),

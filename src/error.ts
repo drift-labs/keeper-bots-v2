@@ -6,9 +6,14 @@ export function getErrorCode(error: Error): number | undefined {
 
 	if (!errorCode) {
 		try {
-			const code = error.message.match(
+			const matches = error.message.match(
 				/custom program error: (0x[0-9,a-f]+)/
-			)[1];
+			);
+			if (!matches) {
+				return undefined;
+			}
+
+			const code = matches[1];
 
 			if (code) {
 				errorCode = parseInt(code, 16);
@@ -22,11 +27,15 @@ export function getErrorCode(error: Error): number | undefined {
 
 export function getErrorMessage(error: SendTransactionError): string {
 	let errorString = '';
-	error.logs.forEach((logMsg) => {
+	error.logs?.forEach((logMsg) => {
 		try {
-			const errorCode = logMsg.match(
+			const matches = logMsg.match(
 				/Program log: AnchorError occurred. Error Code: ([0-9,a-z,A-Z]+). Error Number/
-			)[1];
+			);
+			if (!matches) {
+				return;
+			}
+			const errorCode = matches[1];
 
 			if (errorCode) {
 				errorString = errorCode;

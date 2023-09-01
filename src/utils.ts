@@ -129,7 +129,7 @@ export function getNodeToFillSignature(node: NodeToFill): string {
 	if (!node.node.userAccount) {
 		return '~';
 	}
-	return `${node.node.userAccount.toBase58()}-${node.node.order.orderId.toString()}`;
+	return `${node.node.userAccount.toBase58()}-${node.node.order?.orderId.toString()}`;
 }
 
 export function getFillSignatureFromUserAccountAndOrderId(
@@ -175,7 +175,7 @@ export function getBestLimitBidExcludePubKey(
 	);
 
 	for (const bid of bids) {
-		if (bid.userAccount.equals(excludedUserAccount)) {
+		if (bid.userAccount?.equals(excludedUserAccount)) {
 			continue;
 		}
 		return bid;
@@ -199,7 +199,7 @@ export function getBestLimitAskExcludePubKey(
 		oraclePriceData
 	);
 	for (const ask of asks) {
-		if (ask.userAccount.equals(excludedUserAccount)) {
+		if (ask.userAccount?.equals(excludedUserAccount)) {
 			continue;
 		}
 
@@ -209,7 +209,7 @@ export function getBestLimitAskExcludePubKey(
 	return undefined;
 }
 
-function roundDownToNearest(num, nearest = 100) {
+function roundDownToNearest(num: number, nearest = 100) {
 	return Math.floor(num / nearest) * nearest;
 }
 

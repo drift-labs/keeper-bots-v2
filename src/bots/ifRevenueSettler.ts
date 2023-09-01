@@ -79,19 +79,20 @@ export class IFRevenueSettlerBot implements Bot {
 			logger.info(
 				`IF revenue settled successfully on marketIndex=${spotMarketIndex}. TxSig: ${txSig}`
 			);
-		} catch (err) {
+		} catch (e: any) {
+			const err = e as Error;
 			const errorCode = getErrorCode(err);
 			logger.error(
 				`Error code: ${errorCode} while settling revenue to IF for marketIndex=${spotMarketIndex}: ${err.message}`
 			);
 			console.error(err);
 
-			if (!errorCodesToSuppress.includes(errorCode)) {
+			if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 				await webhookMessage(
 					`[${
 						this.name
 					}]: :x: Error code: ${errorCode} while settling revenue to IF for marketIndex=${spotMarketIndex}:\n${
-						err.logs ? (err.logs as Array<string>).join('\n') : ''
+						e.logs ? (e.logs as Array<string>).join('\n') : ''
 					}\n${err.stack ? err.stack : err.message}`
 				);
 			}
@@ -153,18 +154,19 @@ export class IFRevenueSettlerBot implements Bot {
 			}
 
 			await Promise.all(ifSettlePromises);
-		} catch (err) {
-			console.error(err);
+		} catch (e: any) {
+			console.error(e);
+			const err = e as Error;
 			if (
-				!(err as Error).message.includes('Transaction was not confirmed') &&
-				!(err as Error).message.includes('Blockhash not found')
+				!err.message.includes('Transaction was not confirmed') &&
+				!err.message.includes('Blockhash not found')
 			) {
 				const errorCode = getErrorCode(err);
 				await webhookMessage(
 					`[${
 						this.name
 					}]: :x: IF Revenue Settler error: Error code: ${errorCode}:\n${
-						err.logs ? (err.logs as Array<string>).join('\n') : ''
+						e.logs ? (e.logs as Array<string>).join('\n') : ''
 					}\n${err.stack ? err.stack : err.message}`
 				);
 			}

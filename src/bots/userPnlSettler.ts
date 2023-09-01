@@ -3,8 +3,6 @@ import {
 	DriftClient,
 	UserAccount,
 	PublicKey,
-	PerpMarketConfig,
-	SpotMarketConfig,
 	PerpMarketAccount,
 	SpotMarketAccount,
 	OraclePriceData,
@@ -33,6 +31,7 @@ import { decodeName } from '../utils';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
+	SendTransactionError,
 } from '@solana/web3.js';
 
 type SettlePnlIxParams = {
@@ -60,11 +59,9 @@ export class UserPnlSettlerBot implements Bot {
 	public readonly defaultIntervalMs: number = 600000;
 
 	private driftClient: DriftClient;
-	private lookupTableAccount: AddressLookupTableAccount;
+	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private userMap: UserMap;
-	private perpMarkets: PerpMarketConfig[];
-	private spotMarkets: SpotMarketConfig[];
+	private userMap?: UserMap;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -97,7 +94,7 @@ export class UserPnlSettlerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		await this.userMap.unsubscribe();
+		await this.userMap?.unsubscribe();
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
@@ -172,7 +169,7 @@ export class UserPnlSettlerBot implements Bot {
 			const usersToSettle: SettlePnlIxParams[] = [];
 			const nowTs = await this.driftClient.connection.getBlockTime(slot);
 
-			for (const user of this.userMap.values()) {
+			for (const user of this.userMap!.values()) {
 				const userAccount = user.getUserAccount();
 				const isUsdcBorrow = isVariant(
 					userAccount.spotPositions[0].balanceType,
@@ -220,7 +217,7 @@ export class UserPnlSettlerBot implements Bot {
 					const shouldSettleLp =
 						settleePosition.lpShares.gt(ZERO) &&
 						timeRemainingUntilUpdate(
-							new BN(nowTs),
+							new BN(nowTs ?? Date.now() / 1000),
 							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
 								.lastFundingRateTs,
 							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
@@ -316,9 +313,12 @@ export class UserPnlSettlerBot implements Bot {
 							.map((item) => item.marketIndex)
 							.includes(perpMarketIdx)
 					) {
-						usersToSettle
-							.find((item) => item.marketIndex == perpMarketIdx)
-							.users.push(userData);
+						const foundItem = usersToSettle.find(
+							(item) => item.marketIndex == perpMarketIdx
+						);
+						if (foundItem) {
+							foundItem.users.push(userData);
+						}
 					} else {
 						usersToSettle.push({
 							users: [userData],
@@ -330,7 +330,7 @@ export class UserPnlSettlerBot implements Bot {
 
 			for (const params of usersToSettle) {
 				const marketStr = decodeName(
-					this.driftClient.getPerpMarketAccount(params.marketIndex).name
+					this.driftClient.getPerpMarketAccount(params.marketIndex)!.name
 				);
 
 				logger.info(
@@ -359,7 +359,7 @@ export class UserPnlSettlerBot implements Bot {
 							this.driftClient.txSender.sendVersionedTransaction(
 								await this.driftClient.txSender.getVersionedTransaction(
 									ixs,
-									[this.lookupTableAccount],
+									[this.lookupTableAccount!],
 									[],
 									this.driftClient.opts
 								),
@@ -368,19 +368,24 @@ export class UserPnlSettlerBot implements Bot {
 							)
 						);
 					} catch (err) {
-						const errorCode = getErrorCode(err);
+						if (!(err instanceof Error)) {
+							return;
+						}
+						const errorCode = getErrorCode(err) ?? 0;
 						logger.error(
 							`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
 						);
 						console.error(err);
 						if (!errorCodesToSuppress.includes(errorCode)) {
-							await webhookMessage(
-								`[${
-									this.name
-								}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}:\n${
-									err.logs ? (err.logs as Array<string>).join('\n') : ''
-								}\n${err.stack ? err.stack : err.message}`
-							);
+							if (err instanceof SendTransactionError) {
+								await webhookMessage(
+									`[${
+										this.name
+									}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}:\n${
+										err.logs ? (err.logs as Array<string>).join('\n') : ''
+									}\n${err.stack ? err.stack : err.message}`
+								);
+							}
 						}
 					}
 				}
@@ -391,21 +396,29 @@ export class UserPnlSettlerBot implements Bot {
 			}
 		} catch (err) {
 			console.error(err);
+			if (!(err instanceof Error)) {
+				return;
+			}
 			if (
-				!(err as Error).message.includes('Transaction was not confirmed') &&
-				!(err as Error).message.includes('Blockhash not found')
+				!err.message.includes('Transaction was not confirmed') &&
+				!err.message.includes('Blockhash not found')
 			) {
 				const errorCode = getErrorCode(err);
-				if (errorCodesToSuppress.includes(errorCode)) {
+				if (errorCodesToSuppress.includes(errorCode!)) {
 					console.log(`Suppressing error code: ${errorCode}`);
 				} else {
-					await webhookMessage(
-						`[${
-							this.name
-						}]: :x: Uncaught error: Error code: ${errorCode} while settling pnls:\n${
-							err.logs ? (err.logs as Array<string>).join('\n') : ''
-						}\n${err.stack ? err.stack : err.message}`
-					);
+					const simError = err as SendTransactionError;
+					if (simError) {
+						await webhookMessage(
+							`[${
+								this.name
+							}]: :x: Uncaught error: Error code: ${errorCode} while settling pnls:\n${
+								simError.logs!
+									? (simError.logs as Array<string>).join('\n')
+									: ''
+							}\n${err.stack ? err.stack : err.message}`
+						);
+					}
 				}
 			}
 		} finally {
