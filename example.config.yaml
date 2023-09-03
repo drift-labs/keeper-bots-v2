@@ -143,3 +143,11 @@ botConfigs:
     botId: "trigger"
     dryRun: false
     metricsPort: 9465
+
+  floatingMaker:
+    botId: "floatingMaker"
+    dryRun: false
+    metricsPort: 9669
+    intervalMs: 7500
+    orderOffset: 95
+    orderSize: 5

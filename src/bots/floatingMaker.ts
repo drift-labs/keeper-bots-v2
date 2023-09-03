@@ -27,7 +27,7 @@ import {
 	MeterProvider,
 	View,
 } from '@opentelemetry/sdk-metrics-base';
-import { BaseBotConfig } from '../config';
+import { FloatingMakerConfig } from '../config';
 
 type State = {
 	marketPosition: Map<number, PerpPosition>;
@@ -54,7 +54,9 @@ enum METRIC_TYPES {
 export class FloatingPerpMakerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 5000;
+	public defaultIntervalMs: number = 5000;
+	private orderOffset: number = 90;
+	private orderSize: number = 1;
 
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
@@ -99,12 +101,16 @@ export class FloatingPerpMakerBot implements Bot {
 		clearingHouse: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		runtimeSpec: RuntimeSpec,
-		config: BaseBotConfig
+		config: FloatingMakerConfig
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = clearingHouse;
 		this.slotSubscriber = slotSubscriber;
+
+		this.defaultIntervalMs = config.intervalMs ?? 5000;
+		this.orderOffset = config.orderOffset ?? 90;
+		this.orderSize = config.orderSize ?? 1;
 
 		this.metricsPort = config.metricsPort;
 		if (this.metricsPort) {
@@ -324,7 +330,7 @@ export class FloatingPerpMakerBot implements Bot {
 		if (placeNewOrders) {
 			// The lower the bias numerator, the further below a long bid would be from the oracle price
 			// (or the further above a short ask)
-			const biasNum = new BN(90);
+			const biasNum = new BN(this.orderOffset);
 			const biasDenom = new BN(100);
 
 			try {
@@ -336,7 +342,7 @@ export class FloatingPerpMakerBot implements Bot {
 						marketIndex: marketIndex,
 						orderType: OrderType.LIMIT,
 						direction: PositionDirection.LONG,
-						baseAssetAmount: BASE_PRECISION.mul(new BN(5)),
+						baseAssetAmount: BASE_PRECISION.mul(new BN(this.orderSize)),
 						oraclePriceOffset: oracleBidSpread
 							.mul(biasNum)
 							.div(biasDenom)
@@ -347,7 +353,7 @@ export class FloatingPerpMakerBot implements Bot {
 						marketIndex: marketIndex,
 						orderType: OrderType.LIMIT,
 						direction: PositionDirection.SHORT,
-						baseAssetAmount: BASE_PRECISION.mul(new BN(5)),
+						baseAssetAmount: BASE_PRECISION.mul(new BN(this.orderSize)),
 						oraclePriceOffset: oracleAskSpread
 							.mul(biasNum)
 							.div(biasDenom)

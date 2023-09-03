@@ -22,6 +22,12 @@ export type FillerConfig = BaseBotConfig & {
 	revertOnFailure?: boolean;
 };
 
+export type FloatingMakerConfig = BaseBotConfig & {
+	intervalMs?: number;
+	orderOffset?: number;
+	orderSize?: number;
+};
+
 export type SubaccountConfig = {
 	[key: number]: Array<number>;
 };
@@ -46,7 +52,7 @@ export type BotConfigMap = {
 	spotFiller?: FillerConfig;
 	trigger?: BaseBotConfig;
 	liquidator?: LiquidatorConfig;
-	floatingMaker?: BaseBotConfig;
+	floatingMaker?: FloatingMakerConfig;
 	jitMaker?: JitMakerConfig;
 	ifRevenueSettler?: BaseBotConfig;
 	fundingRateUpdater?: BaseBotConfig;
