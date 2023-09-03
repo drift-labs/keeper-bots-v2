@@ -302,47 +302,69 @@ export class FloatingPerpMakerBot implements Bot {
 			marketIndex === 0
 		) {
 			// cancel orders
-			for (const o of openOrders) {
-				const tx = await this.driftClient.cancelOrder(o.orderId);
-				console.log(
-					`${this.name} cancelling order ${this.driftClient
-						.getUserAccount()!
-						.authority.toBase58()}-${o.orderId}: ${tx}`
+			try {
+				await Promise.all(
+					openOrders.map((o) => {
+						console.log(
+							`${this.name} cancelling order ${this.driftClient
+								.getUserAccount()!
+								.authority.toBase58()}-${o.orderId}`
+						);
+						return this.driftClient.cancelOrder(o.orderId);
+					})
 				);
+			} catch (e) {
+				console.log('Error canceling orders');
+				console.error(e);
+				console.log('----');
 			}
 			placeNewOrders = true;
 		}
 
 		if (placeNewOrders) {
+			// The lower the bias numerator, the further below a long bid would be from the oracle price
+			// (or the further above a short ask)
 			const biasNum = new BN(90);
 			const biasDenom = new BN(100);
 
-			const oracleBidSpread = oracle.price.sub(vBid);
-			const tx0 = await this.driftClient.placePerpOrder({
-				marketIndex: marketIndex,
-				orderType: OrderType.LIMIT,
-				direction: PositionDirection.LONG,
-				baseAssetAmount: BASE_PRECISION.mul(new BN(1)),
-				oraclePriceOffset: oracleBidSpread
-					.mul(biasNum)
-					.div(biasDenom)
-					.neg()
-					.toNumber(), // limit bid below oracle
-			});
-			console.log(`${this.name} placing long: ${tx0}`);
-
-			const oracleAskSpread = vAsk.sub(oracle.price);
-			const tx1 = await this.driftClient.placePerpOrder({
-				marketIndex: marketIndex,
-				orderType: OrderType.LIMIT,
-				direction: PositionDirection.SHORT,
-				baseAssetAmount: BASE_PRECISION.mul(new BN(1)),
-				oraclePriceOffset: oracleAskSpread
-					.mul(biasNum)
-					.div(biasDenom)
-					.toNumber(), // limit ask above oracle
-			});
-			console.log(`${this.name} placing short: ${tx1}`);
+			try {
+				const oracleBidSpread = oracle.price.sub(vBid);
+				const oracleAskSpread = vAsk.sub(oracle.price);
+				// Altering to a vector, it'll be easier to place a set of orders later
+				const orders = [
+					{
+						marketIndex: marketIndex,
+						orderType: OrderType.LIMIT,
+						direction: PositionDirection.LONG,
+						baseAssetAmount: BASE_PRECISION.mul(new BN(5)),
+						oraclePriceOffset: oracleBidSpread
+							.mul(biasNum)
+							.div(biasDenom)
+							.neg()
+							.toNumber(), // limit bid below oracle
+					},
+					{
+						marketIndex: marketIndex,
+						orderType: OrderType.LIMIT,
+						direction: PositionDirection.SHORT,
+						baseAssetAmount: BASE_PRECISION.mul(new BN(5)),
+						oraclePriceOffset: oracleAskSpread
+							.mul(biasNum)
+							.div(biasDenom)
+							.toNumber(), // limit ask above oracle
+					},
+				];
+				await Promise.all(
+					orders.map((o) => {
+						logger.info(`${this.name} placing order: ${JSON.stringify(o)}`);
+						this.driftClient.placePerpOrder(o);
+					})
+				);
+			} catch (e) {
+				console.log('Error placing new orders');
+				console.error(e);
+				console.log('----');
+			}
 		}
 
 		// enforce cooldown on market
@@ -377,7 +399,9 @@ export class FloatingPerpMakerBot implements Bot {
 					)
 				);
 			} else {
-				throw e;
+				// Not re-throwing, as that would abort the floatingMaker
+				// altogether and potentially leave it with open orders
+				logger.error(`Exception processing transaction ${e}`);
 			}
 		} finally {
 			if (ran) {
