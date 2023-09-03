@@ -91,6 +91,7 @@ import {
 	getNodeToTriggerSignature,
 	sleepMs,
 } from '../utils';
+import { PriorityFeeCalculator } from './common/priorityFeeCalculator';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
@@ -220,8 +221,7 @@ export class FillerBot implements Bot {
 	protected fillTxSinceBurstCU = 0;
 	protected fillTxId = 0;
 
-	// track tx timeouts to apply priority fee
-	protected lastTxTimeoutCount = 0;
+	protected priorityFeeCalculator: PriorityFeeCalculator;
 
 	// metrics
 	protected metricsInitialized = false;
@@ -336,6 +336,8 @@ export class FillerBot implements Bot {
 				!!this.jitoSearcherClient && !!this.jitoAuthKeypair
 			}`
 		);
+
+		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
 	}
 
 	protected initializeMetrics() {
@@ -1204,16 +1206,6 @@ export class FillerBot implements Bot {
 		}
 	}
 
-	protected updateAndCheckTxTimeoutsCounter(): boolean {
-		const txTimeoutCount = this.driftClient.txSender.getTimeoutCount();
-		const txTimeoutHasChanged = txTimeoutCount > this.lastTxTimeoutCount;
-		if (txTimeoutHasChanged) {
-			this.lastTxTimeoutCount = txTimeoutCount;
-		}
-
-		return txTimeoutHasChanged;
-	}
-
 	protected async sendFillTxThroughJito(
 		fillTxId: number,
 		ixs: Array<TransactionInstruction>
@@ -1406,9 +1398,8 @@ export class FillerBot implements Bot {
 	 */
 	protected async tryFillMultiMakerPerpNodes(
 		nodeToFill: NodeToFill,
-		hasRecentTxTimeouts: boolean
+		ixs: Array<TransactionInstruction>
 	) {
-		const ixs: Array<TransactionInstruction> = [];
 		const fillTxId = this.fillTxId++;
 		logger.info(
 			logMessageForNodeToFill(
@@ -1418,25 +1409,6 @@ export class FillerBot implements Bot {
 		);
 
 		try {
-			const computeUnitLimit = 10_000_000;
-			ixs.push(
-				ComputeBudgetProgram.setComputeUnitLimit({
-					units: computeUnitLimit,
-				})
-			);
-			if (hasRecentTxTimeouts) {
-				const additionalFeeMicroLamports = 1_000_000_000; // 1000 lamports
-				const computeUnitPrice = additionalFeeMicroLamports / computeUnitLimit;
-				logger.info(
-					`Using additional fee of ${additionalFeeMicroLamports}, computeUnitLimit: ${computeUnitLimit}, computeUnitPrice: ${computeUnitPrice} micro lamports (fillTxId: ${fillTxId})`
-				);
-				ixs.push(
-					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: computeUnitPrice,
-					})
-				);
-			}
-
 			const { makerInfos, takerUser, referrerInfo, marketType } =
 				await this.getNodeFillInfo(nodeToFill);
 
@@ -1479,9 +1451,16 @@ export class FillerBot implements Bot {
 	protected async tryBulkFillPerpNodes(
 		nodesToFill: Array<NodeToFill>
 	): Promise<number> {
-		const ixs: Array<TransactionInstruction> = [];
-
-		const hasRecentTxTimeouts = this.updateAndCheckTxTimeoutsCounter();
+		const usePriorityFee = this.priorityFeeCalculator.updatePriorityFee(
+			Date.now(),
+			this.driftClient.txSender.getTimeoutCount()
+		);
+		const ixs =
+			this.priorityFeeCalculator.generateComputeBudgetWithPriorityFeeIx(
+				10_000_000,
+				usePriorityFee,
+				1_000_000_000 // 1000 lamports
+			);
 
 		/**
 		 * At all times, the running Tx size is:
@@ -1500,30 +1479,11 @@ export class FillerBot implements Bot {
 		const uniqueAccounts = new Set<string>();
 		uniqueAccounts.add(this.driftClient.provider.wallet.publicKey.toString()); // fee payer goes first
 
-		// first ix is compute budget
-		const computeUnitLimit = 10_000_000;
-		const computeBudgetIx = ComputeBudgetProgram.setComputeUnitLimit({
-			units: computeUnitLimit,
-		});
-
+		const computeBudgetIx = ixs[0];
 		computeBudgetIx.keys.forEach((key) =>
 			uniqueAccounts.add(key.pubkey.toString())
 		);
 		uniqueAccounts.add(computeBudgetIx.programId.toString());
-		ixs.push(computeBudgetIx);
-
-		if (hasRecentTxTimeouts) {
-			const additionalFeeMicroLamports = 1_000_000_000; // 1000 lamports
-			const computeUnitPrice = additionalFeeMicroLamports / computeUnitLimit;
-			logger.info(
-				`Using additional fee of ${additionalFeeMicroLamports}, computeUnitLimit: ${computeUnitLimit}, computeUnitPrice: ${computeUnitPrice} micro lamports`
-			);
-			ixs.push(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: computeUnitPrice,
-				})
-			);
-		}
 
 		// initialize the barebones transaction
 		// signatures
@@ -1546,7 +1506,7 @@ export class FillerBot implements Bot {
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			// do multi maker fills in a separate tx since they're larger
 			if (nodeToFill.makerNodes.length > 1) {
-				await this.tryFillMultiMakerPerpNodes(nodeToFill, hasRecentTxTimeouts);
+				await this.tryFillMultiMakerPerpNodes(nodeToFill, ixs);
 				nodesSent.push(nodeToFill);
 				continue;
 			}
