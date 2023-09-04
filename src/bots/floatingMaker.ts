@@ -57,6 +57,7 @@ export class FloatingPerpMakerBot implements Bot {
 	public defaultIntervalMs: number = 5000;
 	private orderOffset: number = 90;
 	private orderSize: number = 1;
+	private subAccountId: number = 0;
 
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
@@ -114,6 +115,16 @@ export class FloatingPerpMakerBot implements Bot {
 		this.defaultIntervalMs = config.intervalMs ?? 5000;
 		this.orderOffset = config.orderOffset ?? 90;
 		this.orderSize = config.orderSize ?? 1;
+
+		// Configure user and subaccount
+		this.subAccountId = config.subAccountId ?? 0;
+		if (this.subAccountId != 0) {
+			logger.warn(`Using subAccountId ${this.subAccountId}.`);
+			logger.warn(
+				`The bot will only change subaccounts once, so make sure there are no conflicting changes on other bots.`
+			);
+		}
+		this.driftClient.switchActiveUser(this.subAccountId);
 
 		this.marketIndices = new Set<number>(config.perpMarketIndices);
 
@@ -185,6 +196,7 @@ export class FloatingPerpMakerBot implements Bot {
 
 	public async init() {
 		logger.info(`${this.name} initing`);
+
 		this.agentState = {
 			marketPosition: new Map<number, PerpPosition>(),
 			openOrders: new Map<number, Array<Order>>(),

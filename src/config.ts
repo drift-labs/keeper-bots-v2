@@ -27,6 +27,7 @@ export type FloatingMakerConfig = BaseBotConfig & {
 	orderOffset?: number;
 	orderSize?: number;
 	perpMarketIndices?: Set<number>;
+	subAccountId?: number;
 };
 
 export type SubaccountConfig = {
