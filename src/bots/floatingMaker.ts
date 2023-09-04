@@ -78,6 +78,9 @@ export class FloatingPerpMakerBot implements Bot {
 
 	private agentState?: State;
 
+	private marketIndices: Set<number>;
+	private markets: PerpMarketAccount[] = [];
+
 	/**
 	 * Set true to enforce max position size
 	 */
@@ -111,6 +114,8 @@ export class FloatingPerpMakerBot implements Bot {
 		this.defaultIntervalMs = config.intervalMs ?? 5000;
 		this.orderOffset = config.orderOffset ?? 90;
 		this.orderSize = config.orderSize ?? 1;
+
+		this.marketIndices = new Set<number>(config.perpMarketIndices);
 
 		this.metricsPort = config.metricsPort;
 		if (this.metricsPort) {
@@ -185,6 +190,12 @@ export class FloatingPerpMakerBot implements Bot {
 			openOrders: new Map<number, Array<Order>>(),
 		};
 		this.updateAgentState();
+
+		this.markets = this.driftClient
+			.getPerpMarketAccounts()
+			.filter((marketAccount) => {
+				return this.marketIndices.has(marketAccount.marketIndex);
+			});
 	}
 
 	public async reset() {
@@ -235,7 +246,7 @@ export class FloatingPerpMakerBot implements Bot {
 		});
 
 		// zero out the open orders
-		for (const market of this.driftClient.getPerpMarketAccounts()) {
+		for (const market of this.markets) {
 			this.agentState!.openOrders.set(market.marketIndex, []);
 		}
 
@@ -383,8 +394,9 @@ export class FloatingPerpMakerBot implements Bot {
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				this.updateAgentState();
+
 				await Promise.all(
-					this.driftClient.getPerpMarketAccounts().map((marketAccount) => {
+					this.markets.map((marketAccount) => {
 						console.log(
 							`${this.name} updating open orders for market ${marketAccount.marketIndex}`
 						);

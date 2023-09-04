@@ -151,3 +151,7 @@ botConfigs:
     intervalMs: 7500
     orderOffset: 95
     orderSize: 5
+    perpMarketIndices:
+      - 0 # SOL
+      - 9 # SUI
+
