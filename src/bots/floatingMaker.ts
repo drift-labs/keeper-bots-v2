@@ -326,10 +326,7 @@ export class FloatingPerpMakerBot implements Bot {
 		// cancel orders if not quoting both sides of the market
 		let placeNewOrders = openOrders.length === 0;
 
-		if (
-			(openOrders.length > 0 && openOrders.length != 2) ||
-			marketIndex === 0
-		) {
+		if (openOrders.length > 0 && openOrders.length != 2) {
 			// cancel orders
 			try {
 				await Promise.all(
