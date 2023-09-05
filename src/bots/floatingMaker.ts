@@ -9,10 +9,13 @@ import {
 	PositionDirection,
 	OrderType,
 	BASE_PRECISION,
+	QUOTE_PRECISION,
 	convertToNumber,
 	PRICE_PRECISION,
 	Order,
 	PerpPosition,
+	User,
+	ZERO,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -65,6 +68,8 @@ export class FloatingPerpMakerBot implements Bot {
 	private lastSlotMarketUpdated: Map<number, number> = new Map();
 
 	private intervalIds: Array<NodeJS.Timer> = [];
+
+	private user: User;
 
 	// metrics
 	private metricsInitialized = false;
@@ -125,6 +130,7 @@ export class FloatingPerpMakerBot implements Bot {
 			);
 		}
 		this.driftClient.switchActiveUser(this.subAccountId);
+		this.user = this.driftClient.getUser();
 
 		this.marketIndices = new Set<number>(config.perpMarketIndices);
 
@@ -325,6 +331,58 @@ export class FloatingPerpMakerBot implements Bot {
 
 		// cancel orders if not quoting both sides of the market
 		let placeNewOrders = openOrders.length === 0;
+		logger.info(
+			`Orders open: ${openOrders.length}. Placing? ${placeNewOrders}`
+		);
+
+		// Skew order size based on total exposure and asset value
+		const totalAssetValue = convertToNumber(
+			this.user.getSpotMarketAssetValue(
+				0, // USDC
+				'Maintenance',
+				true
+			),
+			QUOTE_PRECISION
+		);
+		const position = this.user.getPerpPosition(marketIndex);
+		const posAmount = convertToNumber(
+			position?.baseAssetAmount ?? ZERO,
+			BASE_PRECISION
+		);
+		const perpValue = convertToNumber(
+			this.user.getPerpPositionValue(marketIndex, oracle),
+			QUOTE_PRECISION
+		);
+		const exposure = perpValue / totalAssetValue;
+		const pctExpAllowed =
+			1 - perpValue / (totalAssetValue * this.MAX_POSITION_EXPOSURE);
+		// Yes, this will give a LONG direction when there's no position. It makes no difference,
+		// because in that case the exposure will be 0 and it'll be evenly split.
+		const exposureDir =
+			Math.sign(posAmount) >= 0
+				? PositionDirection.LONG
+				: PositionDirection.SHORT;
+		logger.info(
+			`PerpPosition value: $${perpValue} with ${posAmount}. Exposure: ${exposure}. Allowance used: ${pctExpAllowed}`
+		);
+
+		// Calculate the order size.
+		//
+		// Notice that if this ever gets too small - say, we have hit the exposure
+		// allowance and need to skew it to one side - order placing will barf.
+		//
+		// How to handle this is left as an exercise. You may only want to quote one
+		// side and keep that order open for a while, or keep canceling it and
+		// moving it closer to the oracle (see openOrders.length comparison below).
+		const pctCurrent = pctExpAllowed / 2;
+		const orderSizeCurrent = pctCurrent * (this.orderSize * 2);
+		const orderSizeOther = (1 - pctCurrent) * (this.orderSize * 2);
+		const orderSizeLong =
+			exposureDir == PositionDirection.LONG ? orderSizeCurrent : orderSizeOther;
+		const orderSizeShort =
+			exposureDir == PositionDirection.SHORT
+				? orderSizeCurrent
+				: orderSizeOther;
 
 		if (openOrders.length > 0 && openOrders.length != 2) {
 			// cancel orders
@@ -362,7 +420,7 @@ export class FloatingPerpMakerBot implements Bot {
 						marketIndex: marketIndex,
 						orderType: OrderType.LIMIT,
 						direction: PositionDirection.LONG,
-						baseAssetAmount: BASE_PRECISION.mul(new BN(this.orderSize)),
+						baseAssetAmount: new BN(orderSizeLong * BASE_PRECISION.toNumber()),
 						oraclePriceOffset: oracleBidSpread
 							.mul(biasNum)
 							.div(biasDenom)
@@ -373,7 +431,7 @@ export class FloatingPerpMakerBot implements Bot {
 						marketIndex: marketIndex,
 						orderType: OrderType.LIMIT,
 						direction: PositionDirection.SHORT,
-						baseAssetAmount: BASE_PRECISION.mul(new BN(this.orderSize)),
+						baseAssetAmount: new BN(orderSizeShort * BASE_PRECISION.toNumber()),
 						oraclePriceOffset: oracleAskSpread
 							.mul(biasNum)
 							.div(biasDenom)

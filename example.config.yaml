@@ -150,7 +150,7 @@ botConfigs:
     metricsPort: 9669
     intervalMs: 7500
     orderOffset: 95
-    orderSize: 5
+    orderSize: 4
     # If subAccountId is set, it should also be included on the subaccounts config above
     subAccountId: 1
     perpMarketIndices:
