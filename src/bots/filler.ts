@@ -33,6 +33,7 @@ import {
 	NodeToTrigger,
 	UserAccount,
 	getUserAccountPublicKey,
+	PriorityFeeCalculator,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -91,7 +92,6 @@ import {
 	getNodeToTriggerSignature,
 	sleepMs,
 } from '../utils';
-import { PriorityFeeCalculator } from './common/priorityFeeCalculator';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
