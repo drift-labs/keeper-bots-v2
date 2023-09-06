@@ -33,6 +33,7 @@ import {
 	EventSubscriber,
 	TEN,
 	NodeToTrigger,
+	PriorityFeeCalculator,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -42,7 +43,6 @@ import {
 	GetVersionedTransactionConfig,
 	PublicKey,
 	Transaction,
-	TransactionInstruction,
 	TransactionResponse,
 } from '@solana/web3.js';
 
@@ -75,25 +75,11 @@ import {
 } from './common/txLogParse';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { FillerConfig } from '../config';
-import {
-	decodeName,
-	getNodeToFillSignature,
-	getNodeToTriggerSignature,
-} from '../utils';
+import { getNodeToFillSignature, getNodeToTriggerSignature } from '../utils';
 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_BACKOFF = 10000; // Time to wait before trying a node again
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
-
-/**
- * Constants to determine if we should add a priority fee to a transaction
- */
-const pendingTxKink1 = 5; // number of pending tx before we start adding a priority fee starting at minPriorityFee
-const pendingTxKink2 = 10; // number of pending tx after which we clamp the priority fee to maxPriorityFee
-
-// the max priority fee we will add on top of the 5000 lamport base fee.
-const minPriorityFee = 5000;
-const maxPriorityFee = 10000;
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
@@ -114,7 +100,6 @@ enum METRIC_TYPES {
 	observed_fills_count = 'observed_fills_count',
 	user_map_user_account_keys = 'user_map_user_account_keys',
 	user_stats_map_authority_keys = 'user_stats_map_authority_keys',
-	pending_transactions = 'pending_transactions',
 }
 
 function getMakerNodeFromNodeToFill(
@@ -177,10 +162,8 @@ export class SpotFillerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
-	private pendingTransactionsBuffer = new SharedArrayBuffer(16); // 16 byte shared buffer
-	private pendingTransactionsArray = new Uint8Array(
-		this.pendingTransactionsBuffer
-	);
+
+	private priorityFeeCalculator: PriorityFeeCalculator;
 
 	// metrics
 	private metricsInitialized = false;
@@ -201,7 +184,6 @@ export class SpotFillerBot implements Bot {
 	private lastTryFillTimeGauge?: ObservableGauge;
 	private userMapUserAccountKeysGauge?: ObservableGauge;
 	private userStatsMapAuthorityKeysGauge?: ObservableGauge;
-	private pendingTransactionsGauge?: ObservableGauge;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -252,17 +234,12 @@ export class SpotFillerBot implements Bot {
 			this.initializeMetrics();
 		}
 
-		// load the pending tx atomic
-		for (const spotMarket of this.driftClient.getSpotMarketAccounts()) {
-			if (spotMarket.marketIndex !== 0) {
-				Atomics.store(this.pendingTransactionsArray, spotMarket.marketIndex, 0);
-			}
-		}
-
 		this.transactionVersion = config.transactionVersion ?? undefined;
 		logger.info(
 			`${this.name}: using transactionVersion: ${this.transactionVersion}`
 		);
+
+		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
 	}
 
 	private initializeMetrics() {
@@ -375,30 +352,6 @@ export class SpotFillerBot implements Bot {
 		this.userStatsMapAuthorityKeysGauge.addCallback(async (obs) => {
 			obs.observe(this.userStatsMap!.size());
 		});
-
-		this.pendingTransactionsGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.pending_transactions,
-			{
-				description:
-					'number of pending transactions we are currently waiting on',
-			}
-		);
-		this.pendingTransactionsGauge.addCallback(async (obs) => {
-			for (const spotMarket of this.driftClient.getSpotMarketAccounts()) {
-				if (spotMarket.marketIndex) {
-					const marketIndex = spotMarket.marketIndex;
-					const symbol = decodeName(spotMarket.name);
-					obs.observe(
-						Atomics.load(this.pendingTransactionsArray, marketIndex),
-						{
-							marketIndex: marketIndex,
-							symbol: symbol,
-						}
-					);
-				}
-			}
-		});
-
 		this.sdkCallDurationHistogram = this.meter.createHistogram(
 			METRIC_TYPES.sdk_call_duration_histogram,
 			{
@@ -752,55 +705,6 @@ export class SpotFillerBot implements Bot {
 		this.triggeringNodes.delete(getNodeToTriggerSignature(node));
 	}
 
-	private incPendingTransactions(spotMarketIndex: number): number {
-		return Atomics.add(this.pendingTransactionsArray, spotMarketIndex, 1) + 1;
-	}
-
-	private decPendingTransactions(spotMarketIndex: number): number {
-		return Atomics.sub(this.pendingTransactionsArray, spotMarketIndex, 1) - 1;
-	}
-
-	/**
-	 *
-	 * Priority fee paid (in addition to 5000 lamport base fee)
-	 *
-	 *                 /---------   <-- maxPriorityFee
-	 *                / ^ pendingTxKink2
-	 *               /
-	 *              /   <-- minPriorityFee
-	 *             |
-	 * ------------|    <-- 0 priority fee
-	 *             ^ pendingTxKink1
-	 *
-	 * ---- number of pending txs ----->
-	 *
-	 *
-	 * PriorityFee = (computeUnitLimit * computeUnitPrice * 1e-6) lamports
-	 * BaseFee = 5000 lamports
-	 * TotalFeePaid = BaseFee + PriorityFee lamports
-	 *
-	 * @return computeUnitPrice in micro lamports (can be passed into ComputeBudgetProgram.setComputeUnitPrice)
-	 */
-	private calcComputeUnitPrice(
-		currPendingTx: number,
-		computeUnitLimit: number
-	): number {
-		if (currPendingTx < pendingTxKink1) {
-			return 1;
-		} else if (
-			currPendingTx >= pendingTxKink1 &&
-			currPendingTx < pendingTxKink2
-		) {
-			const m =
-				(maxPriorityFee - minPriorityFee) / (pendingTxKink2 - pendingTxKink1);
-			const b = minPriorityFee - m * pendingTxKink1;
-			const priorityFee = m * currPendingTx + b;
-			return priorityFee / (computeUnitLimit * 1e-6);
-		} else {
-			return maxPriorityFee / (computeUnitLimit * 1e-6);
-		}
-	}
-
 	private async sleep(ms: number) {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
@@ -1117,25 +1021,17 @@ export class SpotFillerBot implements Bot {
 			}
 		}
 
-		const currPendingTxs = this.incPendingTransactions(
-			nodeToFill.node.order!.marketIndex
+		const usePriorityFee = this.priorityFeeCalculator.updatePriorityFee(
+			Date.now(),
+			this.driftClient.txSender.getTimeoutCount()
 		);
-		const computeUnits = 1_000_000;
-		const computeUnitsPrice = this.calcComputeUnitPrice(
-			currPendingTxs,
-			computeUnits
-		);
-		logger.info(
-			`sending - currPendingTxs: ${currPendingTxs}, computeUnits: ${computeUnits}, computeUnitsPrice: ${computeUnitsPrice}`
-		);
+		const ixs =
+			this.priorityFeeCalculator.generateComputeBudgetWithPriorityFeeIx(
+				1_000_000,
+				usePriorityFee,
+				1_000_000_000 // 1000 lamports
+			);
 
-		const ixs: Array<TransactionInstruction> = [];
-		ixs.push(ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }));
-		ixs.push(
-			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: computeUnitsPrice,
-			})
-		);
 		ixs.push(
 			await this.driftClient.getFillSpotOrderIx(
 				chUser.getUserAccountPublicKey(),
@@ -1177,11 +1073,6 @@ export class SpotFillerBot implements Bot {
 					`Filled spot order ${nodeSignature}, TX: ${JSON.stringify(txSig)}`
 				);
 
-				const pendingTxs = this.decPendingTransactions(
-					nodeToFill.node.order!.marketIndex
-				);
-				logger.info(`done - currPendingTxs: ${pendingTxs}`);
-
 				const duration = Date.now() - txStart;
 				const user = this.driftClient.getUser();
 				this.sdkCallDurationHistogram!.record(duration, {
@@ -1195,12 +1086,8 @@ export class SpotFillerBot implements Bot {
 				await this.processBulkFillTxLogs(nodeToFill, txSig.txSig);
 			})
 			.catch(async (e) => {
-				const pendingTxs = this.decPendingTransactions(
-					nodeToFill.node.order!.marketIndex
-				);
 				const errorCode = getErrorCode(e);
 
-				logger.info(`sim error - currPendingTxs: ${pendingTxs}`);
 				logger.error(`Failed to fill spot order (errorCode: ${errorCode}):`);
 
 				if (e.logs) {

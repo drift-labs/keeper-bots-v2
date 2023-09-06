@@ -37,6 +37,8 @@ import {
 	UserAccount,
 	OptionalOrderParams,
 	TEN,
+	TxParams,
+	PriorityFeeCalculator,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -291,6 +293,8 @@ export class LiquidatorBot implements Bot {
 	private minDepositToLiq: Map<number, number>;
 	private excludedAccounts: Set<string>;
 
+	private priorityFeeCalculator: PriorityFeeCalculator;
+
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
 	 */
@@ -468,6 +472,30 @@ export class LiquidatorBot implements Bot {
 				connection: this.driftClient.connection,
 			});
 		}
+
+		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
+	}
+
+	private getTxParamsWithPriorityFees(): TxParams {
+		const usePriorityFee = this.priorityFeeCalculator.updatePriorityFee(
+			Date.now(),
+			this.driftClient.txSender.getTimeoutCount()
+		);
+		const computeUnits = 2_000_000;
+		let txParams: TxParams = { computeUnits };
+		if (usePriorityFee) {
+			const computeUnitsPrice =
+				this.priorityFeeCalculator.calculateComputeUnitPrice(
+					computeUnits,
+					1_000_000_000 // 1000 lamports
+				);
+			txParams = {
+				computeUnits,
+				computeUnitsPrice,
+			};
+		}
+
+		return txParams;
 	}
 
 	private useTwap() {
@@ -1424,7 +1452,9 @@ export class LiquidatorBot implements Bot {
 				user.getUserAccount(),
 				depositMarketIndextoLiq,
 				borrowMarketIndextoLiq,
-				borrowAmountToLiq
+				borrowAmountToLiq,
+				undefined,
+				this.getTxParamsWithPriorityFees()
 			)
 			.then((tx) => {
 				logger.info(
@@ -1559,6 +1589,7 @@ tx: ${tx} `
 						subAccountToUse || this.activeSubAccountId
 					);
 				}
+
 				const start = Date.now();
 				this.driftClient
 					.liquidateBorrowForPerpPnl(
@@ -1566,7 +1597,9 @@ tx: ${tx} `
 						user.getUserAccount(),
 						liquidateePosition.marketIndex,
 						borrowMarketIndextoLiq,
-						borrowAmountToLiq.div(frac)
+						borrowAmountToLiq.div(frac),
+						undefined,
+						this.getTxParamsWithPriorityFees()
 					)
 					.then((tx) => {
 						logger.info(
@@ -1669,7 +1702,9 @@ tx: ${tx} `
 					user.getUserAccount(),
 					liquidateePosition.marketIndex,
 					depositMarketIndextoLiq,
-					depositAmountToLiq
+					depositAmountToLiq,
+					undefined,
+					this.getTxParamsWithPriorityFees()
 				)
 				.then((tx) => {
 					logger.info(
@@ -1916,7 +1951,7 @@ tx: ${tx} `
 								liquidateePosition.marketIndex,
 								baseAmountToLiquidate,
 								undefined,
-								{ computeUnits: 2_000_000 }
+								this.getTxParamsWithPriorityFees()
 							)
 							.then((tx) => {
 								logger.info(`liquidatePerp tx: ${tx} `);
@@ -1963,7 +1998,7 @@ tx: ${tx} `
 								liquidateePosition.marketIndex,
 								ZERO,
 								undefined,
-								{ computeUnits: 2_000_000 }
+								this.getTxParamsWithPriorityFees()
 							)
 							.then((tx) => {
 								logger.info(
@@ -1995,7 +2030,9 @@ tx: ${tx} `
 								user.userAccountPublicKey,
 								user.getUserAccount(),
 								liquidateePerpIndexWithOpenOrders,
-								ZERO
+								ZERO,
+								undefined,
+								this.getTxParamsWithPriorityFees()
 							)
 							.then((tx) => {
 								logger.info(
@@ -2022,7 +2059,9 @@ tx: ${tx} `
 								user.getUserAccount(),
 								indexWithMaxAssets,
 								indexWithOpenOrders,
-								ZERO
+								ZERO,
+								undefined,
+								this.getTxParamsWithPriorityFees()
 							)
 							.then((tx) => {
 								logger.info(
@@ -2049,7 +2088,9 @@ tx: ${tx} `
 						user.userAccountPublicKey,
 						user.getUserAccount(),
 						0,
-						ZERO
+						ZERO,
+						undefined,
+						this.getTxParamsWithPriorityFees()
 					)
 					.then((tx) => {
 						logger.info(

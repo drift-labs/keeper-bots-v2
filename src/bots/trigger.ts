@@ -7,6 +7,8 @@ import {
 	UserMap,
 	MarketType,
 	DLOBSubscriber,
+	PriorityFeeCalculator,
+	TxParams,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -54,6 +56,8 @@ export class TriggerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap?: UserMap;
 
+	private priorityFeeCalculator: PriorityFeeCalculator;
+
 	// metrics
 	private metricsInitialized = false;
 	private metricsPort?: number;
@@ -85,6 +89,7 @@ export class TriggerBot implements Bot {
 		if (this.metricsPort) {
 			this.initializeMetrics();
 		}
+		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
 	}
 
 	private initializeMetrics() {
@@ -332,11 +337,31 @@ export class TriggerBot implements Bot {
 				const user = await this.userMap!.mustGet(
 					nodeToTrigger.node.userAccount.toString()
 				);
+
+				const usePriorityFee = this.priorityFeeCalculator.updatePriorityFee(
+					Date.now(),
+					this.driftClient.txSender.getTimeoutCount()
+				);
+				let txParams: TxParams | undefined = undefined;
+				if (usePriorityFee) {
+					const computeUnits = 100_000;
+					const computeUnitsPrice =
+						this.priorityFeeCalculator.calculateComputeUnitPrice(
+							computeUnits,
+							1_000_000_000 // 1000 lamports
+						);
+					txParams = {
+						computeUnits,
+						computeUnitsPrice,
+					};
+				}
+
 				this.driftClient
 					.triggerOrder(
 						nodeToTrigger.node.userAccount,
 						user.getUserAccount(),
-						nodeToTrigger.node.order
+						nodeToTrigger.node.order,
+						txParams
 					)
 					.then((txSig) => {
 						logger.info(
