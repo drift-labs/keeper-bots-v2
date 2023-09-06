@@ -16,6 +16,7 @@ import {
 	PerpPosition,
 	User,
 	ZERO,
+	MarketType,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -203,6 +204,11 @@ export class FloatingPerpMakerBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 
+		// There migth be orders that are unfilled, but no longer
+		// match the bot's current parameters. Cancel them.
+		logger.info(`Canceling all PERP orders in case there are leftover ones`);
+		await this.driftClient.cancelOrders(MarketType.PERP);
+
 		this.agentState = {
 			marketPosition: new Map<number, PerpPosition>(),
 			openOrders: new Map<number, Array<Order>>(),
@@ -387,16 +393,12 @@ export class FloatingPerpMakerBot implements Bot {
 		if (openOrders.length > 0 && openOrders.length != 2) {
 			// cancel orders
 			try {
-				await Promise.all(
-					openOrders.map((o) => {
-						console.log(
-							`${this.name} cancelling order ${this.driftClient
-								.getUserAccount()!
-								.authority.toBase58()}-${o.orderId}`
-						);
-						return this.driftClient.cancelOrder(o.orderId);
-					})
-				);
+				const idsToCancel = openOrders.map((o) => o.orderId);
+				// TODO / IMPROVEMENT: Given we have an instruction to cancel multiple
+				// orders at once, it might be best to first go through all markets
+				// and cancel all outstanding orders in a single call, before moving
+				// on to place new ones per market.
+				await this.driftClient.cancelOrdersByIds(idsToCancel);
 			} catch (e) {
 				console.log('Error canceling orders');
 				console.error(e);
