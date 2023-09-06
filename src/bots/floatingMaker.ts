@@ -93,11 +93,7 @@ export class FloatingPerpMakerBot implements Bot {
 
 	private marketIndices: Set<number>;
 	private markets: PerpMarketAccount[] = [];
-
-	/**
-	 * The max amount of quote to spend on each order.
-	 */
-	private MAX_TRADE_SIZE_QUOTE = 1000;
+	private marketMinOrderSize: Map<number, number> = new Map();
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -218,6 +214,13 @@ export class FloatingPerpMakerBot implements Bot {
 			.filter((marketAccount) => {
 				return this.marketIndices.has(marketAccount.marketIndex);
 			});
+
+		for (const i of this.marketIndices) {
+			const ei = this.driftClient.getPerpMarketExtendedInfo(i);
+			const minOrderSize = convertToNumber(ei.minOrderSize, BASE_PRECISION);
+			this.marketMinOrderSize.set(i, minOrderSize);
+			logger.info(`Min order size for ${i}: ${minOrderSize}`);
+		}
 	}
 
 	public async reset() {
@@ -298,11 +301,53 @@ export class FloatingPerpMakerBot implements Bot {
 			return;
 		}
 
-		const openOrders = this.agentState!.openOrders.get(marketIndex) || [];
+		// First calculate the total exposure. We'll use it not only to skew
+		// the values, but to figure out if we need to quote both sides
+		// (normal situation), or only one (closing)
 		const oracle = this.driftClient.getOracleDataForPerpMarket(marketIndex);
+		const totalAssetValue = convertToNumber(
+			this.user.getSpotMarketAssetValue(
+				0, // USDC
+				'Maintenance',
+				true
+			),
+			QUOTE_PRECISION
+		);
+		const position = this.user.getPerpPosition(marketIndex);
+		const posAmount = convertToNumber(
+			position?.baseAssetAmount ?? ZERO,
+			BASE_PRECISION
+		);
+		const perpValue = convertToNumber(
+			this.user.getPerpPositionValue(marketIndex, oracle),
+			QUOTE_PRECISION
+		);
+		const exposure = perpValue / totalAssetValue;
+		// Clamping, because there's a chance that the perp has exceeded the allowed exposure
+		const pctExpAllowed = Math.min(
+			1,
+			Math.max(1 - perpValue / (totalAssetValue * this.maxPositionExposure), 0)
+		);
+		// Yes, this will give a LONG direction when there's no position. It makes no difference,
+		// because in that case the exposure will be 0 and it'll be evenly split.
+		const exposureDir =
+			Math.sign(posAmount) >= 0
+				? PositionDirection.LONG
+				: PositionDirection.SHORT;
+		logger.info(
+			`PerpPosition value: $${perpValue} with ${posAmount}. Exposure from collateral: ${(
+				exposure * 100
+			).toFixed(2)}%. Free allowance: ${(pctExpAllowed * 100).toFixed(2)}%`
+		);
+		const isLong = exposureDir == PositionDirection.LONG;
+		const minOrder = this.marketMinOrderSize.get(marketIndex) ?? 0.01;
+		const isClosing = pctExpAllowed * this.orderSize < minOrder;
+
+		// Get the open orders and log
 		const vAsk = calculateAskPrice(marketAccount, oracle);
 		const vBid = calculateBidPrice(marketAccount, oracle);
 
+		const openOrders = this.agentState!.openOrders.get(marketIndex) || [];
 		console.log(`mkt: ${marketAccount.marketIndex} open orders:`);
 		for (const [idx, o] of openOrders.entries()) {
 			console.log(
@@ -338,11 +383,16 @@ export class FloatingPerpMakerBot implements Bot {
 
 		// cancel orders if not quoting both sides of the market
 		let placeNewOrders = openOrders.length === 0;
-		logger.info(
-			`Orders open: ${openOrders.length}. Placing? ${placeNewOrders}`
-		);
+		logger.info(`Orders open: ${openOrders.length}.`);
 
-		if (openOrders.length > 0 && openOrders.length != 2) {
+		// TODO Evaluating by openOrders.length here is iffy, since for all we know
+		// the system could have ended up in a state where we have two orders
+		// quoting on the same side, but leaving it for now.
+		if (
+			openOrders.length > 0 &&
+			openOrders.length != 2 &&
+			!(isClosing && openOrders.length == 1)
+		) {
 			// cancel orders
 			try {
 				const idsToCancel = openOrders.map((o) => o.orderId);
@@ -351,55 +401,16 @@ export class FloatingPerpMakerBot implements Bot {
 				// and cancel all outstanding orders in a single call, before moving
 				// on to place new ones per market.
 				await this.driftClient.cancelOrdersByIds(idsToCancel);
+				placeNewOrders = true;
 			} catch (e) {
-				console.log('Error canceling orders');
+				logger.error('Error canceling orders. Will NOT place new ones.');
 				console.error(e);
 				console.log('----');
+				placeNewOrders = false;
 			}
-			placeNewOrders = true;
 		}
 
 		if (placeNewOrders) {
-			// Skew order size based on total exposure and asset value
-			const totalAssetValue = convertToNumber(
-				this.user.getSpotMarketAssetValue(
-					0, // USDC
-					'Maintenance',
-					true
-				),
-				QUOTE_PRECISION
-			);
-			const position = this.user.getPerpPosition(marketIndex);
-			const posAmount = convertToNumber(
-				position?.baseAssetAmount ?? ZERO,
-				BASE_PRECISION
-			);
-			const perpValue = convertToNumber(
-				this.user.getPerpPositionValue(marketIndex, oracle),
-				QUOTE_PRECISION
-			);
-			const exposure = perpValue / totalAssetValue;
-			// Clamping, because there's a chance that the perp has exceeded the allowed exposure
-			const pctExpAllowed = Math.min(
-				1,
-				Math.max(
-					1 - perpValue / (totalAssetValue * this.maxPositionExposure),
-					0
-				)
-			);
-			// Yes, this will give a LONG direction when there's no position. It makes no difference,
-			// because in that case the exposure will be 0 and it'll be evenly split.
-			const exposureDir =
-				Math.sign(posAmount) >= 0
-					? PositionDirection.LONG
-					: PositionDirection.SHORT;
-			logger.info(
-				`PerpPosition value: $${perpValue} with ${posAmount}. Exposure from collateral: ${(
-					exposure * 100
-				).toFixed(2)}%. Free allowance: ${(pctExpAllowed * 100).toFixed(2)}%`
-			);
-			const isLong = exposureDir == PositionDirection.LONG;
-
 			// Calculate offsets
 			const offsetCurrent =
 				(this.minOracleOffset - this.baseOracleOffset) * (1 - pctExpAllowed) +
@@ -433,9 +444,9 @@ export class FloatingPerpMakerBot implements Bot {
 			try {
 				const oracleBidSpread = oracle.price.sub(vBid);
 				const oracleAskSpread = vAsk.sub(oracle.price);
-				// Altering to a vector, it'll be easier to place a set of orders later
-				const orders = [
-					{
+				const orders = [];
+				if (orderSizeLong > minOrder) {
+					orders.push({
 						marketIndex: marketIndex,
 						orderType: OrderType.LIMIT,
 						direction: PositionDirection.LONG,
@@ -445,8 +456,10 @@ export class FloatingPerpMakerBot implements Bot {
 							.div(biasDenom)
 							.neg()
 							.toNumber(), // limit bid below oracle
-					},
-					{
+					});
+				}
+				if (orderSizeShort > minOrder) {
+					orders.push({
 						marketIndex: marketIndex,
 						orderType: OrderType.LIMIT,
 						direction: PositionDirection.SHORT,
@@ -455,8 +468,8 @@ export class FloatingPerpMakerBot implements Bot {
 							.mul(new BN(offsetShort))
 							.div(biasDenom)
 							.toNumber(), // limit ask above oracle
-					},
-				];
+					});
+				}
 				await Promise.all(
 					orders.map((o) => {
 						logger.info(`${this.name} placing order: ${JSON.stringify(o)}`);
