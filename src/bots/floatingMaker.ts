@@ -379,8 +379,14 @@ export class FloatingPerpMakerBot implements Bot {
 				QUOTE_PRECISION
 			);
 			const exposure = perpValue / totalAssetValue;
-			const pctExpAllowed =
-				1 - perpValue / (totalAssetValue * this.maxPositionExposure);
+			// Clamping, because there's a chance that the perp has exceeded the allowed exposure
+			const pctExpAllowed = Math.min(
+				1,
+				Math.max(
+					1 - perpValue / (totalAssetValue * this.maxPositionExposure),
+					0
+				)
+			);
 			// Yes, this will give a LONG direction when there's no position. It makes no difference,
 			// because in that case the exposure will be 0 and it'll be evenly split.
 			const exposureDir =
