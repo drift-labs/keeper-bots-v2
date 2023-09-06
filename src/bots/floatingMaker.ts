@@ -62,6 +62,10 @@ export class FloatingPerpMakerBot implements Bot {
 	private orderOffset: number = 90;
 	private orderSize: number = 1;
 	private subAccountId: number = 0;
+	// Maximum percentage of the total account value a position
+	// is allowed to take. The bot will start skewing order
+	// values as the position size approaches this percentage.
+	private maxPositionExposure: number;
 
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
@@ -89,17 +93,6 @@ export class FloatingPerpMakerBot implements Bot {
 	private markets: PerpMarketAccount[] = [];
 
 	/**
-	 * Set true to enforce max position size
-	 */
-	private RESTRICT_POSITION_SIZE = false;
-
-	/**
-	 * if a position's notional value passes this percentage of account
-	 * collateral, the position enters a CLOSING_* state.
-	 */
-	private MAX_POSITION_EXPOSURE = 0.1;
-
-	/**
 	 * The max amount of quote to spend on each order.
 	 */
 	private MAX_TRADE_SIZE_QUOTE = 1000;
@@ -121,6 +114,7 @@ export class FloatingPerpMakerBot implements Bot {
 		this.defaultIntervalMs = config.intervalMs ?? 5000;
 		this.orderOffset = config.orderOffset ?? 90;
 		this.orderSize = config.orderSize ?? 1;
+		this.maxPositionExposure = config.maxPositionExposure;
 
 		// Configure user and subaccount
 		this.subAccountId = config.subAccountId ?? 0;
@@ -255,9 +249,11 @@ export class FloatingPerpMakerBot implements Bot {
 	 * We want to maintain a two-sided market while being conscious of the positions
 	 * taken on by the account.
 	 *
-	 * As open positions approach MAX_POSITION_EXPOSURE, limit orders are skewed such
-	 * that the position that decreases risk will be closer to the oracle price, and the
-	 * position that increases risk will be further from the oracle price.
+	 * As open positions approach maxPositionExposure, limit orders are skewed such
+	 * that the order size skews towards the side that decreases risk.
+	 *
+	 * TODO: update so that the position that decreases risk will be closer to the oracle
+	 * price, and the position that increases risk will be further from the oracle price.
 	 *
 	 * @returns {Promise<void>}
 	 */
@@ -361,7 +357,7 @@ export class FloatingPerpMakerBot implements Bot {
 		);
 		const exposure = perpValue / totalAssetValue;
 		const pctExpAllowed =
-			1 - perpValue / (totalAssetValue * this.MAX_POSITION_EXPOSURE);
+			1 - perpValue / (totalAssetValue * this.maxPositionExposure);
 		// Yes, this will give a LONG direction when there's no position. It makes no difference,
 		// because in that case the exposure will be 0 and it'll be evenly split.
 		const exposureDir =

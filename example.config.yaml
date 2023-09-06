@@ -153,6 +153,7 @@ botConfigs:
     orderSize: 4
     # If subAccountId is set, it should also be included on the subaccounts config above
     subAccountId: 1
+    maxPositionExposure: 0.1
     perpMarketIndices:
       - 0 # SOL
       - 9 # SUI

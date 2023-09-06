@@ -24,9 +24,10 @@ export type FillerConfig = BaseBotConfig & {
 
 export type FloatingMakerConfig = BaseBotConfig & {
 	intervalMs?: number;
-	orderOffset?: number;
-	orderSize?: number;
-	perpMarketIndices?: Set<number>;
+	orderOffset: number;
+	orderSize: number;
+	maxPositionExposure: number;
+	perpMarketIndices: Set<number>;
 	subAccountId?: number;
 };
 
