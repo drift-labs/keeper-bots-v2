@@ -260,7 +260,9 @@ const runBot = async () => {
 		connection: sendTxConnection,
 		wallet,
 		opts,
+		retrySleep: config.global.txRetryTimeoutMs,
 	});
+	txSender.getTimeoutCount;
 
 	let perpMarketIndexes, spotMarketIndexes, oracleInfos;
 	if (configHasBot(config, 'fillerLite')) {

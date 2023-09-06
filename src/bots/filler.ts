@@ -33,6 +33,7 @@ import {
 	NodeToTrigger,
 	UserAccount,
 	getUserAccountPublicKey,
+	PriorityFeeCalculator,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -220,6 +221,8 @@ export class FillerBot implements Bot {
 	protected fillTxSinceBurstCU = 0;
 	protected fillTxId = 0;
 
+	protected priorityFeeCalculator: PriorityFeeCalculator;
+
 	// metrics
 	protected metricsInitialized = false;
 	protected metricsPort?: number;
@@ -333,6 +336,8 @@ export class FillerBot implements Bot {
 				!!this.jitoSearcherClient && !!this.jitoAuthKeypair
 			}`
 		);
+
+		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
 	}
 
 	protected initializeMetrics() {
@@ -1201,6 +1206,71 @@ export class FillerBot implements Bot {
 		}
 	}
 
+	protected async sendFillTxThroughJito(
+		fillTxId: number,
+		ixs: Array<TransactionInstruction>
+	) {
+		if (!isNaN(this.transactionVersion!)) {
+			logger.warn(
+				`${this.name} should use unversioned tx for jito until https://github.com/jito-labs/jito-ts/pull/7`
+			);
+			return ['', 0];
+		}
+		const slotsUntilNextLeader =
+			this.jitoLeaderNextSlot! - this.slotSubscriber.getSlot();
+		logger.info(
+			`next jito leader is in ${slotsUntilNextLeader} slots (fillTxId: ${fillTxId})`
+		);
+		if (slotsUntilNextLeader > 2) {
+			logger.info(
+				`next jito leader is too far away, skipping... (fillTxId: ${fillTxId})`
+			);
+			return ['', 0];
+		}
+		const blockHash =
+			await this.driftClient.provider.connection.getLatestBlockhash(
+				'processed'
+			);
+
+		// const tx = new Transaction();
+		const tx = new Transaction();
+		for (const ix of ixs) {
+			tx.add(ix);
+		}
+
+		tx.feePayer = this.driftClient.provider.wallet.publicKey;
+		tx.recentBlockhash = blockHash.blockhash;
+
+		const signedTx = await this.driftClient.provider.wallet.signTransaction(tx);
+		let b: Bundle | Error = new Bundle(
+			[new VersionedTransaction(signedTx.compileMessage())],
+			2
+		);
+		b = b.addTipTx(
+			this.tipPayerKeypair!,
+			100_000, // TODO: make this configurable?
+			this.jitoTipAccount!,
+			blockHash.blockhash
+		);
+		if (b instanceof Error) {
+			logger.error(
+				`failed to attach tip: ${b.message} (fillTxId: ${fillTxId})`
+			);
+			return ['', 0];
+		}
+		this.jitoSearcherClient!.sendBundle(b)
+			.then((uuid) => {
+				logger.info(
+					`${this.name} sent bundle with uuid ${uuid} (fillTxId: ${fillTxId})`
+				);
+			})
+			.catch((err) => {
+				logger.error(
+					`failed to send bundle: ${err.message} (fillTxId: ${fillTxId})`
+				);
+			});
+	}
+
 	protected async sendFillTx(
 		fillTxId: number,
 		nodesSent: Array<NodeToFill>,
@@ -1209,68 +1279,7 @@ export class FillerBot implements Bot {
 		let txResp: Promise<TxSigAndSlot> | undefined = undefined;
 		const txStart = Date.now();
 		if (this.jitoSearcherClient && this.jitoAuthKeypair) {
-			if (!isNaN(this.transactionVersion!)) {
-				logger.warn(
-					`${this.name} should use unversioned tx for jito until https://github.com/jito-labs/jito-ts/pull/7`
-				);
-				return ['', 0];
-			}
-			const slotsUntilNextLeader =
-				this.jitoLeaderNextSlot! - this.slotSubscriber.getSlot();
-			logger.info(
-				`next jito leader is in ${slotsUntilNextLeader} slots (fillTxId: ${fillTxId})`
-			);
-			if (slotsUntilNextLeader > 2) {
-				logger.info(
-					`next jito leader is too far away, skipping... (fillTxId: ${fillTxId})`
-				);
-				return ['', 0];
-			}
-			const blockHash =
-				await this.driftClient.provider.connection.getLatestBlockhash(
-					'processed'
-				);
-
-			// const tx = new Transaction();
-			const tx = new Transaction();
-			for (const ix of ixs) {
-				tx.add(ix);
-			}
-
-			tx.feePayer = this.driftClient.provider.wallet.publicKey;
-			tx.recentBlockhash = blockHash.blockhash;
-
-			const signedTx = await this.driftClient.provider.wallet.signTransaction(
-				tx
-			);
-			let b: Bundle | Error = new Bundle(
-				[new VersionedTransaction(signedTx.compileMessage())],
-				2
-			);
-			b = b.addTipTx(
-				this.tipPayerKeypair!,
-				100_000, // TODO: make this configurable?
-				this.jitoTipAccount!,
-				blockHash.blockhash
-			);
-			if (b instanceof Error) {
-				logger.error(
-					`failed to attach tip: ${b.message} (fillTxId: ${fillTxId})`
-				);
-				return ['', 0];
-			}
-			this.jitoSearcherClient
-				.sendBundle(b)
-				.then((uuid) => {
-					logger.info(
-						`${this.name} sent bundle with uuid ${uuid} (fillTxId: ${fillTxId})`
-					);
-				})
-				.catch((err) => {
-					logger.error(
-						`failed to send bundle: ${err.message} (fillTxId: ${fillTxId})`
-					);
-				});
+			await this.sendFillTxThroughJito(fillTxId, ixs);
 		} else if (isNaN(this.transactionVersion!)) {
 			const tx = new Transaction();
 			for (const ix of ixs) {
@@ -1387,8 +1396,10 @@ export class FillerBot implements Bot {
 	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
 	 * @param node node with multiple makers
 	 */
-	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
-		const ixs: Array<TransactionInstruction> = [];
+	protected async tryFillMultiMakerPerpNodes(
+		nodeToFill: NodeToFill,
+		ixs: Array<TransactionInstruction>
+	) {
 		const fillTxId = this.fillTxId++;
 		logger.info(
 			logMessageForNodeToFill(
@@ -1398,13 +1409,6 @@ export class FillerBot implements Bot {
 		);
 
 		try {
-			// first ix is compute budget
-			const computeBudgetIx = ComputeBudgetProgram.requestUnits({
-				units: 10_000_000,
-				additionalFee: 0,
-			});
-			ixs.push(computeBudgetIx);
-
 			const { makerInfos, takerUser, referrerInfo, marketType } =
 				await this.getNodeFillInfo(nodeToFill);
 
@@ -1447,7 +1451,16 @@ export class FillerBot implements Bot {
 	protected async tryBulkFillPerpNodes(
 		nodesToFill: Array<NodeToFill>
 	): Promise<number> {
-		const ixs: Array<TransactionInstruction> = [];
+		const usePriorityFee = this.priorityFeeCalculator.updatePriorityFee(
+			Date.now(),
+			this.driftClient.txSender.getTimeoutCount()
+		);
+		const ixs =
+			this.priorityFeeCalculator.generateComputeBudgetWithPriorityFeeIx(
+				10_000_000,
+				usePriorityFee,
+				1_000_000_000 // 1000 lamports
+			);
 
 		/**
 		 * At all times, the running Tx size is:
@@ -1466,16 +1479,11 @@ export class FillerBot implements Bot {
 		const uniqueAccounts = new Set<string>();
 		uniqueAccounts.add(this.driftClient.provider.wallet.publicKey.toString()); // fee payer goes first
 
-		// first ix is compute budget
-		const computeBudgetIx = ComputeBudgetProgram.requestUnits({
-			units: 10_000_000,
-			additionalFee: 0,
-		});
+		const computeBudgetIx = ixs[0];
 		computeBudgetIx.keys.forEach((key) =>
 			uniqueAccounts.add(key.pubkey.toString())
 		);
 		uniqueAccounts.add(computeBudgetIx.programId.toString());
-		ixs.push(computeBudgetIx);
 
 		// initialize the barebones transaction
 		// signatures
@@ -1496,8 +1504,9 @@ export class FillerBot implements Bot {
 		let idxUsed = 0;
 		const fillTxId = this.fillTxId++;
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
+			// do multi maker fills in a separate tx since they're larger
 			if (nodeToFill.makerNodes.length > 1) {
-				await this.tryFillMultiMakerPerpNodes(nodeToFill);
+				await this.tryFillMultiMakerPerpNodes(nodeToFill, ixs);
 				nodesSent.push(nodeToFill);
 				continue;
 			}
