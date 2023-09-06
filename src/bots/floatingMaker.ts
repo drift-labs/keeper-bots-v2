@@ -59,7 +59,9 @@ export class FloatingPerpMakerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public defaultIntervalMs: number = 5000;
-	private orderOffset: number = 90;
+	private baseOracleOffset: number;
+	private minOracleOffset: number;
+	private maxOracleOffset: number;
 	private orderSize: number = 1;
 	private subAccountId: number = 0;
 	// Maximum percentage of the total account value a position
@@ -112,7 +114,9 @@ export class FloatingPerpMakerBot implements Bot {
 		this.slotSubscriber = slotSubscriber;
 
 		this.defaultIntervalMs = config.intervalMs ?? 5000;
-		this.orderOffset = config.orderOffset ?? 90;
+		this.baseOracleOffset = config.baseOrderOffset;
+		this.minOracleOffset = config.minOrderOffset;
+		this.maxOracleOffset = config.maxOrderOffset;
 		this.orderSize = config.orderSize ?? 1;
 		this.maxPositionExposure = config.maxPositionExposure;
 
@@ -252,8 +256,9 @@ export class FloatingPerpMakerBot implements Bot {
 	 * As open positions approach maxPositionExposure, limit orders are skewed such
 	 * that the order size skews towards the side that decreases risk.
 	 *
-	 * TODO: update so that the position that decreases risk will be closer to the oracle
-	 * price, and the position that increases risk will be further from the oracle price.
+	 * It'll also update the offset numerator so that the position that decreases
+	 * risk will be closer to the oracle price, and the position that increases
+	 * risk will be further from the oracle price.
 	 *
 	 * @returns {Promise<void>}
 	 */
@@ -337,55 +342,6 @@ export class FloatingPerpMakerBot implements Bot {
 			`Orders open: ${openOrders.length}. Placing? ${placeNewOrders}`
 		);
 
-		// Skew order size based on total exposure and asset value
-		const totalAssetValue = convertToNumber(
-			this.user.getSpotMarketAssetValue(
-				0, // USDC
-				'Maintenance',
-				true
-			),
-			QUOTE_PRECISION
-		);
-		const position = this.user.getPerpPosition(marketIndex);
-		const posAmount = convertToNumber(
-			position?.baseAssetAmount ?? ZERO,
-			BASE_PRECISION
-		);
-		const perpValue = convertToNumber(
-			this.user.getPerpPositionValue(marketIndex, oracle),
-			QUOTE_PRECISION
-		);
-		const exposure = perpValue / totalAssetValue;
-		const pctExpAllowed =
-			1 - perpValue / (totalAssetValue * this.maxPositionExposure);
-		// Yes, this will give a LONG direction when there's no position. It makes no difference,
-		// because in that case the exposure will be 0 and it'll be evenly split.
-		const exposureDir =
-			Math.sign(posAmount) >= 0
-				? PositionDirection.LONG
-				: PositionDirection.SHORT;
-		logger.info(
-			`PerpPosition value: $${perpValue} with ${posAmount}. Exposure: ${exposure}. Allowance used: ${pctExpAllowed}`
-		);
-
-		// Calculate the order size.
-		//
-		// Notice that if this ever gets too small - say, we have hit the exposure
-		// allowance and need to skew it to one side - order placing will barf.
-		//
-		// How to handle this is left as an exercise. You may only want to quote one
-		// side and keep that order open for a while, or keep canceling it and
-		// moving it closer to the oracle (see openOrders.length comparison below).
-		const pctCurrent = pctExpAllowed / 2;
-		const orderSizeCurrent = pctCurrent * (this.orderSize * 2);
-		const orderSizeOther = (1 - pctCurrent) * (this.orderSize * 2);
-		const orderSizeLong =
-			exposureDir == PositionDirection.LONG ? orderSizeCurrent : orderSizeOther;
-		const orderSizeShort =
-			exposureDir == PositionDirection.SHORT
-				? orderSizeCurrent
-				: orderSizeOther;
-
 		if (openOrders.length > 0 && openOrders.length != 2) {
 			// cancel orders
 			try {
@@ -404,9 +360,68 @@ export class FloatingPerpMakerBot implements Bot {
 		}
 
 		if (placeNewOrders) {
+			// Skew order size based on total exposure and asset value
+			const totalAssetValue = convertToNumber(
+				this.user.getSpotMarketAssetValue(
+					0, // USDC
+					'Maintenance',
+					true
+				),
+				QUOTE_PRECISION
+			);
+			const position = this.user.getPerpPosition(marketIndex);
+			const posAmount = convertToNumber(
+				position?.baseAssetAmount ?? ZERO,
+				BASE_PRECISION
+			);
+			const perpValue = convertToNumber(
+				this.user.getPerpPositionValue(marketIndex, oracle),
+				QUOTE_PRECISION
+			);
+			const exposure = perpValue / totalAssetValue;
+			const pctExpAllowed =
+				1 - perpValue / (totalAssetValue * this.maxPositionExposure);
+			// Yes, this will give a LONG direction when there's no position. It makes no difference,
+			// because in that case the exposure will be 0 and it'll be evenly split.
+			const exposureDir =
+				Math.sign(posAmount) >= 0
+					? PositionDirection.LONG
+					: PositionDirection.SHORT;
+			logger.info(
+				`PerpPosition value: $${perpValue} with ${posAmount}. Exposure from collateral: ${(
+					exposure * 100
+				).toFixed(2)}%. Free allowance: ${(pctExpAllowed * 100).toFixed(2)}%`
+			);
+			const isLong = exposureDir == PositionDirection.LONG;
+
+			// Calculate offsets
+			const offsetCurrent =
+				(this.minOracleOffset - this.baseOracleOffset) * (1 - pctExpAllowed) +
+				this.baseOracleOffset;
+			const offsetOther =
+				this.baseOracleOffset -
+				(this.baseOracleOffset - this.maxOracleOffset) * (1 - pctExpAllowed);
+			const offsetLong = isLong ? offsetCurrent : offsetOther;
+			const offsetShort = !isLong ? offsetCurrent : offsetOther;
+
+			logger.info(`Offsets: Long ${offsetLong} Short: ${offsetShort}`);
+
+			// Calculate the order size.
+			//
+			// Notice that if this ever gets too small - say, we have hit the exposure
+			// allowance and need to skew it to one side - order placing will barf.
+			//
+			// How to handle this is left as an exercise. You may only want to quote one
+			// side and keep that order open for a while, or keep canceling it and
+			// moving it closer to the oracle (see openOrders.length comparison).
+			const pctCurrent = pctExpAllowed / 2;
+			const orderSizeCurrent = pctCurrent * (this.orderSize * 2);
+			const orderSizeOther = (1 - pctCurrent) * (this.orderSize * 2);
+			const orderSizeLong = isLong ? orderSizeCurrent : orderSizeOther;
+			const orderSizeShort = !isLong ? orderSizeCurrent : orderSizeOther;
+
 			// The lower the bias numerator, the further below a long bid would be from the oracle price
 			// (or the further above a short ask)
-			const biasNum = new BN(this.orderOffset);
 			const biasDenom = new BN(100);
 
 			try {
@@ -420,7 +435,7 @@ export class FloatingPerpMakerBot implements Bot {
 						direction: PositionDirection.LONG,
 						baseAssetAmount: new BN(orderSizeLong * BASE_PRECISION.toNumber()),
 						oraclePriceOffset: oracleBidSpread
-							.mul(biasNum)
+							.mul(new BN(offsetLong))
 							.div(biasDenom)
 							.neg()
 							.toNumber(), // limit bid below oracle
@@ -431,7 +446,7 @@ export class FloatingPerpMakerBot implements Bot {
 						direction: PositionDirection.SHORT,
 						baseAssetAmount: new BN(orderSizeShort * BASE_PRECISION.toNumber()),
 						oraclePriceOffset: oracleAskSpread
-							.mul(biasNum)
+							.mul(new BN(offsetShort))
 							.div(biasDenom)
 							.toNumber(), // limit ask above oracle
 					},

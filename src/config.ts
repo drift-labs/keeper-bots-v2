@@ -24,7 +24,14 @@ export type FillerConfig = BaseBotConfig & {
 
 export type FloatingMakerConfig = BaseBotConfig & {
 	intervalMs?: number;
-	orderOffset: number;
+	// Order offset determines how close to the oracle we place our orders.
+	// The closest to 100 this value is, the closest it'll be to the oracle.
+	//
+	// The larger offset values are closer to the oracle, so for proper
+	// calculations, minOrderOffset > baseOrderOffset > maxOrderOffset.
+	baseOrderOffset: number;
+	minOrderOffset: number;
+	maxOrderOffset: number;
 	orderSize: number;
 	maxPositionExposure: number;
 	perpMarketIndices: Set<number>;
