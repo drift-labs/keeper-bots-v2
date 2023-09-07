@@ -1,0 +1,15 @@
+name: deploy-on-sdk-update.yml
+
+on:
+  repository_dispatch:
+    types: [sdk-update]
+
+jobs:
+  handle-event:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Do something
+      run: echo "Custom event received!"
