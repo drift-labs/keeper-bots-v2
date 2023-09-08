@@ -1,15 +1,32 @@
-name: deploy-on-sdk-update
-
+name: Deploy on sdk update
 on:
   repository_dispatch:
     types: [sdk-update]
 
 jobs:
-  handle-event:
+  update-sdk:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v2
 
-    - name: Do something
-      run: echo "Custom event received!"
+    - name: Setup node
+      uses: actions/setup-node@v2
+      with:
+        node-version: '16.x'
+        registry-url: 'https://registry.npmjs.org'
+
+    - name: Install dependencies
+      run: yarn install
+
+    - name: Add specific version of sdk
+      run: yarn add @drift-labs/sdk@${{ github.event.client_payload.version }}
+
+    - name: Commit and push changes
+      run: |
+        git config user.name "GitHub Actions"
+        git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+        git add -A 
+        git commit --allow-empty -m "Bumping sdk dependency to version ${{ github.event.client_payload.version }}"
+        git push
+
