@@ -25,6 +25,9 @@ jobs:
     - name: Add specific version of jit sdk
       run: yarn add @drift-labs/jit-proxy@${{ github.event.client_payload.jit-version }}
 
+    - name: Build after new dependency
+      run: yarn run build
+
     - name: Commit and push changes
       run: |
         git config user.name "GitHub Actions"
