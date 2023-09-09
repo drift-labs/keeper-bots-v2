@@ -73,17 +73,18 @@ export class MakerBidAskTwapCrank implements Bot {
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		driftEnv: DriftEnv,
-		config: BaseBotConfig
+		config: BaseBotConfig,
+		runOnce: boolean
 	) {
 		this.slotSubscriber = slotSubscriber;
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
-		this.runOnce = config.runOnce || false;
+		this.runOnce = runOnce;
 		this.driftClient = driftClient;
 	}
 
 	public async init() {
-		logger.info(`${this.name} initing`);
+		logger.info(`${this.name} initing, runOnce: ${this.runOnce}`);
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 

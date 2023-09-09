@@ -581,7 +581,8 @@ const runBot = async () => {
 				driftClient,
 				slotSubscriber,
 				config.global.driftEnv!,
-				config.botConfigs!.markTwapCrank!
+				config.botConfigs!.markTwapCrank!,
+				config.global.runOnce ?? false
 			)
 		);
 	}
