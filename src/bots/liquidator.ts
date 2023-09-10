@@ -696,7 +696,7 @@ export class LiquidatorBot implements Bot {
 				this.driftClient.getOracleDataForSpotMarket(spotMarketIndex);
 			const outMarket = this.driftClient.getSpotMarketAccount(outMarketIndex);
 			const inMarket = this.driftClient.getSpotMarketAccount(inMarketIndex);
-			const outMarketPrecision = TEN.pow(outMarket!.decimals);
+			const outMarketPrecision = TEN.pow(new BN(outMarket!.decimals));
 			const inMarketPrecision = TEN.pow(new BN(inMarket!.decimals));
 			amountIn = standardizedTokenAmount
 				.mul(oracle.price)
