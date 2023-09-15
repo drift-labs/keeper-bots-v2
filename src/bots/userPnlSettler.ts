@@ -43,7 +43,7 @@ type SettlePnlIxParams = {
 };
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
-const SETTLE_USER_CHUNKS = 5;
+const SETTLE_USER_CHUNKS = 4;
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
