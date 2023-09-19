@@ -76,8 +76,8 @@ function calculateSpotTokenAmountToLiquidate(
 	driftClient: DriftClient,
 	liquidatorUser: User,
 	liquidateePosition: SpotPosition,
-	MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL: BN,
-	MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM: BN
+	maxPositionTakeoverPctOfCollateralNum: BN,
+	maxPositionTakeoverPctOfCollateralDenom: BN
 ): BN {
 	const spotMarket = driftClient.getSpotMarketAccount(
 		liquidateePosition.marketIndex
@@ -95,12 +95,12 @@ function calculateSpotTokenAmountToLiquidate(
 	const collateralToSpend = liquidatorUser
 		.getFreeCollateral()
 		.mul(PRICE_PRECISION)
-		.mul(MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL)
+		.mul(maxPositionTakeoverPctOfCollateralNum)
 		.mul(tokenPrecision);
 	const maxSpendTokenAmountToLiquidate = collateralToSpend.div(
 		oraclePrice
 			.mul(QUOTE_PRECISION)
-			.mul(MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM)
+			.mul(maxPositionTakeoverPctOfCollateralDenom)
 	);
 
 	const liquidateeTokenAmount = getTokenAmount(
@@ -245,7 +245,7 @@ enum METRIC_TYPES {
 /**
  * LiquidatorBot implements a simple liquidation bot for the Drift V2 Protocol. Liquidations work by taking over
  * a portion of the endangered account's position, so collateral is required in order to run this bot. The bot
- * will spend at most MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL of its free collateral on any endangered account.
+ * will spend at most maxPositionTakeoverPctOfCollateral of its free collateral on any endangered account.
  *
  */
 export class LiquidatorBot implements Bot {
@@ -298,8 +298,8 @@ export class LiquidatorBot implements Bot {
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
 	 */
-	private MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL = new BN(50);
-	private MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM = new BN(100);
+	private maxPositionTakeoverPctOfCollateralNum: BN;
+	private maxPositionTakeoverPctOfCollateralDenom = new BN(100);
 
 	private watchdogTimerLastPatTime = Date.now();
 
@@ -474,6 +474,20 @@ export class LiquidatorBot implements Bot {
 		}
 
 		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
+
+		if (!config.maxPositionTakeoverPctOfCollateral) {
+			// spend 50% of collateral by default
+			this.maxPositionTakeoverPctOfCollateralNum = new BN(50);
+		} else {
+			if (config.maxPositionTakeoverPctOfCollateral > 1.0) {
+				throw new Error(
+					`liquidator.config.maxPositionTakeoverPctOfCollateral cannot be > 1.00`
+				);
+			}
+			this.maxPositionTakeoverPctOfCollateralNum = new BN(
+				config.maxPositionTakeoverPctOfCollateral * 100.0
+			);
+		}
 	}
 
 	private getTxParamsWithPriorityFees(): TxParams {
@@ -569,8 +583,8 @@ export class LiquidatorBot implements Bot {
 				freeCollateral,
 				QUOTE_PRECISION
 			)}, spending at most ${
-				(this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL.toNumber() /
-					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM.toNumber()) *
+				(this.maxPositionTakeoverPctOfCollateralNum.toNumber() /
+					this.maxPositionTakeoverPctOfCollateralDenom.toNumber()) *
 				100.0
 			}% per liquidation`
 		);
@@ -1250,12 +1264,12 @@ export class LiquidatorBot implements Bot {
 		const collateralToSpend = liquidatorUser
 			.getFreeCollateral()
 			.mul(PRICE_PRECISION)
-			.mul(this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL)
+			.mul(this.maxPositionTakeoverPctOfCollateralNum)
 			.mul(BASE_PRECISION);
 		const baseAssetAmountToLiquidate = collateralToSpend.div(
 			oraclePrice
 				.mul(QUOTE_PRECISION)
-				.mul(this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM)
+				.mul(this.maxPositionTakeoverPctOfCollateralDenom)
 		);
 
 		if (
@@ -1824,8 +1838,8 @@ tx: ${tx} `
 					liquidatorUser,
 					liquidateeUserAccount.spotPositions,
 					false,
-					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
-					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM,
+					this.maxPositionTakeoverPctOfCollateralNum,
+					this.maxPositionTakeoverPctOfCollateralDenom,
 					this.minDepositToLiq
 				);
 
@@ -1838,8 +1852,8 @@ tx: ${tx} `
 					liquidatorUser,
 					liquidateeUserAccount.spotPositions,
 					true,
-					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL,
-					this.MAX_POSITION_TAKEOVER_PCT_OF_COLLATERAL_DENOM,
+					this.maxPositionTakeoverPctOfCollateralNum,
+					this.maxPositionTakeoverPctOfCollateralDenom,
 					this.minDepositToLiq
 				);
 
