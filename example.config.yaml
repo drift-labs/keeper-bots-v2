@@ -138,6 +138,9 @@ botConfigs:
     - 9CJLgd5f9nmTp7KRV37RFcQrfEmJn6TU87N7VQAe2Pcq
     - Edh39zr8GnQFNYwyvxhPngTJHrr29H3vVup8e8ZD4Hwu
 
+    # max % of collateral to spend when liquidating a user. In percentage terms (0.5 = 50%)
+    maxPositionTakeoverPctOfCollateral: 0.5
+
 
   trigger:
     botId: "trigger"

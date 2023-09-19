@@ -38,6 +38,7 @@ export type LiquidatorConfig = BaseBotConfig & {
 	twapDurationSec?: number;
 	minDepositToLiq?: Map<number, number>;
 	excludedAccounts?: Set<string>;
+	maxPositionTakeoverPctOfCollateral?: number;
 };
 
 export type BotConfigMap = {
