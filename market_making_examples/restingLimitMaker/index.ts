@@ -28,6 +28,7 @@ import {
 	calculateBidPrice,
 	ZERO,
 	ModifyOrderPolicy,
+	FastSingleTxSender,
 } from '@drift-labs/sdk';
 import { logger, setLogLevel } from '../../src/logger';
 import { getWallet } from '../../src/utils';
@@ -81,7 +82,7 @@ const maxSpreadBps = intEnvVarWithDefault("MAX_SPREAD_BPS", 20);
 if (!maxSpreadBps || maxSpreadBps <= 0) {
 	throw new Error('Must set MAX_SPREAD_BPS environment variable to be > 0');
 }
-if (minSpreadBps < maxSpreadBps) {
+if (minSpreadBps > maxSpreadBps) {
 	throw new Error('MIN_SPREAD_BPS must be less than MAX_SPREAD_BPS');
 }
 /// size of each order on the book (1 SOL-PERP)
@@ -90,11 +91,11 @@ const orderSizePerSideBN = new BN(orderSizePerSide).mul(BASE_PRECISION);
 /// number of orders to place on each side of the book (careful if too many orders might go over tx size or CU limits)
 const ordersPerSide = intEnvVarWithDefault("ORDERS_PER_SIDE", 5);
 /// number of ticks between each order on the book
-const ticksBetweenOrders = intEnvVarWithDefault("TICKS_BETWEEN_ORDERS", 300);
+const ticksBetweenOrders = intEnvVarWithDefault("TICKS_BETWEEN_ORDERS", 100);
 /// target leverage for this account
 const targetLeverage = intEnvVarWithDefault("TARGET_LEVERAGE", 1);
 if (!targetLeverage || targetLeverage <= 0) {
-	throw new Error('Must set TARGET_LEVERAGE environment variable to be > 0');
+	throw new Error(`Must set TARGET_LEVERAGE environment variable to be > 0, got ${targetLeverage}`);
 }
 /// perp market index to market make on
 const perpMarketIndex = intEnvVarWithDefault("PERP_MARKET_INDEX", 0);
@@ -107,6 +108,10 @@ if (!privateKeyOrFilepath) {
 		'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json, list of commma separated numbers, or b58 encoded private key'
 	);
 }
+/// set orders to auto expire in ~30s, note you will have to pay a filler fee (0.01 USDC)
+/// for each order that is cancelled, so this is disabled by default
+const autoExpireOrders = process.env.AUTO_EXPIRE_ORDERS === "true";
+
 const [_, wallet] = getWallet(privateKeyOrFilepath);
 
 console.log("Config:");
@@ -279,7 +284,7 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				orderId: openBid.orderId,
 				price: bidPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
-				maxTs: orderExpireTs,
+				maxTs: autoExpireOrders ? orderExpireTs : undefined,
 				policy: ModifyOrderPolicy.TRY_MODIFY,
 			};
 			ixs.push(await driftClient.getModifyOrderIx(ops));
@@ -293,7 +298,7 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				price: bidPriceBN,
 				direction: PositionDirection.LONG,
 				postOnly: PostOnlyParams.MUST_POST_ONLY,
-				maxTs: orderExpireTs,
+				maxTs: autoExpireOrders ? orderExpireTs : undefined,
 			}));
 			newOrders++;
 		}
@@ -309,7 +314,7 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				orderId: openAsk.orderId,
 				price: askPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
-				maxTs: orderExpireTs,
+				maxTs: autoExpireOrders ? orderExpireTs : undefined,
 				policy: ModifyOrderPolicy.TRY_MODIFY,
 			};
 			ixs.push(await driftClient.getModifyOrderIx(ops));
@@ -323,7 +328,7 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				price: askPriceBN,
 				direction: PositionDirection.SHORT,
 				postOnly: PostOnlyParams.MUST_POST_ONLY,
-				maxTs: orderExpireTs,
+				maxTs: autoExpireOrders ? orderExpireTs : undefined,
 			}));
 			newOrders++;
 		}
@@ -365,10 +370,17 @@ const main = async () => {
 			type: 'websocket',
 		},
 		env: driftEnv,
-		txSenderConfig: {
-			type: 'retry',
-			timeout: 35000,
-		},
+		txSender: new FastSingleTxSender({
+			connection,
+			wallet,
+			opts: {
+				commitment: stateCommitment,
+				skipPreflight: false,
+				preflightCommitment: stateCommitment,
+			},
+			timeout: 3000,
+			blockhashRefreshInterval: 1000,
+		}),
 		activeSubAccountId: subaccountId,
 		subAccountIds: [subaccountId],
 	});
