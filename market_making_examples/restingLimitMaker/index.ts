@@ -12,7 +12,6 @@ import {
 	QUOTE_PRECISION,
 	BN,
 	DriftEnv,
-	UserMap,
 	DLOBSubscriber,
 	DLOB,
 	MarketType,
@@ -31,6 +30,7 @@ import {
 	FastSingleTxSender,
 	BulkAccountLoader,
 	DriftClientSubscriptionConfig,
+	DLOBApiClient,
 } from '@drift-labs/sdk';
 import { logger, setLogLevel } from '../../src/logger';
 import { getWallet } from '../../src/utils';
@@ -112,9 +112,6 @@ if (!privateKeyOrFilepath) {
 		'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json, list of commma separated numbers, or b58 encoded private key'
 	);
 }
-/// set orders to auto expire in ~30s, note you will have to pay a filler fee (0.01 USDC)
-/// for each order that is cancelled, so this is disabled by default
-const autoExpireOrders = process.env.AUTO_EXPIRE_ORDERS === "true";
 
 const [_, wallet] = getWallet(privateKeyOrFilepath);
 
@@ -288,7 +285,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				orderId: openBid.orderId,
 				price: bidPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
-				maxTs: autoExpireOrders ? orderExpireTs : undefined,
 				policy: ModifyOrderPolicy.TRY_MODIFY,
 			};
 			ixs.push(await driftClient.getModifyOrderIx(ops));
@@ -302,7 +298,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				price: bidPriceBN,
 				direction: PositionDirection.LONG,
 				postOnly: PostOnlyParams.MUST_POST_ONLY,
-				maxTs: autoExpireOrders ? orderExpireTs : undefined,
 			}));
 			newOrders++;
 		}
@@ -318,7 +313,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				orderId: openAsk.orderId,
 				price: askPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
-				maxTs: autoExpireOrders ? orderExpireTs : undefined,
 				policy: ModifyOrderPolicy.TRY_MODIFY,
 			};
 			ixs.push(await driftClient.getModifyOrderIx(ops));
@@ -332,7 +326,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				price: askPriceBN,
 				direction: PositionDirection.SHORT,
 				postOnly: PostOnlyParams.MUST_POST_ONLY,
-				maxTs: autoExpireOrders ? orderExpireTs : undefined,
 			}));
 			newOrders++;
 		}
@@ -408,18 +401,13 @@ const main = async () => {
 	const slotSubscriber = new SlotSubscriber(connection, {});
 	await slotSubscriber.subscribe();
 
-	const userMap = new UserMap(
-		driftClient,
-		driftClient.userAccountSubscriptionConfig,
-		false
-	);
-	await userMap.subscribe();
-
 	const dlobSubscriber = new DLOBSubscriber({
-		driftClient,
-		dlobSource: userMap,
+		dlobSource: new DLOBApiClient({
+			url: 'https://dlob.drift.trade/orders/idlWithSlot',
+		}),
 		slotSource: slotSubscriber,
 		updateFrequency: 1000,
+		driftClient: driftClient,
 	});
 	await dlobSubscriber.subscribe();
 
