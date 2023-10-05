@@ -20,6 +20,7 @@ import {
 	SpotBalanceType,
 	calculateNetUserPnl,
 	BASE_PRECISION,
+	QUOTE_SPOT_MARKET_INDEX,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -44,7 +45,7 @@ type SettlePnlIxParams = {
 };
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
-const SETTLE_USER_CHUNKS = 5;
+const SETTLE_USER_CHUNKS = 6;
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -176,6 +177,8 @@ export class UserPnlSettlerBot implements Bot {
 					userAccount.spotPositions[0].balanceType,
 					'borrow'
 				);
+				const usdcAmount = user.getTokenAmount(QUOTE_SPOT_MARKET_INDEX);
+
 				for (const settleePosition of user.getActivePerpPositions()) {
 					// only settle active positions or negative quote
 					if (
@@ -247,10 +250,21 @@ export class UserPnlSettlerBot implements Bot {
 
 					// only settle for $10 or more negative pnl
 					if (
-						userUnsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
-						!settleePositionWithLp.baseAssetAmount.eq(ZERO) &&
-						!isUsdcBorrow &&
-						settleePositionWithLp.lpShares.eq(ZERO)
+						(userUnsettledPnl.eq(ZERO) &&
+							settleePositionWithLp.lpShares.eq(ZERO)) ||
+						(userUnsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
+							!settleePositionWithLp.baseAssetAmount.eq(ZERO) &&
+							!isUsdcBorrow &&
+							settleePositionWithLp.lpShares.eq(ZERO))
+					) {
+						continue;
+					}
+
+					// if user has usdc borrow, only settle if magnitude of pnl is material ($10 and 1% of borrow)
+					if (
+						isUsdcBorrow &&
+						(userUnsettledPnl.abs().lt(MIN_PNL_TO_SETTLE.abs()) ||
+							userUnsettledPnl.abs().lt(usdcAmount.abs().div(new BN(100))))
 					) {
 						continue;
 					}
