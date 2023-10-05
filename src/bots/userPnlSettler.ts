@@ -19,6 +19,8 @@ import {
 	getTokenAmount,
 	SpotBalanceType,
 	calculateNetUserPnl,
+	BASE_PRECISION,
+	QUOTE_SPOT_MARKET_INDEX,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -43,7 +45,7 @@ type SettlePnlIxParams = {
 };
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
-const SETTLE_USER_CHUNKS = 5;
+const SETTLE_USER_CHUNKS = 6;
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -175,9 +177,12 @@ export class UserPnlSettlerBot implements Bot {
 					userAccount.spotPositions[0].balanceType,
 					'borrow'
 				);
+				const usdcAmount = user.getTokenAmount(QUOTE_SPOT_MARKET_INDEX);
+
 				for (const settleePosition of user.getActivePerpPositions()) {
+					// only settle active positions (base amount) or negative quote
 					if (
-						settleePosition.quoteAssetAmount.eq(ZERO) &&
+						settleePosition.quoteAssetAmount.gte(ZERO) &&
 						settleePosition.baseAssetAmount.eq(ZERO) &&
 						settleePosition.lpShares.eq(ZERO)
 					) {
@@ -185,6 +190,8 @@ export class UserPnlSettlerBot implements Bot {
 					}
 
 					const perpMarketIdx = settleePosition.marketIndex;
+					const perpMarket =
+						perpMarketAndOracleData[perpMarketIdx].marketAccount;
 
 					let settleePositionWithLp = settleePosition;
 
@@ -214,22 +221,50 @@ export class UserPnlSettlerBot implements Bot {
 						perpMarketAndOracleData[perpMarketIdx].oraclePriceData
 					);
 
+					const twoPctOfOpenInterestBase = BN.min(
+						perpMarket.amm.baseAssetAmountLong,
+						perpMarket.amm.baseAssetAmountShort.abs()
+					).div(new BN(50));
+					const fiveHundredNotionalBase = QUOTE_PRECISION.mul(new BN(500))
+						.mul(BASE_PRECISION)
+						.div(perpMarket.amm.historicalOracleData.lastOraclePriceTwap5Min);
+
+					const largeUnsettledLP =
+						perpMarket.amm.baseAssetAmountWithUnsettledLp
+							.abs()
+							.gt(twoPctOfOpenInterestBase) &&
+						perpMarket.amm.baseAssetAmountWithUnsettledLp
+							.abs()
+							.gt(fiveHundredNotionalBase);
+
 					const shouldSettleLp =
 						settleePosition.lpShares.gt(ZERO) &&
-						timeRemainingUntilUpdate(
+						(timeRemainingUntilUpdate(
 							new BN(nowTs ?? Date.now() / 1000),
 							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
 								.lastFundingRateTs,
 							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
 								.fundingPeriod
-						).ltn(120);
+						).ltn(120) ||
+							largeUnsettledLP);
 
 					// only settle for $10 or more negative pnl
 					if (
-						userUnsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
-						!settleePositionWithLp.baseAssetAmount.eq(ZERO) &&
-						!isUsdcBorrow &&
-						settleePositionWithLp.lpShares.eq(ZERO)
+						(userUnsettledPnl.eq(ZERO) &&
+							settleePositionWithLp.lpShares.eq(ZERO)) ||
+						(userUnsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
+							!settleePositionWithLp.baseAssetAmount.eq(ZERO) &&
+							!isUsdcBorrow &&
+							settleePositionWithLp.lpShares.eq(ZERO))
+					) {
+						continue;
+					}
+
+					// if user has usdc borrow, only settle if magnitude of pnl is material ($10 and 1% of borrow)
+					if (
+						isUsdcBorrow &&
+						(userUnsettledPnl.abs().lt(MIN_PNL_TO_SETTLE.abs()) ||
+							userUnsettledPnl.abs().lt(usdcAmount.abs().div(new BN(100))))
 					) {
 						continue;
 					}
