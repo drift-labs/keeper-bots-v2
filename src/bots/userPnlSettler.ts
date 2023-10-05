@@ -180,9 +180,9 @@ export class UserPnlSettlerBot implements Bot {
 				const usdcAmount = user.getTokenAmount(QUOTE_SPOT_MARKET_INDEX);
 
 				for (const settleePosition of user.getActivePerpPositions()) {
-					// only settle active positions or negative quote
+					// only settle active positions (base amount) or negative quote
 					if (
-						settleePosition.quoteAssetAmount.gt(ZERO) &&
+						settleePosition.quoteAssetAmount.gte(ZERO) &&
 						settleePosition.baseAssetAmount.eq(ZERO) &&
 						settleePosition.lpShares.eq(ZERO)
 					) {
@@ -223,19 +223,19 @@ export class UserPnlSettlerBot implements Bot {
 
 					const twoPctOfOpenInterestBase = BN.min(
 						perpMarket.amm.baseAssetAmountLong,
-						perpMarket.amm.baseAssetAmountShort
+						perpMarket.amm.baseAssetAmountShort.abs()
 					).div(new BN(50));
 					const fiveHundredNotionalBase = QUOTE_PRECISION.mul(new BN(500))
 						.mul(BASE_PRECISION)
 						.div(perpMarket.amm.historicalOracleData.lastOraclePriceTwap5Min);
 
 					const largeUnsettledLP =
-						perpMarket.amm.baseAssetAmountWithUnsettledLp.gt(
-							twoPctOfOpenInterestBase
-						) &&
-						perpMarket.amm.baseAssetAmountWithUnsettledLp.gt(
-							fiveHundredNotionalBase
-						);
+						perpMarket.amm.baseAssetAmountWithUnsettledLp
+							.abs()
+							.gt(twoPctOfOpenInterestBase) &&
+						perpMarket.amm.baseAssetAmountWithUnsettledLp
+							.abs()
+							.gt(fiveHundredNotionalBase);
 
 					const shouldSettleLp =
 						settleePosition.lpShares.gt(ZERO) &&
