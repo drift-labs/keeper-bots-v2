@@ -29,6 +29,8 @@ import {
 	ZERO,
 	ModifyOrderPolicy,
 	FastSingleTxSender,
+	BulkAccountLoader,
+	DriftClientSubscriptionConfig,
 } from '@drift-labs/sdk';
 import { logger, setLogLevel } from '../../src/logger';
 import { getWallet } from '../../src/utils';
@@ -72,6 +74,8 @@ if (!endpoint) {
 const driftEnv = (process.env.DRIFT_ENV ?? 'mainnet-beta') as DriftEnv;
 /// optional WS endpoint if using a separate server for websockets
 const wsEndpoint = process.env.WS_ENDPOINT;
+const wsDisabled = process.env.WS_DISABLED === "true";
+const pollingIntervalMs = intEnvVarWithDefault("POLLING_INTERVAL_MS", 3000);
 /// the min spread to quote in basis points (3 for 0.03%)
 const minSpreadBps = intEnvVarWithDefault("MIN_SPREAD_BPS", 10);
 if (!minSpreadBps || minSpreadBps <= 0) {
@@ -357,6 +361,22 @@ const main = async () => {
 		commitment: stateCommitment,
 	});
 
+	let accountSubscription: DriftClientSubscriptionConfig = {
+		type: 'websocket',
+	};
+	if (wsDisabled) {
+		logger.info(`Websocket disabled, using polling with interval ${pollingIntervalMs}ms`);
+
+		accountSubscription = {
+			type: 'polling',
+			accountLoader: new BulkAccountLoader(
+				connection,
+				stateCommitment,
+				pollingIntervalMs,
+			),
+		};
+	}
+
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
@@ -366,9 +386,7 @@ const main = async () => {
 			skipPreflight: false,
 			preflightCommitment: stateCommitment,
 		},
-		accountSubscription: {
-			type: 'websocket',
-		},
+		accountSubscription,
 		env: driftEnv,
 		txSender: new FastSingleTxSender({
 			connection,
