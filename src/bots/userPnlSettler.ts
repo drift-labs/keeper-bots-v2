@@ -19,6 +19,7 @@ import {
 	getTokenAmount,
 	SpotBalanceType,
 	calculateNetUserPnl,
+	BASE_PRECISION,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -176,8 +177,9 @@ export class UserPnlSettlerBot implements Bot {
 					'borrow'
 				);
 				for (const settleePosition of user.getActivePerpPositions()) {
+					// only settle active positions or negative quote
 					if (
-						settleePosition.quoteAssetAmount.eq(ZERO) &&
+						settleePosition.quoteAssetAmount.gt(ZERO) &&
 						settleePosition.baseAssetAmount.eq(ZERO) &&
 						settleePosition.lpShares.eq(ZERO)
 					) {
@@ -185,6 +187,8 @@ export class UserPnlSettlerBot implements Bot {
 					}
 
 					const perpMarketIdx = settleePosition.marketIndex;
+					const perpMarket =
+						perpMarketAndOracleData[perpMarketIdx].marketAccount;
 
 					let settleePositionWithLp = settleePosition;
 
@@ -214,15 +218,32 @@ export class UserPnlSettlerBot implements Bot {
 						perpMarketAndOracleData[perpMarketIdx].oraclePriceData
 					);
 
+					const twoPctOfOpenInterestBase = BN.min(
+						perpMarket.amm.baseAssetAmountLong,
+						perpMarket.amm.baseAssetAmountShort
+					).div(new BN(50));
+					const fiveHundredNotionalBase = QUOTE_PRECISION.mul(new BN(500))
+						.mul(BASE_PRECISION)
+						.div(perpMarket.amm.historicalOracleData.lastOraclePriceTwap5Min);
+
+					const largeUnsettledLP =
+						perpMarket.amm.baseAssetAmountWithUnsettledLp.gt(
+							twoPctOfOpenInterestBase
+						) &&
+						perpMarket.amm.baseAssetAmountWithUnsettledLp.gt(
+							fiveHundredNotionalBase
+						);
+
 					const shouldSettleLp =
 						settleePosition.lpShares.gt(ZERO) &&
-						timeRemainingUntilUpdate(
+						(timeRemainingUntilUpdate(
 							new BN(nowTs ?? Date.now() / 1000),
 							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
 								.lastFundingRateTs,
 							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
 								.fundingPeriod
-						).ltn(120);
+						).ltn(120) ||
+							largeUnsettledLP);
 
 					// only settle for $10 or more negative pnl
 					if (
