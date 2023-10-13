@@ -6,6 +6,7 @@ global:
   endpoint: 
   # custom websocket endpoint to use (if null will be determined from rpc endpoint)
   wsEndpoint:
+  resubTimeoutMs: 30000 # timeout for resubscribing to websocket
 
   # Private key to use to sign transactions.
   # will load from KEEPER_PRIVATE_KEY env var if null

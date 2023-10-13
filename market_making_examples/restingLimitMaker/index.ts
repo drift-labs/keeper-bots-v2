@@ -259,7 +259,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 	}
 
 	// reduce, resuse, recycle open order slots
-	const orderExpireTs = new BN((Date.now()) / 1000 + ORDER_TIF_S); // new order will expire in 30s
 	const marketTick = convertToNumber(driftClient.getPerpMarketAccount(perpMarketIndex)!.amm.orderTickSize, PRICE_PRECISION);
 	const ixs: Array<TransactionInstruction> = [];
 	ixs.push(
