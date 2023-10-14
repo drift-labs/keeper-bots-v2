@@ -1018,12 +1018,14 @@ export class FillerBot implements Bot {
 
 					// can also print this from parsing the log record in upcoming
 					const nodeFilled = nodesFilled[ixIdx];
-					logger.info(
-						logMessageForNodeToFill(
-							nodeFilled,
-							`Processing tx log for assoc node ${ixIdx}`
-						)
-					);
+					if (nodeFilled) {
+						logger.info(
+							logMessageForNodeToFill(
+								nodeFilled,
+								`Processing tx log for assoc node ${ixIdx}`
+							)
+						);
+					}
 				} else {
 					inFillIx = false;
 				}
