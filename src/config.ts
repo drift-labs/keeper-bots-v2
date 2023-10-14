@@ -59,6 +59,7 @@ export interface GlobalConfig {
 	driftEnv?: DriftEnv;
 	endpoint?: string;
 	wsEndpoint?: string;
+	resubTimeoutMs?: number;
 	keeperPrivateKey?: string;
 	initUser?: boolean;
 	testLiveness?: boolean;

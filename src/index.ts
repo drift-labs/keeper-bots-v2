@@ -229,6 +229,7 @@ const runBot = async () => {
 	let lastBulkAccountLoaderSlot: number | undefined;
 	let accountSubscription: DriftClientSubscriptionConfig = {
 		type: 'websocket',
+		resubTimeoutMs: config.global.resubTimeoutMs,
 	};
 	let logProviderConfig: LogProviderConfig = {
 		type: 'websocket',
