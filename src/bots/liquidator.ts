@@ -427,7 +427,14 @@ export class LiquidatorBot implements Bot {
 				});
 			}
 		}
-		logger.info(`this.allSubaccounts: ${JSON.stringify(this.allSubaccounts)}`);
+		logger.info(
+			`this.allSubaccounts (${this.allSubaccounts.size}): ${JSON.stringify(
+				Array.from(this.allSubaccounts)
+			)}`
+		);
+		for (const subAccountId of this.allSubaccounts) {
+			logger.info(` * ${subAccountId}`);
+		}
 
 		if (this.useTwap()) {
 			const nowSec = Math.floor(Date.now() / 1000);
