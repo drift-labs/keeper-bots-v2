@@ -427,6 +427,7 @@ export class LiquidatorBot implements Bot {
 				});
 			}
 		}
+		logger.info(`this.allSubaccounts: ${JSON.stringify(this.allSubaccounts)}`);
 
 		if (this.useTwap()) {
 			const nowSec = Math.floor(Date.now() / 1000);
