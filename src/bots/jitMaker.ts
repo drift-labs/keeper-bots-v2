@@ -181,7 +181,7 @@ export class JitMaker implements Bot {
 				for (let i = 0; i < this.marketIndexes.length; i++) {
 					const perpIdx = this.marketIndexes[i];
 					const subId = this.subAccountIds[i];
-					this.driftClient.switchActiveUser(subId);
+					this.driftClient.switchActiveUser(subId, this.driftClient.authority);
 					console.log(perpIdx, subId);
 
 					let spotMarketIndex = 0;

@@ -1214,7 +1214,7 @@ export class LiquidatorBot implements Bot {
 	}
 
 	private async deriskForSubaccount(subaccountId: number) {
-		this.driftClient.switchActiveUser(subaccountId);
+		this.driftClient.switchActiveUser(subaccountId, this.driftClient.authority);
 		const userAccount = this.driftClient.getUserAccount();
 		if (!userAccount) {
 			logger.error('failed to get user account');
@@ -1249,6 +1249,7 @@ export class LiquidatorBot implements Bot {
 	 * attempts to close out any open positions on this account. It starts by cancelling any open orders
 	 */
 	private async derisk() {
+		console.log('wtfwtfwtf');
 		if (!this.acquireMutex()) {
 			return;
 		}
@@ -1465,7 +1466,10 @@ export class LiquidatorBot implements Bot {
 		logger.info(
 			`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
 		);
-		this.driftClient.switchActiveUser(subAccountToUse);
+		this.driftClient.switchActiveUser(
+			subAccountToUse,
+			this.driftClient.authority
+		);
 
 		const start = Date.now();
 		this.driftClient
@@ -1608,7 +1612,8 @@ tx: ${tx} `
 						`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
 					);
 					this.driftClient.switchActiveUser(
-						subAccountToUse || this.activeSubAccountId
+						subAccountToUse || this.activeSubAccountId,
+						this.driftClient.authority
 					);
 				}
 
@@ -1716,7 +1721,10 @@ tx: ${tx} `
 			logger.info(
 				`Switching to subaccount ${subAccountToUse} for perp market ${liquidateePosition.marketIndex}`
 			);
-			this.driftClient.switchActiveUser(subAccountToUse);
+			this.driftClient.switchActiveUser(
+				subAccountToUse,
+				this.driftClient.authority
+			);
 
 			this.driftClient
 				.liquidatePerpPnlForDeposit(
@@ -1962,7 +1970,10 @@ tx: ${tx} `
 							logger.info(
 								`Switching to subaccount ${subAccountToUse} for perp market ${liquidateePosition.marketIndex}`
 							);
-							this.driftClient.switchActiveUser(subAccountToUse);
+							this.driftClient.switchActiveUser(
+								subAccountToUse,
+								this.driftClient.authority
+							);
 						}
 
 						const start = Date.now();
