@@ -141,7 +141,7 @@ export class UncrossArbBot implements Bot {
 				const marketIndexes = PerpMarkets[this.driftEnv];
 				for (let i = 0; i < marketIndexes.length; i++) {
 					const perpIdx = marketIndexes[i].marketIndex;
-					const driftUser = this.driftClient.getUser(0);
+					const driftUser = this.driftClient.getUser();
 					const perpMarketAccount =
 						this.driftClient.getPerpMarketAccount(perpIdx)!;
 					const oraclePriceData =
@@ -184,9 +184,12 @@ export class UncrossArbBot implements Bot {
 							.getUserAccount(),
 						order: bestDriftBid.order,
 						maker: bestDriftBid.userAccount!,
-						makerStats: this.userMap
-							.get(bestDriftBid.userAccount!.toBase58())!
-							.getUserAccount().authority,
+						makerStats: getUserStatsAccountPublicKey(
+							this.driftClient.program.programId,
+							this.userMap
+								.get(bestDriftBid.userAccount!.toBase58())!
+								.getUserAccount().authority
+						),
 					};
 
 					const askMakerInfo: MakerInfo = {
@@ -200,7 +203,7 @@ export class UncrossArbBot implements Bot {
 							this.userMap
 								.get(bestDriftAsk.userAccount!.toBase58())!
 								.getUserAccount().authority
-						),
+						)
 					};
 
 					const midPrice = (bestBidPrice + bestAskPrice) / 2;
