@@ -6,7 +6,7 @@ global:
   endpoint: 
   # custom websocket endpoint to use (if null will be determined from rpc endpoint)
   wsEndpoint:
-  resubTimeoutMs: 30000 # timeout for resubscribing to websocket
+  resubTimeoutMs: 10000 # timeout for resubscribing to websocket
 
   # Private key to use to sign transactions.
   # will load from KEEPER_PRIVATE_KEY env var if null
@@ -52,7 +52,7 @@ enabledBots:
   # - liquidator
 
   # Example maker bot that participates in JIT auction (caution: you will probably lose money)
-  - jitMaker
+  # - jitMaker
 
   # Example maker bot that posts floating oracle orders
   # - floatingMaker
@@ -63,8 +63,16 @@ enabledBots:
   # settles negative PnLs for users (may want to run with runOnce: true)
   # - userPnlSettler
 
+  # uncross the book to capture an arb
+  - uncrossArb
+
 # below are bot configs
 botConfigs:
+  uncrossArb:
+    botId: "uncrossArb"
+    dryRun: false
+    driftEnv: "mainnet-beta"
+
   jitMaker:
     botId: "jitMaker"
     dryRun: false

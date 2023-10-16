@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { program, Option } from 'commander';
 import * as http from 'http';
 
@@ -26,9 +27,9 @@ import {
 	RetryTxSender,
 	AuctionSubscriber,
 	FastSingleTxSender,
+	OracleInfo,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
-import { Mutex } from 'async-mutex';
 
 import { logger, setLogLevel } from './logger';
 import { constants } from './types';
@@ -59,6 +60,7 @@ import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
 import { FillerLiteBot } from './bots/fillerLite';
 import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
 import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
+import { UncrossArbBot } from './bots/uncrossArbBot';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -121,12 +123,12 @@ program
 	)
 	.option(
 		'--perp-markets <string>',
-		'comma delimited list of perp market ID(s) to liquidate (willing to inherit risk), omit for all',
+		'comma delimited list of perp market ID(s) for applicable bots (willing to inherit risk), omit for all',
 		''
 	)
 	.option(
 		'--spot-markets <string>',
-		'comma delimited list of spot market ID(s) to liquidate (willing to inherit risk), omit for all',
+		'comma delimited list of spot market ID(s) for applicable bots (willing to inherit risk), omit for all',
 		''
 	)
 	.option(
@@ -169,7 +171,6 @@ logger.info(
 
 // @ts-ignore
 const sdkConfig = initialize({ env: config.global.driftEnv });
-
 setLogLevel(config.global.debug ? 'debug' : 'info');
 
 const endpoint = config.global.endpoint!;
@@ -178,29 +179,6 @@ logger.info(`RPC endpoint: ${endpoint}`);
 logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`DriftEnv:     ${config.global.driftEnv}`);
 logger.info(`Commit:       ${commitHash}`);
-
-function printUserAccountStats(clearingHouseUser: User) {
-	const freeCollateral = clearingHouseUser.getFreeCollateral();
-	logger.info(
-		`User free collateral: $${convertToNumber(
-			freeCollateral,
-			QUOTE_PRECISION
-		)}:`
-	);
-
-	logger.info(
-		`CHUser unrealized funding PnL: ${convertToNumber(
-			clearingHouseUser.getUnrealizedFundingPNL(),
-			QUOTE_PRECISION
-		)}`
-	);
-	logger.info(
-		`CHUser unrealized PnL:         ${convertToNumber(
-			clearingHouseUser.getUnrealizedPNL(),
-			QUOTE_PRECISION
-		)}`
-	);
-}
 
 const bots: Bot[] = [];
 const runBot = async () => {
@@ -263,13 +241,18 @@ const runBot = async () => {
 		opts,
 		retrySleep: config.global.txRetryTimeoutMs,
 	});
-	txSender.getTimeoutCount;
 
-	let perpMarketIndexes, spotMarketIndexes, oracleInfos;
+	/**
+	 * Creating and subscribing to the drift client
+	 */
+	let perpMarketIndexes: number[] | undefined;
+	let spotMarketIndexes: number[] | undefined;
+	let oracleInfos: OracleInfo[] | undefined;
 	if (configHasBot(config, 'fillerLite')) {
 		({ perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 			getMarketsAndOraclesForSubscription(config.global.driftEnv!));
 	}
+
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
@@ -296,9 +279,6 @@ const runBot = async () => {
 	});
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
-	const lastSlotReceivedMutex = new Mutex();
-	let lastSlotReceived: number;
-	let lastHealthCheckSlot = -1;
 	const startupTime = Date.now();
 
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
@@ -330,18 +310,12 @@ const runBot = async () => {
 		: [driftUser.subscribe(), eventSubscriber.subscribe()];
 	await waitForAllSubscribesToFinish(subscribePromises);
 
-	// await driftClient.subscribe();
 	driftClient.eventEmitter.on('error', (e) => {
 		logger.info('clearing house error');
 		logger.error(e);
 	});
 
 	await slotSubscriber.subscribe();
-	slotSubscriber.eventEmitter.on('newSlot', async (slot: number) => {
-		await lastSlotReceivedMutex.runExclusive(async () => {
-			lastSlotReceived = slot;
-		});
-	});
 
 	if (!(await driftClient.getUser().exists())) {
 		logger.error(`User for ${wallet.publicKey} does not exist`);
@@ -387,7 +361,9 @@ const runBot = async () => {
 		console.log(`Closed ${closedSpots} spot positions`);
 	}
 
-	// check that user has collateral
+	/**
+	 * Look for collateral and force deposit before running if flag is set
+	 */
 	const freeCollateral = driftUser.getFreeCollateral();
 	if (
 		freeCollateral.isZero() &&
@@ -411,9 +387,7 @@ const runBot = async () => {
 		}
 
 		const mint = SpotMarkets[config.global.driftEnv!][0].mint; // TODO: are index 0 always USDC???, support other collaterals
-
 		const ata = await getAssociatedTokenAddress(mint, wallet.publicKey);
-
 		const amount = new BN(config.global.forceDeposit).mul(QUOTE_PRECISION);
 
 		if (config.global.driftEnv === 'devnet') {
@@ -437,6 +411,9 @@ const runBot = async () => {
 		return;
 	}
 
+	/**
+	 * Jito info here
+	 */
 	let jitoSearcherClient: SearcherClient | undefined;
 	let jitoAuthKeypair: Keypair | undefined;
 	if (config.global.useJito) {
@@ -490,6 +467,7 @@ const runBot = async () => {
 			)
 		);
 	}
+
 	if (configHasBot(config, 'fillerLite')) {
 		logger.info(`Starting filler lite bot`);
 		bots.push(
@@ -510,6 +488,7 @@ const runBot = async () => {
 			)
 		);
 	}
+
 	if (configHasBot(config, 'spotFiller')) {
 		bots.push(
 			new SpotFillerBot(
@@ -528,6 +507,7 @@ const runBot = async () => {
 			)
 		);
 	}
+
 	if (configHasBot(config, 'trigger')) {
 		bots.push(
 			new TriggerBot(
@@ -544,10 +524,11 @@ const runBot = async () => {
 			)
 		);
 	}
+
 	if (configHasBot(config, 'jitMaker')) {
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
-			programId: new PublicKey('J1TnP8zvVxbtF5KFp5xRmWuvG9McnhzmBd9XGfCyuxFP'),
+			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
 		});
 
 		const auctionSubscriber = new AuctionSubscriber({ driftClient });
@@ -604,6 +585,7 @@ const runBot = async () => {
 			)
 		);
 	}
+
 	if (configHasBot(config, 'floatingMaker')) {
 		bots.push(
 			new FloatingPerpMakerBot(
@@ -642,6 +624,31 @@ const runBot = async () => {
 		);
 	}
 
+	if (configHasBot(config, 'fundingRateUpdater')) {
+		bots.push(
+			new FundingRateUpdaterBot(
+				driftClient,
+				config.botConfigs!.fundingRateUpdater!
+			)
+		);
+	}
+
+	if (configHasBot(config, 'uncrossArb')) {
+		const jitProxyClient = new JitProxyClient({
+			driftClient,
+			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
+		});
+		bots.push(
+			new UncrossArbBot(
+				driftClient,
+				jitProxyClient,
+				slotSubscriber,
+				config.botConfigs!.uncrossArb!,
+				config.global.driftEnv!
+			)
+		);
+	}
+
 	logger.info(`initializing bots`);
 	await Promise.all(bots.map((bot) => bot.init()));
 
@@ -670,24 +677,6 @@ const runBot = async () => {
 						res.end(`Connection rpc websocket disconnected`);
 						return;
 					}
-				}
-
-				// check if a slot was received recently
-				let healthySlotSubscriber = false;
-				await lastSlotReceivedMutex.runExclusive(async () => {
-					healthySlotSubscriber = lastSlotReceived > lastHealthCheckSlot;
-					logger.debug(
-						`Health check: lastSlotReceived: ${lastSlotReceived}, lastHealthCheckSlot: ${lastHealthCheckSlot}, healthySlot: ${healthySlotSubscriber}`
-					);
-					if (healthySlotSubscriber) {
-						lastHealthCheckSlot = lastSlotReceived;
-					}
-				});
-				if (!healthySlotSubscriber) {
-					res.writeHead(501);
-					logger.error(`SlotSubscriber is not healthy`);
-					res.end(`SlotSubscriber is not healthy`);
-					return;
 				}
 
 				if (bulkAccountLoader) {
@@ -733,6 +722,8 @@ const runBot = async () => {
 	}
 };
 
+recursiveTryCatch(() => runBot());
+
 async function recursiveTryCatch(f: () => void) {
 	try {
 		f();
@@ -747,4 +738,25 @@ async function recursiveTryCatch(f: () => void) {
 	}
 }
 
-recursiveTryCatch(() => runBot());
+function printUserAccountStats(clearingHouseUser: User) {
+	const freeCollateral = clearingHouseUser.getFreeCollateral();
+	logger.info(
+		`User free collateral: $${convertToNumber(
+			freeCollateral,
+			QUOTE_PRECISION
+		)}:`
+	);
+
+	logger.info(
+		`CHUser unrealized funding PnL: ${convertToNumber(
+			clearingHouseUser.getUnrealizedFundingPNL(),
+			QUOTE_PRECISION
+		)}`
+	);
+	logger.info(
+		`CHUser unrealized PnL:         ${convertToNumber(
+			clearingHouseUser.getUnrealizedPNL(),
+			QUOTE_PRECISION
+		)}`
+	);
+}
