@@ -63,16 +63,21 @@ export class UserPnlSettlerBot implements Bot {
 	private driftClient: DriftClient;
 	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private userMap?: UserMap;
+	private userMap: UserMap;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(driftClient: DriftClient, config: BaseBotConfig) {
+	constructor(
+		driftClient: DriftClient,
+		config: BaseBotConfig,
+		userMap: UserMap
+	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
 		this.driftClient = driftClient;
+		this.userMap = userMap;
 	}
 
 	public async init() {
@@ -80,14 +85,6 @@ export class UserPnlSettlerBot implements Bot {
 
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
-
-		// initialize userMap instance
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
-		await this.userMap.sync();
 	}
 
 	public async reset() {

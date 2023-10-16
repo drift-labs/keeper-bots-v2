@@ -28,6 +28,7 @@ import {
 	AuctionSubscriber,
 	FastSingleTxSender,
 	OracleInfo,
+	UserMap,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -446,12 +447,19 @@ const runBot = async () => {
 	 * Start bots depending on flags enabled
 	 */
 
+	const userMap = new UserMap(
+		driftClient,
+		driftClient.userAccountSubscriptionConfig,
+		false
+	);
 	if (configHasBot(config, 'filler')) {
+		await userMap.subscribe();
 		bots.push(
 			new FillerBot(
 				slotSubscriber,
 				bulkAccountLoader,
 				driftClient,
+				userMap,
 				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
@@ -490,11 +498,13 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'spotFiller')) {
+		await userMap.subscribe();
 		bots.push(
 			new SpotFillerBot(
 				slotSubscriber,
 				bulkAccountLoader,
 				driftClient,
+				userMap,
 				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
@@ -509,10 +519,12 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'trigger')) {
+		await userMap.subscribe();
 		bots.push(
 			new TriggerBot(
 				driftClient,
 				slotSubscriber,
+				userMap,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -526,6 +538,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'jitMaker')) {
+		await userMap.subscribe();
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
@@ -551,6 +564,7 @@ const runBot = async () => {
 			new JitMaker(
 				driftClient,
 				jitter,
+				userMap,
 				config.botConfigs!.jitMaker!,
 				config.global.driftEnv!
 			)
@@ -558,11 +572,12 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'markTwapCrank')) {
+		await userMap.subscribe();
 		bots.push(
 			new MakerBidAskTwapCrank(
 				driftClient,
 				slotSubscriber,
-				config.global.driftEnv!,
+				userMap,
 				config.botConfigs!.markTwapCrank!,
 				config.global.runOnce ?? false
 			)
@@ -570,9 +585,11 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'liquidator')) {
+		await userMap.subscribe();
 		bots.push(
 			new LiquidatorBot(
 				driftClient,
+				userMap,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -604,8 +621,13 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userPnlSettler')) {
+		await userMap.subscribe();
 		bots.push(
-			new UserPnlSettlerBot(driftClient, config.botConfigs!.userPnlSettler!)
+			new UserPnlSettlerBot(
+				driftClient,
+				config.botConfigs!.userPnlSettler!,
+				userMap
+			)
 		);
 	}
 
@@ -634,6 +656,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'uncrossArb')) {
+		await userMap.subscribe();
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
@@ -643,6 +666,7 @@ const runBot = async () => {
 				driftClient,
 				jitProxyClient,
 				slotSubscriber,
+				userMap,
 				config.botConfigs!.uncrossArb!,
 				config.global.driftEnv!
 			)

@@ -284,7 +284,7 @@ export class LiquidatorBot implements Bot {
 	private perpMarketToSubaccount: Map<number, number>;
 	private spotMarketToSubaccount: Map<number, number>;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private userMap?: UserMap;
+	private userMap: UserMap;
 	private deriskMutex = new Uint8Array(new SharedArrayBuffer(1));
 	private runtimeSpecs: RuntimeSpec;
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
@@ -305,6 +305,7 @@ export class LiquidatorBot implements Bot {
 
 	constructor(
 		driftClient: DriftClient,
+		userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
 		config: LiquidatorConfig,
 		defaultSubaccountId: number
@@ -317,6 +318,7 @@ export class LiquidatorBot implements Bot {
 		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
 			this.driftClient
 		);
+		this.userMap = userMap;
 
 		this.metricsPort = config.metricsPort;
 		if (this.metricsPort) {
@@ -537,12 +539,6 @@ export class LiquidatorBot implements Bot {
 
 	public async init() {
 		logger.info(`${this.name} initing`);
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
-		await this.userMap.subscribe();
 
 		const config = initialize({ env: this.runtimeSpecs.driftEnv as DriftEnv });
 		for (const spotMarketConfig of config.SPOT_MARKETS) {
@@ -1249,7 +1245,6 @@ export class LiquidatorBot implements Bot {
 	 * attempts to close out any open positions on this account. It starts by cancelling any open orders
 	 */
 	private async derisk() {
-		console.log('wtfwtfwtf');
 		if (!this.acquireMutex()) {
 			return;
 		}

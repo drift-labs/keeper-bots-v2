@@ -54,7 +54,7 @@ export class TriggerBot implements Bot {
 	private triggeringNodes = new Map<string, number>();
 	private periodicTaskMutex = new Mutex();
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private userMap?: UserMap;
+	private userMap: UserMap;
 
 	private priorityFeeCalculator: PriorityFeeCalculator;
 
@@ -76,12 +76,14 @@ export class TriggerBot implements Bot {
 	constructor(
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
+		userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
 		config: BaseBotConfig
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
+		this.userMap = userMap;
 		this.runtimeSpec = runtimeSpec;
 		this.slotSubscriber = slotSubscriber;
 
@@ -157,12 +159,6 @@ export class TriggerBot implements Bot {
 
 	public async init() {
 		logger.info(`${this.name} initing`);
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
-		await this.userMap.subscribe();
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,

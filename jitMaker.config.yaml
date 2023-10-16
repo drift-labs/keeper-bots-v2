@@ -74,7 +74,7 @@ botConfigs:
     driftEnv: "mainnet-beta"
 
   jitMaker:
-    botId: "jitMaker"
+    botId: "liquidator"
     dryRun: false
     # below, ordering is important: match the subaccountIds to perpMarketindices.
     # e.g. to MM perp markets 0, 1 both on subaccount 0, then subaccounts=[0,0], perpMarketIndicies=[0,1]

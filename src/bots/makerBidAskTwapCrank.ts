@@ -1,7 +1,6 @@
 import {
 	DLOB,
 	DriftClient,
-	DriftEnv,
 	UserMap,
 	SlotSubscriber,
 	MarketType,
@@ -72,7 +71,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	constructor(
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
-		driftEnv: DriftEnv,
+		userMap: UserMap,
 		config: BaseBotConfig,
 		runOnce: boolean
 	) {
@@ -81,20 +80,13 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.dryRun = config.dryRun;
 		this.runOnce = runOnce;
 		this.driftClient = driftClient;
+		this.userMap = userMap;
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing, runOnce: ${this.runOnce}`);
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
-
-		// initialize userMap instance
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
-		await this.userMap.subscribe();
 	}
 
 	public async reset() {

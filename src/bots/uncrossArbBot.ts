@@ -57,6 +57,7 @@ export class UncrossArbBot implements Bot {
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
 		jitProxyClient: JitProxyClient,
 		slotSubscriber: SlotSubscriber,
+		userMap: UserMap,
 		config: BaseBotConfig,
 		driftEnv: DriftEnv
 	) {
@@ -66,12 +67,8 @@ export class UncrossArbBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.driftEnv = driftEnv;
 		this.slotSubscriber = slotSubscriber;
+		this.userMap = userMap;
 
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
 			slotSource: this.slotSubscriber,
@@ -86,7 +83,6 @@ export class UncrossArbBot implements Bot {
 	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
 
-		await this.userMap.subscribe();
 		await this.dlobSubscriber.subscribe();
 
 		logger.info(`${this.name} init done`);

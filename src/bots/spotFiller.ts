@@ -145,7 +145,7 @@ export class SpotFillerBot implements Bot {
 
 	private dlobSubscriber?: DLOBSubscriber;
 
-	private userMap?: UserMap;
+	private userMap: UserMap;
 	private userStatsMap?: UserStatsMap;
 
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
@@ -189,6 +189,7 @@ export class SpotFillerBot implements Bot {
 		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
+		userMap: UserMap,
 		eventSubscriber: EventSubscriber,
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig
@@ -203,6 +204,7 @@ export class SpotFillerBot implements Bot {
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		this.eventSubscriber = eventSubscriber;
+		this.userMap = userMap;
 		this.bulkAccountLoader = bulkAccountLoader;
 		if (this.bulkAccountLoader) {
 			this.userStatsMapSubscriptionConfig = {
@@ -385,13 +387,6 @@ export class SpotFillerBot implements Bot {
 		logger.info(`${this.name} initing`);
 
 		const initPromises: Array<Promise<any>> = [];
-
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
-		initPromises.push(this.userMap.subscribe());
 
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
