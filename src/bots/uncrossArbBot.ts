@@ -203,7 +203,7 @@ export class UncrossArbBot implements Bot {
 							this.userMap
 								.get(bestDriftAsk.userAccount!.toBase58())!
 								.getUserAccount().authority
-						)
+						),
 					};
 
 					const midPrice = (bestBidPrice + bestAskPrice) / 2;
