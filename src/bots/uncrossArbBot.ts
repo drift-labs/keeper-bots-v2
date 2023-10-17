@@ -207,10 +207,21 @@ export class UncrossArbBot implements Bot {
 						(bestBidPrice - bestAskPrice) / midPrice >
 						2 * driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
 					) {
-						await this.jitProxyClient.arbPerp({
-							marketIndex: perpIdx,
-							makerInfos: [bidMakerInfo, askMakerInfo],
-						});
+						try {
+							const txResult = await this.jitProxyClient.arbPerp({
+								marketIndex: perpIdx,
+								makerInfos: [bidMakerInfo, askMakerInfo],
+							});
+							logger.info(`Completed arb with sig: ${txResult.txSig}`);
+						} catch (e) {
+							if (e instanceof Error) {
+								logger.error(
+									`Error sending arb tx on market index ${perpIdx} with detected market ${bestBidPrice}@${bestAskPrice}: ${
+										e.stack ? e.stack : e.message
+									}`
+								);
+							}
+						}
 					}
 				}
 
