@@ -212,7 +212,9 @@ export class UncrossArbBot implements Bot {
 								marketIndex: perpIdx,
 								makerInfos: [bidMakerInfo, askMakerInfo],
 							});
-							logger.info(`Completed arb with sig: ${txResult.txSig}`);
+							logger.info(
+								`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
+							);
 						} catch (e) {
 							if (e instanceof Error) {
 								logger.error(
