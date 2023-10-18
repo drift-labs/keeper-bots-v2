@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
 	ReferrerInfo,
 	isOracleValid,
@@ -250,6 +251,7 @@ export class FillerBot implements Bot {
 		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
+		userMap: UserMap | undefined,
 		eventSubscriber: EventSubscriber | undefined,
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
@@ -284,6 +286,7 @@ export class FillerBot implements Bot {
 		if (this.metricsPort) {
 			this.initializeMetrics();
 		}
+		this.userMap = userMap;
 
 		this.transactionVersion = config.transactionVersion ?? undefined;
 		logger.info(
@@ -522,12 +525,14 @@ export class FillerBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
-		await this.userMap.subscribe();
+		if (!this.userMap) {
+			this.userMap = new UserMap(
+				this.driftClient,
+				this.driftClient.userAccountSubscriptionConfig,
+				false
+			);
+			await this.userMap.subscribe();
+		}
 
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,

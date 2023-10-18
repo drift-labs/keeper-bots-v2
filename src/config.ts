@@ -53,6 +53,7 @@ export type BotConfigMap = {
 	fundingRateUpdater?: BaseBotConfig;
 	userPnlSettler?: BaseBotConfig;
 	markTwapCrank?: BaseBotConfig;
+	uncrossArb?: BaseBotConfig;
 };
 
 export interface GlobalConfig {
@@ -301,6 +302,16 @@ export function loadConfigFromOpts(opts: any): Config {
 		config.botConfigs!.markTwapCrank = {
 			dryRun: opts.dryRun ?? false,
 			botId: process.env.BOT_ID ?? 'crank',
+			metricsPort: 9464,
+			runOnce: opts.runOnce ?? false,
+		};
+	}
+
+	if (opts.uncrossArb) {
+		config.enabledBots.push('uncrossArb');
+		config.botConfigs!.uncrossArb = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'uncrossArb',
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
 		};

@@ -90,6 +90,7 @@ export class JitMaker implements Bot {
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
 		jitter: JitterSniper | JitterShotgun,
+		userMap: UserMap,
 		config: JitMakerConfig,
 		driftEnv: DriftEnv
 	) {
@@ -103,12 +104,8 @@ export class JitMaker implements Bot {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftEnv = driftEnv;
+		this.userMap = userMap;
 
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
 		this.slotSubscriber = new SlotSubscriber(this.driftClient.connection);
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
@@ -125,7 +122,6 @@ export class JitMaker implements Bot {
 		logger.info(`${this.name} initing`);
 
 		// do stuff that takes some time
-		await this.userMap.subscribe();
 		await this.slotSubscriber.subscribe();
 		await this.dlobSubscriber.subscribe();
 
