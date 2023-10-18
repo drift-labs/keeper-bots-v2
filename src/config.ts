@@ -52,6 +52,7 @@ export type BotConfigMap = {
 	ifRevenueSettler?: BaseBotConfig;
 	fundingRateUpdater?: BaseBotConfig;
 	userPnlSettler?: BaseBotConfig;
+	userIdleFlipper?: BaseBotConfig;
 	markTwapCrank?: BaseBotConfig;
 	uncrossArb?: BaseBotConfig;
 };
@@ -283,6 +284,15 @@ export function loadConfigFromOpts(opts: any): Config {
 		config.botConfigs!.userPnlSettler = {
 			dryRun: opts.dryRun ?? false,
 			botId: process.env.BOT_ID ?? 'userPnlSettler',
+			metricsPort: 9464,
+			runOnce: opts.runOnce ?? false,
+		};
+	}
+	if (opts.userIdleFlipper) {
+		config.enabledBots.push('userIdleFlipper');
+		config.botConfigs!.userIdleFlipper = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'userIdleFlipper',
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
 		};

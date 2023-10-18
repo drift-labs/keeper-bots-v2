@@ -43,6 +43,7 @@ import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { IFRevenueSettlerBot } from './bots/ifRevenueSettler';
 import { UserPnlSettlerBot } from './bots/userPnlSettler';
+import { UserIdleFlipperBot } from './bots/userIdleFlipper';
 import {
 	getOrCreateAssociatedTokenAccount,
 	sleepMs,
@@ -88,6 +89,7 @@ program
 	)
 	.option('--funding-rate-updater', 'Enable Funding Rate updater bot')
 	.option('--user-pnl-settler', 'Enable User PnL settler bot')
+	.option('--user-idle-flipper', 'Flips eligible users to idle')
 	.option('--mark-twap-crank', 'Enable bid/ask twap crank bot')
 
 	.option('--cancel-open-orders', 'Cancel open orders on startup')
@@ -626,6 +628,17 @@ const runBot = async () => {
 			new UserPnlSettlerBot(
 				driftClient,
 				config.botConfigs!.userPnlSettler!,
+				userMap
+			)
+		);
+	}
+
+	if (configHasBot(config, 'userIdleFlipper')) {
+		await userMap.subscribe();
+		bots.push(
+			new UserIdleFlipperBot(
+				driftClient,
+				config.botConfigs!.userIdleFlipper!,
 				userMap
 			)
 		);
