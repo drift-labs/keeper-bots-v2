@@ -317,9 +317,15 @@ export class JitMaker implements Bot {
 					});
 
 					if (spotMarketIndex != 0) {
+						const spotMarketAccount =
+							this.driftClient.getSpotMarketAccount(spotMarketIndex)!;
+						const spotMarketPrecision = Math.pow(
+							10,
+							spotMarketAccount.decimals
+						);
 						this.jitter.updateSpotParams(spotMarketIndex, {
-							maxPosition: new BN(maxBase * BASE_PRECISION.toNumber()),
-							minPosition: new BN(-maxBase * BASE_PRECISION.toNumber()),
+							maxPosition: new BN(maxBase * spotMarketPrecision),
+							minPosition: new BN(-maxBase * spotMarketPrecision),
 							bid: BN.min(bidOffset, new BN(-1)),
 							ask: BN.max(askOffset, new BN(1)),
 							priceType: PriceType.ORACLE,
@@ -430,7 +436,7 @@ export class JitMaker implements Bot {
 		}
 		assert(
 			perpMarketAccount.amm.oracle.toString() ===
-			spotMarketAccount.oracle.toString()
+				spotMarketAccount.oracle.toString()
 		);
 
 		const perpSize =
@@ -474,7 +480,7 @@ export class JitMaker implements Bot {
 						(maxDollarSize /
 							(perpMarketAccount.amm.historicalOracleData.lastOraclePrice.toNumber() /
 								1e6)) *
-						BASE_PRECISION.toNumber()
+							BASE_PRECISION.toNumber()
 					),
 					tradeSize
 				);
@@ -568,9 +574,9 @@ export class JitMaker implements Bot {
 		oraclePrice: number
 	): Promise<
 		| {
-			ixs: TransactionInstruction[];
-			lookupTables: AddressLookupTableAccount[];
-		}
+				ixs: TransactionInstruction[];
+				lookupTables: AddressLookupTableAccount[];
+		  }
 		| undefined
 	> {
 		let tsize: BN;
