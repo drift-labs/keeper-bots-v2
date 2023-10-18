@@ -108,6 +108,7 @@ botConfigs:
 
     # this replaces perpMarketIndicies and spotMarketIndicies by allowing you to specify
     # which subaccount is responsible for liquidating markets
+    # Markets are defined on perpMarkets.ts and spotMarkets.ts on the protocol codebase
     # Note: you must set global.subaccounts with all the subaccounts you want to load
     perpSubAccountConfig:
       0: # subaccount 0 will watch perp markets 0 and 1
@@ -124,6 +125,22 @@ botConfigs:
 
     # if deriskAlgo == "twap", must supply these as well
     # twapDurationSec: 300 # overall duration of to run the twap algo. Aims to derisk the entire position over this duration
+
+    # Minimum deposit amount to try to liquidiate, per spot market, in lamports.
+    # If null, or a spot market isn't here, it will liquidate any amount
+    # See perpMarkets.ts on the protocol codebase for the indices
+    minDepositToLiq:
+      1: 10
+      2: 1000
+
+    # Filter out un-liquidateable accounts that just create log noise
+    excludedAccounts:
+    - 9CJLgd5f9nmTp7KRV37RFcQrfEmJn6TU87N7VQAe2Pcq
+    - Edh39zr8GnQFNYwyvxhPngTJHrr29H3vVup8e8ZD4Hwu
+
+    # max % of collateral to spend when liquidating a user. In percentage terms (0.5 = 50%)
+    maxPositionTakeoverPctOfCollateral: 0.5
+
 
   trigger:
     botId: "trigger"

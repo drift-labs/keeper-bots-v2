@@ -5,8 +5,8 @@
 	"main": "lib/index.js",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@drift-labs/jit-proxy": "^0.7.0",
-		"@drift-labs/sdk": "^2.37.1-beta.4",
+		"@drift-labs/jit-proxy": "0.10.36",
+		"@drift-labs/sdk": "2.42.0-beta.6",
 		"@opentelemetry/api": "^1.1.0",
 		"@opentelemetry/auto-instrumentations-node": "^0.31.1",
 		"@opentelemetry/exporter-prometheus": "^0.31.0",
@@ -28,6 +28,7 @@
 		"yaml": "^2.2.1"
 	},
 	"devDependencies": {
+		"@types/chai": "^4.3.5",
 		"@types/mocha": "^10.0.1",
 		"@typescript-eslint/eslint-plugin": "^5.59.11",
 		"@typescript-eslint/parser": "^4.28.0",
@@ -37,7 +38,7 @@
 		"eslint-plugin-prettier": "^3.4.0",
 		"husky": "^7.0.4",
 		"mocha": "^10.2.0",
-		"prettier": "^2.4.1",
+		"prettier": "3.0.1",
 		"ts-node": "^10.9.1"
 	},
 	"scripts": {
@@ -45,7 +46,7 @@
 		"build": "yarn clean && tsc",
 		"clean": "rm -rf lib",
 		"start": "node lib/index.js",
-		"dev": "NODE_OPTIONS=--max-old-space-size=3000 ts-node src/index.ts",
+		"dev": "NODE_OPTIONS=--max-old-space-size=8192 ts-node src/index.ts",
 		"dev:inspect": "node --inspect-brk --require ts-node/register",
 		"dev:filler": "ts-node src/index.ts --filler",
 		"dev:trigger": "ts-node src/index.ts --trigger",

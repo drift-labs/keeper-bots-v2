@@ -3,8 +3,6 @@ import {
 	DriftClient,
 	UserAccount,
 	PublicKey,
-	PerpMarketConfig,
-	SpotMarketConfig,
 	PerpMarketAccount,
 	SpotMarketAccount,
 	OraclePriceData,
@@ -18,6 +16,11 @@ import {
 	isVariant,
 	TxSigAndSlot,
 	timeRemainingUntilUpdate,
+	getTokenAmount,
+	SpotBalanceType,
+	calculateNetUserPnl,
+	BASE_PRECISION,
+	QUOTE_SPOT_MARKET_INDEX,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -30,6 +33,7 @@ import { decodeName } from '../utils';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
+	SendTransactionError,
 } from '@solana/web3.js';
 
 type SettlePnlIxParams = {
@@ -41,7 +45,7 @@ type SettlePnlIxParams = {
 };
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
-const SETTLE_USER_CHUNKS = 2;
+const SETTLE_USER_CHUNKS = 4;
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -57,20 +61,23 @@ export class UserPnlSettlerBot implements Bot {
 	public readonly defaultIntervalMs: number = 600000;
 
 	private driftClient: DriftClient;
-	private lookupTableAccount: AddressLookupTableAccount;
+	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
-	private perpMarkets: PerpMarketConfig[];
-	private spotMarkets: SpotMarketConfig[];
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(driftClient: DriftClient, config: BaseBotConfig) {
+	constructor(
+		driftClient: DriftClient,
+		config: BaseBotConfig,
+		userMap: UserMap
+	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
 		this.driftClient = driftClient;
+		this.userMap = userMap;
 	}
 
 	public async init() {
@@ -78,14 +85,6 @@ export class UserPnlSettlerBot implements Bot {
 
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
-
-		// initialize userMap instance
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
-		await this.userMap.sync();
 	}
 
 	public async reset() {
@@ -94,7 +93,7 @@ export class UserPnlSettlerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		await this.userMap.unsubscribe();
+		await this.userMap?.unsubscribe();
 	}
 
 	public async startIntervalLoop(intervalMs: number): Promise<void> {
@@ -169,15 +168,18 @@ export class UserPnlSettlerBot implements Bot {
 			const usersToSettle: SettlePnlIxParams[] = [];
 			const nowTs = await this.driftClient.connection.getBlockTime(slot);
 
-			for (const user of this.userMap.values()) {
+			for (const user of this.userMap!.values()) {
 				const userAccount = user.getUserAccount();
 				const isUsdcBorrow = isVariant(
 					userAccount.spotPositions[0].balanceType,
 					'borrow'
 				);
+				const usdcAmount = user.getTokenAmount(QUOTE_SPOT_MARKET_INDEX);
+
 				for (const settleePosition of user.getActivePerpPositions()) {
+					// only settle active positions (base amount) or negative quote
 					if (
-						settleePosition.quoteAssetAmount.eq(ZERO) &&
+						settleePosition.quoteAssetAmount.gte(ZERO) &&
 						settleePosition.baseAssetAmount.eq(ZERO) &&
 						settleePosition.lpShares.eq(ZERO)
 					) {
@@ -185,6 +187,8 @@ export class UserPnlSettlerBot implements Bot {
 					}
 
 					const perpMarketIdx = settleePosition.marketIndex;
+					const perpMarket =
+						perpMarketAndOracleData[perpMarketIdx].marketAccount;
 
 					let settleePositionWithLp = settleePosition;
 
@@ -207,29 +211,57 @@ export class UserPnlSettlerBot implements Bot {
 						continue;
 					}
 
-					const unsettledPnl = calculateClaimablePnl(
+					const userUnsettledPnl = calculateClaimablePnl(
 						perpMarketAndOracleData[perpMarketIdx].marketAccount,
 						spotMarketAndOracleData[spotMarketIdx].marketAccount, // always liquidating the USDC spot market
 						settleePositionWithLp,
 						perpMarketAndOracleData[perpMarketIdx].oraclePriceData
 					);
 
+					const twoPctOfOpenInterestBase = BN.min(
+						perpMarket.amm.baseAssetAmountLong,
+						perpMarket.amm.baseAssetAmountShort.abs()
+					).div(new BN(50));
+					const fiveHundredNotionalBase = QUOTE_PRECISION.mul(new BN(500))
+						.mul(BASE_PRECISION)
+						.div(perpMarket.amm.historicalOracleData.lastOraclePriceTwap5Min);
+
+					const largeUnsettledLP =
+						perpMarket.amm.baseAssetAmountWithUnsettledLp
+							.abs()
+							.gt(twoPctOfOpenInterestBase) &&
+						perpMarket.amm.baseAssetAmountWithUnsettledLp
+							.abs()
+							.gt(fiveHundredNotionalBase);
+
 					const shouldSettleLp =
 						settleePosition.lpShares.gt(ZERO) &&
-						timeRemainingUntilUpdate(
-							new BN(nowTs),
+						(timeRemainingUntilUpdate(
+							new BN(nowTs ?? Date.now() / 1000),
 							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
 								.lastFundingRateTs,
 							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
 								.fundingPeriod
-						).ltn(120);
+						).ltn(120) ||
+							largeUnsettledLP);
 
 					// only settle for $10 or more negative pnl
 					if (
-						unsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
-						!settleePositionWithLp.baseAssetAmount.eq(ZERO) &&
-						!isUsdcBorrow &&
-						settleePositionWithLp.lpShares.eq(ZERO)
+						(userUnsettledPnl.eq(ZERO) &&
+							settleePositionWithLp.lpShares.eq(ZERO)) ||
+						(userUnsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
+							!settleePositionWithLp.baseAssetAmount.eq(ZERO) &&
+							!isUsdcBorrow &&
+							settleePositionWithLp.lpShares.eq(ZERO))
+					) {
+						continue;
+					}
+
+					// if user has usdc borrow, only settle if magnitude of pnl is material ($10 and 1% of borrow)
+					if (
+						isUsdcBorrow &&
+						(userUnsettledPnl.abs().lt(MIN_PNL_TO_SETTLE.abs()) ||
+							userUnsettledPnl.abs().lt(usdcAmount.abs().div(new BN(100))))
 					) {
 						continue;
 					}
@@ -238,19 +270,38 @@ export class UserPnlSettlerBot implements Bot {
 						continue;
 					}
 
-					if (unsettledPnl.gt(ZERO)) {
-						const pnlImbalance = calculateNetUserPnlImbalance(
-							perpMarketAndOracleData[perpMarketIdx].marketAccount,
-							spotMarketAndOracleData[spotMarketIdx].marketAccount,
-							perpMarketAndOracleData[perpMarketIdx].oraclePriceData
-						).mul(new BN(-1));
+					const pnlPool =
+						perpMarketAndOracleData[perpMarketIdx].marketAccount.pnlPool;
+					let pnlToSettleWithUser = ZERO;
+					let pnlPoolTookenAmount = ZERO;
+					if (userUnsettledPnl.gt(ZERO)) {
+						pnlPoolTookenAmount = getTokenAmount(
+							pnlPool.scaledBalance,
+							spotMarketAndOracleData[pnlPool.marketIndex].marketAccount,
+							SpotBalanceType.DEPOSIT
+						);
+						pnlToSettleWithUser = BN.min(userUnsettledPnl, pnlPoolTookenAmount);
+					}
 
-						if (pnlImbalance.lte(ZERO)) {
+					if (pnlToSettleWithUser.gt(ZERO)) {
+						const netUserPnl = calculateNetUserPnl(
+							perpMarketAndOracleData[perpMarketIdx].marketAccount,
+							perpMarketAndOracleData[perpMarketIdx].oraclePriceData
+						);
+						let maxPnlPoolExcess = ZERO;
+						if (netUserPnl.lt(pnlPoolTookenAmount)) {
+							maxPnlPoolExcess = pnlPoolTookenAmount.sub(
+								BN.max(netUserPnl, ZERO)
+							);
+						}
+
+						// we're only allowed to settle positive pnl if pnl pool is in excess
+						if (maxPnlPoolExcess.lte(ZERO)) {
 							logger.warn(
 								`Want to settle positive PnL for user ${user
 									.getUserAccountPublicKey()
-									.toBase58()} in market ${perpMarketIdx}, but there is a pnl imbalance (${convertToNumber(
-									pnlImbalance,
+									.toBase58()} in market ${perpMarketIdx}, but maxPnlPoolExcess is: (${convertToNumber(
+									maxPnlPoolExcess,
 									QUOTE_PRECISION
 								)})`
 							);
@@ -294,9 +345,12 @@ export class UserPnlSettlerBot implements Bot {
 							.map((item) => item.marketIndex)
 							.includes(perpMarketIdx)
 					) {
-						usersToSettle
-							.find((item) => item.marketIndex == perpMarketIdx)
-							.users.push(userData);
+						const foundItem = usersToSettle.find(
+							(item) => item.marketIndex == perpMarketIdx
+						);
+						if (foundItem) {
+							foundItem.users.push(userData);
+						}
 					} else {
 						usersToSettle.push({
 							users: [userData],
@@ -308,7 +362,7 @@ export class UserPnlSettlerBot implements Bot {
 
 			for (const params of usersToSettle) {
 				const marketStr = decodeName(
-					this.driftClient.getPerpMarketAccount(params.marketIndex).name
+					this.driftClient.getPerpMarketAccount(params.marketIndex)!.name
 				);
 
 				logger.info(
@@ -325,7 +379,7 @@ export class UserPnlSettlerBot implements Bot {
 					try {
 						const ixs = [
 							ComputeBudgetProgram.setComputeUnitLimit({
-								units: 1_000_000,
+								units: 2_000_000,
 							}),
 						];
 						ixs.push(
@@ -337,7 +391,7 @@ export class UserPnlSettlerBot implements Bot {
 							this.driftClient.txSender.sendVersionedTransaction(
 								await this.driftClient.txSender.getVersionedTransaction(
 									ixs,
-									[this.lookupTableAccount],
+									[this.lookupTableAccount!],
 									[],
 									this.driftClient.opts
 								),
@@ -346,19 +400,24 @@ export class UserPnlSettlerBot implements Bot {
 							)
 						);
 					} catch (err) {
-						const errorCode = getErrorCode(err);
+						if (!(err instanceof Error)) {
+							return;
+						}
+						const errorCode = getErrorCode(err) ?? 0;
 						logger.error(
 							`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
 						);
 						console.error(err);
 						if (!errorCodesToSuppress.includes(errorCode)) {
-							await webhookMessage(
-								`[${
-									this.name
-								}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}:\n${
-									err.logs ? (err.logs as Array<string>).join('\n') : ''
-								}\n${err.stack ? err.stack : err.message}`
-							);
+							if (err instanceof SendTransactionError) {
+								await webhookMessage(
+									`[${
+										this.name
+									}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}:\n${
+										err.logs ? (err.logs as Array<string>).join('\n') : ''
+									}\n${err.stack ? err.stack : err.message}`
+								);
+							}
 						}
 					}
 				}
@@ -369,21 +428,29 @@ export class UserPnlSettlerBot implements Bot {
 			}
 		} catch (err) {
 			console.error(err);
+			if (!(err instanceof Error)) {
+				return;
+			}
 			if (
-				!(err as Error).message.includes('Transaction was not confirmed') &&
-				!(err as Error).message.includes('Blockhash not found')
+				!err.message.includes('Transaction was not confirmed') &&
+				!err.message.includes('Blockhash not found')
 			) {
 				const errorCode = getErrorCode(err);
-				if (errorCodesToSuppress.includes(errorCode)) {
+				if (errorCodesToSuppress.includes(errorCode!)) {
 					console.log(`Suppressing error code: ${errorCode}`);
 				} else {
-					await webhookMessage(
-						`[${
-							this.name
-						}]: :x: Uncaught error: Error code: ${errorCode} while settling pnls:\n${
-							err.logs ? (err.logs as Array<string>).join('\n') : ''
-						}\n${err.stack ? err.stack : err.message}`
-					);
+					const simError = err as SendTransactionError;
+					if (simError) {
+						await webhookMessage(
+							`[${
+								this.name
+							}]: :x: Uncaught error: Error code: ${errorCode} while settling pnls:\n${
+								simError.logs!
+									? (simError.logs as Array<string>).join('\n')
+									: ''
+							}\n${err.stack ? err.stack : err.message}`
+						);
+					}
 				}
 			}
 		} finally {

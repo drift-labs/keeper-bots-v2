@@ -12,7 +12,6 @@ import {
 	QUOTE_PRECISION,
 	BN,
 	DriftEnv,
-	UserMap,
 	DLOBSubscriber,
 	DLOB,
 	MarketType,
@@ -28,6 +27,10 @@ import {
 	calculateBidPrice,
 	ZERO,
 	ModifyOrderPolicy,
+	FastSingleTxSender,
+	BulkAccountLoader,
+	DriftClientSubscriptionConfig,
+	DLOBApiClient,
 } from '@drift-labs/sdk';
 import { logger, setLogLevel } from '../../src/logger';
 import { getWallet } from '../../src/utils';
@@ -71,6 +74,8 @@ if (!endpoint) {
 const driftEnv = (process.env.DRIFT_ENV ?? 'mainnet-beta') as DriftEnv;
 /// optional WS endpoint if using a separate server for websockets
 const wsEndpoint = process.env.WS_ENDPOINT;
+const wsDisabled = process.env.WS_DISABLED === "true";
+const pollingIntervalMs = intEnvVarWithDefault("POLLING_INTERVAL_MS", 3000);
 /// the min spread to quote in basis points (3 for 0.03%)
 const minSpreadBps = intEnvVarWithDefault("MIN_SPREAD_BPS", 10);
 if (!minSpreadBps || minSpreadBps <= 0) {
@@ -81,7 +86,7 @@ const maxSpreadBps = intEnvVarWithDefault("MAX_SPREAD_BPS", 20);
 if (!maxSpreadBps || maxSpreadBps <= 0) {
 	throw new Error('Must set MAX_SPREAD_BPS environment variable to be > 0');
 }
-if (minSpreadBps < maxSpreadBps) {
+if (minSpreadBps > maxSpreadBps) {
 	throw new Error('MIN_SPREAD_BPS must be less than MAX_SPREAD_BPS');
 }
 /// size of each order on the book (1 SOL-PERP)
@@ -90,11 +95,11 @@ const orderSizePerSideBN = new BN(orderSizePerSide).mul(BASE_PRECISION);
 /// number of orders to place on each side of the book (careful if too many orders might go over tx size or CU limits)
 const ordersPerSide = intEnvVarWithDefault("ORDERS_PER_SIDE", 5);
 /// number of ticks between each order on the book
-const ticksBetweenOrders = intEnvVarWithDefault("TICKS_BETWEEN_ORDERS", 300);
+const ticksBetweenOrders = intEnvVarWithDefault("TICKS_BETWEEN_ORDERS", 100);
 /// target leverage for this account
 const targetLeverage = intEnvVarWithDefault("TARGET_LEVERAGE", 1);
 if (!targetLeverage || targetLeverage <= 0) {
-	throw new Error('Must set TARGET_LEVERAGE environment variable to be > 0');
+	throw new Error(`Must set TARGET_LEVERAGE environment variable to be > 0, got ${targetLeverage}`);
 }
 /// perp market index to market make on
 const perpMarketIndex = intEnvVarWithDefault("PERP_MARKET_INDEX", 0);
@@ -107,6 +112,7 @@ if (!privateKeyOrFilepath) {
 		'Must set environment variable KEEPER_PRIVATE_KEY with the path to a id.json, list of commma separated numbers, or b58 encoded private key'
 	);
 }
+
 const [_, wallet] = getWallet(privateKeyOrFilepath);
 
 console.log("Config:");
@@ -253,7 +259,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 	}
 
 	// reduce, resuse, recycle open order slots
-	const orderExpireTs = new BN((Date.now()) / 1000 + ORDER_TIF_S); // new order will expire in 30s
 	const marketTick = convertToNumber(driftClient.getPerpMarketAccount(perpMarketIndex)!.amm.orderTickSize, PRICE_PRECISION);
 	const ixs: Array<TransactionInstruction> = [];
 	ixs.push(
@@ -279,7 +284,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				orderId: openBid.orderId,
 				price: bidPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
-				maxTs: orderExpireTs,
 				policy: ModifyOrderPolicy.TRY_MODIFY,
 			};
 			ixs.push(await driftClient.getModifyOrderIx(ops));
@@ -293,7 +297,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				price: bidPriceBN,
 				direction: PositionDirection.LONG,
 				postOnly: PostOnlyParams.MUST_POST_ONLY,
-				maxTs: orderExpireTs,
 			}));
 			newOrders++;
 		}
@@ -309,7 +312,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				orderId: openAsk.orderId,
 				price: askPriceBN,
 				baseAssetAmount: orderSizePerSideBN,
-				maxTs: orderExpireTs,
 				policy: ModifyOrderPolicy.TRY_MODIFY,
 			};
 			ixs.push(await driftClient.getModifyOrderIx(ops));
@@ -323,7 +325,6 @@ const updateOrders = async (driftClient: DriftClient, baseBidPrice: number, base
 				price: askPriceBN,
 				direction: PositionDirection.SHORT,
 				postOnly: PostOnlyParams.MUST_POST_ONLY,
-				maxTs: orderExpireTs,
 			}));
 			newOrders++;
 		}
@@ -352,6 +353,22 @@ const main = async () => {
 		commitment: stateCommitment,
 	});
 
+	let accountSubscription: DriftClientSubscriptionConfig = {
+		type: 'websocket',
+	};
+	if (wsDisabled) {
+		logger.info(`Websocket disabled, using polling with interval ${pollingIntervalMs}ms`);
+
+		accountSubscription = {
+			type: 'polling',
+			accountLoader: new BulkAccountLoader(
+				connection,
+				stateCommitment,
+				pollingIntervalMs,
+			),
+		};
+	}
+
 	const driftClient = new DriftClient({
 		connection,
 		wallet,
@@ -361,14 +378,19 @@ const main = async () => {
 			skipPreflight: false,
 			preflightCommitment: stateCommitment,
 		},
-		accountSubscription: {
-			type: 'websocket',
-		},
+		accountSubscription,
 		env: driftEnv,
-		txSenderConfig: {
-			type: 'retry',
-			timeout: 35000,
-		},
+		txSender: new FastSingleTxSender({
+			connection,
+			wallet,
+			opts: {
+				commitment: stateCommitment,
+				skipPreflight: false,
+				preflightCommitment: stateCommitment,
+			},
+			timeout: 3000,
+			blockhashRefreshInterval: 1000,
+		}),
 		activeSubAccountId: subaccountId,
 		subAccountIds: [subaccountId],
 	});
@@ -378,18 +400,13 @@ const main = async () => {
 	const slotSubscriber = new SlotSubscriber(connection, {});
 	await slotSubscriber.subscribe();
 
-	const userMap = new UserMap(
-		driftClient,
-		driftClient.userAccountSubscriptionConfig,
-		false
-	);
-	await userMap.subscribe();
-
 	const dlobSubscriber = new DLOBSubscriber({
-		driftClient,
-		dlobSource: userMap,
+		dlobSource: new DLOBApiClient({
+			url: 'https://dlob.drift.trade/orders/idlWithSlot',
+		}),
 		slotSource: slotSubscriber,
 		updateFrequency: 1000,
+		driftClient: driftClient,
 	});
 	await dlobSubscriber.subscribe();
 

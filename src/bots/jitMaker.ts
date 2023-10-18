@@ -87,7 +87,6 @@ export class JitMaker implements Bot {
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
-	private lookupTableAccount: AddressLookupTableAccount;
 
 	private dlobSubscriber: DLOBSubscriber;
 	private slotSubscriber: SlotSubscriber;
@@ -96,6 +95,7 @@ export class JitMaker implements Bot {
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
 		jitter: JitterSniper | JitterShotgun,
+		userMap: UserMap,
 		config: JitMakerConfig,
 		driftEnv: DriftEnv
 	) {
@@ -109,12 +109,8 @@ export class JitMaker implements Bot {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftEnv = driftEnv;
+		this.userMap = userMap;
 
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
 		this.slotSubscriber = new SlotSubscriber(this.driftClient.connection);
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
@@ -131,12 +127,8 @@ export class JitMaker implements Bot {
 		logger.info(`${this.name} initing`);
 
 		// do stuff that takes some time
-		await this.userMap.subscribe();
 		await this.slotSubscriber.subscribe();
 		await this.dlobSubscriber.subscribe();
-
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
 
 		logger.info(`${this.name} init done`);
 	}
@@ -190,13 +182,13 @@ export class JitMaker implements Bot {
 				for (let i = 0; i < this.marketIndexes.length; i++) {
 					const perpIdx = this.marketIndexes[i];
 					const subId = this.subAccountIds[i];
-					this.driftClient.switchActiveUser(subId);
+					this.driftClient.switchActiveUser(subId, this.driftClient.authority);
 					console.log(perpIdx, subId);
 
 					let spotMarketIndex = 0;
 					const driftUser = this.driftClient.getUser(subId);
 					const perpMarketAccount =
-						this.driftClient.getPerpMarketAccount(perpIdx);
+						this.driftClient.getPerpMarketAccount(perpIdx)!;
 					const oraclePriceData =
 						this.driftClient.getOracleDataForPerpMarket(perpIdx);
 
@@ -259,6 +251,10 @@ export class JitMaker implements Bot {
 						oraclePriceData,
 						driftUser.userAccountPublicKey
 					);
+					if (!bestDriftBid || !bestDriftAsk) {
+						logger.warn('skipping, no best bid/ask');
+						return;
+					}
 
 					const bestBidPrice = bestDriftBid.getPrice(
 						oraclePriceData,
@@ -413,14 +409,14 @@ export class JitMaker implements Bot {
 
 	private async doBasisRebalance(
 		driftClient: DriftClient,
-		jupiterClient,
+		jupiterClient: JupiterClient,
 		u: User,
-		perpIndex,
-		spotIndex,
+		perpIndex: number,
+		spotIndex: number,
 		maxDollarSize = 0
 	) {
-		const solPerpMarket = driftClient.getPerpMarketAccount(perpIndex);
-		const solSpotMarket = driftClient.getSpotMarketAccount(spotIndex);
+		const solPerpMarket = driftClient.getPerpMarketAccount(perpIndex)!;
+		const solSpotMarket = driftClient.getSpotMarketAccount(spotIndex)!;
 		const uSpotPosition = u.getSpotPosition(spotIndex);
 		assert(
 			solPerpMarket.amm.oracle.toString() === solSpotMarket.oracle.toString()
@@ -494,15 +490,20 @@ export class JitMaker implements Bot {
 					new BN(tradeSizeDollar * QUOTE_PRECISION.toNumber() * 1.001),
 					direction
 				);
-
-				await this.sendBasisTx(driftClient, dd.ixs, dd.lookupTables);
+				if (dd) {
+					await this.sendBasisTx(driftClient, dd.ixs, dd.lookupTables);
+				}
 			} catch (e) {
 				console.error(e);
 			}
 		}
 	}
 
-	async sendBasisTx(driftClient, theInstr, lookupTablesToUse) {
+	async sendBasisTx(
+		driftClient: DriftClient,
+		theInstr: TransactionInstruction[],
+		lookupTablesToUse: AddressLookupTableAccount[]
+	) {
 		const cuEstimate = 2_000_000;
 		const chunk = [
 			ComputeBudgetProgram.setComputeUnitLimit({
@@ -514,7 +515,7 @@ export class JitMaker implements Bot {
 			...theInstr,
 		];
 		try {
-			const chunkedTx: VersionedTransaction = await promiseTimeout(
+			const chunkedTx: VersionedTransaction | null = await promiseTimeout(
 				driftClient.txSender.getVersionedTransaction(
 					chunk,
 					lookupTablesToUse,
@@ -580,12 +581,12 @@ export class JitMaker implements Bot {
 		logger.info(
 			`Jupiter swap: ${getVariant(
 				direction
-			)}: ${tradeSize.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex}, 
+			)}: ${tradeSize.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex},
 			jupSwapMode: ${jupSwapMode}`
 		);
 
-		const inMarket = driftClient.getSpotMarketAccount(inMarketIndex);
-		const outMarket = driftClient.getSpotMarketAccount(outMarketIndex);
+		const inMarket = driftClient.getSpotMarketAccount(inMarketIndex)!;
+		const outMarket = driftClient.getSpotMarketAccount(outMarketIndex)!;
 		const routes = await jupiterClient.getRoutes({
 			inputMint: inMarket.mint,
 			outputMint: outMarket.mint,
@@ -626,7 +627,7 @@ export async function sendVersionedTransaction(
 	}
 
 	const rawTransaction = tx.serialize();
-	let txid: TransactionSignature;
+	let txid: TransactionSignature | null;
 	try {
 		txid = await promiseTimeout(
 			driftClient.provider.connection.sendRawTransaction(rawTransaction, opts),
