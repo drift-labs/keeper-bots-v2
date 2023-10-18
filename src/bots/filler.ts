@@ -1046,11 +1046,15 @@ export class FillerBot implements Bot {
 			const orderIdDoesNotExist = isOrderDoesNotExistLog(log);
 			if (orderIdDoesNotExist) {
 				const filledNode = nodesFilled[ixIdx];
-				logger.error(
-					`assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${
-						filledNode.node.order!.orderId
-					}; does not exist (filled by someone else); ${log}`
-				);
+				if (filledNode) {
+					logger.error(
+						`assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${
+							filledNode.node.order!.orderId
+						}; does not exist (filled by someone else); ${log}`
+					);
+				} else {
+					logger.error(`Tried to fille node filled by someone else; ${log}`);
+				}
 				this.clearThrottledNode(getNodeToFillSignature(filledNode));
 				errorThisFillIx = true;
 				continue;
