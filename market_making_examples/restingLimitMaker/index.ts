@@ -440,12 +440,12 @@ const main = async () => {
 		const vAskNum = convertToNumber(vAsk, PRICE_PRECISION);
 		const vBidNum = convertToNumber(vBid, PRICE_PRECISION);
 
-		const bestBidNode = (dlob.getMakerLimitBids(perpMarketIndex, currSlot, MarketType.PERP, oracleData).next().value as DLOBNode);
+		const bestBidNode = (dlob.getRestingLimitBids(perpMarketIndex, currSlot, MarketType.PERP, oracleData).next().value as DLOBNode);
 		const dlobBid = bestBidNode ? bestBidNode.getPrice(oracleData, currSlot) : vBid;
 		const dlobBidNum = convertToNumber(dlobBid, PRICE_PRECISION);
 		const bestBid = BN.min(vBid, dlobBid);
 
-		const bestAskNode = (dlob.getMakerLimitAsks(perpMarketIndex, currSlot, MarketType.PERP, oracleData).next().value as DLOBNode);
+		const bestAskNode = (dlob.getRestingLimitAsks(perpMarketIndex, currSlot, MarketType.PERP, oracleData).next().value as DLOBNode);
 		const dlobAsk = bestAskNode ? bestAskNode.getPrice(oracleData, currSlot) : vAsk;
 		const dlobAskNum = convertToNumber(dlobAsk, PRICE_PRECISION);
 		const bestAsk = BN.max(vAsk, dlobAsk);

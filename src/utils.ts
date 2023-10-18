@@ -167,7 +167,7 @@ export function getBestLimitBidExcludePubKey(
 	oraclePriceData: OraclePriceData,
 	excludedUserAccount: PublicKey
 ): DLOBNode | undefined {
-	const bids = dlob.getMakerLimitBids(
+	const bids = dlob.getRestingLimitBids(
 		marketIndex,
 		slot,
 		marketType,
@@ -192,7 +192,7 @@ export function getBestLimitAskExcludePubKey(
 	oraclePriceData: OraclePriceData,
 	excludedUserAccount: PublicKey
 ): DLOBNode | undefined {
-	const asks = dlob.getMakerLimitAsks(
+	const asks = dlob.getRestingLimitAsks(
 		marketIndex,
 		slot,
 		marketType,
