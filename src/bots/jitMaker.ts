@@ -430,7 +430,7 @@ export class JitMaker implements Bot {
 		}
 		assert(
 			perpMarketAccount.amm.oracle.toString() ===
-			spotMarketAccount.oracle.toString()
+				spotMarketAccount.oracle.toString()
 		);
 
 		const perpSize =
@@ -474,7 +474,7 @@ export class JitMaker implements Bot {
 						(maxDollarSize /
 							(perpMarketAccount.amm.historicalOracleData.lastOraclePrice.toNumber() /
 								1e6)) *
-						BASE_PRECISION.toNumber()
+							BASE_PRECISION.toNumber()
 					),
 					tradeSize
 				);
@@ -568,9 +568,9 @@ export class JitMaker implements Bot {
 		oraclePrice: number
 	): Promise<
 		| {
-			ixs: TransactionInstruction[];
-			lookupTables: AddressLookupTableAccount[];
-		}
+				ixs: TransactionInstruction[];
+				lookupTables: AddressLookupTableAccount[];
+		  }
 		| undefined
 	> {
 		let tsize: BN;
