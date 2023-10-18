@@ -1046,7 +1046,7 @@ export class FillerBot implements Bot {
 			const orderIdDoesNotExist = isOrderDoesNotExistLog(log);
 			if (orderIdDoesNotExist) {
 				const filledNode = nodesFilled[ixIdx];
-				if (filledNode.node) {
+				if (filledNode) {
 					logger.error(
 						`assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${
 							filledNode.node.order!.orderId
