@@ -16,6 +16,7 @@ import {
 	PRICE_PRECISION,
 	DLOBSubscriber,
 	UserMap,
+	OrderType,
 	SlotSubscriber,
 	QUOTE_PRECISION,
 	DLOBNode,
@@ -24,6 +25,12 @@ import {
 	getVariant,
 	isVariant,
 	User,
+	getLimitOrderParams,
+	getOrderParams,
+	ONE,
+	PostOnlyParams,
+	TEN,
+	PerpMarketAccount,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -42,7 +49,7 @@ import {
 	PriceType,
 } from '@drift-labs/jit-proxy/lib';
 import { assert } from '@drift-labs/sdk/lib/assert/assert';
-import dotenv = require('dotenv');
+import dotenv from 'dotenv';
 
 dotenv.config();
 import {
@@ -56,9 +63,14 @@ import {
 	ConfirmOptions,
 	TransactionSignature,
 } from '@solana/web3.js';
-import { BaseBotConfig, JitMakerConfig } from 'src/config';
+import { BaseBotConfig, JitMakerConfig } from '../config';
 
 const TARGET_LEVERAGE_PER_ACCOUNT = 1;
+/// jupiter slippage, which is the difference between the quoted price, and the final swap price
+const JUPITER_SLIPPAGE_BPS = 10;
+/// this is the slippage away from the oracle price that we're willing to tolerate.
+/// i.e. we don't want to buy 50 bps above oracle, or sell 50 bps below oracle
+const JUPITER_ORACLE_SLIPPAGE_BPS = 50;
 
 /**
  * This is an example of a bot that implements the Bot interface.
@@ -66,13 +78,14 @@ const TARGET_LEVERAGE_PER_ACCOUNT = 1;
 export class JitMaker implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 1000;
+	public readonly defaultIntervalMs: number = 30000;
 
 	private driftEnv: DriftEnv;
 	private periodicTaskMutex = new Mutex();
 
 	private jitter: JitterSniper | JitterShotgun;
 	private driftClient: DriftClient;
+	private driftLookupTables?: Array<AddressLookupTableAccount>;
 	private jupiterClient: JupiterClient;
 	// private subaccountConfig: SubaccountConfig;
 	private subAccountIds: Array<number>;
@@ -110,7 +123,7 @@ export class JitMaker implements Bot {
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
 			slotSource: this.slotSubscriber,
-			updateFrequency: 1000,
+			updateFrequency: 30000,
 			driftClient: this.driftClient,
 		});
 	}
@@ -124,6 +137,10 @@ export class JitMaker implements Bot {
 		// do stuff that takes some time
 		await this.slotSubscriber.subscribe();
 		await this.dlobSubscriber.subscribe();
+
+		this.driftLookupTables = [
+			await this.driftClient.fetchMarketLookupTableAccount(),
+		];
 
 		logger.info(`${this.name} init done`);
 	}
@@ -177,8 +194,7 @@ export class JitMaker implements Bot {
 				for (let i = 0; i < this.marketIndexes.length; i++) {
 					const perpIdx = this.marketIndexes[i];
 					const subId = this.subAccountIds[i];
-					this.driftClient.switchActiveUser(subId, this.driftClient.authority);
-					console.log(perpIdx, subId);
+					this.driftClient.switchActiveUser(subId);
 
 					let spotMarketIndex = 0;
 					const driftUser = this.driftClient.getUser(subId);
@@ -210,18 +226,18 @@ export class JitMaker implements Bot {
 					}
 
 					this.jitter.setUserFilter((userAccount, userKey) => {
-						let skip = userKey == driftUser.userAccountPublicKey.toBase58();
+						const skip = userKey == driftUser.userAccountPublicKey.toBase58();
 
-						if (
-							isMarketVolatile(
-								perpMarketAccount,
-								oraclePriceData,
-								0.01 // 100 bps
-							)
-						) {
-							console.log('skipping, market is volatile');
-							skip = true;
-						}
+						// if (
+						// 	isMarketVolatile(
+						// 		perpMarketAccount,
+						// 		oraclePriceData,
+						// 		0.01 // 100 bps
+						// 	)
+						// ) {
+						// 	console.log('skipping, market is volatile');
+						// 	skip = true;
+						// }
 						if (skip) {
 							console.log('skipping user:', userKey);
 						}
@@ -251,6 +267,22 @@ export class JitMaker implements Bot {
 						return;
 					}
 
+					const bestBidPrice = bestDriftBid.getPrice(
+						oraclePriceData,
+						this.dlobSubscriber.slotSource.getSlot()
+					);
+
+					const bestAskPrice = bestDriftAsk.getPrice(
+						oraclePriceData,
+						this.dlobSubscriber.slotSource.getSlot()
+					);
+
+					await this.placeRestingOrders(
+						perpMarketAccount,
+						oraclePriceData,
+						bestBidPrice.add(bestAskPrice).div(new BN(2))
+					);
+
 					// const bestDriftBid = this.dlob.estimateFillWithExactBaseAmount(
 					// 	{marketIndex: perpMarketAccount.marketIndex,
 					// 	marketType: MarketType.SPOT,
@@ -271,39 +303,28 @@ export class JitMaker implements Bot {
 					// 	}
 					// ).mul(BASE_PRECISION).div(baseDepth);
 
-					const bidOffset = bestDriftBid
-						.getPrice(oraclePriceData, this.dlobSubscriber.slotSource.getSlot())
-						.sub(oraclePriceData.price);
+					const bidOffset = bestBidPrice.sub(oraclePriceData.price);
 
-					const askOffset = bestDriftAsk
-						.getPrice(oraclePriceData, this.dlobSubscriber.slotSource.getSlot())
-						.sub(oraclePriceData.price);
+					const askOffset = bestAskPrice.sub(oraclePriceData.price);
 
 					this.jitter.updatePerpParams(perpMarketIndex, {
 						maxPosition: new BN(maxBase * BASE_PRECISION.toNumber()),
 						minPosition: new BN(-maxBase * BASE_PRECISION.toNumber()),
 						bid: bidOffset,
 						ask: askOffset,
-						// ask: new BN(1),
 						priceType: PriceType.ORACLE,
 						subAccountId: subId,
 					});
 
 					if (spotMarketIndex != 0) {
 						this.jitter.updateSpotParams(spotMarketIndex, {
-							maxPosition: new BN((maxBase / 7) * BASE_PRECISION.toNumber()),
-							minPosition: new BN((-maxBase / 7) * BASE_PRECISION.toNumber()),
+							maxPosition: new BN(maxBase * BASE_PRECISION.toNumber()),
+							minPosition: new BN(-maxBase * BASE_PRECISION.toNumber()),
 							bid: BN.min(bidOffset, new BN(-1)),
 							ask: BN.max(askOffset, new BN(1)),
 							priceType: PriceType.ORACLE,
 							subAccountId: subId,
 						});
-						console.log(
-							'sub account:',
-							this.driftClient.activeSubAccountId,
-							'vs',
-							this.subAccountIds[i]
-						);
 						if (this.driftClient.activeSubAccountId == this.subAccountIds[i]) {
 							let maxSize = 200;
 							if (spotMarketIndex == 1) {
@@ -320,7 +341,7 @@ export class JitMaker implements Bot {
 						}
 					}
 				}
-				await sleepMs(5000); // 30 seconds
+				await sleepMs(10000); // 10 seconds
 
 				console.log(`done: ${Date.now() - start}ms`);
 				ran = true;
@@ -343,6 +364,54 @@ export class JitMaker implements Bot {
 		}
 	}
 
+	private async placeRestingOrders(
+		perpMarketAccount: PerpMarketAccount,
+		oraclePriceData: OraclePriceData,
+		markPrice: BN
+	) {
+		const markOffset = markPrice.sub(oraclePriceData.price);
+
+		await this.driftClient.cancelOrders(
+			MarketType.PERP,
+			perpMarketAccount.marketIndex,
+			undefined
+		);
+
+		const now = new BN(Date.now() / 1000);
+
+		const params = [
+			getOrderParams(
+				getLimitOrderParams({
+					marketIndex: perpMarketAccount.marketIndex,
+					// orderType: OrderType.LIMIT,
+					direction: PositionDirection.LONG,
+					baseAssetAmount: perpMarketAccount.amm.orderStepSize.mul(new BN(123)),
+					oraclePriceOffset: markOffset
+						.sub(perpMarketAccount.amm.orderTickSize.mul(new BN(3)))
+						.toNumber(), // limit bid below oracle
+					price: ZERO,
+					postOnly: PostOnlyParams.TRY_POST_ONLY,
+					maxTs: now.add(new BN(60 * 5)),
+				})
+			),
+			getOrderParams(
+				getLimitOrderParams({
+					marketIndex: perpMarketAccount.marketIndex,
+					// orderType: OrderType.LIMIT,
+					direction: PositionDirection.SHORT,
+					baseAssetAmount: perpMarketAccount.amm.orderStepSize.mul(new BN(123)),
+					oraclePriceOffset: BN.max(
+						PRICE_PRECISION.div(new BN(150)),
+						markOffset.add(perpMarketAccount.amm.orderTickSize.mul(new BN(3)))
+					).toNumber(), // limit bid below oracle
+					price: ZERO,
+					postOnly: PostOnlyParams.TRY_POST_ONLY,
+				})
+			),
+		];
+		await this.driftClient.placeOrders(params);
+	}
+
 	private async doBasisRebalance(
 		driftClient: DriftClient,
 		jupiterClient: JupiterClient,
@@ -351,11 +420,17 @@ export class JitMaker implements Bot {
 		spotIndex: number,
 		maxDollarSize = 0
 	) {
-		const solPerpMarket = driftClient.getPerpMarketAccount(perpIndex)!;
-		const solSpotMarket = driftClient.getSpotMarketAccount(spotIndex)!;
+		const perpMarketAccount = driftClient.getPerpMarketAccount(perpIndex);
+		const spotMarketAccount = driftClient.getSpotMarketAccount(spotIndex);
 		const uSpotPosition = u.getSpotPosition(spotIndex);
+		if (!perpMarketAccount || !spotMarketAccount) {
+			throw new Error(
+				`perpMarket ${perpIndex} or spotIndex ${spotIndex} not found`
+			);
+		}
 		assert(
-			solPerpMarket.amm.oracle.toString() === solSpotMarket.oracle.toString()
+			perpMarketAccount.amm.oracle.toString() ===
+			spotMarketAccount.oracle.toString()
 		);
 
 		const perpSize =
@@ -366,7 +441,7 @@ export class JitMaker implements Bot {
 			spotSize = getSignedTokenAmount(
 				getTokenAmount(
 					uSpotPosition.scaledBalance,
-					solSpotMarket,
+					spotMarketAccount,
 					uSpotPosition.balanceType
 				),
 				uSpotPosition.balanceType
@@ -374,13 +449,13 @@ export class JitMaker implements Bot {
 		}
 		const spotSizeNum = convertToNumber(
 			spotSize,
-			new BN(10 ** solSpotMarket.decimals)
+			new BN(10 ** spotMarketAccount.decimals)
 		);
 		const perpSizeNum = convertToNumber(perpSize, BASE_PRECISION);
 		const mismatch = perpSizeNum + spotSizeNum;
 
 		const lastOraclePrice = convertToNumber(
-			solPerpMarket.amm.historicalOracleData.lastOraclePrice,
+			perpMarketAccount.amm.historicalOracleData.lastOraclePrice,
 			PRICE_PRECISION
 		);
 
@@ -391,16 +466,24 @@ export class JitMaker implements Bot {
 			const direction =
 				mismatch < 0 ? PositionDirection.LONG : PositionDirection.SHORT;
 			tradeSize = new BN(Math.abs(mismatch) * BASE_PRECISION.toNumber());
+			let tradeSizeDollar = 0;
 
 			if (maxDollarSize != 0) {
 				tradeSize = BN.min(
 					new BN(
 						(maxDollarSize /
-							(solPerpMarket.amm.historicalOracleData.lastOraclePrice.toNumber() /
+							(perpMarketAccount.amm.historicalOracleData.lastOraclePrice.toNumber() /
 								1e6)) *
-							BASE_PRECISION.toNumber()
+						BASE_PRECISION.toNumber()
 					),
 					tradeSize
+				);
+
+				tradeSizeDollar = convertToNumber(
+					tradeSize
+						.mul(perpMarketAccount.amm.historicalOracleData.lastOraclePrice)
+						.div(BASE_PRECISION),
+					PRICE_PRECISION
 				);
 			}
 
@@ -408,18 +491,22 @@ export class JitMaker implements Bot {
 				tradeSize = tradeSize.div(new BN(10)); //1e8 decimal
 			}
 
-			console.log('direction=', direction, tradeSize.toNumber() / 1e9, 'base');
 			try {
 				const dd = await this.doSpotHedgeTrades(
 					spotIndex,
 					driftClient,
 					jupiterClient,
 					tradeSize,
-					new BN(maxDollarSize * 1e6 * 1.001),
-					direction
+					new BN(tradeSizeDollar * QUOTE_PRECISION.toNumber() * 1.001),
+					direction,
+					lastOraclePrice
 				);
 				if (dd) {
-					await this.sendBasisTx(driftClient, dd.ixs, dd.lookupTables);
+					await this.sendBasisTx(
+						driftClient,
+						dd.ixs,
+						(this.driftLookupTables ?? []).concat(...dd.lookupTables)
+					);
 				}
 			} catch (e) {
 				console.error(e);
@@ -429,11 +516,11 @@ export class JitMaker implements Bot {
 
 	async sendBasisTx(
 		driftClient: DriftClient,
-		theInstr: TransactionInstruction[],
-		lookupTablesToUse: AddressLookupTableAccount[]
+		theInstr: Array<TransactionInstruction>,
+		lookupTablesToUse: Array<AddressLookupTableAccount>
 	) {
 		const cuEstimate = 2_000_000;
-		const chunk = [
+		const ixs = [
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: cuEstimate,
 			}),
@@ -443,30 +530,30 @@ export class JitMaker implements Bot {
 			...theInstr,
 		];
 		try {
-			const chunkedTx: VersionedTransaction | null = await promiseTimeout(
+			const versionedTx: VersionedTransaction | null = await promiseTimeout(
 				driftClient.txSender.getVersionedTransaction(
-					chunk,
+					ixs,
 					lookupTablesToUse,
 					[],
 					driftClient.opts
 				),
 				1000
 			);
-			if (chunkedTx === null) {
+			if (versionedTx === null) {
 				logger.error(`Timed out getting versioned Transaction for tx chunk`);
 				return;
 			}
 			const tx = await sendVersionedTransaction(
 				driftClient,
-				chunkedTx,
+				versionedTx,
 				[],
-				// { skipPreflight: true },
 				driftClient.opts,
 				1000
 			);
-			logger.info(`tx signature: https://solscan.io/tx/${tx}`);
+			logger.info(`basis tx signature: https://solscan.io/tx/${tx}`);
 		} catch (e) {
-			logger.error(`Failed to send chunked placeOrder tx: ${e}`);
+			console.error(e);
+			logger.error(`Failed to send basis tx: ${e}`);
 			return;
 		}
 	}
@@ -476,67 +563,106 @@ export class JitMaker implements Bot {
 		driftClient: DriftClient,
 		jupiterClient: JupiterClient,
 		tradeSize: BN,
-		maxDollarSize: BN,
-		direction: PositionDirection
+		tradeSizeDollar: BN,
+		direction: PositionDirection,
+		oraclePrice: number
 	): Promise<
 		| {
-				ixs: TransactionInstruction[];
-				lookupTables: AddressLookupTableAccount[];
-		  }
+			ixs: TransactionInstruction[];
+			lookupTables: AddressLookupTableAccount[];
+		}
 		| undefined
 	> {
-		let jupSwapMode: SwapMode;
 		let tsize: BN;
 		let inMarketIndex: number;
 		let outMarketIndex: number;
-		// let jupReduceOnly: SwapReduceOnly;
+
 		if (isVariant(direction, 'long')) {
 			// sell USDC, buy spotMarketIndex
 			inMarketIndex = 0;
 			outMarketIndex = spotMarketIndex;
-			jupSwapMode = 'ExactIn';
-			tsize = maxDollarSize;
-			// jupReduceOnly = SwapReduceOnly.In;
+			tsize = tradeSizeDollar;
 		} else {
 			// sell spotMarketIndex, buy USDC
 			inMarketIndex = spotMarketIndex;
 			outMarketIndex = 0;
-			jupSwapMode = 'ExactIn';
 			tsize = tradeSize;
-			// jupReduceOnly = SwapReduceOnly.In;
 		}
+
+		const inMarket = driftClient.getSpotMarketAccount(inMarketIndex);
+		const outMarket = driftClient.getSpotMarketAccount(outMarketIndex);
+		if (!inMarket || !outMarket) {
+			throw new Error(
+				`inMarket ${inMarketIndex} or outMarket ${outMarketIndex} not found`
+			);
+		}
+		const inMarketPrecision = TEN.pow(new BN(inMarket.decimals));
+		const outMarketPrecision = TEN.pow(new BN(outMarket.decimals));
 
 		logger.info(
 			`Jupiter swap: ${getVariant(
 				direction
-			)}: ${tradeSize.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex},
-			jupSwapMode: ${jupSwapMode}`
+			)}: ${tradeSize.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex}`
 		);
 
-		const inMarket = driftClient.getSpotMarketAccount(inMarketIndex)!;
-		const outMarket = driftClient.getSpotMarketAccount(outMarketIndex)!;
-		const routes = await jupiterClient.getRoutes({
+		const quote = await jupiterClient.getQuote({
 			inputMint: inMarket.mint,
 			outputMint: outMarket.mint,
 			amount: tsize,
-			swapMode: jupSwapMode,
+			maxAccounts: 30,
+			slippageBps: JUPITER_SLIPPAGE_BPS,
+			excludeDexes: ['Raydium CLMM'],
 		});
 
-		// TODO: check if price of route is not too far from oracle price
-		if (routes.length === 0) {
-			return undefined;
+		let swapPrice: number;
+		let decentSwapPrice = true;
+		let fromOracleBps: number;
+		const inAmountNum = convertToNumber(
+			new BN(quote.inAmount),
+			inMarketPrecision
+		);
+		const outAmountNum = convertToNumber(
+			new BN(quote.outAmount),
+			outMarketPrecision
+		);
+		if (isVariant(direction, 'long')) {
+			// in = usdc, out = spot
+			// swap price = in / out
+			swapPrice = inAmountNum / outAmountNum;
+
+			// decent buys are JUPITER_ORACLE_SLIPPAGE_BPS above oracle
+			decentSwapPrice =
+				swapPrice < oraclePrice * (1 + JUPITER_ORACLE_SLIPPAGE_BPS / 10000);
+			fromOracleBps = (swapPrice / oraclePrice - 1) * 10000;
+		} else {
+			// in = spot, out = usdc
+			// swap price = out / in
+			swapPrice = outAmountNum / inAmountNum;
+
+			// decent sells are JUPITER_ORACLE_SLIPPAGE_BPS below oracle
+			decentSwapPrice =
+				swapPrice > oraclePrice * (1 - JUPITER_ORACLE_SLIPPAGE_BPS / 10000);
+			fromOracleBps = (swapPrice / oraclePrice - 1) * 10000;
 		}
 
-		return driftClient.getJupiterSwapIx({
-			jupiterClient,
-			outMarketIndex,
-			inMarketIndex,
-			amount: tsize,
-			swapMode: jupSwapMode,
-			route: routes[0],
-			// reduceOnly: jupReduceOnly,
-			slippageBps: 10,
-		});
+		if (!decentSwapPrice) {
+			logger.warn(
+				`Not swapping spot markets ${inMarketIndex} -> ${outMarketIndex}, amounts ${inAmountNum} -> ${outAmountNum}, swapPrice: ${swapPrice}, oracle: ${oraclePrice} (fromOracle: ${fromOracleBps} bps), decent ?: ${decentSwapPrice} `
+			);
+			return undefined;
+		} else {
+			logger.info(
+				`Swapping spot markets ${inMarketIndex} -> ${outMarketIndex}, amounts ${inAmountNum} -> ${outAmountNum}, swapPrice: ${swapPrice}, oracle: ${oraclePrice} (fromOracle: ${fromOracleBps} bps), decent: ${decentSwapPrice} `
+			);
+			return driftClient.getJupiterSwapIxV6({
+				jupiterClient,
+				outMarketIndex,
+				inMarketIndex,
+				quote,
+				amount: tsize,
+				slippageBps: JUPITER_SLIPPAGE_BPS,
+			});
+		}
 	}
 }
 
