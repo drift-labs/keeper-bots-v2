@@ -226,18 +226,19 @@ export class JitMaker implements Bot {
 					}
 
 					this.jitter.setUserFilter((userAccount, userKey) => {
-						const skip = userKey == driftUser.userAccountPublicKey.toBase58();
+						let skip = userKey == driftUser.userAccountPublicKey.toBase58();
 
-						// if (
-						// 	isMarketVolatile(
-						// 		perpMarketAccount,
-						// 		oraclePriceData,
-						// 		0.01 // 100 bps
-						// 	)
-						// ) {
-						// 	console.log('skipping, market is volatile');
-						// 	skip = true;
-						// }
+						if (
+							isMarketVolatile(
+								perpMarketAccount,
+								oraclePriceData,
+								0.015 // 150 bps
+							)
+						) {
+							console.log('skipping, market is volatile');
+							skip = true;
+						}
+
 						if (skip) {
 							console.log('skipping user:', userKey);
 						}
@@ -308,8 +309,8 @@ export class JitMaker implements Bot {
 					const askOffset = bestAskPrice.sub(oraclePriceData.price);
 
 					this.jitter.updatePerpParams(perpMarketIndex, {
-						maxPosition: new BN(maxBase * BASE_PRECISION.toNumber()),
-						minPosition: new BN(-maxBase * BASE_PRECISION.toNumber()),
+						maxPosition: new BN((maxBase / 20) * BASE_PRECISION.toNumber()),
+						minPosition: new BN((-maxBase / 20) * BASE_PRECISION.toNumber()),
 						bid: bidOffset,
 						ask: askOffset,
 						priceType: PriceType.ORACLE,
@@ -324,8 +325,8 @@ export class JitMaker implements Bot {
 							spotMarketAccount.decimals
 						);
 						this.jitter.updateSpotParams(spotMarketIndex, {
-							maxPosition: new BN(maxBase * spotMarketPrecision),
-							minPosition: new BN(-maxBase * spotMarketPrecision),
+							maxPosition: new BN((maxBase / 20) * spotMarketPrecision),
+							minPosition: new BN((-maxBase / 20) * spotMarketPrecision),
 							bid: BN.min(bidOffset, new BN(-1)),
 							ask: BN.max(askOffset, new BN(1)),
 							priceType: PriceType.ORACLE,
