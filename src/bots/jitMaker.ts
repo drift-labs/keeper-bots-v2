@@ -392,9 +392,9 @@ export class JitMaker implements Bot {
 					marketIndex: perpMarketAccount.marketIndex,
 					// orderType: OrderType.LIMIT,
 					direction: PositionDirection.LONG,
-					baseAssetAmount: perpMarketAccount.amm.orderStepSize.mul(new BN(123)),
+					baseAssetAmount: perpMarketAccount.amm.orderStepSize.mul(new BN(5)),
 					oraclePriceOffset: markOffset
-						.sub(perpMarketAccount.amm.orderTickSize.mul(new BN(3)))
+						.sub(perpMarketAccount.amm.orderTickSize.mul(new BN(15)))
 						.toNumber(), // limit bid below oracle
 					price: ZERO,
 					postOnly: PostOnlyParams.TRY_POST_ONLY,
@@ -406,10 +406,10 @@ export class JitMaker implements Bot {
 					marketIndex: perpMarketAccount.marketIndex,
 					// orderType: OrderType.LIMIT,
 					direction: PositionDirection.SHORT,
-					baseAssetAmount: perpMarketAccount.amm.orderStepSize.mul(new BN(123)),
+					baseAssetAmount: perpMarketAccount.amm.orderStepSize.mul(new BN(5)),
 					oraclePriceOffset: BN.max(
 						PRICE_PRECISION.div(new BN(150)),
-						markOffset.add(perpMarketAccount.amm.orderTickSize.mul(new BN(3)))
+						markOffset.add(perpMarketAccount.amm.orderTickSize.mul(new BN(15)))
 					).toNumber(), // limit bid below oracle
 					price: ZERO,
 					postOnly: PostOnlyParams.TRY_POST_ONLY,
