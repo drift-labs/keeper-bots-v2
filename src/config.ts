@@ -18,7 +18,7 @@ export type JitMakerConfig = BaseBotConfig & {
 
 export type FillerConfig = BaseBotConfig & {
 	fillerPollingInterval?: number;
-	transactionVersion: number | null;
+	transactionVersion?: number;
 	revertOnFailure?: boolean;
 };
 
@@ -123,7 +123,7 @@ function mergeDefaults<T>(defaults: T, data: Partial<T>): T {
 	for (const key in data) {
 		const value = data[key];
 
-		if (!value) {
+		if (value === undefined || value === null) {
 			continue;
 		}
 		if (typeof value === 'object' && !Array.isArray(value)) {
