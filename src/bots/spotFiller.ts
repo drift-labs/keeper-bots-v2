@@ -141,7 +141,8 @@ export class SpotFillerBot implements Bot {
 	private eventSubscriber: EventSubscriber;
 	private pollingIntervalMs: number;
 	private transactionVersion?: number;
-	private lookupTableAccount?: AddressLookupTableAccount;
+	private driftLutAccount?: AddressLookupTableAccount;
+	private driftSpotLutAccount?: AddressLookupTableAccount;
 
 	private dlobSubscriber?: DLOBSubscriber;
 
@@ -465,8 +466,18 @@ export class SpotFillerBot implements Bot {
 
 		await Promise.all(initPromises);
 
-		this.lookupTableAccount =
+		this.driftLutAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
+		if ('SERUM_LOOKUP_TABLE' in config) {
+			const lutAccount = (
+				await this.driftClient.connection.getAddressLookupTable(
+					new PublicKey(config.SERUM_LOOKUP_TABLE as string)
+				)
+			).value;
+			if (lutAccount) {
+				this.driftSpotLutAccount = lutAccount;
+			}
+		}
 
 		await webhookMessage(`[${this.name}]: started`);
 	}
@@ -906,7 +917,7 @@ export class SpotFillerBot implements Bot {
 			maxSupportedTransactionVersion: 0,
 		};
 		while (tx === null && attempts < 10) {
-			logger.info(`waiting for ${txSig} to be confirmed`);
+			logger.info(`waiting for https://solscan.io/tx/${txSig} to be confirmed`);
 			tx = await this.driftClient.connection.getTransaction(txSig, config);
 			attempts++;
 			// sleep 1s
@@ -1047,10 +1058,13 @@ export class SpotFillerBot implements Bot {
 			}
 			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
 		} else if (this.transactionVersion === 0) {
+			const lutAccounts: Array<AddressLookupTableAccount> = [];
+			this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
+			this.driftSpotLutAccount && lutAccounts.push(this.driftSpotLutAccount);
 			txResp = this.driftClient.txSender.sendVersionedTransaction(
 				await this.driftClient.txSender.getVersionedTransaction(
 					ixs,
-					[this.lookupTableAccount!],
+					lutAccounts,
 					[],
 					this.driftClient.opts
 				),
@@ -1065,7 +1079,7 @@ export class SpotFillerBot implements Bot {
 		txResp
 			.then(async (txSig) => {
 				logger.info(
-					`Filled spot order ${nodeSignature}, TX: ${JSON.stringify(txSig)}`
+					`Filled spot order ${nodeSignature}: https://solscan.io/tx/${txSig.txSig}`
 				);
 
 				const duration = Date.now() - txStart;
@@ -1082,8 +1096,11 @@ export class SpotFillerBot implements Bot {
 			})
 			.catch(async (e) => {
 				const errorCode = getErrorCode(e);
-
-				logger.error(`Failed to fill spot order (errorCode: ${errorCode}):`);
+				if (!errorCode) {
+					console.error(e);
+				} else {
+					logger.error(`Failed to fill spot order(errorCode: ${errorCode}): `);
+				}
 
 				if (e.logs) {
 					await this.handleTransactionLogs(nodeToFill, e.logs);
@@ -1097,7 +1114,7 @@ export class SpotFillerBot implements Bot {
 					webhookMessage(
 						`[${
 							this.name
-						}]: :x: error trying to fill spot orders:\n\nSim logs:\n${
+						}]: :x: error trying to fill spot orders: \n\nSim logs: \n${
 							e.logs ? (e.logs as Array<string>).join('\n') : ''
 						}\n\n${e.stack ? e.stack : e.message}`
 					);
@@ -1160,7 +1177,7 @@ export class SpotFillerBot implements Bot {
 				)
 				.then((txSig) => {
 					logger.info(
-						`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+						`Triggered user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
 					);
 					logger.info(`Tx: ${txSig}`);
 				})
@@ -1174,15 +1191,15 @@ export class SpotFillerBot implements Bot {
 						!(error as Error).message.includes('Transaction was not confirmed')
 					) {
 						logger.error(
-							`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+							`Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} `
 						);
 						logger.error(error);
 						webhookMessage(
 							`[${
 								this.name
-							}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+							}]: Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} \n${
 								error.stack ? error.stack : error.message
-							}`
+							} `
 						);
 					}
 				})
@@ -1230,7 +1247,7 @@ export class SpotFillerBot implements Bot {
 					this.filterTriggerableNodes.bind(this)
 				);
 				logger.debug(
-					`filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length}`
+					`filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length} `
 				);
 
 				await Promise.all([
@@ -1271,9 +1288,9 @@ export class SpotFillerBot implements Bot {
 				console.error(e);
 				if (e instanceof Error) {
 					webhookMessage(
-						`[${this.name}]: :x: error trying to run main loop:\n${
+						`[${this.name}]: error trying to run main loop: \n${
 							e.stack ? e.stack : e.message
-						}`
+						} `
 					);
 				}
 			}
@@ -1288,7 +1305,7 @@ export class SpotFillerBot implements Bot {
 						user.getUserAccount()
 					)
 				);
-				logger.debug(`trySpotFill done, took ${duration}ms`);
+				logger.debug(`trySpotFill done, took ${duration} ms`);
 
 				await this.watchdogTimerMutex.runExclusive(async () => {
 					this.watchdogTimerLastPatTime = Date.now();
