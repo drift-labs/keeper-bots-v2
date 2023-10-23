@@ -1052,10 +1052,10 @@ export class FillerBot implements Bot {
 							filledNode.node.order!.orderId
 						}; does not exist (filled by someone else); ${log}`
 					);
+					this.clearThrottledNode(getNodeToFillSignature(filledNode));
 				} else {
-					logger.error(`Tried to fille node filled by someone else; ${log}`);
+					logger.error(`Tried to fill node filled by someone else; ${log}`);
 				}
-				this.clearThrottledNode(getNodeToFillSignature(filledNode));
 				errorThisFillIx = true;
 				continue;
 			}
