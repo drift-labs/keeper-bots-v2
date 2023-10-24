@@ -242,6 +242,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			dryRun: opts.dryRun ?? false,
 			botId: process.env.BOT_ID ?? 'liquidator',
 			metricsPort: 9464,
+
 			disableAutoDerisking: opts.disableAutoDerisking ?? false,
 			useJupiter: opts.useJupiter ?? true,
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
