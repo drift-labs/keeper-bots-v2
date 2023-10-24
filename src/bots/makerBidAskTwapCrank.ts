@@ -19,6 +19,7 @@ import {
 	AddressLookupTableAccount,
 	PublicKey,
 } from '@solana/web3.js';
+import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
 
 const CRANK_TX_MARKET_CHUNK_SIZE = 7; // empiracal tx sizes: [869, 1039, 1143] bytes
@@ -257,8 +258,13 @@ export class MakerBidAskTwapCrank implements Bot {
 				);
 
 				logger.info(`https://solscan.io/tx/${txSig}`);
-			} catch (e) {
+			} catch (e: any) {
 				console.error(e);
+				await webhookMessage(
+					`[${this.name}] failed to crank funding rate:\n${
+						e.logs ? (e.logs as Array<string>).join('\n') : ''
+					} \n${e.stack ? e.stack : e.message}`
+				);
 			}
 		}
 	}
