@@ -79,7 +79,7 @@ export class FillerLiteBot extends FillerBot {
 		await webhookMessage(`[${this.name}]: started`);
 	}
 
-	public async startIntervalLoop(_intervalMs: number) {
+	public async startIntervalLoop(_intervalMs?: number) {
 		const intervalId = setInterval(
 			this.tryFill.bind(this),
 			this.pollingIntervalMs

@@ -503,7 +503,7 @@ export class SpotFillerBot implements Bot {
 		}
 	}
 
-	public async startIntervalLoop(_intervalMs: number) {
+	public async startIntervalLoop(_intervalMs?: number) {
 		const intervalId = setInterval(
 			this.trySpotFill.bind(this),
 			this.pollingIntervalMs

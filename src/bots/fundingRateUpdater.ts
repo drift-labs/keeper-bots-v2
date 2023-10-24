@@ -81,7 +81,7 @@ export class FundingRateUpdaterBot implements Bot {
 		this.intervalIds = [];
 	}
 
-	public async startIntervalLoop(_intervalMs: number): Promise<void> {
+	public async startIntervalLoop(_intervalMs?: number): Promise<void> {
 		logger.info(`${this.name} Bot started!`);
 		await this.tryUpdateFundingRate();
 		// we don't want to run this repeatedly

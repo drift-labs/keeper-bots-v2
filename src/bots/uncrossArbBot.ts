@@ -99,7 +99,7 @@ export class UncrossArbBot implements Bot {
 		this.intervalIds = [];
 	}
 
-	public async startIntervalLoop(intervalMs: number): Promise<void> {
+	public async startIntervalLoop(intervalMs?: number): Promise<void> {
 		const intervalId = setInterval(
 			this.runPeriodicTasks.bind(this),
 			intervalMs
@@ -230,7 +230,7 @@ export class UncrossArbBot implements Bot {
 					}
 				}
 
-				console.log(`done: ${Date.now() - start}ms`);
+				logger.debug(`done: ${Date.now() - start}ms`);
 				ran = true;
 			});
 		} catch (e) {

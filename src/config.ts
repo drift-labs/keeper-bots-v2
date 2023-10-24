@@ -16,6 +16,10 @@ export type JitMakerConfig = BaseBotConfig & {
 	subaccounts?: Array<number>;
 };
 
+export type MarkTwapCrankConfig = BaseBotConfig & {
+	crankIntervalToMarketIndicies?: { [key: number]: number[] };
+};
+
 export type FillerConfig = BaseBotConfig & {
 	fillerPollingInterval?: number;
 	transactionVersion?: number;
@@ -53,7 +57,7 @@ export type BotConfigMap = {
 	fundingRateUpdater?: BaseBotConfig;
 	userPnlSettler?: BaseBotConfig;
 	userIdleFlipper?: BaseBotConfig;
-	markTwapCrank?: BaseBotConfig;
+	markTwapCrank?: MarkTwapCrankConfig;
 	uncrossArb?: BaseBotConfig;
 };
 

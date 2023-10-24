@@ -71,6 +71,8 @@ enabledBots:
   # settles negative PnLs for users (may want to run with runOnce: true)
   # - userPnlSettler
 
+  # - markTwapCrank
+
 # below are bot configs
 botConfigs:
   filler:
@@ -135,14 +137,38 @@ botConfigs:
 
     # Filter out un-liquidateable accounts that just create log noise
     excludedAccounts:
-    - 9CJLgd5f9nmTp7KRV37RFcQrfEmJn6TU87N7VQAe2Pcq
-    - Edh39zr8GnQFNYwyvxhPngTJHrr29H3vVup8e8ZD4Hwu
+      - 9CJLgd5f9nmTp7KRV37RFcQrfEmJn6TU87N7VQAe2Pcq
+      - Edh39zr8GnQFNYwyvxhPngTJHrr29H3vVup8e8ZD4Hwu
 
     # max % of collateral to spend when liquidating a user. In percentage terms (0.5 = 50%)
     maxPositionTakeoverPctOfCollateral: 0.5
-
 
   trigger:
     botId: "trigger"
     dryRun: false
     metricsPort: 9465
+
+  markTwapCrank:
+    botId: "mark-twap-cranker"
+    dryRun: false
+    metricsPort: 9465
+    crankIntervalToMarketIndicies:
+      15000:
+        - 0
+        - 1
+        - 2
+      60000:
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+        - 8
+        - 9
+        - 10
+        - 11
+        - 12
+        - 13
+        - 14
+        - 15
+        - 16
