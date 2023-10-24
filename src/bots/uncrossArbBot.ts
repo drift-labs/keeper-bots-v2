@@ -209,14 +209,35 @@ export class UncrossArbBot implements Bot {
 					) {
 						try {
 							this.jitProxyClient
-								.arbPerp({
-									marketIndex: perpIdx,
-									makerInfos: [bidMakerInfo, askMakerInfo],
-								})
+								.arbPerp(
+									{
+										marketIndex: perpIdx,
+										makerInfos: [bidMakerInfo, askMakerInfo],
+									},
+									{
+										computeUnits: 1_000_000,
+									}
+								)
 								.then((txResult) => {
 									logger.info(
 										`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
 									);
+								})
+								.catch((e) => {
+									if (e.logs && e.logs.length > 0) {
+										let noArbOpError = false;
+										for (const log of e.logs) {
+											if (log.includes('NoArbOpportunity')) {
+												noArbOpError = true;
+												break;
+											}
+										}
+										console.error(`Not no arb opp error:\n`);
+										console.error(e);
+									} else {
+										console.error(`Caught unknown error:\n`);
+										console.error(e);
+									}
 								});
 						} catch (e) {
 							if (e instanceof Error) {
