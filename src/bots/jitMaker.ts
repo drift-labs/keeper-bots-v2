@@ -71,6 +71,7 @@ const JUPITER_SLIPPAGE_BPS = 10;
 /// this is the slippage away from the oracle price that we're willing to tolerate.
 /// i.e. we don't want to buy 50 bps above oracle, or sell 50 bps below oracle
 const JUPITER_ORACLE_SLIPPAGE_BPS = 50;
+const BASE_PCT_DEVIATION_BEFORE_HEDGE = 0.1;
 
 /**
  * This is an example of a bot that implements the Bot interface.
@@ -342,7 +343,8 @@ export class JitMaker implements Bot {
 								driftUser,
 								perpMarketIndex,
 								spotMarketIndex,
-								maxSize //todo: $200-$400 max rebalance to start
+								maxSize, //todo: $200-$400 max rebalance to start
+								maxBase * BASE_PCT_DEVIATION_BEFORE_HEDGE
 							);
 						}
 					}
@@ -424,7 +426,8 @@ export class JitMaker implements Bot {
 		u: User,
 		perpIndex: number,
 		spotIndex: number,
-		maxDollarSize = 0
+		maxDollarSize = 0,
+		baseDeltaBeforeHedge = 0
 	) {
 		const perpMarketAccount = driftClient.getPerpMarketAccount(perpIndex);
 		const spotMarketAccount = driftClient.getSpotMarketAccount(spotIndex);
@@ -453,12 +456,11 @@ export class JitMaker implements Bot {
 				uSpotPosition.balanceType
 			);
 		}
-		const spotSizeNum = convertToNumber(
-			spotSize,
-			new BN(10 ** spotMarketAccount.decimals)
-		);
+		const spotPrecision = new BN(10 ** spotMarketAccount.decimals);
+		const spotSizeNum = convertToNumber(spotSize, spotPrecision);
 		const perpSizeNum = convertToNumber(perpSize, BASE_PRECISION);
 		const mismatch = perpSizeNum + spotSizeNum;
+		const mismatchThreshold = baseDeltaBeforeHedge;
 
 		const lastOraclePrice = convertToNumber(
 			perpMarketAccount.amm.historicalOracleData.lastOraclePrice,
@@ -466,7 +468,10 @@ export class JitMaker implements Bot {
 		);
 
 		// only do $10
-		if (Math.abs(mismatch * lastOraclePrice) > 10) {
+		if (
+			Math.abs(mismatch) > Math.abs(mismatchThreshold) &&
+			Math.abs(mismatch * lastOraclePrice) > 10
+		) {
 			let tradeSize;
 
 			const direction =
