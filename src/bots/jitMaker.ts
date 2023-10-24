@@ -157,7 +157,7 @@ export class JitMaker implements Bot {
 		this.intervalIds = [];
 	}
 
-	public async startIntervalLoop(intervalMs: number): Promise<void> {
+	public async startIntervalLoop(intervalMs?: number): Promise<void> {
 		const intervalId = setInterval(
 			this.runPeriodicTasks.bind(this),
 			intervalMs

@@ -188,7 +188,7 @@ export class FloatingPerpMakerBot implements Bot {
 		this.intervalIds = [];
 	}
 
-	public async startIntervalLoop(intervalMs: number) {
+	public async startIntervalLoop(intervalMs?: number) {
 		await this.updateOpenOrders();
 		const intervalId = setInterval(
 			this.updateOpenOrders.bind(this),

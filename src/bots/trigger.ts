@@ -179,7 +179,7 @@ export class TriggerBot implements Bot {
 		await this.userMap!.unsubscribe();
 	}
 
-	public async startIntervalLoop(intervalMs: number): Promise<void> {
+	public async startIntervalLoop(intervalMs?: number): Promise<void> {
 		this.tryTrigger();
 		const intervalId = setInterval(this.tryTrigger.bind(this), intervalMs);
 		this.intervalIds.push(intervalId);

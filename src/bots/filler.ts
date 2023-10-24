@@ -571,7 +571,7 @@ export class FillerBot implements Bot {
 		await this.userStatsMap!.unsubscribe();
 	}
 
-	public async startIntervalLoop(_intervalMs: number) {
+	public async startIntervalLoop(_intervalMs?: number) {
 		const intervalId = setInterval(
 			this.tryFill.bind(this),
 			this.pollingIntervalMs
