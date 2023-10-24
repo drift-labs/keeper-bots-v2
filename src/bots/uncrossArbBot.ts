@@ -161,7 +161,7 @@ export class UncrossArbBot implements Bot {
 						driftUser.userAccountPublicKey
 					);
 					if (!bestDriftBid || !bestDriftAsk) {
-						return;
+						break;
 					}
 
 					const currentSlot = this.slotSubscriber.getSlot();
@@ -230,7 +230,6 @@ export class UncrossArbBot implements Bot {
 					}
 				}
 
-				await sleepMs(100);
 				console.log(`done: ${Date.now() - start}ms`);
 				ran = true;
 			});
