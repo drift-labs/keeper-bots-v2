@@ -114,7 +114,7 @@ export class TwapExecutionProgress {
 export interface Bot {
 	readonly name: string;
 	readonly dryRun: boolean;
-	readonly defaultIntervalMs: number;
+	readonly defaultIntervalMs?: number;
 
 	/**
 	 * Initialize the bot
@@ -129,7 +129,7 @@ export interface Bot {
 	/**
 	 * Start the bot loop. This is generally a polling loop.
 	 */
-	startIntervalLoop: (intervalMs: number) => Promise<void>;
+	startIntervalLoop: (intervalMs?: number) => Promise<void>;
 
 	/**
 	 * Returns true if bot is healthy, else false. Typically used for monitoring liveness.

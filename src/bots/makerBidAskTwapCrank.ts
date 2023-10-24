@@ -19,7 +19,10 @@ import {
 	AddressLookupTableAccount,
 	PublicKey,
 } from '@solana/web3.js';
+import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
+
+const CRANK_TX_MARKET_CHUNK_SIZE = 7; // empiracal tx sizes: [869, 1039, 1143] bytes
 
 export async function sendVersionedTransaction(
 	driftClient: DriftClient,
@@ -54,7 +57,11 @@ export class MakerBidAskTwapCrank implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly runOnce: boolean;
-	public readonly defaultIntervalMs: number = 60000 * 5; // once every 5 minute
+	public readonly defaultIntervalMs?: number = undefined;
+
+	private crankIntervalToMarketIds?: { [key: number]: number[] }; // Object from number to array of numbers
+	private allCrankIntervalGroups?: number[];
+	private maxIntervalGroup?: number; // tracks the max interval group for health checking
 
 	private slotSubscriber: SlotSubscriber;
 	private driftClient: DriftClient;
@@ -73,7 +80,8 @@ export class MakerBidAskTwapCrank implements Bot {
 		slotSubscriber: SlotSubscriber,
 		userMap: UserMap,
 		config: BaseBotConfig,
-		runOnce: boolean
+		runOnce: boolean,
+		crankIntervalToMarketIds?: { [key: number]: number[] }
 	) {
 		this.slotSubscriber = slotSubscriber;
 		this.name = config.botId;
@@ -81,6 +89,13 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.runOnce = runOnce;
 		this.driftClient = driftClient;
 		this.userMap = userMap;
+		this.crankIntervalToMarketIds = crankIntervalToMarketIds;
+		if (this.crankIntervalToMarketIds) {
+			this.allCrankIntervalGroups = Object.keys(
+				this.crankIntervalToMarketIds
+			).map((x) => parseInt(x));
+			this.maxIntervalGroup = Math.max(...this.allCrankIntervalGroups!);
+		}
 	}
 
 	public async init() {
@@ -98,13 +113,19 @@ export class MakerBidAskTwapCrank implements Bot {
 		await this.userMap?.unsubscribe();
 	}
 
-	public async startIntervalLoop(intervalMs: number): Promise<void> {
+	public async startIntervalLoop(_intervalMs?: number): Promise<void> {
 		logger.info(`${this.name} Bot started!`);
 		if (this.runOnce) {
-			await this.tryTwapCrank();
+			await this.tryTwapCrank(null);
 		} else {
-			const intervalId = setInterval(this.tryTwapCrank.bind(this), intervalMs);
-			this.intervalIds.push(intervalId);
+			// start an interval for each crank interval
+			for (const intervalGroup of this.allCrankIntervalGroups!) {
+				const intervalId = setInterval(
+					this.tryTwapCrank.bind(this, intervalGroup),
+					intervalGroup
+				);
+				this.intervalIds.push(intervalId);
+			}
 		}
 	}
 
@@ -112,7 +133,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
 			healthy =
-				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+				this.watchdogTimerLastPatTime > Date.now() - 2 * this.maxIntervalGroup!;
 		});
 		return healthy;
 	}
@@ -151,16 +172,21 @@ export class MakerBidAskTwapCrank implements Bot {
 		return combinedList;
 	}
 
-	private async tryTwapCrank() {
-		await this.init();
+	private async tryTwapCrank(intervalGroup: number | null) {
 		await this.initDlob();
 
-		const state = await this.driftClient.getStateAccount();
+		const state = this.driftClient.getStateAccount();
 
-		const crankMarkets: number[] = Array.from(
-			{ length: state.numberOfMarkets },
-			(_, index) => index
-		);
+		let crankMarkets: number[] = [];
+		if (intervalGroup === null) {
+			crankMarkets = Array.from(
+				{ length: state.numberOfMarkets },
+				(_, index) => index
+			);
+		} else {
+			crankMarkets = this.crankIntervalToMarketIds![intervalGroup]!;
+		}
+		logger.info(`Cranking interval group ${intervalGroup}: ${crankMarkets}`);
 
 		// Function to split the list into chunks
 		function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
@@ -171,15 +197,15 @@ export class MakerBidAskTwapCrank implements Bot {
 			return chunks;
 		}
 
-		// 4 is too large some times with error:
-		// SendTransactionError: failed to send transaction: encoded solana_sdk::transaction::versioned::VersionedTransaction too large: 1664 bytes (max: encoded/raw 1644/1232)
-		const chunkSize = 3;
-		const chunkedLists: number[][] = chunkArray(crankMarkets, chunkSize);
+		const allChunks: number[][] = chunkArray(
+			crankMarkets,
+			CRANK_TX_MARKET_CHUNK_SIZE
+		);
 
-		for (const chunk of chunkedLists) {
+		for (const chunkOfMarketIndicies of allChunks) {
 			const ixs = [];
-			for (let i = 0; i < chunk.length; i++) {
-				const mi = chunk[i];
+			for (let i = 0; i < chunkOfMarketIndicies.length; i++) {
+				const mi = chunkOfMarketIndicies[i];
 
 				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
 
@@ -217,33 +243,28 @@ export class MakerBidAskTwapCrank implements Bot {
 				ixs.push(ix);
 			}
 
-			const chunkedTx = await promiseTimeout(
-				this.driftClient.txSender.getVersionedTransaction(
-					ixs,
-					[this.lookupTableAccount!],
-					[],
-					this.driftClient.opts
-				),
-				5000
-			);
-			if (chunkedTx === null) {
-				logger.error(`Timed out getting versioned Transaction for tx chunk`);
-				return;
-			}
-
 			try {
 				const txSig = await sendVersionedTransaction(
 					this.driftClient,
-					chunkedTx,
+					await this.driftClient.txSender.getVersionedTransaction(
+						ixs,
+						[this.lookupTableAccount!],
+						[],
+						this.driftClient.opts
+					),
 					[],
-					// {}, // { skipPreflight: true },
 					this.driftClient.opts,
 					5000
 				);
 
 				logger.info(`https://solscan.io/tx/${txSig}`);
-			} catch (e) {
+			} catch (e: any) {
 				console.error(e);
+				await webhookMessage(
+					`[${this.name}] failed to crank funding rate:\n${
+						e.logs ? (e.logs as Array<string>).join('\n') : ''
+					} \n${e.stack ? e.stack : e.message}`
+				);
 			}
 		}
 	}

@@ -49,7 +49,7 @@ export class IFRevenueSettlerBot implements Bot {
 		this.intervalIds = [];
 	}
 
-	public async startIntervalLoop(intervalMs: number): Promise<void> {
+	public async startIntervalLoop(intervalMs?: number): Promise<void> {
 		logger.info(`${this.name} Bot started!`);
 		if (this.runOnce) {
 			await this.trySettleIFRevenue();

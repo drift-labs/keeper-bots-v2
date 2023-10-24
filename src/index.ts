@@ -581,7 +581,8 @@ const runBot = async () => {
 				slotSubscriber,
 				userMap,
 				config.botConfigs!.markTwapCrank!,
-				config.global.runOnce ?? false
+				config.global.runOnce ?? false,
+				config.botConfigs!.markTwapCrank!.crankIntervalToMarketIndicies
 			)
 		);
 	}

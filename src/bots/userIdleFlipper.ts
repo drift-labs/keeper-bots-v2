@@ -61,7 +61,7 @@ export class UserIdleFlipperBot implements Bot {
 		await this.userMap?.unsubscribe();
 	}
 
-	public async startIntervalLoop(intervalMs: number): Promise<void> {
+	public async startIntervalLoop(intervalMs?: number): Promise<void> {
 		logger.info(`${this.name} Bot started!`);
 		if (this.runOnce) {
 			await this.tryIdleUsers();

@@ -563,7 +563,7 @@ export class LiquidatorBot implements Bot {
 		await this.userMap!.unsubscribe();
 	}
 
-	public async startIntervalLoop(intervalMs: number): Promise<void> {
+	public async startIntervalLoop(intervalMs?: number): Promise<void> {
 		this.tryLiquidateStart();
 		const intervalId = setInterval(
 			this.tryLiquidateStart.bind(this),
@@ -574,7 +574,7 @@ export class LiquidatorBot implements Bot {
 		if (!this.disableAutoDerisking) {
 			const deRiskIntervalId = setInterval(
 				this.derisk.bind(this),
-				3.3 * intervalMs
+				3.3 * intervalMs!
 			); // try to make it not overlap with the normal liquidation loop
 			this.intervalIds.push(deRiskIntervalId);
 		}
