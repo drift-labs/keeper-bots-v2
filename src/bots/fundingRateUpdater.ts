@@ -56,7 +56,8 @@ function onTheHourUpdate(
 export class FundingRateUpdaterBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
-	public readonly defaultIntervalMs: number = 600000;
+	public readonly runOnce: boolean;
+	public readonly defaultIntervalMs: number = 120000; // run every 2 min
 
 	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
@@ -68,6 +69,7 @@ export class FundingRateUpdaterBot implements Bot {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
+		this.runOnce = config.runOnce ?? false;
 	}
 
 	public async init() {
@@ -81,10 +83,18 @@ export class FundingRateUpdaterBot implements Bot {
 		this.intervalIds = [];
 	}
 
-	public async startIntervalLoop(_intervalMs?: number): Promise<void> {
-		logger.info(`${this.name} Bot started!`);
-		await this.tryUpdateFundingRate();
-		// we don't want to run this repeatedly
+	public async startIntervalLoop(intervalMs?: number): Promise<void> {
+		logger.info(`${this.name} Bot started! runOnce ${this.runOnce}`);
+
+		if (this.runOnce) {
+			await this.tryUpdateFundingRate();
+		} else {
+			const intervalId = setInterval(
+				this.tryUpdateFundingRate.bind(this),
+				intervalMs
+			);
+			this.intervalIds.push(intervalId);
+		}
 	}
 
 	public async healthCheck(): Promise<boolean> {

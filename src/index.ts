@@ -660,15 +660,6 @@ const runBot = async () => {
 		);
 	}
 
-	if (configHasBot(config, 'fundingRateUpdater')) {
-		bots.push(
-			new FundingRateUpdaterBot(
-				driftClient,
-				config.botConfigs!.fundingRateUpdater!
-			)
-		);
-	}
-
 	if (configHasBot(config, 'uncrossArb')) {
 		await userMap.subscribe();
 		const jitProxyClient = new JitProxyClient({
