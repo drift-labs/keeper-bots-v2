@@ -11,6 +11,7 @@ import {
 	SlotSubscriber,
 	MakerInfo,
 	getUserStatsAccountPublicKey,
+	PriorityFeeCalculator,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -24,10 +25,7 @@ import dotenv = require('dotenv');
 
 dotenv.config();
 import { BaseBotConfig } from 'src/config';
-import {
-	AddressLookupTableAccount,
-	ComputeBudgetProgram,
-} from '@solana/web3.js';
+import { AddressLookupTableAccount } from '@solana/web3.js';
 
 const TARGET_LEVERAGE_PER_ACCOUNT = 1;
 
@@ -53,6 +51,7 @@ export class UncrossArbBot implements Bot {
 	private dlobSubscriber: DLOBSubscriber;
 	private slotSubscriber: SlotSubscriber;
 	private userMap: UserMap;
+	private priorityFeeCalculator: PriorityFeeCalculator;
 
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
@@ -69,6 +68,8 @@ export class UncrossArbBot implements Bot {
 		this.driftEnv = driftEnv;
 		this.slotSubscriber = slotSubscriber;
 		this.userMap = userMap;
+
+		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
@@ -223,18 +224,27 @@ export class UncrossArbBot implements Bot {
 								)} Ask: $${bestAskPrice.toFixed(4)} `
 							);
 							if (!this.dryRun) {
+								const usePriorityFee =
+									this.priorityFeeCalculator.updatePriorityFee(
+										Date.now(),
+										this.driftClient.txSender.getTimeoutCount()
+									);
+								const ixs =
+									this.priorityFeeCalculator.generateComputeBudgetWithPriorityFeeIx(
+										1_000_000,
+										usePriorityFee,
+										1_000_000_000 // 1000 lamports
+									);
+								ixs.push(
+									await this.jitProxyClient.getArbPerpIx({
+										marketIndex: perpIdx,
+										makerInfos: [bidMakerInfo, askMakerInfo],
+									})
+								);
 								this.driftClient.txSender
 									.sendVersionedTransaction(
 										await this.driftClient.txSender.getVersionedTransaction(
-											[
-												ComputeBudgetProgram.setComputeUnitLimit({
-													units: 1_000_000,
-												}),
-												await this.jitProxyClient.getArbPerpIx({
-													marketIndex: perpIdx,
-													makerInfos: [bidMakerInfo, askMakerInfo],
-												}),
-											],
+											ixs,
 											[this.lookupTableAccount!],
 											[],
 											this.driftClient.opts
