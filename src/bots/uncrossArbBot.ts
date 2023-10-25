@@ -88,6 +88,10 @@ export class UncrossArbBot implements Bot {
 	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
 
+		if (this.dryRun) {
+			logger.warn(`${this.name} on DRY RUN. Will not place any transactions.`);
+		}
+
 		await this.dlobSubscriber.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
@@ -215,46 +219,57 @@ export class UncrossArbBot implements Bot {
 						2 * driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
 					) {
 						try {
-							this.driftClient.txSender
-								.sendVersionedTransaction(
-									await this.driftClient.txSender.getVersionedTransaction(
-										[
-											ComputeBudgetProgram.setComputeUnitLimit({
-												units: 1_000_000,
-											}),
-											await this.jitProxyClient.getArbPerpIx({
-												marketIndex: perpIdx,
-												makerInfos: [bidMakerInfo, askMakerInfo],
-											}),
-										],
-										[this.lookupTableAccount!],
+							logger.info(
+								`Found arb opportunity @ midPrice $${midPrice.toFixed(
+									4
+								)} between Bid: $${bestBidPrice.toFixed(
+									4
+								)} Ask: $${bestAskPrice.toFixed(4)} `
+							);
+							if (!this.dryRun) {
+								this.driftClient.txSender
+									.sendVersionedTransaction(
+										await this.driftClient.txSender.getVersionedTransaction(
+											[
+												ComputeBudgetProgram.setComputeUnitLimit({
+													units: 1_000_000,
+												}),
+												await this.jitProxyClient.getArbPerpIx({
+													marketIndex: perpIdx,
+													makerInfos: [bidMakerInfo, askMakerInfo],
+												}),
+											],
+											[this.lookupTableAccount!],
+											[],
+											this.driftClient.opts
+										),
 										[],
 										this.driftClient.opts
-									),
-									[],
-									this.driftClient.opts
-								)
-								.then((txResult) => {
-									logger.info(
-										`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
-									);
-								})
-								.catch((e) => {
-									if (e.logs && e.logs.length > 0) {
-										let noArbOpError = false;
-										for (const log of e.logs) {
-											if (log.includes('NoArbOpportunity')) {
-												noArbOpError = true;
-												break;
+									)
+									.then((txResult) => {
+										logger.info(
+											`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
+										);
+									})
+									.catch((e) => {
+										if (e.logs && e.logs.length > 0) {
+											let noArbOpError = false;
+											for (const log of e.logs) {
+												if (log.includes('NoArbOpportunity')) {
+													noArbOpError = true;
+													break;
+												}
 											}
+											console.error(`Not no arb opp error:\n`);
+											console.error(e);
+										} else {
+											console.error(`Caught unknown error:\n`);
+											console.error(e);
 										}
-										console.error(`Not no arb opp error:\n`);
-										console.error(e);
-									} else {
-										console.error(`Caught unknown error:\n`);
-										console.error(e);
-									}
-								});
+									});
+							} else {
+								logger.warn(`DRY RUN - Did not place any transactions`);
+							}
 						} catch (e) {
 							if (e instanceof Error) {
 								logger.error(
