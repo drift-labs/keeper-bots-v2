@@ -123,8 +123,12 @@ export class IFRevenueSettlerBot implements Bot {
 				i < this.driftClient.getSpotMarketAccounts().length;
 				i++
 			) {
-				const spotIf = spotMarketAndOracleData[i].marketAccount.insuranceFund;
-				if (spotIf.revenueSettlePeriod.eq(ZERO)) {
+				const spotMarketAccount = spotMarketAndOracleData[i].marketAccount;
+				const spotIf = spotMarketAccount.insuranceFund;
+				if (
+					spotIf.revenueSettlePeriod.eq(ZERO) ||
+					spotMarketAccount.revenuePool.scaledBalance.eq(ZERO)
+				) {
 					continue;
 				}
 				const currentTs = Date.now() / 1000;
