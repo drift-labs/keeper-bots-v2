@@ -22,7 +22,7 @@ import {
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
 
-const CRANK_TX_MARKET_CHUNK_SIZE = 7; // empiracal tx sizes: [869, 1039, 1143] bytes
+const CRANK_TX_MARKET_CHUNK_SIZE = 6;
 
 export async function sendVersionedTransaction(
 	driftClient: DriftClient,
