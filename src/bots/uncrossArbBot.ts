@@ -27,6 +27,11 @@ import dotenv = require('dotenv');
 
 dotenv.config();
 import { BaseBotConfig } from 'src/config';
+import {
+	AddressLookupTableAccount,
+	ComputeBudgetInstruction,
+	ComputeBudgetProgram,
+} from '@solana/web3.js';
 
 const TARGET_LEVERAGE_PER_ACCOUNT = 1;
 
@@ -43,7 +48,7 @@ export class UncrossArbBot implements Bot {
 
 	private jitProxyClient: JitProxyClient;
 	private driftClient: DriftClient;
-	// private subaccountConfig: SubaccountConfig;
+	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
 
 	private watchdogTimerMutex = new Mutex();
@@ -84,6 +89,8 @@ export class UncrossArbBot implements Bot {
 		logger.info(`${this.name} initing`);
 
 		await this.dlobSubscriber.subscribe();
+		this.lookupTableAccount =
+			await this.driftClient.fetchMarketLookupTableAccount();
 
 		logger.info(`${this.name} init done`);
 	}
@@ -208,15 +215,24 @@ export class UncrossArbBot implements Bot {
 						2 * driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
 					) {
 						try {
-							this.jitProxyClient
-								.arbPerp(
-									{
-										marketIndex: perpIdx,
-										makerInfos: [bidMakerInfo, askMakerInfo],
-									},
-									{
-										computeUnits: 1_000_000,
-									}
+							this.driftClient.txSender
+								.sendVersionedTransaction(
+									await this.driftClient.txSender.getVersionedTransaction(
+										[
+											ComputeBudgetProgram.setComputeUnitLimit({
+												units: 1_000_000,
+											}),
+											await this.jitProxyClient.getArbPerpIx({
+												marketIndex: perpIdx,
+												makerInfos: [bidMakerInfo, askMakerInfo],
+											}),
+										],
+										[this.lookupTableAccount!],
+										[],
+										this.driftClient.opts
+									),
+									[],
+									this.driftClient.opts
 								)
 								.then((txResult) => {
 									logger.info(
