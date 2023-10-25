@@ -227,18 +227,19 @@ export class JitMaker implements Bot {
 					}
 
 					this.jitter.setUserFilter((userAccount, userKey) => {
-						const skip = userKey == driftUser.userAccountPublicKey.toBase58();
+						let skip = userKey == driftUser.userAccountPublicKey.toBase58();
 
-						// if (
-						// 	isMarketVolatile(
-						// 		perpMarketAccount,
-						// 		oraclePriceData,
-						// 		0.01 // 100 bps
-						// 	)
-						// ) {
-						// 	console.log('skipping, market is volatile');
-						// 	skip = true;
-						// }
+						if (
+							isMarketVolatile(
+								perpMarketAccount,
+								oraclePriceData,
+								0.015 // 150 bps
+							)
+						) {
+							console.log('skipping, market is volatile');
+							skip = true;
+						}
+
 						if (skip) {
 							console.log('skipping user:', userKey);
 						}
@@ -309,8 +310,8 @@ export class JitMaker implements Bot {
 					const askOffset = bestAskPrice.sub(oraclePriceData.price);
 
 					this.jitter.updatePerpParams(perpMarketIndex, {
-						maxPosition: new BN(maxBase * BASE_PRECISION.toNumber()),
-						minPosition: new BN(-maxBase * BASE_PRECISION.toNumber()),
+						maxPosition: new BN((maxBase / 20) * BASE_PRECISION.toNumber()),
+						minPosition: new BN((-maxBase / 20) * BASE_PRECISION.toNumber()),
 						bid: bidOffset,
 						ask: askOffset,
 						priceType: PriceType.ORACLE,
@@ -325,8 +326,8 @@ export class JitMaker implements Bot {
 							spotMarketAccount.decimals
 						);
 						this.jitter.updateSpotParams(spotMarketIndex, {
-							maxPosition: new BN(maxBase * spotMarketPrecision),
-							minPosition: new BN(-maxBase * spotMarketPrecision),
+							maxPosition: new BN((maxBase / 20) * spotMarketPrecision),
+							minPosition: new BN((-maxBase / 20) * spotMarketPrecision),
 							bid: BN.min(bidOffset, new BN(-1)),
 							ask: BN.max(askOffset, new BN(1)),
 							priceType: PriceType.ORACLE,
@@ -393,9 +394,9 @@ export class JitMaker implements Bot {
 					marketIndex: perpMarketAccount.marketIndex,
 					// orderType: OrderType.LIMIT,
 					direction: PositionDirection.LONG,
-					baseAssetAmount: perpMarketAccount.amm.orderStepSize.mul(new BN(123)),
+					baseAssetAmount: perpMarketAccount.amm.orderStepSize.mul(new BN(5)),
 					oraclePriceOffset: markOffset
-						.sub(perpMarketAccount.amm.orderTickSize.mul(new BN(3)))
+						.sub(perpMarketAccount.amm.orderTickSize.mul(new BN(15)))
 						.toNumber(), // limit bid below oracle
 					price: ZERO,
 					postOnly: PostOnlyParams.TRY_POST_ONLY,
@@ -407,10 +408,10 @@ export class JitMaker implements Bot {
 					marketIndex: perpMarketAccount.marketIndex,
 					// orderType: OrderType.LIMIT,
 					direction: PositionDirection.SHORT,
-					baseAssetAmount: perpMarketAccount.amm.orderStepSize.mul(new BN(123)),
+					baseAssetAmount: perpMarketAccount.amm.orderStepSize.mul(new BN(5)),
 					oraclePriceOffset: BN.max(
 						PRICE_PRECISION.div(new BN(150)),
-						markOffset.add(perpMarketAccount.amm.orderTickSize.mul(new BN(3)))
+						markOffset.add(perpMarketAccount.amm.orderTickSize.mul(new BN(15)))
 					).toNumber(), // limit bid below oracle
 					price: ZERO,
 					postOnly: PostOnlyParams.TRY_POST_ONLY,
