@@ -256,8 +256,7 @@ export class UncrossArbBot implements Bot {
 													break;
 												}
 											}
-											console.error(`Not no arb opp error:\n`);
-											console.error(e);
+											console.error(`NoArbOpportunity error`);
 										} else {
 											console.error(`Caught unknown error:\n`);
 											console.error(e);
