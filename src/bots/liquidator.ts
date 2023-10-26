@@ -1996,24 +1996,26 @@ tx: ${tx} `
 									`Error liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePosition.marketIndex} `
 								);
 								console.error(e);
-								webhookMessage(
-									`[${
-										this.name
-									}]: :x: Error liquidating auth: ${auth}, user: ${userKey} on market ${
-										liquidateePosition.marketIndex
-									} \n${e.logs ? (e.logs as Array<string>).join('\n') : ''} \n${
-										e.stack || e
-									} `
-								);
+
+								const errorCode = getErrorCode(e);
+								if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
+									webhookMessage(
+										`[${
+											this.name
+										}]: :x: Error liquidatePerp'ing auth: ${auth}, user: ${userKey} on market ${
+											liquidateePosition.marketIndex
+										} \n${
+											e.logs ? (e.logs as Array<string>).join('\n') : ''
+										} \n${e.stack || e} `
+									);
+								}
 							})
 							.finally(() => {
 								this.sdkCallDurationHistogram!.record(Date.now() - start, {
 									method: 'liquidatePerp',
 								});
 							});
-					}
-
-					if (liquidateeHasLpPos) {
+					} else if (liquidateeHasLpPos) {
 						logger.info(
 							`liquidatePerp ${auth}-${user.userAccountPublicKey.toBase58()} on market ${
 								liquidateePosition.marketIndex
@@ -2037,6 +2039,18 @@ tx: ${tx} `
 								logger.error(
 									`Error liquidating auth: ${auth}, user: ${userKey} on market ${liquidateePosition.marketIndex}\n${e}`
 								);
+								const errorCode = getErrorCode(e);
+								if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
+									webhookMessage(
+										`[${
+											this.name
+										}]: :x: Error liquidatePerp'ing auth (with no pos, but has lp shares): ${auth}, user: ${userKey} on market ${
+											liquidateePosition.marketIndex
+										} \n${
+											e.logs ? (e.logs as Array<string>).join('\n') : ''
+										} \n${e.stack || e} `
+									);
+								}
 							});
 					}
 				}
