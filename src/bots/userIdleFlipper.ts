@@ -17,7 +17,6 @@ import {
 } from '@solana/web3.js';
 
 const USER_IDLE_CHUNKS = 9;
-const SLOTS_BEFORE_IDLE = 1512000; // from validate_user_is_idle()
 
 export class UserIdleFlipperBot implements Bot {
 	public readonly name: string;
@@ -83,10 +82,9 @@ export class UserIdleFlipperBot implements Bot {
 	private async tryIdleUsers() {
 		try {
 			const currentSlot = await this.driftClient.connection.getSlot();
-			const slotsBeforeIdle = new BN(SLOTS_BEFORE_IDLE);
 			const usersToIdle: Array<[PublicKey, UserAccount]> = [];
 			for (const user of this.userMap.values()) {
-				if (user.canMakeIdle(new BN(currentSlot), slotsBeforeIdle)) {
+				if (user.canMakeIdle(new BN(currentSlot))) {
 					usersToIdle.push([
 						user.getUserAccountPublicKey(),
 						user.getUserAccount(),
