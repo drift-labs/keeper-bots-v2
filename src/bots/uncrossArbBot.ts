@@ -258,14 +258,16 @@ export class UncrossArbBot implements Bot {
 										);
 									})
 									.catch((e) => {
+										let noArbOpError = false;
 										if (e.logs && e.logs.length > 0) {
-											let noArbOpError = false;
 											for (const log of e.logs) {
 												if (log.includes('NoArbOpportunity')) {
 													noArbOpError = true;
 													break;
 												}
 											}
+										}
+										if (noArbOpError) {
 											console.error(`NoArbOpportunity error`);
 										} else {
 											console.error(`Caught unknown error:\n`);
