@@ -26,6 +26,10 @@ export type FillerConfig = BaseBotConfig & {
 	revertOnFailure?: boolean;
 };
 
+export type UncrossArbBotConfig = BaseBotConfig & {
+	feeMultiplier?: number;
+};
+
 export type SubaccountConfig = {
 	[key: number]: Array<number>;
 };

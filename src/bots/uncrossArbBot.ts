@@ -24,7 +24,7 @@ import { JitProxyClient } from '@drift-labs/jit-proxy/lib';
 import dotenv = require('dotenv');
 
 dotenv.config();
-import { BaseBotConfig } from 'src/config';
+import { UncrossArbBotConfig } from 'src/config';
 import { AddressLookupTableAccount } from '@solana/web3.js';
 
 const TARGET_LEVERAGE_PER_ACCOUNT = 1;
@@ -53,12 +53,14 @@ export class UncrossArbBot implements Bot {
 	private userMap: UserMap;
 	private priorityFeeCalculator: PriorityFeeCalculator;
 
+	private feeMultiplier: number;
+
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
 		jitProxyClient: JitProxyClient,
 		slotSubscriber: SlotSubscriber,
 		userMap: UserMap,
-		config: BaseBotConfig,
+		config: UncrossArbBotConfig,
 		driftEnv: DriftEnv
 	) {
 		this.jitProxyClient = jitProxyClient;
@@ -68,6 +70,7 @@ export class UncrossArbBot implements Bot {
 		this.driftEnv = driftEnv;
 		this.slotSubscriber = slotSubscriber;
 		this.userMap = userMap;
+		this.feeMultiplier = config.feeMultiplier ?? 1;
 
 		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
 
@@ -87,6 +90,14 @@ export class UncrossArbBot implements Bot {
 
 		if (this.dryRun) {
 			logger.warn(`${this.name} on DRY RUN. Will not place any transactions.`);
+		}
+
+		if (this.feeMultiplier != 1) {
+			logger.info(
+				`${this.name} using ${this.feeMultiplier.toFixed(
+					2
+				)} as a fee multiplier`
+			);
 		}
 
 		await this.dlobSubscriber.subscribe();
@@ -213,7 +224,9 @@ export class UncrossArbBot implements Bot {
 					const midPrice = (bestBidPrice + bestAskPrice) / 2;
 					if (
 						(bestBidPrice - bestAskPrice) / midPrice >
-						2 * driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
+						this.feeMultiplier *
+							2 *
+							driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
 					) {
 						try {
 							logger.info(
