@@ -53,6 +53,15 @@ export async function sendVersionedTransaction(
 	return txid;
 }
 
+/// split the list into chunks
+function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
+	const chunks: T[][] = [];
+	for (let i = 0; i < arr.length; i += chunkSize) {
+		chunks.push(arr.slice(i, i + chunkSize));
+	}
+	return chunks;
+}
+
 export class MakerBidAskTwapCrank implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
@@ -173,99 +182,107 @@ export class MakerBidAskTwapCrank implements Bot {
 	}
 
 	private async tryTwapCrank(intervalGroup: number | null) {
-		await this.initDlob();
+		try {
+			await this.initDlob();
 
-		const state = this.driftClient.getStateAccount();
+			const state = this.driftClient.getStateAccount();
 
-		let crankMarkets: number[] = [];
-		if (intervalGroup === null) {
-			crankMarkets = Array.from(
-				{ length: state.numberOfMarkets },
-				(_, index) => index
+			let crankMarkets: number[] = [];
+			if (intervalGroup === null) {
+				crankMarkets = Array.from(
+					{ length: state.numberOfMarkets },
+					(_, index) => index
+				);
+			} else {
+				crankMarkets = this.crankIntervalToMarketIds![intervalGroup]!;
+			}
+			logger.info(`Cranking interval group ${intervalGroup}: ${crankMarkets}`);
+
+			const allChunks: number[][] = chunkArray(
+				crankMarkets,
+				CRANK_TX_MARKET_CHUNK_SIZE
 			);
-		} else {
-			crankMarkets = this.crankIntervalToMarketIds![intervalGroup]!;
-		}
-		logger.info(`Cranking interval group ${intervalGroup}: ${crankMarkets}`);
 
-		// Function to split the list into chunks
-		function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
-			const chunks: T[][] = [];
-			for (let i = 0; i < arr.length; i += chunkSize) {
-				chunks.push(arr.slice(i, i + chunkSize));
-			}
-			return chunks;
-		}
+			for (const chunkOfMarketIndicies of allChunks) {
+				const ixs = [];
+				for (let i = 0; i < chunkOfMarketIndicies.length; i++) {
+					const mi = chunkOfMarketIndicies[i];
 
-		const allChunks: number[][] = chunkArray(
-			crankMarkets,
-			CRANK_TX_MARKET_CHUNK_SIZE
-		);
+					const oraclePriceData =
+						this.driftClient.getOracleDataForPerpMarket(mi);
 
-		for (const chunkOfMarketIndicies of allChunks) {
-			const ixs = [];
-			for (let i = 0; i < chunkOfMarketIndicies.length; i++) {
-				const mi = chunkOfMarketIndicies[i];
+					const bidMakers = this.dlob!.getBestMakers({
+						marketIndex: mi,
+						marketType: MarketType.PERP,
+						direction: PositionDirection.LONG,
+						slot: this.latestDlobSlot!,
+						oraclePriceData,
+						numMakers: 5,
+					});
 
-				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
+					const askMakers = this.dlob!.getBestMakers({
+						marketIndex: mi,
+						marketType: MarketType.PERP,
+						direction: PositionDirection.LONG,
+						slot: this.latestDlobSlot!,
+						oraclePriceData,
+						numMakers: 5,
+					});
+					logger.info(
+						`loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
+					);
 
-				const bidMakers = this.dlob!.getBestMakers({
-					marketIndex: mi,
-					marketType: MarketType.PERP,
-					direction: PositionDirection.LONG,
-					slot: this.latestDlobSlot!,
-					oraclePriceData,
-					numMakers: 5,
-				});
+					const concatenatedList = [
+						...this.getCombinedList(bidMakers),
+						...this.getCombinedList(askMakers),
+					];
 
-				const askMakers = this.dlob!.getBestMakers({
-					marketIndex: mi,
-					marketType: MarketType.PERP,
-					direction: PositionDirection.LONG,
-					slot: this.latestDlobSlot!,
-					oraclePriceData,
-					numMakers: 5,
-				});
-				logger.info(
-					`loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
-				);
+					const ix = await this.driftClient.getUpdatePerpBidAskTwapIx(
+						mi,
+						concatenatedList as [PublicKey, PublicKey][]
+					);
 
-				const concatenatedList = [
-					...this.getCombinedList(bidMakers),
-					...this.getCombinedList(askMakers),
-				];
+					ixs.push(ix);
+				}
 
-				const ix = await this.driftClient.getUpdatePerpBidAskTwapIx(
-					mi,
-					concatenatedList as [PublicKey, PublicKey][]
-				);
-
-				ixs.push(ix);
-			}
-
-			try {
-				const txSig = await sendVersionedTransaction(
-					this.driftClient,
-					await this.driftClient.txSender.getVersionedTransaction(
-						ixs,
-						[this.lookupTableAccount!],
+				try {
+					const txSig = await sendVersionedTransaction(
+						this.driftClient,
+						await this.driftClient.txSender.getVersionedTransaction(
+							ixs,
+							[this.lookupTableAccount!],
+							[],
+							this.driftClient.opts
+						),
 						[],
-						this.driftClient.opts
-					),
-					[],
-					this.driftClient.opts,
-					5000
-				);
+						this.driftClient.opts,
+						5000
+					);
 
-				logger.info(`https://solscan.io/tx/${txSig}`);
-			} catch (e: any) {
-				console.error(e);
+					logger.info(`https://solscan.io/tx/${txSig}`);
+				} catch (e: any) {
+					console.error(e);
+					await webhookMessage(
+						`[${this.name}] failed to crank funding rate:\n${
+							e.logs ? (e.logs as Array<string>).join('\n') : ''
+						} \n${e.stack ? e.stack : e.message}`
+					);
+				}
+			}
+		} catch (e) {
+			console.error(e);
+			if (e instanceof Error) {
 				await webhookMessage(
-					`[${this.name}] failed to crank funding rate:\n${
-						e.logs ? (e.logs as Array<string>).join('\n') : ''
-					} \n${e.stack ? e.stack : e.message}`
+					`[${this.name}]: :x: uncaught error:\n${
+						e.stack ? e.stack : e.message
+					}`
 				);
 			}
+		} finally {
+			logger.info('tryTwapCrank finished');
+			await this.watchdogTimerMutex.runExclusive(async () => {
+				this.watchdogTimerLastPatTime = Date.now();
+			});
 		}
 	}
 }
