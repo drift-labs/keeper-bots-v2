@@ -16,7 +16,7 @@ import { logger } from '../logger';
 import { FillerConfig } from '../config';
 import { RuntimeSpec } from '../metrics';
 import { webhookMessage } from '../webhook';
-import { FillerBot } from './filler';
+import { FillerBot, SETTLE_POSITIVE_PNL_COOLDOWN_MS } from './filler';
 
 import { sleepMs } from '../utils';
 
@@ -80,11 +80,15 @@ export class FillerLiteBot extends FillerBot {
 	}
 
 	public async startIntervalLoop(_intervalMs?: number) {
-		const intervalId = setInterval(
-			this.tryFill.bind(this),
-			this.pollingIntervalMs
+		this.intervalIds.push(
+			setInterval(this.tryFill.bind(this), this.pollingIntervalMs)
 		);
-		this.intervalIds.push(intervalId);
+		this.intervalIds.push(
+			setInterval(
+				this.settlePnls.bind(this),
+				SETTLE_POSITIVE_PNL_COOLDOWN_MS / 2
+			)
+		);
 
 		logger.info(`${this.name} Bot started! (websocket: true)`);
 	}

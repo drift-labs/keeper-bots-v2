@@ -104,6 +104,10 @@ const FILL_ORDER_BACKOFF = 2000; // the time to wait before trying to a node in 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 
+const SETTLE_PNL_CHUNKS = 4;
+const MAX_POSITIONS_PER_USER = 8;
+export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
+
 const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
 	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
@@ -221,6 +225,7 @@ export class FillerBot implements Bot {
 	protected useBurstCULimit = false;
 	protected fillTxSinceBurstCU = 0;
 	protected fillTxId = 0;
+	protected lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 
 	protected priorityFeeCalculator: PriorityFeeCalculator;
 
@@ -572,11 +577,15 @@ export class FillerBot implements Bot {
 	}
 
 	public async startIntervalLoop(_intervalMs?: number) {
-		const intervalId = setInterval(
-			this.tryFill.bind(this),
-			this.pollingIntervalMs
+		this.intervalIds.push(
+			setInterval(this.tryFill.bind(this), this.pollingIntervalMs)
 		);
-		this.intervalIds.push(intervalId);
+		this.intervalIds.push(
+			setInterval(
+				this.settlePnls.bind(this),
+				SETTLE_POSITIVE_PNL_COOLDOWN_MS / 2
+			)
+		);
 
 		this.eventSubscriber?.eventEmitter.on(
 			'newEvent',
@@ -1749,6 +1758,72 @@ export class FillerBot implements Bot {
 		);
 	}
 
+	protected async settlePnls() {
+		const user = this.driftClient.getUser();
+		const marketIds = user
+			.getActivePerpPositions()
+			.map((pos) => pos.marketIndex);
+		const now = Date.now();
+		if (marketIds.length === MAX_POSITIONS_PER_USER) {
+			if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
+				logger.info(`Want to settle positive pnl, but in cooldown...`);
+			} else {
+				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
+				for (let i = 0; i < marketIds.length; i += SETTLE_PNL_CHUNKS) {
+					const marketIdChunks = marketIds.slice(i, i + SETTLE_PNL_CHUNKS);
+					try {
+						const ixs = [
+							ComputeBudgetProgram.setComputeUnitLimit({
+								units: 2_000_000,
+							}),
+						];
+						ixs.push(
+							...(await this.driftClient.getSettlePNLsIxs(
+								[
+									{
+										settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
+										settleeUserAccount: this.driftClient.getUserAccount()!,
+									},
+								],
+								marketIdChunks
+							))
+						);
+						settlePnlPromises.push(
+							this.driftClient.txSender.sendVersionedTransaction(
+								await this.driftClient.txSender.getVersionedTransaction(
+									ixs,
+									[this.lookupTableAccount!],
+									[],
+									this.driftClient.opts
+								),
+								[],
+								this.driftClient.opts
+							)
+						);
+					} catch (err) {
+						if (!(err instanceof Error)) {
+							return;
+						}
+						const errorCode = getErrorCode(err) ?? 0;
+						logger.error(
+							`Error code: ${errorCode} while settling pnls for markets ${JSON.stringify(
+								marketIds
+							)}: ${err.message}`
+						);
+						console.error(err);
+					}
+				}
+				const txs = await Promise.all(settlePnlPromises);
+				for (const tx of txs) {
+					logger.info(
+						`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
+					);
+				}
+				this.lastSettlePnl = now;
+			}
+		}
+	}
+
 	protected async tryFill() {
 		const startTime = Date.now();
 		let ran = false;
@@ -1794,6 +1869,8 @@ export class FillerBot implements Bot {
 					this.executeFillablePerpNodesForMarket(filteredFillableNodes),
 					this.executeTriggerablePerpNodesForMarket(filteredTriggerableNodes),
 				]);
+
+				// check if should settle positive pnl
 
 				ran = true;
 			});
