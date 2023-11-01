@@ -367,7 +367,7 @@ const runBot = async () => {
 	/**
 	 * Look for collateral and force deposit before running if flag is set
 	 */
-	const freeCollateral = driftUser.getFreeCollateral();
+	const freeCollateral = driftUser.getFreeCollateral('Maintenance');
 	if (
 		freeCollateral.isZero() &&
 		configHasBot(config, 'jitMaker') &&
