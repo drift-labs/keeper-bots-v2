@@ -73,7 +73,6 @@ import {
 	isOrderDoesNotExistLog,
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
-import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { FillerConfig } from '../config';
 import { getNodeToFillSignature, getNodeToTriggerSignature } from '../utils';
 
@@ -140,7 +139,6 @@ export class SpotFillerBot implements Bot {
 	private driftClient: DriftClient;
 	private eventSubscriber: EventSubscriber;
 	private pollingIntervalMs: number;
-	private transactionVersion?: number;
 	private driftLutAccount?: AddressLookupTableAccount;
 	private driftSpotLutAccount?: AddressLookupTableAccount;
 
@@ -236,11 +234,6 @@ export class SpotFillerBot implements Bot {
 		if (this.metricsPort) {
 			this.initializeMetrics();
 		}
-
-		this.transactionVersion = config.transactionVersion ?? undefined;
-		logger.info(
-			`${this.name}: using transactionVersion: ${this.transactionVersion}`
-		);
 
 		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
 	}
@@ -1049,19 +1042,12 @@ export class SpotFillerBot implements Bot {
 			)
 		);
 
-		let txResp: Promise<TxSigAndSlot>;
 		const txStart = Date.now();
-		if (isNaN(this.transactionVersion!)) {
-			const tx = new Transaction();
-			for (const ix of ixs) {
-				tx.add(ix);
-			}
-			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
-		} else if (this.transactionVersion === 0) {
-			const lutAccounts: Array<AddressLookupTableAccount> = [];
-			this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
-			this.driftSpotLutAccount && lutAccounts.push(this.driftSpotLutAccount);
-			txResp = this.driftClient.txSender.sendVersionedTransaction(
+		const lutAccounts: Array<AddressLookupTableAccount> = [];
+		this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
+		this.driftSpotLutAccount && lutAccounts.push(this.driftSpotLutAccount);
+		this.driftClient.txSender
+			.sendVersionedTransaction(
 				await this.driftClient.txSender.getVersionedTransaction(
 					ixs,
 					lutAccounts,
@@ -1070,13 +1056,7 @@ export class SpotFillerBot implements Bot {
 				),
 				[],
 				this.driftClient.opts
-			);
-		} else {
-			throw new Error(
-				`unsupported transaction version ${this.transactionVersion}`
-			);
-		}
-		txResp
+			)
 			.then(async (txSig) => {
 				logger.info(
 					`Filled spot order ${nodeSignature}: https://solscan.io/tx/${txSig.txSig}`

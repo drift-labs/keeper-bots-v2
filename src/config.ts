@@ -22,7 +22,6 @@ export type MarkTwapCrankConfig = BaseBotConfig & {
 
 export type FillerConfig = BaseBotConfig & {
 	fillerPollingInterval?: number;
-	transactionVersion?: number;
 	revertOnFailure?: boolean;
 };
 
@@ -210,7 +209,6 @@ export function loadConfigFromOpts(opts: any): Config {
 			botId: process.env.BOT_ID ?? 'filler',
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
-			transactionVersion: 0,
 			runOnce: opts.runOnce ?? false,
 		};
 	}
@@ -221,7 +219,6 @@ export function loadConfigFromOpts(opts: any): Config {
 			botId: process.env.BOT_ID ?? 'fillerLite',
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
-			transactionVersion: 0,
 			runOnce: opts.runOnce ?? false,
 		};
 	}
@@ -232,7 +229,6 @@ export function loadConfigFromOpts(opts: any): Config {
 			botId: process.env.BOT_ID ?? 'filler',
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
-			transactionVersion: 0,
 			runOnce: opts.runOnce ?? false,
 		};
 	}

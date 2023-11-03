@@ -49,7 +49,6 @@ import {
 	GetVersionedTransactionConfig,
 	AddressLookupTableAccount,
 	Keypair,
-	VersionedTransaction,
 } from '@solana/web3.js';
 
 import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
@@ -197,7 +196,6 @@ export class FillerBot implements Bot {
 	protected driftClient: DriftClient;
 	protected eventSubscriber?: EventSubscriber;
 	protected pollingIntervalMs: number;
-	protected transactionVersion?: number;
 	protected revertOnFailure?: boolean;
 	protected lookupTableAccount?: AddressLookupTableAccount;
 	protected jitoSearcherClient?: SearcherClient;
@@ -293,11 +291,6 @@ export class FillerBot implements Bot {
 		}
 		this.userMap = userMap;
 
-		this.transactionVersion = config.transactionVersion ?? undefined;
-		logger.info(
-			`${this.name}: using transactionVersion: ${this.transactionVersion}`
-		);
-
 		this.revertOnFailure = config.revertOnFailure ?? true;
 		logger.info(`${this.name}: revertOnFailure: ${this.revertOnFailure}`);
 
@@ -324,7 +317,7 @@ export class FillerBot implements Bot {
 						try {
 							await tryAcquire(this.jitoLeaderNextSlotMutex).runExclusive(
 								async () => {
-									logger.warn('LEADER REACHEd, GETTING NEXT SLOT');
+									logger.warn('LEADER REACHED, GETTING NEXT SLOT');
 									this.jitoLeaderNextSlot = (
 										await this.jitoSearcherClient!.getNextScheduledLeader()
 									).nextLeaderSlot;
@@ -442,7 +435,7 @@ export class FillerBot implements Bot {
 		this.attemptedTriggersCounter = this.meter.createCounter(
 			METRIC_TYPES.attempted_triggers,
 			{
-				description: 'Count of triggers s s s s s s s s we attempted',
+				description: 'Count of triggers we attempted',
 			}
 		);
 		this.observedFillsCountCounter = this.meter.createCounter(
@@ -1230,12 +1223,6 @@ export class FillerBot implements Bot {
 		fillTxId: number,
 		ixs: Array<TransactionInstruction>
 	) {
-		if (!isNaN(this.transactionVersion!)) {
-			logger.warn(
-				`${this.name} should use unversioned tx for jito until https://github.com/jito-labs/jito-ts/pull/7`
-			);
-			return ['', 0];
-		}
 		const slotsUntilNextLeader =
 			this.jitoLeaderNextSlot! - this.slotSubscriber.getSlot();
 		logger.info(
@@ -1247,23 +1234,22 @@ export class FillerBot implements Bot {
 			);
 			return ['', 0];
 		}
+
+		// should probably do this in background
 		const blockHash =
 			await this.driftClient.provider.connection.getLatestBlockhash(
-				'processed'
+				'confirmed'
 			);
 
-		// const tx = new Transaction();
-		const tx = new Transaction();
-		for (const ix of ixs) {
-			tx.add(ix);
-		}
-
-		tx.feePayer = this.driftClient.provider.wallet.publicKey;
-		tx.recentBlockhash = blockHash.blockhash;
-
-		const signedTx = await this.driftClient.provider.wallet.signTransaction(tx);
+		const tx = await this.driftClient.txSender.getVersionedTransaction(ixs, [
+			this.lookupTableAccount!,
+		]);
+		// @ts-ignore
+		tx.sign([this.driftClient.wallet.payer]);
+		// const signedTx = await this.driftClient.provider.wallet.signTransaction(tx);
 		let b: Bundle | Error = new Bundle(
-			[new VersionedTransaction(signedTx.compileMessage())],
+			// [new VersionedTransaction(signedTx.compileMessage())],
+			[tx],
 			2
 		);
 		b = b.addTipTx(
@@ -1300,13 +1286,7 @@ export class FillerBot implements Bot {
 		const txStart = Date.now();
 		if (this.jitoSearcherClient && this.jitoAuthKeypair) {
 			await this.sendFillTxThroughJito(fillTxId, ixs);
-		} else if (isNaN(this.transactionVersion!)) {
-			const tx = new Transaction();
-			for (const ix of ixs) {
-				tx.add(ix);
-			}
-			txResp = this.driftClient.txSender.send(tx, [], this.driftClient.opts);
-		} else if (this.transactionVersion === 0) {
+		} else {
 			const tx = await this.driftClient.txSender.getVersionedTransaction(
 				ixs,
 				[this.lookupTableAccount!],
@@ -1317,10 +1297,6 @@ export class FillerBot implements Bot {
 				tx,
 				[],
 				this.driftClient.opts
-			);
-		} else {
-			throw new Error(
-				`unsupported transaction version ${this.transactionVersion}`
 			);
 		}
 		if (txResp) {

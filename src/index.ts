@@ -135,11 +135,6 @@ program
 		''
 	)
 	.option(
-		'--transaction-version <number>',
-		'Select transaction version (omit for legacy transaction)',
-		''
-	)
-	.option(
 		'--config-file <string>',
 		'Config file to load (yaml format), will override any other config options',
 		''

@@ -76,12 +76,9 @@ botConfigs:
     fillerPollingInterval: 500
     metricsPort: 9464
 
-    # disable for jito transactions
-    # transactionVersion: 0
-
     # will revert a transaction during simulation if a fill fails, this will save on tx fees,
     # and be friendlier for use with services like Jito.
     # Default is true
     revertOnFailure: true
 
-  
+
