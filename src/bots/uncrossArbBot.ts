@@ -9,10 +9,9 @@ import {
 	DLOBSubscriber,
 	UserMap,
 	SlotSubscriber,
-	UserStatsMap,
 	MakerInfo,
-	PerpMarkets,
 	getUserStatsAccountPublicKey,
+	PriorityFeeCalculator,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -20,18 +19,13 @@ import { Bot } from '../types';
 import {
 	getBestLimitAskExcludePubKey,
 	getBestLimitBidExcludePubKey,
-	sleepMs,
 } from '../utils';
 import { JitProxyClient } from '@drift-labs/jit-proxy/lib';
 import dotenv = require('dotenv');
 
 dotenv.config();
-import { BaseBotConfig } from 'src/config';
-import {
-	AddressLookupTableAccount,
-	ComputeBudgetInstruction,
-	ComputeBudgetProgram,
-} from '@solana/web3.js';
+import { UncrossArbBotConfig } from 'src/config';
+import { AddressLookupTableAccount } from '@solana/web3.js';
 
 const TARGET_LEVERAGE_PER_ACCOUNT = 1;
 
@@ -57,13 +51,16 @@ export class UncrossArbBot implements Bot {
 	private dlobSubscriber: DLOBSubscriber;
 	private slotSubscriber: SlotSubscriber;
 	private userMap: UserMap;
+	private priorityFeeCalculator: PriorityFeeCalculator;
+
+	private feeMultiplier: number;
 
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
 		jitProxyClient: JitProxyClient,
 		slotSubscriber: SlotSubscriber,
 		userMap: UserMap,
-		config: BaseBotConfig,
+		config: UncrossArbBotConfig,
 		driftEnv: DriftEnv
 	) {
 		this.jitProxyClient = jitProxyClient;
@@ -73,6 +70,9 @@ export class UncrossArbBot implements Bot {
 		this.driftEnv = driftEnv;
 		this.slotSubscriber = slotSubscriber;
 		this.userMap = userMap;
+		this.feeMultiplier = config.feeMultiplier ?? 1;
+
+		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
@@ -87,6 +87,18 @@ export class UncrossArbBot implements Bot {
 	 */
 	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
+
+		if (this.dryRun) {
+			logger.warn(`${this.name} on DRY RUN. Will not place any transactions.`);
+		}
+
+		if (this.feeMultiplier != 1) {
+			logger.info(
+				`${this.name} using ${this.feeMultiplier.toFixed(
+					2
+				)} as a fee multiplier`
+			);
+		}
 
 		await this.dlobSubscriber.subscribe();
 		this.lookupTableAccount =
@@ -212,49 +224,72 @@ export class UncrossArbBot implements Bot {
 					const midPrice = (bestBidPrice + bestAskPrice) / 2;
 					if (
 						(bestBidPrice - bestAskPrice) / midPrice >
-						2 * driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
+						this.feeMultiplier *
+							2 *
+							driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
 					) {
 						try {
-							this.driftClient.txSender
-								.sendVersionedTransaction(
-									await this.driftClient.txSender.getVersionedTransaction(
-										[
-											ComputeBudgetProgram.setComputeUnitLimit({
-												units: 1_000_000,
-											}),
-											await this.jitProxyClient.getArbPerpIx({
-												marketIndex: perpIdx,
-												makerInfos: [bidMakerInfo, askMakerInfo],
-											}),
-										],
-										[this.lookupTableAccount!],
+							logger.info(
+								`Found arb opportunity @ midPrice $${midPrice.toFixed(
+									4
+								)} between Bid: $${bestBidPrice.toFixed(
+									4
+								)} Ask: $${bestAskPrice.toFixed(4)} `
+							);
+							if (!this.dryRun) {
+								const usePriorityFee =
+									this.priorityFeeCalculator.updatePriorityFee(
+										Date.now(),
+										this.driftClient.txSender.getTimeoutCount()
+									);
+								const ixs =
+									this.priorityFeeCalculator.generateComputeBudgetWithPriorityFeeIx(
+										1_000_000,
+										usePriorityFee,
+										1_000_000_000 // 1000 lamports
+									);
+								ixs.push(
+									await this.jitProxyClient.getArbPerpIx({
+										marketIndex: perpIdx,
+										makerInfos: [bidMakerInfo, askMakerInfo],
+									})
+								);
+								this.driftClient.txSender
+									.sendVersionedTransaction(
+										await this.driftClient.txSender.getVersionedTransaction(
+											ixs,
+											[this.lookupTableAccount!],
+											[],
+											this.driftClient.opts
+										),
 										[],
 										this.driftClient.opts
-									),
-									[],
-									this.driftClient.opts
-								)
-								.then((txResult) => {
-									logger.info(
-										`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
-									);
-								})
-								.catch((e) => {
-									if (e.logs && e.logs.length > 0) {
+									)
+									.then((txResult) => {
+										logger.info(
+											`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
+										);
+									})
+									.catch((e) => {
 										let noArbOpError = false;
-										for (const log of e.logs) {
-											if (log.includes('NoArbOpportunity')) {
-												noArbOpError = true;
-												break;
+										if (e.logs && e.logs.length > 0) {
+											for (const log of e.logs) {
+												if (log.includes('NoArbOpportunity')) {
+													noArbOpError = true;
+													break;
+												}
 											}
 										}
-										console.error(`Not no arb opp error:\n`);
-										console.error(e);
-									} else {
-										console.error(`Caught unknown error:\n`);
-										console.error(e);
-									}
-								});
+										if (noArbOpError) {
+											console.error(`NoArbOpportunity error`);
+										} else {
+											console.error(`Caught unknown error:\n`);
+											console.error(e);
+										}
+									});
+							} else {
+								logger.warn(`DRY RUN - Did not place any transactions`);
+							}
 						} catch (e) {
 							if (e instanceof Error) {
 								logger.error(
