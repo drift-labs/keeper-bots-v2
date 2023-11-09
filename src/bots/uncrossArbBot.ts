@@ -141,9 +141,8 @@ export class UncrossArbBot implements Bot {
 				logger.debug(
 					`[${new Date().toISOString()}] Running uncross periodic tasks...`
 				);
-				const marketIndexes = this.driftClient.getPerpMarketAccounts();
-				for (let i = 0; i < marketIndexes.length; i++) {
-					const perpIdx = marketIndexes[i].marketIndex;
+				for (let i = 0; i < PerpMarkets[this.driftEnv].length; i++) {
+					const perpIdx = PerpMarkets[this.driftEnv][i].marketIndex;
 					const driftUser = this.driftClient.getUser();
 					const perpMarketAccount =
 						this.driftClient.getPerpMarketAccount(perpIdx)!;
