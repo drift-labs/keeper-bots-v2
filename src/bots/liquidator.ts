@@ -286,6 +286,7 @@ export class LiquidatorBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private deriskMutex = new Uint8Array(new SharedArrayBuffer(1));
+	private liquidateMutex = new Uint8Array(new SharedArrayBuffer(1));
 	private runtimeSpecs: RuntimeSpec;
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
 	private jupiterClient?: JupiterClient;
@@ -599,7 +600,7 @@ export class LiquidatorBot implements Bot {
 
 		// check if we've ran the main loop recently
 		healthy =
-			this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+			this.watchdogTimerLastPatTime > Date.now() - 3 * this.defaultIntervalMs;
 
 		if (!healthy) {
 			logger.error(
@@ -1229,23 +1230,23 @@ export class LiquidatorBot implements Bot {
 	/**
 	 * attempts to acquire the mutex for derisking. If it is already acquired, it returns false
 	 */
-	private acquireMutex(): boolean {
-		return Atomics.compareExchange(this.deriskMutex, 0, 0, 1) === 0;
+	private acquireMutex(mutex: Uint8Array): boolean {
+		return Atomics.compareExchange(mutex, 0, 0, 1) === 0;
 	}
 
 	/**
 	 * releases the mutex.
 	 * Warning: this should only be called after acquireMutex() returns true
 	 */
-	private releaseMutex() {
-		Atomics.store(this.deriskMutex, 0, 0);
+	private releaseMutex(mutex: Uint8Array) {
+		Atomics.store(mutex, 0, 0);
 	}
 
 	/**
 	 * attempts to close out any open positions on this account. It starts by cancelling any open orders
 	 */
 	private async derisk() {
-		if (!this.acquireMutex()) {
+		if (!this.acquireMutex(this.deriskMutex)) {
 			return;
 		}
 
@@ -1254,7 +1255,7 @@ export class LiquidatorBot implements Bot {
 				await this.deriskForSubaccount(subAccountId);
 			}
 		} finally {
-			this.releaseMutex();
+			this.releaseMutex(this.deriskMutex);
 		}
 	}
 
@@ -1775,13 +1776,13 @@ tx: ${tx} `
 	}
 
 	private async tryLiquidate(): Promise<boolean> {
-		let ran = false;
 		const usersCanBeLiquidated = new Array<{
 			user: User;
 			userKey: string;
 			marginRequirement: BN;
 			canBeLiquidated: boolean;
 		}>();
+
 		for (const user of this.userMap!.values()) {
 			const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
 			if (canBeLiquidated || user.isBeingLiquidated()) {
@@ -2144,9 +2145,7 @@ tx: ${tx} `
 					});
 			}
 		}
-
-		ran = true;
-		return ran;
+		return true;
 	}
 
 	/**
@@ -2156,16 +2155,22 @@ tx: ${tx} `
 	 */
 	private async tryLiquidateStart() {
 		const start = Date.now();
+		/* 
+          If there is more than one subAccount, then derisk and liquidate may try to
+          change it, so both need to be mutually exclusive.
+
+          If not, all we care about is avoiding two liquidation calls at the same time.
+         */
+		const mutex =
+			this.allSubaccounts.size > 1 ? this.deriskMutex : this.liquidateMutex;
+		if (!this.acquireMutex(mutex)) {
+			logger.info(
+				`${this.name} tryLiquidate ran into locked mutex, skipping run.`
+			);
+			return;
+		}
 		let ran = false;
-		const needMutex = this.allSubaccounts.size > 1;
 		try {
-			// need mutex since derisk and tryLiquidate may change the active subaccountId
-			if (needMutex && !this.acquireMutex()) {
-				logger.info(
-					`${this.name} tryLiquidate ran into locked mutex, skipping run.`
-				);
-				return;
-			}
 			ran = await this.tryLiquidate();
 		} catch (e) {
 			console.error(e);
@@ -2177,14 +2182,12 @@ tx: ${tx} `
 				);
 			}
 		} finally {
-			if (needMutex) {
-				this.releaseMutex();
-			}
 			if (ran) {
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
 				this.watchdogTimerLastPatTime = Date.now();
 			}
 		}
+		this.releaseMutex(mutex);
 	}
 
 	private initializeMetrics() {
