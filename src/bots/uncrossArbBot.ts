@@ -141,8 +141,9 @@ export class UncrossArbBot implements Bot {
 				logger.debug(
 					`[${new Date().toISOString()}] Running uncross periodic tasks...`
 				);
-				for (let i = 0; i < PerpMarkets[this.driftEnv].length; i++) {
-					const perpIdx = PerpMarkets[this.driftEnv][i].marketIndex;
+				const perpMarkets = this.driftClient.getPerpMarketAccounts();
+				for (let i = 0; i < perpMarkets.length; i++) {
+					const perpIdx = perpMarkets[i].marketIndex;
 					const driftUser = this.driftClient.getUser();
 					const perpMarketAccount =
 						this.driftClient.getPerpMarketAccount(perpIdx)!;
@@ -167,7 +168,7 @@ export class UncrossArbBot implements Bot {
 						driftUser.userAccountPublicKey
 					);
 					if (!bestDriftBid || !bestDriftAsk) {
-						break;
+						continue;
 					}
 
 					const currentSlot = this.slotSubscriber.getSlot();
