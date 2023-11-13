@@ -225,6 +225,9 @@ export class UncrossArbBot implements Bot {
 											await this.jitProxyClient.getArbPerpIx({
 												marketIndex: perpIdx,
 												makerInfos: [bidMakerInfo, askMakerInfo],
+												referrerInfo: this.driftClient
+													.getUserStats()
+													.getReferrerInfo(),
 											}),
 										],
 										[this.lookupTableAccount!],
