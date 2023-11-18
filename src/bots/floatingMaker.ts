@@ -383,13 +383,15 @@ export class FloatingPerpMakerBot implements Bot {
 			if (ran) {
 				const duration = Date.now() - start;
 				const user = this.driftClient.getUser();
-				this.tryMakeDurationHistogram!.record(
-					duration,
-					metricAttrFromUserAccount(
-						user.getUserAccountPublicKey(),
-						user.getUserAccount()
-					)
-				);
+				if (this.tryMakeDurationHistogram) {
+					this.tryMakeDurationHistogram!.record(
+						duration,
+						metricAttrFromUserAccount(
+							user.getUserAccountPublicKey(),
+							user.getUserAccount()
+						)
+					);
+				}
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
 
 				await this.watchdogTimerMutex.runExclusive(async () => {

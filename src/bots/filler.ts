@@ -1308,13 +1308,15 @@ export class FillerBot implements Bot {
 					);
 
 					const user = this.driftClient.getUser();
-					this.sdkCallDurationHistogram!.record(duration, {
-						...metricAttrFromUserAccount(
-							user.getUserAccountPublicKey(),
-							user.getUserAccount()
-						),
-						method: 'sendTx',
-					});
+					if (this.sdkCallDurationHistogram) {
+						this.sdkCallDurationHistogram!.record(duration, {
+							...metricAttrFromUserAccount(
+								user.getUserAccountPublicKey(),
+								user.getUserAccount()
+							),
+							method: 'sendTx',
+						});
+					}
 
 					const parseLogsStart = Date.now();
 					this.processBulkFillTxLogs(nodesSent, resp.txSig)

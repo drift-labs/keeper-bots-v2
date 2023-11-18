@@ -682,9 +682,7 @@ export class LiquidatorBot implements Bot {
 				);
 			}
 		} finally {
-			this.sdkCallDurationHistogram!.record(Date.now() - start, {
-				method: 'placeSpotOrderDrift',
-			});
+			this.recordHistogram(start, 'placeSpotOrderDrift');
 		}
 	}
 
@@ -779,9 +777,7 @@ export class LiquidatorBot implements Bot {
 				);
 			}
 		} finally {
-			this.sdkCallDurationHistogram!.record(Date.now() - start, {
-				method: 'driftClientSwap',
-			});
+			this.recordHistogram(start, 'driftClientSwap');
 		}
 	}
 
@@ -911,9 +907,7 @@ export class LiquidatorBot implements Bot {
 						);
 					})
 					.then(() => {
-						this.sdkCallDurationHistogram!.record(Date.now() - start, {
-							method: 'placePerpOrder',
-						});
+						this.recordHistogram(start, 'placePerpOrder');
 					});
 			} else if (position.quoteAssetAmount.lt(ZERO)) {
 				const start = Date.now();
@@ -1383,9 +1377,7 @@ export class LiquidatorBot implements Bot {
 					);
 				})
 				.finally(() => {
-					this.sdkCallDurationHistogram!.record(Date.now() - start, {
-						method: 'resolvePerpBankruptcy',
-					});
+					this.recordHistogram(start, 'resolvePerpBankruptcy');
 				});
 		}
 
@@ -1425,9 +1417,7 @@ export class LiquidatorBot implements Bot {
 					);
 				})
 				.finally(() => {
-					this.sdkCallDurationHistogram!.record(Date.now() - start, {
-						method: 'resolveSpotBankruptcy',
-					});
+					this.recordHistogram(start, 'resolveSpotBankruptcy');
 				});
 		}
 	}
@@ -1516,9 +1506,7 @@ tx: ${tx} `
 				}
 			})
 			.finally(() => {
-				this.sdkCallDurationHistogram!.record(Date.now() - start, {
-					method: 'liquidateSpot',
-				});
+				this.recordHistogram(start, 'liquidateSpot');
 			});
 	}
 
@@ -1663,9 +1651,7 @@ tx: ${tx} `
 						}
 					})
 					.finally(() => {
-						this.sdkCallDurationHistogram!.record(Date.now() - start, {
-							method: 'liquidateBorrowForPerpPnl',
-						});
+						this.recordHistogram(start, 'liquidateBorrowForPerpPnl');
 					});
 			} else {
 				logger.info(
@@ -1767,9 +1753,7 @@ tx: ${tx} `
 					}
 				})
 				.finally(() => {
-					this.sdkCallDurationHistogram!.record(Date.now() - start, {
-						method: 'liquidatePerpPnlForDeposit',
-					});
+					this.recordHistogram(start, 'liquidatePerpPnlForDeposit');
 				});
 		}
 	}
@@ -2011,9 +1995,7 @@ tx: ${tx} `
 								}
 							})
 							.finally(() => {
-								this.sdkCallDurationHistogram!.record(Date.now() - start, {
-									method: 'liquidatePerp',
-								});
+								this.recordHistogram(start, 'liquidatePerp');
 							});
 					} else if (liquidateeHasLpPos) {
 						logger.info(
@@ -2184,6 +2166,14 @@ tx: ${tx} `
 				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
 				this.watchdogTimerLastPatTime = Date.now();
 			}
+		}
+	}
+
+	private recordHistogram(start: number, method: string) {
+		if (this.sdkCallDurationHistogram) {
+			this.sdkCallDurationHistogram!.record(Date.now() - start, {
+				method: method,
+			});
 		}
 	}
 

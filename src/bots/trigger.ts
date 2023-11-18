@@ -447,13 +447,15 @@ export class TriggerBot implements Bot {
 				const user = this.driftClient.getUser();
 
 				const duration = Date.now() - start;
-				this.tryTriggerDurationHistogram!.record(
-					duration,
-					metricAttrFromUserAccount(
-						user.getUserAccountPublicKey(),
-						user.getUserAccount()
-					)
-				);
+				if (this.tryTriggerDurationHistogram) {
+					this.tryTriggerDurationHistogram!.record(
+						duration,
+						metricAttrFromUserAccount(
+							user.getUserAccountPublicKey(),
+							user.getUserAccount()
+						)
+					);
+				}
 
 				logger.debug(`${this.name} Bot took ${duration}ms to run`);
 				await this.watchdogTimerMutex.runExclusive(async () => {
