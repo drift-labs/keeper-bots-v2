@@ -580,30 +580,33 @@ export class FillerBot implements Bot {
 			)
 		);
 
-		this.eventSubscriber?.eventEmitter.on(
-			'newEvent',
-			async (record: WrappedEvent<any>) => {
-				await this.userMap!.updateWithEventRecord(record);
-				await this.userStatsMap!.updateWithEventRecord(record, this.userMap);
+		// Metrics should have been initialized by now, if at all
+		if (this.observedFillsCountCounter) {
+			this.eventSubscriber?.eventEmitter.on(
+				'newEvent',
+				async (record: WrappedEvent<any>) => {
+					await this.userMap!.updateWithEventRecord(record);
+					await this.userStatsMap!.updateWithEventRecord(record, this.userMap);
 
-				if (record.eventType === 'OrderActionRecord') {
-					const actionRecord = record as OrderActionRecord;
+					if (record.eventType === 'OrderActionRecord') {
+						const actionRecord = record as OrderActionRecord;
 
-					if (isVariant(actionRecord.action, 'fill')) {
-						if (isVariant(actionRecord.marketType, 'perp')) {
-							const perpMarket = this.driftClient.getPerpMarketAccount(
-								actionRecord.marketIndex
-							);
-							if (perpMarket) {
-								this.observedFillsCountCounter!.add(1, {
-									market: decodeName(perpMarket.name),
-								});
+						if (isVariant(actionRecord.action, 'fill')) {
+							if (isVariant(actionRecord.marketType, 'perp')) {
+								const perpMarket = this.driftClient.getPerpMarketAccount(
+									actionRecord.marketIndex
+								);
+								if (perpMarket) {
+									this.observedFillsCountCounter!.add(1, {
+										market: decodeName(perpMarket.name),
+									});
+								}
 							}
 						}
 					}
 				}
-			}
-		);
+			);
+		}
 
 		logger.info(
 			`${this.name} Bot started! (websocket: ${
@@ -1371,7 +1374,7 @@ export class FillerBot implements Bot {
 							!errorCodesToSuppress.includes(errorCode) &&
 							!(e as Error).message.includes('Transaction was not confirmed')
 						) {
-							if (errorCode) {
+							if (errorCode && this.txSimErrorCounter) {
 								this.txSimErrorCounter!.add(1, {
 									errorCode: errorCode.toString(),
 								});
@@ -1662,13 +1665,15 @@ export class FillerBot implements Bot {
 
 			// record fill attempts
 			const user = this.driftClient.getUser();
-			this.attemptedFillsCounter!.add(
-				attemptedFills,
-				metricAttrFromUserAccount(
-					user.userAccountPublicKey,
-					user.getUserAccount()
-				)
-			);
+			if (this.attemptedFillsCounter) {
+				this.attemptedFillsCounter!.add(
+					attemptedFills,
+					metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					)
+				);
+			}
 		}
 	}
 
@@ -1727,13 +1732,15 @@ export class FillerBot implements Bot {
 		}
 
 		const user = this.driftClient.getUser();
-		this.attemptedTriggersCounter!.add(
-			triggerableNodes.length,
-			metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
-			)
-		);
+		if (this.attemptedFillsCounter) {
+			this.attemptedTriggersCounter!.add(
+				triggerableNodes.length,
+				metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				)
+			);
+		}
 	}
 
 	protected async settlePnls() {
@@ -1876,13 +1883,15 @@ export class FillerBot implements Bot {
 			if (ran) {
 				const duration = Date.now() - startTime;
 				const user = this.driftClient.getUser();
-				this.tryFillDurationHistogram!.record(
-					duration,
-					metricAttrFromUserAccount(
-						user.getUserAccountPublicKey(),
-						user.getUserAccount()
-					)
-				);
+				if (this.tryFillDurationHistogram) {
+					this.tryFillDurationHistogram!.record(
+						duration,
+						metricAttrFromUserAccount(
+							user.getUserAccountPublicKey(),
+							user.getUserAccount()
+						)
+					);
+				}
 				logger.debug(`tryFill done, took ${duration}ms`);
 
 				await this.watchdogTimerMutex.runExclusive(async () => {
