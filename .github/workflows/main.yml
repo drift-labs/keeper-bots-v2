@@ -1,0 +1,149 @@
+name: Main CI
+
+on:
+  push:
+    branches: ['master']
+  pull_request:
+    branches: ['master']
+
+jobs:
+  yarn-prettier:
+    name: Run prettier
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install yarn
+        run: yarn
+
+      - name: Run prettier
+        run: yarn prettify
+  
+  yarn-lint:
+    name: Run eslint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install yarn
+        run: yarn
+
+      - name: Run lint
+        run: yarn lint
+  
+  yarn-build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup node
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install yarn
+        run: yarn
+
+      - name: Run build
+        run: yarn build
+  
+  sca:
+    name: Vulnerability scan
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      # Report all vulnerabilities in security tab
+      - name: Report all vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          ignore-unfixed: true
+          hide-progress: true
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          
+      # Fail the job on critical vulnerabiliies with fix available
+      - name: Fail critical vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          ignore-unfixed: true
+          hide-progress: true
+          format: 'table'
+          severity: 'CRITICAL'
+          exit-code: '1'
+
+      - name: Upload scan results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  sast:
+    name: Static security tests
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript']
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v2
+        with:
+          languages: ${{ matrix.language }}
+
+      - name: Run CodeQL
+        uses: github/codeql-action/analyze@v2
+  
+  yarn-pass:
+      name: Yarn tests pass
+      needs: ['yarn-prettier', 'yarn-lint', 'yarn-build']
+      runs-on: ubuntu-latest
+      steps:
+        - run: echo ok
+
+  security-pass:
+      name: Security tests pass
+      needs: ['sca', 'sast']
+      runs-on: ubuntu-latest
+      steps:
+        - run: echo ok
+
+  all-pass:
+      name: All tests pass 🚀
+      needs: ['yarn-pass', 'security-pass']
+      runs-on: ubuntu-latest
+      steps:
+        - run: echo ok
