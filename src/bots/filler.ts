@@ -368,7 +368,7 @@ export class FillerBot implements Bot {
 					instrumentType: InstrumentType.HISTOGRAM,
 					meterName: meterName,
 					aggregation: new ExplicitBucketHistogramAggregation(
-						Array.from(new Array(20), (_, i) => 0 + i * 100),
+						Array.from(new Array(20), (_, i) => i + 2000),
 						true
 					),
 				}),
