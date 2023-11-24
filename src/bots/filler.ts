@@ -1100,7 +1100,7 @@ export class FillerBot implements Bot {
 					});
 
 				errorThisFillIx = true;
-				continue;
+				break;
 			}
 
 			const takerBreachedMaintenanceMargin =
