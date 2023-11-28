@@ -213,17 +213,22 @@ const main = async () => {
 	const slotSubscriber = new SlotSubscriber(connection, {});
 	await slotSubscriber.subscribe();
 
+	logger.info(`Initing usermap...`);
+	const initUserMapStart = Date.now();
+	const userStatsMap = new UserStatsMap(
+		driftClient,
+	);
 	const userMap = new UserMap(
 		driftClient,
 		driftClient.userAccountSubscriptionConfig,
-		false
+		false,
+		async (authorities) => {
+			await userStatsMap.sync(authorities);
+		},
+		{ hasOpenOrders: true }
 	);
 	await userMap.subscribe();
-	const userStatsMap = new UserStatsMap(
-		driftClient,
-		driftClient.userAccountSubscriptionConfig
-	);
-	await userStatsMap.subscribe();
+	logger.info(`Usermap init took: ${Date.now() - initUserMapStart}ms`);
 
 	const dlobSubscriber = new DLOBSubscriber({
 		driftClient,

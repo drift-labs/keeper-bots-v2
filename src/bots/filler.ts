@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
 	ReferrerInfo,
 	isOracleValid,
@@ -145,39 +144,36 @@ function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
 	if (prefix) {
 		msg += `${prefix}\n`;
 	}
-	msg += `taker on market ${
-		takerOrder.marketIndex
-	}: ${takerNode.userAccount?.toBase58()}-${takerOrder.orderId} ${getVariant(
-		takerOrder.direction
-	)} ${convertToNumber(
-		takerOrder.baseAssetAmountFilled,
-		BASE_PRECISION
-	)}/${convertToNumber(
-		takerOrder.baseAssetAmount,
-		BASE_PRECISION
-	)} @ ${convertToNumber(
-		takerOrder.price,
-		PRICE_PRECISION
-	)} (orderType: ${getVariant(takerOrder.orderType)})\n`;
+	msg += `taker on market ${takerOrder.marketIndex
+		}: ${takerNode.userAccount?.toBase58()}-${takerOrder.orderId} ${getVariant(
+			takerOrder.direction
+		)} ${convertToNumber(
+			takerOrder.baseAssetAmountFilled,
+			BASE_PRECISION
+		)}/${convertToNumber(
+			takerOrder.baseAssetAmount,
+			BASE_PRECISION
+		)} @ ${convertToNumber(
+			takerOrder.price,
+			PRICE_PRECISION
+		)} (orderType: ${getVariant(takerOrder.orderType)})\n`;
 	msg += `makers:\n`;
 	if (node.makerNodes.length > 0) {
 		for (let i = 0; i < node.makerNodes.length; i++) {
 			const makerNode = node.makerNodes[i];
 			const makerOrder = makerNode.order!;
-			msg += `  [${i}] market ${
-				makerOrder.marketIndex
-			}: ${makerNode.userAccount!.toBase58()}-${
-				makerOrder.orderId
-			} ${getVariant(makerOrder.direction)} ${convertToNumber(
-				makerOrder.baseAssetAmountFilled,
-				BASE_PRECISION
-			)}/${convertToNumber(
-				makerOrder.baseAssetAmount,
-				BASE_PRECISION
-			)} @ ${convertToNumber(
-				makerOrder.price,
-				PRICE_PRECISION
-			)} (orderType: ${getVariant(makerOrder.orderType)})\n`;
+			msg += `  [${i}] market ${makerOrder.marketIndex
+				}: ${makerNode.userAccount!.toBase58()}-${makerOrder.orderId
+				} ${getVariant(makerOrder.direction)} ${convertToNumber(
+					makerOrder.baseAssetAmountFilled,
+					BASE_PRECISION
+				)}/${convertToNumber(
+					makerOrder.baseAssetAmount,
+					BASE_PRECISION
+				)} @ ${convertToNumber(
+					makerOrder.price,
+					PRICE_PRECISION
+				)} (orderType: ${getVariant(makerOrder.orderType)})\n`;
 		}
 	} else {
 		msg += `  vAMM`;
@@ -333,8 +329,7 @@ export class FillerBot implements Bot {
 			});
 		}
 		logger.info(
-			`${this.name}: jito enabled: ${
-				!!this.jitoSearcherClient && !!this.jitoAuthKeypair
+			`${this.name}: jito enabled: ${!!this.jitoSearcherClient && !!this.jitoAuthKeypair
 			}`
 		);
 
@@ -523,23 +518,24 @@ export class FillerBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 
-		if (!this.userMap) {
-			this.userMap = new UserMap(
-				this.driftClient,
-				this.driftClient.userAccountSubscriptionConfig,
-				false
-			);
-			await this.userMap.subscribe();
-		}
-
+		logger.info(`${this.name} initing userMap`);
+		const startInitUserMap = Date.now();
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
-			this.userStatsMapSubscriptionConfig
 		);
-		await this.userStatsMap.subscribe();
-
+		this.userMap = new UserMap(
+			this.driftClient,
+			this.driftClient.userAccountSubscriptionConfig,
+			false,
+			async (authorities) => {
+				logger.info(`UserStatsMap initialized with ${authorities.length} authorities`)
+				await this.userStatsMap!.sync(authorities);
+			},
+			{ hasOpenOrders: false }
+		);
+		await this.userMap.subscribe();
 		logger.info(
-			`initial userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}`
+			`Initialize userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}, took: ${Date.now() - startInitUserMap} ms`
 		);
 
 		this.dlobSubscriber = new DLOBSubscriber({
@@ -566,7 +562,6 @@ export class FillerBot implements Bot {
 
 		await this.dlobSubscriber!.unsubscribe();
 		await this.userMap!.unsubscribe();
-		await this.userStatsMap!.unsubscribe();
 	}
 
 	public async startIntervalLoop(_intervalMs?: number) {
@@ -606,8 +601,7 @@ export class FillerBot implements Bot {
 		);
 
 		logger.info(
-			`${this.name} Bot started! (websocket: ${
-				this.bulkAccountLoader === undefined
+			`${this.name} Bot started! (websocket: ${this.bulkAccountLoader === undefined
 			})`
 		);
 	}
@@ -784,10 +778,8 @@ export class FillerBot implements Bot {
 				return false;
 			}
 			logger.warn(
-				`order is expired on market ${
-					nodeToFill.node.order.marketIndex
-				} for user ${nodeToFill.node.userAccount}-${
-					nodeToFill.node.order.orderId
+				`order is expired on market ${nodeToFill.node.order.marketIndex
+				} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId
 				} (${getVariant(nodeToFill.node.order.orderType)})`
 			);
 			return true;
@@ -1050,8 +1042,7 @@ export class FillerBot implements Bot {
 				const filledNode = nodesFilled[ixIdx];
 				if (filledNode) {
 					logger.error(
-						`assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${
-							filledNode.node.order!.orderId
+						`assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${filledNode.node.order!.orderId
 						}; does not exist (filled by someone else); ${log}`
 					);
 					this.clearThrottledNode(getNodeToFillSignature(filledNode));
@@ -1093,8 +1084,7 @@ export class FillerBot implements Bot {
 						// console.error(e);
 						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
 						webhookMessage(
-							`[${this.name}]: :x: error processing fill tx logs:\n${
-								e.stack ? e.stack : e.message
+							`[${this.name}]: :x: error processing fill tx logs:\n${e.stack ? e.stack : e.message
 							}`
 						);
 					});
@@ -1109,8 +1099,7 @@ export class FillerBot implements Bot {
 				const filledNode = nodesFilled[ixIdx];
 				const takerNodeSignature = filledNode.node.userAccount!.toBase58();
 				logger.error(
-					`taker breach maint. margin, assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${
-						filledNode.node.order!.orderId
+					`taker breach maint. margin, assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${filledNode.node.order!.orderId
 					}; (throttling ${takerNodeSignature} and force cancelling orders); ${log}`
 				);
 				this.throttledNodes.set(takerNodeSignature, Date.now());
@@ -1143,8 +1132,7 @@ export class FillerBot implements Bot {
 						console.error(e);
 						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
 						webhookMessage(
-							`[${this.name}]: :x: error processing fill tx logs:\n${
-								e.stack ? e.stack : e.message
+							`[${this.name}]: :x: error processing fill tx logs:\n${e.stack ? e.stack : e.message
 							}`
 						);
 					});
@@ -1340,8 +1328,7 @@ export class FillerBot implements Bot {
 								`Failed to process fill tx logs (error above) (fillTxId: ${fillTxId}):`
 							);
 							webhookMessage(
-								`[${this.name}]: :x: error processing fill tx logs:\n${
-									e.stack ? e.stack : e.message
+								`[${this.name}]: :x: error processing fill tx logs:\n${e.stack ? e.stack : e.message
 								}`
 							);
 						});
@@ -1357,8 +1344,7 @@ export class FillerBot implements Bot {
 						const start = Date.now();
 						await this.handleTransactionLogs(nodesSent, simError.logs);
 						logger.error(
-							`Failed to send tx, sim error tx logs took: ${
-								Date.now() - start
+							`Failed to send tx, sim error tx logs took: ${Date.now() - start
 							}ms (fillTxId: ${fillTxId})`
 						);
 
@@ -1375,8 +1361,7 @@ export class FillerBot implements Bot {
 								});
 							}
 							webhookMessage(
-								`[${this.name}]: :x: error simulating tx:\n${
-									simError.logs ? simError.logs.join('\n') : ''
+								`[${this.name}]: :x: error simulating tx:\n${simError.logs ? simError.logs.join('\n') : ''
 								}\n${e.stack || e}`
 							);
 						}
@@ -1436,8 +1421,7 @@ export class FillerBot implements Bot {
 		} catch (e) {
 			if (e instanceof Error) {
 				logger.error(
-					`Error filling multi maker perp node (fillTxId: ${fillTxId}): ${
-						e.stack ? e.stack : e.message
+					`Error filling multi maker perp node (fillTxId: ${fillTxId}): ${e.stack ? e.stack : e.message
 					}`
 				);
 			}
@@ -1562,10 +1546,8 @@ export class FillerBot implements Bot {
 				ixs.length > 1 // ensure at least 1 attempted fill
 			) {
 				logger.info(
-					`Fully packed fill tx (ixs: ${ixs.length}): est. tx size ${
-						runningTxSize + newIxCost + additionalAccountsCost
-					}, max: ${MAX_TX_PACK_SIZE}, est. CU used: expected ${
-						runningCUUsed + cuToUsePerFill
+					`Fully packed fill tx (ixs: ${ixs.length}): est. tx size ${runningTxSize + newIxCost + additionalAccountsCost
+					}, max: ${MAX_TX_PACK_SIZE}, est. CU used: expected ${runningCUUsed + cuToUsePerFill
 					}, max: ${MAX_CU_PER_TX}, (fillTxId: ${fillTxId})`
 				);
 				break;
@@ -1599,10 +1581,8 @@ export class FillerBot implements Bot {
 		}
 
 		logger.info(
-			`sending tx, ${
-				uniqueAccounts.size
-			} unique accounts, total ix: ${idxUsed}, calcd tx size: ${runningTxSize}, took ${
-				Date.now() - txPackerStart
+			`sending tx, ${uniqueAccounts.size
+			} unique accounts, total ix: ${idxUsed}, calcd tx size: ${runningTxSize}, took ${Date.now() - txPackerStart
 			}ms (fillTxId: ${fillTxId})`
 		);
 
@@ -1711,10 +1691,8 @@ export class FillerBot implements Bot {
 						);
 						logger.error(error);
 						webhookMessage(
-							`[${
-								this.name
-							}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-								error.stack ? error.stack : error.message
+							`[${this.name
+							}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${error.stack ? error.stack : error.message
 							}`
 						);
 					}
@@ -1824,8 +1802,7 @@ export class FillerBot implements Bot {
 						if (e instanceof Error) {
 							console.error(e);
 							webhookMessage(
-								`[${this.name}]: :x: Failed to get fillable nodes for market ${
-									market.marketIndex
+								`[${this.name}]: :x: Failed to get fillable nodes for market ${market.marketIndex
 								}:\n${e.stack ? e.stack : e.message}`
 							);
 						}
@@ -1863,8 +1840,7 @@ export class FillerBot implements Bot {
 			} else {
 				if (e instanceof Error) {
 					webhookMessage(
-						`[${this.name}]: :x: uncaught error:\n${
-							e.stack ? e.stack : e.message
+						`[${this.name}]: :x: uncaught error:\n${e.stack ? e.stack : e.message
 						}`
 					);
 				}

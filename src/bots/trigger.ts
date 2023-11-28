@@ -221,8 +221,7 @@ export class TriggerBot implements Bot {
 				if (timeStartedToTriggerNode) {
 					if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
 						logger.warn(
-							`triggering node ${nodeToFillSignature} too soon (${
-								now - timeStartedToTriggerNode
+							`triggering node ${nodeToFillSignature} too soon (${now - timeStartedToTriggerNode
 							}ms since last trigger), skipping`
 						);
 						continue;
@@ -237,8 +236,7 @@ export class TriggerBot implements Bot {
 				this.triggeringNodes.set(nodeToFillSignature, Date.now());
 
 				logger.info(
-					`trying to trigger perp order on market ${
-						nodeToTrigger.node.order.marketIndex
+					`trying to trigger perp order on market ${nodeToTrigger.node.order.marketIndex
 					} (account: ${nodeToTrigger.node.userAccount.toString()}) perp order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
@@ -276,10 +274,8 @@ export class TriggerBot implements Bot {
 							);
 							logger.error(error);
 							webhookMessage(
-								`[${
-									this.name
-								}]: :x: Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-									error.logs ? (error.logs as Array<string>).join('\n') : ''
+								`[${this.name
+								}]: :x: Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}\n${error.logs ? (error.logs as Array<string>).join('\n') : ''
 								}\n${error.stack ? error.stack : error.message}`
 							);
 						}
@@ -295,8 +291,7 @@ export class TriggerBot implements Bot {
 			console.error(e);
 			if (e instanceof Error) {
 				webhookMessage(
-					`[${this.name}]: :x: Uncaught error:\n${
-						e.stack ? e.stack : e.message
+					`[${this.name}]: :x: Uncaught error:\n${e.stack ? e.stack : e.message
 					}}`
 				);
 			}
@@ -384,10 +379,8 @@ export class TriggerBot implements Bot {
 							);
 							logger.error(error);
 							webhookMessage(
-								`[${
-									this.name
-								}]: :x: Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-									error.stack ? error.stack : error.message
+								`[${this.name
+								}]: :x: Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}\n${error.stack ? error.stack : error.message
 								}`
 							);
 						}
@@ -435,8 +428,7 @@ export class TriggerBot implements Bot {
 			} else {
 				if (e instanceof Error) {
 					webhookMessage(
-						`[${this.name}]: :x: Uncaught error in main loop:\n${
-							e.stack ? e.stack : e.message
+						`[${this.name}]: :x: Uncaught error in main loop:\n${e.stack ? e.stack : e.message
 						}`
 					);
 				}

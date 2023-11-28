@@ -384,9 +384,16 @@ export class SpotFillerBot implements Bot {
 
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
-			this.userStatsMapSubscriptionConfig
 		);
-		initPromises.push(this.userStatsMap.subscribe());
+		this.userMap.addSyncCallback(
+			async (userAuthKeys: PublicKey[]) => {
+				await this.userStatsMap!.sync(userAuthKeys);
+			},
+			{
+				hasOpenOrders: true,
+			}
+		);
+		initPromises.push(this.userStatsMap.subscribe(this.userMap.getUniqueAuthorities(true)));
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
@@ -772,8 +779,7 @@ export class SpotFillerBot implements Bot {
 			const orderIdDoesNotExist = isOrderDoesNotExistLog(log);
 			if (orderIdDoesNotExist) {
 				logger.error(
-					`spot node filled: ${node.userAccount!.toString()}, ${
-						order.orderId
+					`spot node filled: ${node.userAccount!.toString()}, ${order.orderId
 					}; does not exist (filled by someone else); ${log}`
 				);
 				this.throttledNodes.delete(getNodeToFillSignature(nodeFilled));
@@ -802,8 +808,7 @@ export class SpotFillerBot implements Bot {
 						order.orderId.toString()
 					);
 				logger.error(
-					`maker breach maint. margin, assoc node: ${makerNode.userAccount!.toString()}, ${
-						order.orderId
+					`maker breach maint. margin, assoc node: ${makerNode.userAccount!.toString()}, ${order.orderId
 					}; (throttling ${makerNodeSignature}); ${log}`
 				);
 				this.throttledNodes.set(makerNodeSignature, Date.now());
@@ -835,8 +840,7 @@ export class SpotFillerBot implements Bot {
 						console.error(e);
 						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
 						webhookMessage(
-							`[${this.name}]: :x: error processing fill tx logs:\n${
-								e.stack ? e.stack : e.message
+							`[${this.name}]: :x: error processing fill tx logs:\n${e.stack ? e.stack : e.message
 							}`
 						);
 					});
@@ -855,8 +859,7 @@ export class SpotFillerBot implements Bot {
 						order.orderId.toString()
 					);
 				logger.error(
-					`taker breach maint. margin, assoc node: ${node.userAccount!.toString()}, ${
-						order.orderId
+					`taker breach maint. margin, assoc node: ${node.userAccount!.toString()}, ${order.orderId
 					}; (throttling ${takerNodeSignature} and force cancelling orders); ${log}`
 				);
 				this.throttledNodes.set(takerNodeSignature, Date.now());
@@ -889,8 +892,7 @@ export class SpotFillerBot implements Bot {
 						console.error(e);
 						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
 						webhookMessage(
-							`[${this.name}]: :x: error processing fill tx logs:\n${
-								e.stack ? e.stack : e.message
+							`[${this.name}]: :x: error processing fill tx logs:\n${e.stack ? e.stack : e.message
 							}`
 						);
 					});
@@ -962,8 +964,7 @@ export class SpotFillerBot implements Bot {
 		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
 		if (makerNode) {
 			logger.info(
-				`filling spot node:\ntaker: ${node.userAccount!.toBase58()}-${
-					order.orderId
+				`filling spot node:\ntaker: ${node.userAccount!.toBase58()}-${order.orderId
 				} ${convertToNumber(
 					order.baseAssetAmountFilled,
 					spotMarketPrecision
@@ -973,8 +974,7 @@ export class SpotFillerBot implements Bot {
 				)} @ ${convertToNumber(
 					order.price,
 					PRICE_PRECISION
-				)}\nmaker: ${makerNode.userAccount!.toBase58()}-${
-					makerNode.order!.orderId
+				)}\nmaker: ${makerNode.userAccount!.toBase58()}-${makerNode.order!.orderId
 				} ${convertToNumber(
 					makerNode.order!.baseAssetAmountFilled,
 					spotMarketPrecision
@@ -985,8 +985,7 @@ export class SpotFillerBot implements Bot {
 			);
 		} else {
 			logger.info(
-				`filling spot node\ntaker: ${node.userAccount!.toBase58()}-${
-					order.orderId
+				`filling spot node\ntaker: ${node.userAccount!.toBase58()}-${order.orderId
 				} ${convertToNumber(
 					order.baseAssetAmountFilled,
 					spotMarketPrecision
@@ -1092,10 +1091,8 @@ export class SpotFillerBot implements Bot {
 					!(e as Error).message.includes('Transaction was not confirmed')
 				) {
 					webhookMessage(
-						`[${
-							this.name
-						}]: :x: error trying to fill spot orders: \n\nSim logs: \n${
-							e.logs ? (e.logs as Array<string>).join('\n') : ''
+						`[${this.name
+						}]: :x: error trying to fill spot orders: \n\nSim logs: \n${e.logs ? (e.logs as Array<string>).join('\n') : ''
 						}\n\n${e.stack ? e.stack : e.message}`
 					);
 				}
@@ -1175,10 +1172,8 @@ export class SpotFillerBot implements Bot {
 						);
 						logger.error(error);
 						webhookMessage(
-							`[${
-								this.name
-							}]: Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} \n${
-								error.stack ? error.stack : error.message
+							`[${this.name
+							}]: Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} \n${error.stack ? error.stack : error.message
 							} `
 						);
 					}
@@ -1268,8 +1263,7 @@ export class SpotFillerBot implements Bot {
 				console.error(e);
 				if (e instanceof Error) {
 					webhookMessage(
-						`[${this.name}]: error trying to run main loop: \n${
-							e.stack ? e.stack : e.message
+						`[${this.name}]: error trying to run main loop: \n${e.stack ? e.stack : e.message
 						} `
 					);
 				}

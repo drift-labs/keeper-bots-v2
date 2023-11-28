@@ -67,7 +67,6 @@ export class FillerLiteBot extends FillerBot {
 		// so we don't call getProgramAccounts
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
-			this.userStatsMapSubscriptionConfig
 		);
 
 		await this.orderSubscriber.subscribe();
