@@ -65,10 +65,7 @@ export class FillerLiteBot extends FillerBot {
 
 		// Initializing so we can use mustGet for RPC fall back, but don't subscribe
 		// so we don't call getProgramAccounts
-		this.userStatsMap = new UserStatsMap(
-			this.driftClient,
-			this.userStatsMapSubscriptionConfig
-		);
+		this.userStatsMap = new UserStatsMap(this.driftClient);
 
 		await this.orderSubscriber.subscribe();
 		await sleepMs(1200); // Wait a few slots to build up order book

@@ -9,9 +9,7 @@ import {
 	DLOBSubscriber,
 	UserMap,
 	SlotSubscriber,
-	UserStatsMap,
 	MakerInfo,
-	PerpMarkets,
 	getUserStatsAccountPublicKey,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -20,7 +18,6 @@ import { Bot } from '../types';
 import {
 	getBestLimitAskExcludePubKey,
 	getBestLimitBidExcludePubKey,
-	sleepMs,
 } from '../utils';
 import { JitProxyClient } from '@drift-labs/jit-proxy/lib';
 import dotenv = require('dotenv');
@@ -29,11 +26,8 @@ dotenv.config();
 import { BaseBotConfig } from 'src/config';
 import {
 	AddressLookupTableAccount,
-	ComputeBudgetInstruction,
 	ComputeBudgetProgram,
 } from '@solana/web3.js';
-
-const TARGET_LEVERAGE_PER_ACCOUNT = 1;
 
 /**
  * This is an example of a bot that implements the Bot interface.

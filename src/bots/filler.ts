@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
 	ReferrerInfo,
 	isOracleValid,
@@ -523,23 +522,23 @@ export class FillerBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 
-		if (!this.userMap) {
-			this.userMap = new UserMap(
-				this.driftClient,
-				this.driftClient.userAccountSubscriptionConfig,
-				false
-			);
-			await this.userMap.subscribe();
-		}
-
-		this.userStatsMap = new UserStatsMap(
+		logger.info(`${this.name} initing userMap`);
+		const startInitUserMap = Date.now();
+		this.userStatsMap = new UserStatsMap(this.driftClient);
+		this.userMap = new UserMap(
 			this.driftClient,
-			this.userStatsMapSubscriptionConfig
+			this.driftClient.userAccountSubscriptionConfig,
+			false
 		);
-		await this.userStatsMap.subscribe();
+		await this.userMap.subscribe();
+
+		// sync userstats once
+		await this.userStatsMap.sync(this.userMap!.getUniqueAuthorities());
 
 		logger.info(
-			`initial userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}`
+			`Initialize userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}, took: ${
+				Date.now() - startInitUserMap
+			} ms`
 		);
 
 		this.dlobSubscriber = new DLOBSubscriber({
@@ -566,7 +565,6 @@ export class FillerBot implements Bot {
 
 		await this.dlobSubscriber!.unsubscribe();
 		await this.userMap!.unsubscribe();
-		await this.userStatsMap!.unsubscribe();
 	}
 
 	public async startIntervalLoop(_intervalMs?: number) {

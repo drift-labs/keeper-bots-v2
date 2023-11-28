@@ -499,7 +499,6 @@ const runBot = async () => {
 		bots.push(
 			new SpotFillerBot(
 				slotSubscriber,
-				bulkAccountLoader,
 				driftClient,
 				userMap,
 				eventSubscriber,

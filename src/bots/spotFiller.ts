@@ -17,13 +17,11 @@ import {
 	SerumFulfillmentConfigMap,
 	SerumV3FulfillmentConfigAccount,
 	OrderActionRecord,
-	BulkAccountLoader,
 	OrderRecord,
 	convertToNumber,
 	PRICE_PRECISION,
 	WrappedEvent,
 	DLOBNode,
-	UserSubscriptionConfig,
 	DLOBSubscriber,
 	SlotSubscriber,
 	PhoenixFulfillmentConfigMap,
@@ -134,8 +132,6 @@ export class SpotFillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 2000;
 
 	private slotSubscriber: SlotSubscriber;
-	private bulkAccountLoader?: BulkAccountLoader;
-	private userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	private driftClient: DriftClient;
 	private eventSubscriber: EventSubscriber;
 	private pollingIntervalMs: number;
@@ -186,38 +182,18 @@ export class SpotFillerBot implements Bot {
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
-		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		userMap: UserMap,
 		eventSubscriber: EventSubscriber,
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig
 	) {
-		if (!bulkAccountLoader) {
-			throw new Error(
-				'SpotFiller only works in polling mode (cannot run with --websocket flag) bulkAccountLoader is required'
-			);
-		}
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		this.eventSubscriber = eventSubscriber;
 		this.userMap = userMap;
-		this.bulkAccountLoader = bulkAccountLoader;
-		if (this.bulkAccountLoader) {
-			this.userStatsMapSubscriptionConfig = {
-				type: 'polling',
-				accountLoader: new BulkAccountLoader(
-					this.bulkAccountLoader.connection,
-					this.bulkAccountLoader.commitment,
-					0 // no polling
-				),
-			};
-		} else {
-			this.userStatsMapSubscriptionConfig =
-				this.driftClient.userAccountSubscriptionConfig;
-		}
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
 			config.fillerPollingInterval ?? this.defaultIntervalMs;
@@ -382,11 +358,10 @@ export class SpotFillerBot implements Bot {
 
 		const initPromises: Array<Promise<any>> = [];
 
-		this.userStatsMap = new UserStatsMap(
-			this.driftClient,
-			this.userStatsMapSubscriptionConfig
+		this.userStatsMap = new UserStatsMap(this.driftClient);
+		initPromises.push(
+			this.userStatsMap.sync(this.userMap.getUniqueAuthorities())
 		);
-		initPromises.push(this.userStatsMap.subscribe());
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
