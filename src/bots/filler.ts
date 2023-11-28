@@ -527,13 +527,12 @@ export class FillerBot implements Bot {
 			this.driftClient,
 			this.driftClient.userAccountSubscriptionConfig,
 			false,
-			async (authorities) => {
-				logger.info(`UserStatsMap initialized with ${authorities.length} authorities`)
-				await this.userStatsMap!.sync(authorities);
-			},
-			{ hasOpenOrders: false }
 		);
 		await this.userMap.subscribe();
+
+		// sync userstats once
+		await this.userStatsMap.sync(this.userMap!.getUniqueAuthorities())
+
 		logger.info(
 			`Initialize userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}, took: ${Date.now() - startInitUserMap} ms`
 		);
