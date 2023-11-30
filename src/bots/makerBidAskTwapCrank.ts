@@ -104,6 +104,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				this.crankIntervalToMarketIds
 			).map((x) => parseInt(x));
 			this.maxIntervalGroup = Math.max(...this.allCrankIntervalGroups!);
+			this.watchdogTimerLastPatTime = Date.now() - this.maxIntervalGroup;
 		}
 	}
 
