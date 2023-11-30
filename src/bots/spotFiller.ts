@@ -380,7 +380,9 @@ export class SpotFillerBot implements Bot {
 					spotMarketConfig.serumMarket
 				);
 
-				const serumConfigAccount = await this.serumFulfillmentConfigMap.get(spotMarketConfig.marketIndex);
+				const serumConfigAccount = this.serumFulfillmentConfigMap.get(
+					spotMarketConfig.marketIndex
+				);
 				if (isVariant(serumConfigAccount.status, 'enabled')) {
 					// set up serum price subscriber
 					const serumSubscriber = new SerumSubscriber({
@@ -410,7 +412,9 @@ export class SpotFillerBot implements Bot {
 					spotMarketConfig.phoenixMarket
 				);
 
-				const phoenixConfigAccount = this.phoenixFulfillmentConfigMap.get(spotMarketConfig.marketIndex);
+				const phoenixConfigAccount = this.phoenixFulfillmentConfigMap.get(
+					spotMarketConfig.marketIndex
+				);
 				if (isVariant(phoenixConfigAccount.status, 'enabled')) {
 					// set up phoenix price subscriber
 					const phoenixSubscriber = new PhoenixSubscriber({
