@@ -24,7 +24,6 @@ import {
 	DriftClientSubscriptionConfig,
 	LogProviderConfig,
 	getMarketsAndOraclesForSubscription,
-	RetryTxSender,
 	AuctionSubscriber,
 	FastSingleTxSender,
 	OracleInfo,
@@ -233,11 +232,10 @@ const runBot = async () => {
 		skipPreflight: false,
 		preflightCommitment: stateCommitment,
 	};
-	const txSender = new RetryTxSender({
+	const txSender = new FastSingleTxSender({
 		connection: sendTxConnection,
 		wallet,
 		opts,
-		retrySleep: config.global.txRetryTimeoutMs,
 	});
 
 	/**
