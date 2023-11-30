@@ -375,60 +375,62 @@ export class SpotFillerBot implements Bot {
 		for (const spotMarketConfig of config.SPOT_MARKETS) {
 			if (spotMarketConfig.serumMarket) {
 				// set up fulfillment config
-				initPromises.push(
-					this.serumFulfillmentConfigMap.add(
-						spotMarketConfig.marketIndex,
-						spotMarketConfig.serumMarket
-					)
+				await this.serumFulfillmentConfigMap.add(
+					spotMarketConfig.marketIndex,
+					spotMarketConfig.serumMarket
 				);
 
-				// set up serum price subscriber
-				const serumSubscriber = new SerumSubscriber({
-					connection: this.driftClient.connection,
-					programId: new PublicKey(config.SERUM_V3),
-					marketAddress: spotMarketConfig.serumMarket,
-					accountSubscription: {
-						type: 'polling',
-						accountLoader: (
-							this.driftClient
-								.accountSubscriber as PollingDriftClientAccountSubscriber
-						).accountLoader,
-					},
-				});
-				initPromises.push(serumSubscriber.subscribe());
-				this.serumSubscribers.set(
-					spotMarketConfig.marketIndex,
-					serumSubscriber
-				);
+				const serumConfigAccount = await this.serumFulfillmentConfigMap.get(spotMarketConfig.marketIndex);
+				if (isVariant(serumConfigAccount.status, 'enabled')) {
+					// set up serum price subscriber
+					const serumSubscriber = new SerumSubscriber({
+						connection: this.driftClient.connection,
+						programId: new PublicKey(config.SERUM_V3),
+						marketAddress: spotMarketConfig.serumMarket,
+						accountSubscription: {
+							type: 'polling',
+							accountLoader: (
+								this.driftClient
+									.accountSubscriber as PollingDriftClientAccountSubscriber
+							).accountLoader,
+						},
+					});
+					initPromises.push(serumSubscriber.subscribe());
+					this.serumSubscribers.set(
+						spotMarketConfig.marketIndex,
+						serumSubscriber
+					);
+				}
 			}
 
 			if (spotMarketConfig.phoenixMarket) {
 				// set up fulfillment config
-				initPromises.push(
-					this.phoenixFulfillmentConfigMap.add(
-						spotMarketConfig.marketIndex,
-						spotMarketConfig.phoenixMarket
-					)
+				await this.phoenixFulfillmentConfigMap.add(
+					spotMarketConfig.marketIndex,
+					spotMarketConfig.phoenixMarket
 				);
 
-				// set up phoenix price subscriber
-				const phoenixSubscriber = new PhoenixSubscriber({
-					connection: this.driftClient.connection,
-					programId: new PublicKey(config.PHOENIX),
-					marketAddress: spotMarketConfig.phoenixMarket,
-					accountSubscription: {
-						type: 'polling',
-						accountLoader: (
-							this.driftClient
-								.accountSubscriber as PollingDriftClientAccountSubscriber
-						).accountLoader,
-					},
-				});
-				initPromises.push(phoenixSubscriber.subscribe());
-				this.phoenixSubscribers.set(
-					spotMarketConfig.marketIndex,
-					phoenixSubscriber
-				);
+				const phoenixConfigAccount = this.phoenixFulfillmentConfigMap.get(spotMarketConfig.marketIndex);
+				if (isVariant(phoenixConfigAccount.status, 'enabled')) {
+					// set up phoenix price subscriber
+					const phoenixSubscriber = new PhoenixSubscriber({
+						connection: this.driftClient.connection,
+						programId: new PublicKey(config.PHOENIX),
+						marketAddress: spotMarketConfig.phoenixMarket,
+						accountSubscription: {
+							type: 'polling',
+							accountLoader: (
+								this.driftClient
+									.accountSubscriber as PollingDriftClientAccountSubscriber
+							).accountLoader,
+						},
+					});
+					initPromises.push(phoenixSubscriber.subscribe());
+					this.phoenixSubscribers.set(
+						spotMarketConfig.marketIndex,
+						phoenixSubscriber
+					);
+				}
 			}
 		}
 
