@@ -1039,13 +1039,15 @@ export class SpotFillerBot implements Bot {
 
 				const duration = Date.now() - txStart;
 				const user = this.driftClient.getUser();
-				this.sdkCallDurationHistogram!.record(duration, {
-					...metricAttrFromUserAccount(
-						user.getUserAccountPublicKey(),
-						user.getUserAccount()
-					),
-					method: 'fillSpotOrder',
-				});
+				if (this.sdkCallDurationHistogram) {
+					this.sdkCallDurationHistogram!.record(duration, {
+						...metricAttrFromUserAccount(
+							user.getUserAccountPublicKey(),
+							user.getUserAccount()
+						),
+						method: 'fillSpotOrder',
+					});
+				}
 
 				await this.processBulkFillTxLogs(nodeToFill, txSig.txSig);
 			})
