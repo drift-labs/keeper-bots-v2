@@ -879,11 +879,11 @@ export class LiquidatorBot implements Bot {
 			const perpMarket = this.driftClient.getPerpMarketAccount(
 				position.marketIndex
 			)!;
-			if (position.baseAssetAmount.abs().lt(perpMarket.amm.minOrderSize)) {
-				continue;
-			}
-
 			if (!position.baseAssetAmount.isZero()) {
+				if (position.baseAssetAmount.abs().lt(perpMarket.amm.minOrderSize)) {
+					continue;
+				}
+
 				const orderParams = this.getOrderParamsForPerpDerisk(
 					userAccount.subAccountId,
 					position
