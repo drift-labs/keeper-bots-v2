@@ -520,9 +520,7 @@ export class FillerBot implements Bot {
 	}
 
 	public async init() {
-		logger.info(`${this.name} initing`);
-
-		logger.info(`${this.name} initing userMap`);
+		logger.info(`${this.name} Initializing userMap...`);
 		const startInitUserMap = Date.now();
 		this.userStatsMap = new UserStatsMap(this.driftClient);
 		this.userMap = new UserMap(
@@ -536,7 +534,7 @@ export class FillerBot implements Bot {
 		await this.userStatsMap.sync(this.userMap!.getUniqueAuthorities());
 
 		logger.info(
-			`Initialize userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}, took: ${
+			`Initialized userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}, took: ${
 				Date.now() - startInitUserMap
 			} ms`
 		);

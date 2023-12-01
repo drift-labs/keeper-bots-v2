@@ -72,6 +72,7 @@ export interface GlobalConfig {
 	closeOpenPositions?: boolean;
 	forceDeposit?: number | null;
 	websocket?: boolean;
+	eventSubscriber?: false;
 	runOnce?: boolean;
 	debug?: boolean;
 	subaccounts?: Array<number>;
@@ -100,6 +101,7 @@ const defaultConfig: Partial<Config> = {
 		closeOpenPositions: false,
 		forceDeposit: null,
 		websocket: false,
+		eventSubscriber: false,
 		runOnce: false,
 		debug: false,
 		subaccounts: [0],
@@ -193,6 +195,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			closeOpenPositions: opts.closeOpenPositions ?? false,
 			forceDeposit: opts.forceDeposit ?? null,
 			websocket: opts.websocket ?? false,
+			eventSubscriber: opts.eventSubscriber ?? false,
 			runOnce: opts.runOnce ?? false,
 			debug: opts.debug ?? false,
 			subaccounts: loadCommaDelimitToArray(opts.subaccount),

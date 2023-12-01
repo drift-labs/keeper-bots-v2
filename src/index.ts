@@ -142,6 +142,10 @@ program
 		'--use-jito',
 		'Submit transactions to a Jito relayer if the bot supports it'
 	)
+	.option(
+		'--event-susbcriber',
+		'Explicitly intialize an eventSubscriber (RPC heavy'
+	)
 	.parse();
 
 const opts = program.opts();
@@ -265,14 +269,17 @@ const runBot = async () => {
 		txSender,
 	});
 
-	const eventSubscriber = new EventSubscriber(connection, driftClient.program, {
-		maxTx: 4096,
-		maxEventsPerType: 4096,
-		orderBy: 'blockchain', // Possible options are 'blockchain' or 'client'
-		orderDir: 'desc',
-		commitment: stateCommitment,
-		logProviderConfig,
-	});
+	let eventSubscriber: EventSubscriber | undefined = undefined;
+	if (config.global.eventSubscriber) {
+		eventSubscriber = new EventSubscriber(connection, driftClient.program, {
+			maxTx: 4096,
+			maxEventsPerType: 4096,
+			orderBy: 'blockchain', // Possible options are 'blockchain' or 'client'
+			orderDir: 'desc',
+			commitment: stateCommitment,
+			logProviderConfig,
+		});
+	}
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
 	const startupTime = Date.now();
@@ -301,9 +308,10 @@ const runBot = async () => {
 		await sleepMs(1000);
 	}
 	const driftUser = driftClient.getUser();
-	const subscribePromises = configHasBot(config, 'fillerLite')
-		? [driftUser.subscribe()]
-		: [driftUser.subscribe(), eventSubscriber.subscribe()];
+	const subscribePromises = [driftUser.subscribe()];
+	if (eventSubscriber !== undefined && !configHasBot(config, 'fillerLite')) {
+		subscribePromises.push(eventSubscriber.subscribe());
+	}
 	await waitForAllSubscribesToFinish(subscribePromises);
 
 	driftClient.eventEmitter.on('error', (e) => {
@@ -499,7 +507,6 @@ const runBot = async () => {
 				slotSubscriber,
 				driftClient,
 				userMap,
-				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -507,7 +514,8 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
-				config.botConfigs!.spotFiller!
+				config.botConfigs!.spotFiller!,
+				eventSubscriber
 			)
 		);
 	}

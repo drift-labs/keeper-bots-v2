@@ -133,7 +133,7 @@ export class SpotFillerBot implements Bot {
 
 	private slotSubscriber: SlotSubscriber;
 	private driftClient: DriftClient;
-	private eventSubscriber: EventSubscriber;
+	private eventSubscriber?: EventSubscriber;
 	private pollingIntervalMs: number;
 	private driftLutAccount?: AddressLookupTableAccount;
 	private driftSpotLutAccount?: AddressLookupTableAccount;
@@ -159,6 +159,7 @@ export class SpotFillerBot implements Bot {
 	private triggeringNodes = new Map<string, number>();
 
 	private priorityFeeCalculator: PriorityFeeCalculator;
+	private revertOnFailure: boolean;
 
 	// metrics
 	private metricsInitialized = false;
@@ -184,9 +185,9 @@ export class SpotFillerBot implements Bot {
 		slotSubscriber: SlotSubscriber,
 		driftClient: DriftClient,
 		userMap: UserMap,
-		eventSubscriber: EventSubscriber,
 		runtimeSpec: RuntimeSpec,
-		config: FillerConfig
+		config: FillerConfig,
+		eventSubscriber?: EventSubscriber
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
@@ -212,6 +213,8 @@ export class SpotFillerBot implements Bot {
 		}
 
 		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
+		this.revertOnFailure = config.revertOnFailure ?? true;
+		logger.info(`${this.name}: revertOnFailure: ${this.revertOnFailure}`);
 	}
 
 	private initializeMetrics() {
@@ -462,7 +465,7 @@ export class SpotFillerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		this.eventSubscriber.eventEmitter.removeAllListeners('newEvent');
+		this.eventSubscriber?.eventEmitter.removeAllListeners('newEvent');
 
 		await this.dlobSubscriber!.unsubscribe();
 		await this.userStatsMap!.unsubscribe();
@@ -484,7 +487,7 @@ export class SpotFillerBot implements Bot {
 		);
 		this.intervalIds.push(intervalId);
 
-		this.eventSubscriber.eventEmitter.on(
+		this.eventSubscriber?.eventEmitter.on(
 			'newEvent',
 			async (record: WrappedEvent<any>) => {
 				await this.userMap!.updateWithEventRecord(record);
@@ -1022,6 +1025,10 @@ export class SpotFillerBot implements Bot {
 				referrerInfo
 			)
 		);
+
+		if (this.revertOnFailure) {
+			ixs.push(await this.driftClient.getRevertFillIx());
+		}
 
 		const txStart = Date.now();
 		const lutAccounts: Array<AddressLookupTableAccount> = [];
