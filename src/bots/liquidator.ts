@@ -1800,7 +1800,6 @@ tx: ${tx} `
 			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
 		});
 
-		console.log(usersCanBeLiquidated.length);
 		for (const { user, userKey, canBeLiquidated } of usersCanBeLiquidated) {
 			const userAcc = user.getUserAccount();
 			const auth = userAcc.authority.toBase58();
