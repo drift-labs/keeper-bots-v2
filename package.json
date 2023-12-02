@@ -13,7 +13,7 @@
 		"@opentelemetry/sdk-node": "^0.31.0",
 		"@project-serum/anchor": "^0.19.1-beta.1",
 		"@project-serum/serum": "^0.13.65",
-		"@solana/web3.js": "^1.22.0",
+		"@solana/web3.js": "1.73.3",
 		"@types/bn.js": "^5.1.0",
 		"@types/mocha": "^10.0.1",
 		"async": "^3.2.2",

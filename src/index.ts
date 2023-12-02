@@ -449,7 +449,6 @@ const runBot = async () => {
 	/*
 	 * Start bots depending on flags enabled
 	 */
-
 	const userMap = new UserMap(
 		driftClient,
 		driftClient.userAccountSubscriptionConfig,
@@ -557,8 +556,13 @@ const runBot = async () => {
 		});
 		await jitter.subscribe();
 
+		const txSenderConnection = new Connection(endpoint, {
+			wsEndpoint: wsEndpoint,
+			commitment: stateCommitment,
+			disableRetryOnRateLimit: true,
+		});
 		driftClient.txSender = new FastSingleTxSender({
-			connection,
+			connection: txSenderConnection,
 			wallet,
 		});
 
@@ -588,7 +592,12 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'liquidator')) {
+		const startUserMapSubscribe = Date.now();
+		logger.info(`subscribing to userMap`);
 		await userMap.subscribe();
+		logger.info(
+			`userMap.subscribe took ${Date.now() - startUserMapSubscribe}ms`
+		);
 		bots.push(
 			new LiquidatorBot(
 				driftClient,

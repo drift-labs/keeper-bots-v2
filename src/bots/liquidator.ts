@@ -1759,7 +1759,11 @@ tx: ${tx} `
 		}
 	}
 
-	private async tryLiquidate(): Promise<boolean> {
+	private async tryLiquidate(): Promise<{
+		checkedUsers: number;
+		liquidatableUsers: number;
+		ran: boolean;
+	}> {
 		const usersCanBeLiquidated = new Array<{
 			user: User;
 			userKey: string;
@@ -1767,9 +1771,13 @@ tx: ${tx} `
 			canBeLiquidated: boolean;
 		}>();
 
+		let checkedUsers = 0;
+		let liquidatableUsers = 0;
 		for (const user of this.userMap!.values()) {
+			checkedUsers++;
 			const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
 			if (canBeLiquidated || user.isBeingLiquidated()) {
+				liquidatableUsers++;
 				const userKey = user.userAccountPublicKey.toBase58();
 				if (this.excludedAccounts.has(userKey)) {
 					// Debug log precisely because the intent is to avoid noise
@@ -1792,6 +1800,7 @@ tx: ${tx} `
 			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
 		});
 
+		console.log(usersCanBeLiquidated.length);
 		for (const { user, userKey, canBeLiquidated } of usersCanBeLiquidated) {
 			const userAcc = user.getUserAccount();
 			const auth = userAcc.authority.toBase58();
@@ -2100,7 +2109,7 @@ tx: ${tx} `
 							});
 					}
 				}
-			} else if (isVariant(userAcc.status, 'beingLiquidated')) {
+			} else if (user.isBeingLiquidated()) {
 				// liquidate the user to bring them out of liquidation status, can liquidate any market even
 				// if the user doesn't have a position in it
 				logger.info(
@@ -2127,7 +2136,11 @@ tx: ${tx} `
 					});
 			}
 		}
-		return true;
+		return {
+			ran: true,
+			checkedUsers,
+			liquidatableUsers,
+		};
 	}
 
 	/**
@@ -2137,12 +2150,12 @@ tx: ${tx} `
 	 */
 	private async tryLiquidateStart() {
 		const start = Date.now();
-		/* 
-          If there is more than one subAccount, then derisk and liquidate may try to
-          change it, so both need to be mutually exclusive.
+		/*
+		  If there is more than one subAccount, then derisk and liquidate may try to
+		  change it, so both need to be mutually exclusive.
 
-          If not, all we care about is avoiding two liquidation calls at the same time.
-         */
+		  If not, all we care about is avoiding two liquidation calls at the same time.
+		 */
 		const mutex =
 			this.allSubaccounts.size > 1 ? this.deriskMutex : this.liquidateMutex;
 		if (!this.acquireMutex(mutex)) {
@@ -2152,8 +2165,10 @@ tx: ${tx} `
 			return;
 		}
 		let ran = false;
+		let checkedUsers = 0;
+		let liquidatableUsers = 0;
 		try {
-			ran = await this.tryLiquidate();
+			({ ran, checkedUsers, liquidatableUsers } = await this.tryLiquidate());
 		} catch (e) {
 			console.error(e);
 			if (e instanceof Error) {
@@ -2165,7 +2180,13 @@ tx: ${tx} `
 			}
 		} finally {
 			if (ran) {
-				logger.debug(`${this.name} Bot took ${Date.now() - start}ms to run`);
+				logger.debug(
+					`${
+						this.name
+					} Bot checked ${checkedUsers} users, ${liquidatableUsers} liquidateable took ${
+						Date.now() - start
+					}ms to run`
+				);
 				this.watchdogTimerLastPatTime = Date.now();
 			}
 		}

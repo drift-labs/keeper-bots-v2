@@ -520,27 +520,20 @@ export class FillerBot implements Bot {
 	}
 
 	public async init() {
-		logger.info(`${this.name} Initializing userMap...`);
-		const startInitUserMap = Date.now();
-		this.userStatsMap = new UserStatsMap(this.driftClient);
-		this.userMap = new UserMap(
-			this.driftClient,
-			this.driftClient.userAccountSubscriptionConfig,
-			false
-		);
-		await this.userMap.subscribe();
+		const startInitUserStatsMap = Date.now();
 
 		// sync userstats once
+		this.userStatsMap = new UserStatsMap(this.driftClient);
 		await this.userStatsMap.sync(this.userMap!.getUniqueAuthorities());
 
 		logger.info(
-			`Initialized userMap size: ${this.userMap.size()}, userStatsMap: ${this.userStatsMap.size()}, took: ${
-				Date.now() - startInitUserMap
+			`Initialized userMap: ${this.userMap!.size()}, userStatsMap: ${this.userStatsMap.size()}, took: ${
+				Date.now() - startInitUserStatsMap
 			} ms`
 		);
 
 		this.dlobSubscriber = new DLOBSubscriber({
-			dlobSource: this.userMap,
+			dlobSource: this.userMap!,
 			slotSource: this.slotSubscriber,
 			updateFrequency: this.pollingIntervalMs - 500,
 			driftClient: this.driftClient,
