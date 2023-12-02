@@ -198,12 +198,6 @@ const runBot = async () => {
 		commitment: stateCommitment,
 	});
 
-	const sendTxConnection = new Connection(endpoint, {
-		wsEndpoint: wsEndpoint,
-		commitment: stateCommitment,
-		disableRetryOnRateLimit: true,
-	});
-
 	let bulkAccountLoader: BulkAccountLoader | undefined;
 	let lastBulkAccountLoaderSlot: number | undefined;
 	let accountSubscription: DriftClientSubscriptionConfig = {
@@ -215,8 +209,13 @@ const runBot = async () => {
 	};
 
 	if (!config.global.websocket) {
+		const bulkAccountLoaderConnection = new Connection(endpoint, {
+			wsEndpoint: wsEndpoint,
+			commitment: stateCommitment,
+			disableRetryOnRateLimit: true,
+		});
 		bulkAccountLoader = new BulkAccountLoader(
-			connection,
+			bulkAccountLoaderConnection,
 			stateCommitment,
 			config.global.bulkAccountLoaderPollingInterval
 		);
@@ -236,6 +235,11 @@ const runBot = async () => {
 		skipPreflight: false,
 		preflightCommitment: stateCommitment,
 	};
+	const sendTxConnection = new Connection(endpoint, {
+		wsEndpoint: wsEndpoint,
+		commitment: stateCommitment,
+		disableRetryOnRateLimit: true,
+	});
 	const txSender = new FastSingleTxSender({
 		connection: sendTxConnection,
 		wallet,
