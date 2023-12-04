@@ -5,6 +5,8 @@ import {
 	PublicKey,
 	UserMap,
 	TxSigAndSlot,
+	DriftClientConfig,
+	BulkAccountLoader,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -32,16 +34,31 @@ export class UserIdleFlipperBot implements Bot {
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(
-		driftClient: DriftClient,
-		config: BaseBotConfig,
-		userMap: UserMap
-	) {
+	constructor(driftClientConfigs: DriftClientConfig, config: BaseBotConfig) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
-		this.driftClient = driftClient;
-		this.userMap = userMap;
+		const bulkAccountLoader = new BulkAccountLoader(
+			driftClientConfigs.connection,
+			driftClientConfigs.connection.commitment || 'processed',
+			0
+		);
+		this.driftClient = new DriftClient(
+			Object.assign({}, driftClientConfigs, {
+				accountSubscription: {
+					type: 'polling',
+					accountLoader: bulkAccountLoader,
+				},
+			})
+		);
+		this.userMap = new UserMap(
+			this.driftClient,
+			{
+				type: 'polling',
+				accountLoader: bulkAccountLoader,
+			},
+			false
+		);
 	}
 
 	public async init() {

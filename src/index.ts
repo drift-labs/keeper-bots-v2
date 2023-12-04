@@ -257,7 +257,7 @@ const runBot = async () => {
 			getMarketsAndOraclesForSubscription(config.global.driftEnv!));
 	}
 
-	const driftClient = new DriftClient({
+	const driftClientConfig = {
 		connection,
 		wallet,
 		programID: driftPublicKey,
@@ -271,7 +271,8 @@ const runBot = async () => {
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts ?? [0],
 		txSender,
-	});
+	};
+	const driftClient = new DriftClient(driftClientConfig);
 
 	let eventSubscriber: EventSubscriber | undefined = undefined;
 	if (config.global.eventSubscriber) {
@@ -640,7 +641,7 @@ const runBot = async () => {
 		await userMap.subscribe();
 		bots.push(
 			new UserPnlSettlerBot(
-				driftClient,
+				driftClientConfig,
 				config.botConfigs!.userPnlSettler!,
 				userMap
 			)
@@ -651,16 +652,18 @@ const runBot = async () => {
 		await userMap.subscribe();
 		bots.push(
 			new UserIdleFlipperBot(
-				driftClient,
-				config.botConfigs!.userIdleFlipper!,
-				userMap
+				driftClientConfig,
+				config.botConfigs!.userIdleFlipper!
 			)
 		);
 	}
 
 	if (configHasBot(config, 'ifRevenueSettler')) {
 		bots.push(
-			new IFRevenueSettlerBot(driftClient, config.botConfigs!.ifRevenueSettler!)
+			new IFRevenueSettlerBot(
+				driftClientConfig,
+				config.botConfigs!.ifRevenueSettler!
+			)
 		);
 	}
 

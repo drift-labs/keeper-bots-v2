@@ -21,6 +21,8 @@ import {
 	calculateNetUserPnl,
 	BASE_PRECISION,
 	QUOTE_SPOT_MARKET_INDEX,
+	DriftClientConfig,
+	BulkAccountLoader,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -69,14 +71,27 @@ export class UserPnlSettlerBot implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
-		driftClient: DriftClient,
+		driftClientConfigs: DriftClientConfig,
 		config: BaseBotConfig,
 		userMap: UserMap
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
-		this.driftClient = driftClient;
+
+		const bulkAccountLoader = new BulkAccountLoader(
+			driftClientConfigs.connection,
+			driftClientConfigs.connection.commitment || 'processed',
+			0
+		);
+		this.driftClient = new DriftClient(
+			Object.assign({}, driftClientConfigs, {
+				accountSubscription: {
+					type: 'polling',
+					accountLoader: bulkAccountLoader,
+				},
+			})
+		);
 		this.userMap = userMap;
 	}
 
