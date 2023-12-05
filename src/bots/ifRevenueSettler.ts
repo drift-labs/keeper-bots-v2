@@ -3,6 +3,8 @@ import {
 	SpotMarketAccount,
 	OraclePriceData,
 	ZERO,
+	DriftClientConfig,
+	BulkAccountLoader,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -31,15 +33,33 @@ export class IFRevenueSettlerBot implements Bot {
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(driftClient: DriftClient, config: BaseBotConfig) {
+	constructor(driftClientConfigs: DriftClientConfig, config: BaseBotConfig) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
-		this.driftClient = driftClient;
+		const bulkAccountLoader = new BulkAccountLoader(
+			driftClientConfigs.connection,
+			driftClientConfigs.connection.commitment || 'processed',
+			0
+		);
+		this.driftClient = new DriftClient(
+			Object.assign({}, driftClientConfigs, {
+				accountSubscription: {
+					type: 'polling',
+					accountLoader: bulkAccountLoader,
+				},
+			})
+		);
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing`);
+		await this.driftClient.subscribe();
+		if (!(await this.driftClient.getUser().exists())) {
+			throw new Error(
+				`User for ${this.driftClient.wallet.publicKey.toString()} does not exist`
+			);
+		}
 	}
 
 	public async reset() {
