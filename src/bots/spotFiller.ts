@@ -81,6 +81,7 @@ const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a n
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
 	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
+	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 ];
 
 enum METRIC_TYPES {
