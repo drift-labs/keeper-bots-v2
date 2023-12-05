@@ -64,6 +64,13 @@ export class UserIdleFlipperBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 
+		await this.driftClient.subscribe();
+		if (!(await this.driftClient.getUser().exists())) {
+			throw new Error(
+				`User for ${this.driftClient.wallet.publicKey.toString()} does not exist`
+			);
+		}
+		await this.userMap.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 	}

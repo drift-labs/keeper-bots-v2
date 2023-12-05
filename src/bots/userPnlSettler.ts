@@ -70,11 +70,7 @@ export class UserPnlSettlerBot implements Bot {
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(
-		driftClientConfigs: DriftClientConfig,
-		config: BaseBotConfig,
-		userMap: UserMap
-	) {
+	constructor(driftClientConfigs: DriftClientConfig, config: BaseBotConfig) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
@@ -92,12 +88,25 @@ export class UserPnlSettlerBot implements Bot {
 				},
 			})
 		);
-		this.userMap = userMap;
+		this.userMap = new UserMap(
+			this.driftClient,
+			{
+				type: 'polling',
+				accountLoader: bulkAccountLoader,
+			},
+			false
+		);
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing`);
-
+		await this.driftClient.subscribe();
+		if (!(await this.driftClient.getUser().exists())) {
+			throw new Error(
+				`User for ${this.driftClient.wallet.publicKey.toString()} does not exist`
+			);
+		}
+		await this.userMap.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 	}
