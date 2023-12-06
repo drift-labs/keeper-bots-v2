@@ -12,8 +12,6 @@ global:
 
   initUser: false # initialize user on startup
   testLiveness: false # test liveness, by failing liveness test after 1 min
-  cancelOpenOrders: false # cancel open orders on startup
-  closeOpenPositions: false # close all open positions
 
   # Force deposit this amount of USDC to collateral account, the program will
   # end after the deposit transaction is sent
@@ -45,7 +43,7 @@ global:
 # Bot specific configs are below
 enabledBots:
   # Perp order filler bot
-  - fillerLite
+  # - fillerLite
 
   # Spot order filler bot
   # - spotFiller
@@ -68,6 +66,8 @@ enabledBots:
   # settles negative PnLs for users (may want to run with runOnce: true)
   # - userPnlSettler
 
+  - markTwapCrank
+
 # below are bot configs
 botConfigs:
   fillerLite:
@@ -79,6 +79,28 @@ botConfigs:
     # will revert a transaction during simulation if a fill fails, this will save on tx fees,
     # and be friendlier for use with services like Jito.
     # Default is true
-    revertOnFailure: true
 
-
+  markTwapCrank:
+    botId: "mark-twap-cranker"
+    dryRun: false
+    metricsPort: 9465
+    crankIntervalToMarketIndicies:
+      15000:
+        - 0
+        - 1
+        - 2
+      60000:
+        - 3
+        - 4
+        - 5
+        - 6
+        - 7
+        - 8
+        - 9
+        - 10
+        - 11
+        - 12
+        - 13
+        - 14
+        - 15
+        - 16

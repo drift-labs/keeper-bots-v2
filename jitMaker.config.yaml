@@ -14,8 +14,6 @@ global:
 
   initUser: false # initialize user on startup
   testLiveness: false # test liveness, by failing liveness test after 1 min
-  cancelOpenOrders: false # cancel open orders on startup
-  closeOpenPositions: false # close all open positions
 
   # Force deposit this amount of USDC to collateral account, the program will
   # end after the deposit transaction is sent

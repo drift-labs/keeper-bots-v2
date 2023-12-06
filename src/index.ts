@@ -12,11 +12,9 @@ import { getAssociatedTokenAddress } from '@solana/spl-token';
 import {
 	BulkAccountLoader,
 	DriftClient,
-	User,
 	initialize,
 	EventSubscriber,
 	SlotSubscriber,
-	convertToNumber,
 	QUOTE_PRECISION,
 	SpotMarkets,
 	BN,
@@ -28,6 +26,7 @@ import {
 	FastSingleTxSender,
 	OracleInfo,
 	UserMap,
+	Wallet,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -49,7 +48,6 @@ import {
 	TOKEN_FAUCET_PROGRAM_ID,
 	getWallet,
 	loadKeypair,
-	waitForAllSubscribesToFinish,
 } from './utils';
 import {
 	Config,
@@ -90,9 +88,6 @@ program
 	.option('--user-pnl-settler', 'Enable User PnL settler bot')
 	.option('--user-idle-flipper', 'Flips eligible users to idle')
 	.option('--mark-twap-crank', 'Enable bid/ask twap crank bot')
-
-	.option('--cancel-open-orders', 'Cancel open orders on startup')
-	.option('--close-open-positions', 'close all open positions')
 	.option('--test-liveness', 'Purposefully fail liveness test after 1 minute')
 	.option(
 		'--force-deposit <number>',
@@ -249,6 +244,7 @@ const runBot = async () => {
 	/**
 	 * Creating and subscribing to the drift client
 	 */
+
 	let perpMarketIndexes: number[] | undefined;
 	let spotMarketIndexes: number[] | undefined;
 	let oracleInfos: OracleInfo[] | undefined;
@@ -256,8 +252,7 @@ const runBot = async () => {
 		({ perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 			getMarketsAndOraclesForSubscription(config.global.driftEnv!));
 	}
-
-	const driftClient = new DriftClient({
+	const driftClientConfig = {
 		connection,
 		wallet,
 		programID: driftPublicKey,
@@ -271,6 +266,11 @@ const runBot = async () => {
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts ?? [0],
 		txSender,
+	};
+	const driftClient = new DriftClient(driftClientConfig);
+	driftClient.eventEmitter.on('error', (e) => {
+		logger.info('clearing house error');
+		logger.error(e);
 	});
 
 	let eventSubscriber: EventSubscriber | undefined = undefined;
@@ -286,8 +286,9 @@ const runBot = async () => {
 	}
 
 	const slotSubscriber = new SlotSubscriber(connection, {});
-	const startupTime = Date.now();
+	await slotSubscriber.subscribe();
 
+	const startupTime = Date.now();
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	logger.info(
 		`DriftClient ProgramId: ${driftClient.program.programId.toBase58()}`
@@ -305,118 +306,6 @@ const runBot = async () => {
 		logger.info(` . USDC balance: ${usdcBalance.value.uiAmount}`);
 	} catch (e) {
 		logger.info(`Failed to load USDC token account: ${e}`);
-	}
-
-	while (!(await driftClient.subscribe())) {
-		logger.info('waiting to subscribe to DriftClient');
-		await sleepMs(1000);
-	}
-	const driftUser = driftClient.getUser();
-	const subscribePromises = [driftUser.subscribe()];
-	if (eventSubscriber !== undefined && !configHasBot(config, 'fillerLite')) {
-		subscribePromises.push(eventSubscriber.subscribe());
-	}
-	await waitForAllSubscribesToFinish(subscribePromises);
-
-	driftClient.eventEmitter.on('error', (e) => {
-		logger.info('clearing house error');
-		logger.error(e);
-	});
-
-	await slotSubscriber.subscribe();
-
-	if (!(await driftClient.getUser().exists())) {
-		logger.error(`User for ${wallet.publicKey} does not exist`);
-		if (config.global.initUser) {
-			logger.info(`Creating User for ${wallet.publicKey}`);
-			const [txSig] = await driftClient.initializeUserAccount();
-			logger.info(`Initialized user account in transaction: ${txSig}`);
-		} else {
-			throw new Error("Run with '--init-user' flag to initialize a User");
-		}
-	}
-
-	logger.info(
-		`User PublicKey: ${driftUser.getUserAccountPublicKey().toBase58()}`
-	);
-	await driftClient.getUser().fetchAccounts();
-
-	printUserAccountStats(driftUser);
-	if (config.global.closeOpenPositions) {
-		logger.info(`Closing open perp positions`);
-		let closedPerps = 0;
-		for await (const p of driftUser.getUserAccount().perpPositions) {
-			if (p.baseAssetAmount.isZero()) {
-				logger.info(`no position on market: ${p.marketIndex}`);
-				continue;
-			}
-			logger.info(`closing position on ${p.marketIndex}`);
-			logger.info(` . ${await driftClient.closePosition(p.marketIndex)}`);
-			closedPerps++;
-		}
-		console.log(`Closed ${closedPerps} spot positions`);
-
-		let closedSpots = 0;
-		for await (const p of driftUser.getUserAccount().spotPositions) {
-			if (p.scaledBalance.isZero()) {
-				logger.info(`no position on market: ${p.marketIndex}`);
-				continue;
-			}
-			logger.info(`closing position on ${p.marketIndex}`);
-			logger.info(` . ${await driftClient.closePosition(p.marketIndex)}`);
-			closedSpots++;
-		}
-		console.log(`Closed ${closedSpots} spot positions`);
-	}
-
-	/**
-	 * Look for collateral and force deposit before running if flag is set
-	 */
-	const freeCollateral = driftUser.getFreeCollateral('Maintenance');
-	if (
-		freeCollateral.isZero() &&
-		configHasBot(config, 'jitMaker') &&
-		!config.global.forceDeposit
-	) {
-		throw new Error(
-			`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
-		);
-	}
-	if (config.global.forceDeposit) {
-		logger.info(
-			`Depositing (${new BN(
-				config.global.forceDeposit
-			).toString()} USDC to collateral account)`
-		);
-
-		if (config.global.forceDeposit < 0) {
-			logger.error(`Deposit amount must be greater than 0`);
-			throw new Error('Deposit amount must be greater than 0');
-		}
-
-		const mint = SpotMarkets[config.global.driftEnv!][0].mint; // TODO: are index 0 always USDC???, support other collaterals
-		const ata = await getAssociatedTokenAddress(mint, wallet.publicKey);
-		const amount = new BN(config.global.forceDeposit).mul(QUOTE_PRECISION);
-
-		if (config.global.driftEnv === 'devnet') {
-			const tokenFaucet = new TokenFaucet(
-				connection,
-				wallet,
-				TOKEN_FAUCET_PROGRAM_ID,
-				mint,
-				opts
-			);
-			await tokenFaucet.mintToUser(ata, amount);
-		}
-
-		const tx = await driftClient.deposit(
-			amount,
-			0, // USDC bank
-			ata
-		);
-		logger.info(`Deposit transaction: ${tx}`);
-		logger.info(`exiting...run again without --force-deposit flag`);
-		return;
 	}
 
 	/**
@@ -453,13 +342,17 @@ const runBot = async () => {
 	/*
 	 * Start bots depending on flags enabled
 	 */
+	let needCheckDriftUser = false;
+	let needForceCollateral = !!config.global.forceDeposit;
+	let needUserMapSubscribe = false;
 	const userMap = new UserMap(
 		driftClient,
 		driftClient.userAccountSubscriptionConfig,
 		false
 	);
 	if (configHasBot(config, 'filler')) {
-		await userMap.subscribe();
+		needCheckDriftUser = true;
+		needUserMapSubscribe = true;
 		bots.push(
 			new FillerBot(
 				slotSubscriber,
@@ -483,6 +376,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'fillerLite')) {
+		needCheckDriftUser = true;
 		logger.info(`Starting filler lite bot`);
 		bots.push(
 			new FillerLiteBot(
@@ -504,7 +398,8 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'spotFiller')) {
-		await userMap.subscribe();
+		needCheckDriftUser = true;
+		needUserMapSubscribe = true;
 		bots.push(
 			new SpotFillerBot(
 				slotSubscriber,
@@ -524,7 +419,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'trigger')) {
-		await userMap.subscribe();
+		needUserMapSubscribe = true;
 		bots.push(
 			new TriggerBot(
 				driftClient,
@@ -542,17 +437,22 @@ const runBot = async () => {
 		);
 	}
 
+	let auctionSubscriber: AuctionSubscriber | undefined = undefined;
+	let jitter: JitterSniper | undefined = undefined;
 	if (configHasBot(config, 'jitMaker')) {
-		await userMap.subscribe();
+		// Subscribe to drift client
+
+		needUserMapSubscribe = true;
+		needForceCollateral;
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
 		});
 
-		const auctionSubscriber = new AuctionSubscriber({ driftClient });
+		auctionSubscriber = new AuctionSubscriber({ driftClient });
 		await auctionSubscriber.subscribe();
 
-		const jitter = new JitterSniper({
+		jitter = new JitterSniper({
 			auctionSubscriber,
 			driftClient,
 			slotSubscriber,
@@ -582,7 +482,8 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'markTwapCrank')) {
-		await userMap.subscribe();
+		needCheckDriftUser = true;
+		needUserMapSubscribe = true;
 		bots.push(
 			new MakerBidAskTwapCrank(
 				driftClient,
@@ -596,12 +497,9 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'liquidator')) {
-		const startUserMapSubscribe = Date.now();
-		logger.info(`subscribing to userMap`);
-		await userMap.subscribe();
-		logger.info(
-			`userMap.subscribe took ${Date.now() - startUserMapSubscribe}ms`
-		);
+		needCheckDriftUser = true;
+		needUserMapSubscribe = true;
+		needForceCollateral = true;
 		bots.push(
 			new LiquidatorBot(
 				driftClient,
@@ -620,6 +518,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'floatingMaker')) {
+		needCheckDriftUser = true;
 		bots.push(
 			new FloatingPerpMakerBot(
 				driftClient,
@@ -637,34 +536,34 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userPnlSettler')) {
-		await userMap.subscribe();
 		bots.push(
 			new UserPnlSettlerBot(
-				driftClient,
-				config.botConfigs!.userPnlSettler!,
-				userMap
+				driftClientConfig,
+				config.botConfigs!.userPnlSettler!
 			)
 		);
 	}
 
 	if (configHasBot(config, 'userIdleFlipper')) {
-		await userMap.subscribe();
 		bots.push(
 			new UserIdleFlipperBot(
-				driftClient,
-				config.botConfigs!.userIdleFlipper!,
-				userMap
+				driftClientConfig,
+				config.botConfigs!.userIdleFlipper!
 			)
 		);
 	}
 
 	if (configHasBot(config, 'ifRevenueSettler')) {
 		bots.push(
-			new IFRevenueSettlerBot(driftClient, config.botConfigs!.ifRevenueSettler!)
+			new IFRevenueSettlerBot(
+				driftClientConfig,
+				config.botConfigs!.ifRevenueSettler!
+			)
 		);
 	}
 
 	if (configHasBot(config, 'fundingRateUpdater')) {
+		needCheckDriftUser = true;
 		bots.push(
 			new FundingRateUpdaterBot(
 				driftClient,
@@ -674,7 +573,8 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'uncrossArb')) {
-		await userMap.subscribe();
+		needCheckDriftUser = true;
+		needUserMapSubscribe = true;
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
@@ -691,6 +591,39 @@ const runBot = async () => {
 		);
 	}
 
+	// Run subscribe functions once
+	if (
+		needCheckDriftUser ||
+		needForceCollateral ||
+		eventSubscriber ||
+		auctionSubscriber ||
+		jitter ||
+		needUserMapSubscribe
+	) {
+		while (!(await driftClient.subscribe())) {
+			logger.info('waiting to subscribe to DriftClient');
+			await sleepMs(1000);
+		}
+	}
+	if (needCheckDriftUser) await checkUserExists(config, driftClient, wallet);
+	if (needForceCollateral)
+		await checkAndForceCollateral(config, driftClient, wallet);
+	if (eventSubscriber) await eventSubscriber.subscribe();
+	if (needUserMapSubscribe) await userMap.subscribe();
+	if (auctionSubscriber) await auctionSubscriber.subscribe();
+	if (jitter) {
+		const freeCollateral = driftClient
+			.getUser()
+			.getFreeCollateral('Maintenance');
+		if (freeCollateral.isZero()) {
+			throw new Error(
+				`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
+			);
+		}
+		await jitter.subscribe();
+	}
+
+	// Initialize bots
 	logger.info(`initializing bots`);
 	await Promise.all(bots.map((bot) => bot.init()));
 
@@ -780,25 +713,63 @@ async function recursiveTryCatch(f: () => void) {
 	}
 }
 
-function printUserAccountStats(clearingHouseUser: User) {
-	const freeCollateral = clearingHouseUser.getFreeCollateral();
-	logger.info(
-		`User free collateral: $${convertToNumber(
-			freeCollateral,
-			QUOTE_PRECISION
-		)}:`
-	);
+async function checkUserExists(
+	config: Config,
+	driftClient: DriftClient,
+	wallet: Wallet
+) {
+	if (!(await driftClient.getUser().exists())) {
+		logger.error(`User for ${wallet.publicKey} does not exist`);
+		if (config.global.initUser) {
+			logger.info(`Creating User for ${wallet.publicKey}`);
+			const [txSig] = await driftClient.initializeUserAccount();
+			logger.info(`Initialized user account in transaction: ${txSig}`);
+		} else {
+			throw new Error("Run with '--init-user' flag to initialize a User");
+		}
+	}
+	return true;
+}
 
-	logger.info(
-		`CHUser unrealized funding PnL: ${convertToNumber(
-			clearingHouseUser.getUnrealizedFundingPNL(),
-			QUOTE_PRECISION
-		)}`
-	);
-	logger.info(
-		`CHUser unrealized PnL:         ${convertToNumber(
-			clearingHouseUser.getUnrealizedPNL(),
-			QUOTE_PRECISION
-		)}`
-	);
+async function checkAndForceCollateral(
+	config: Config,
+	driftClient: DriftClient,
+	wallet: Wallet
+) {
+	// Force depost collateral if requested
+	if (config.global.forceDeposit) {
+		logger.info(
+			`Depositing (${new BN(
+				config.global.forceDeposit
+			).toString()} USDC to collateral account)`
+		);
+
+		if (config.global.forceDeposit < 0) {
+			logger.error(`Deposit amount must be greater than 0`);
+			throw new Error('Deposit amount must be greater than 0');
+		}
+
+		const mint = SpotMarkets[config.global.driftEnv!][0].mint; // TODO: are index 0 always USDC???, support other collaterals
+		const ata = await getAssociatedTokenAddress(mint, wallet.publicKey);
+		const amount = new BN(config.global.forceDeposit).mul(QUOTE_PRECISION);
+
+		if (config.global.driftEnv === 'devnet') {
+			const tokenFaucet = new TokenFaucet(
+				driftClient.connection,
+				wallet,
+				TOKEN_FAUCET_PROGRAM_ID,
+				mint,
+				opts
+			);
+			await tokenFaucet.mintToUser(ata, amount);
+		}
+		const tx = await driftClient.deposit(
+			amount,
+			0, // USDC bank
+			ata
+		);
+		logger.info(`Deposit transaction: ${tx}`);
+		logger.info(`exiting...run again without --force-deposit flag`);
+	}
+	return true;
 }
