@@ -202,6 +202,21 @@ const runBot = async () => {
 	let logProviderConfig: LogProviderConfig = {
 		type: 'websocket',
 	};
+	let userMapSubscriptionConfig:
+		| {
+				type: 'polling';
+				frequency: number;
+				commitment?: Commitment;
+		  }
+		| {
+				type: 'websocket';
+				resubTimeoutMs?: number;
+				commitment?: Commitment;
+		  } = {
+		type: 'polling',
+		frequency: 60_000,
+		commitment: stateCommitment,
+	};
 
 	if (!config.global.websocket) {
 		const bulkAccountLoaderConnection = new Connection(endpoint, {
@@ -222,6 +237,11 @@ const runBot = async () => {
 		logProviderConfig = {
 			type: 'polling',
 			frequency: config.global.eventSubscriberPollingInterval,
+		};
+		userMapSubscriptionConfig = {
+			type: 'websocket',
+			resubTimeoutMs: 30_000,
+			commitment: stateCommitment,
 		};
 	}
 
@@ -345,11 +365,12 @@ const runBot = async () => {
 	let needCheckDriftUser = false;
 	let needForceCollateral = !!config.global.forceDeposit;
 	let needUserMapSubscribe = false;
-	const userMap = new UserMap(
+	const userMap = new UserMap({
 		driftClient,
-		driftClient.userAccountSubscriptionConfig,
-		false
-	);
+		subscriptionConfig: userMapSubscriptionConfig,
+		skipInitialLoad: false,
+		includeIdle: false,
+	});
 	if (configHasBot(config, 'filler')) {
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
