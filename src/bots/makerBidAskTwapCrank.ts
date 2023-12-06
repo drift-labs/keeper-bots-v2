@@ -22,7 +22,7 @@ import {
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
 
-const CRANK_TX_MARKET_CHUNK_SIZE = 3;
+const CRANK_TX_MARKET_CHUNK_SIZE = 2;
 
 export async function sendVersionedTransaction(
 	driftClient: DriftClient,
@@ -143,7 +143,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
 			healthy =
-				this.watchdogTimerLastPatTime > Date.now() - 2 * this.maxIntervalGroup!;
+				this.watchdogTimerLastPatTime > Date.now() - 5 * this.maxIntervalGroup!;
 		});
 		return healthy;
 	}

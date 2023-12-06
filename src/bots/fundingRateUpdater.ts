@@ -101,7 +101,8 @@ export class FundingRateUpdaterBot implements Bot {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
 			healthy =
-				this.watchdogTimerLastPatTime > Date.now() - 2 * this.defaultIntervalMs;
+				this.watchdogTimerLastPatTime >
+				Date.now() - 10 * this.defaultIntervalMs;
 		});
 		return healthy;
 	}
