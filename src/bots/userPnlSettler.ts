@@ -88,14 +88,16 @@ export class UserPnlSettlerBot implements Bot {
 				},
 			})
 		);
-		this.userMap = new UserMap(
-			this.driftClient,
-			{
+		this.userMap = new UserMap({
+			driftClient: this.driftClient,
+			subscriptionConfig: {
 				type: 'polling',
-				accountLoader: bulkAccountLoader,
+				frequency: 60_000,
+				commitment: this.driftClient.opts?.commitment,
 			},
-			false
-		);
+			skipInitialLoad: false,
+			includeIdle: false,
+		});
 	}
 
 	public async init() {

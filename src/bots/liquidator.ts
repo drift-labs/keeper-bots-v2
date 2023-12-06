@@ -1039,6 +1039,10 @@ export class LiquidatorBot implements Bot {
 			swapMode: jupSwapMode,
 		});
 
+		if (!jupiterRoutes) {
+			return undefined;
+		}
+
 		console.log('routes');
 		console.log(JSON.stringify(jupiterRoutes, null, 2));
 
@@ -1423,7 +1427,7 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
-	private liqBorrow(
+	private async liqBorrow(
 		depositMarketIndextoLiq: number,
 		borrowMarketIndextoLiq: number,
 		borrowAmountToLiq: BN,
@@ -1452,7 +1456,7 @@ export class LiquidatorBot implements Bot {
 		logger.info(
 			`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
 		);
-		this.driftClient.switchActiveUser(
+		await this.driftClient.switchActiveUser(
 			subAccountToUse,
 			this.driftClient.authority
 		);
@@ -1800,7 +1804,12 @@ tx: ${tx} `
 			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
 		});
 
-		for (const { user, userKey, canBeLiquidated } of usersCanBeLiquidated) {
+		for (const {
+			user,
+			userKey,
+			marginRequirement,
+			canBeLiquidated,
+		} of usersCanBeLiquidated) {
 			const userAcc = user.getUserAccount();
 			const auth = userAcc.authority.toBase58();
 
@@ -1864,7 +1873,10 @@ tx: ${tx} `
 				let liquidateeHasSpotPos = false;
 				if (borrowMarketIndextoLiq != -1 && depositMarketIndextoLiq != -1) {
 					liquidateeHasSpotPos = true;
-					this.liqBorrow(
+					logger.info(
+						`User ${userKey} has spot positions to liquidate ${canBeLiquidated}, marginRequirement: ${marginRequirement}`
+					);
+					await this.liqBorrow(
 						depositMarketIndextoLiq,
 						borrowMarketIndextoLiq,
 						borrowAmountToLiq,
