@@ -257,6 +257,7 @@ const runBot = async () => {
 	});
 	const txSender = new FastSingleTxSender({
 		connection: sendTxConnection,
+		blockhashRefreshInterval: 10_000,
 		wallet,
 		opts,
 	});
@@ -489,6 +490,7 @@ const runBot = async () => {
 		driftClient.txSender = new FastSingleTxSender({
 			connection: txSenderConnection,
 			wallet,
+			blockhashRefreshInterval: 10_000,
 		});
 
 		bots.push(
