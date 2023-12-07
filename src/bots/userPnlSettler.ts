@@ -447,9 +447,16 @@ export class UserPnlSettlerBot implements Bot {
 						}
 					}
 				}
-				const txs = await Promise.all(settlePnlPromises);
-				for (const tx of txs) {
-					logger.info(`Settle PNL tx: ${JSON.stringify(tx)}`);
+				try {
+					const txs = await Promise.all(settlePnlPromises);
+					for (const tx of txs) {
+						logger.info(`Settle PNL tx: ${JSON.stringify(tx)}`);
+					}
+				} catch (e) {
+					console.error(
+						`Caught error settling users for ${params.marketIndex}: ${marketStr}`
+					);
+					console.error(e);
 				}
 			}
 		} catch (err) {
