@@ -9,8 +9,6 @@ import {
 	PositionDirection,
 	OrderType,
 	BASE_PRECISION,
-	convertToNumber,
-	PRICE_PRECISION,
 	Order,
 	PerpPosition,
 } from '@drift-labs/sdk';
@@ -260,39 +258,6 @@ export class FloatingPerpMakerBot implements Bot {
 		const oracle = this.driftClient.getOracleDataForPerpMarket(marketIndex);
 		const vAsk = calculateAskPrice(marketAccount, oracle);
 		const vBid = calculateBidPrice(marketAccount, oracle);
-
-		console.log(`mkt: ${marketAccount.marketIndex} open orders:`);
-		for (const [idx, o] of openOrders.entries()) {
-			console.log(
-				`${Object.keys(o.orderType)[0]} ${Object.keys(o.direction)[0]}`
-			);
-			console.log(
-				`[${idx}]: baseAmountFilled: ${convertToNumber(
-					o.baseAssetAmountFilled,
-					BASE_PRECISION
-				)}/${convertToNumber(o.baseAssetAmount, BASE_PRECISION)}`
-			);
-			console.log(` .        qaa: ${o.quoteAssetAmount}`);
-			console.log(
-				` .        price:       ${convertToNumber(o.price, PRICE_PRECISION)}`
-			);
-			console.log(
-				` .        priceOffset: ${convertToNumber(
-					new BN(o.oraclePriceOffset),
-					PRICE_PRECISION
-				)}`
-			);
-			console.log(` .        vBid: ${convertToNumber(vBid, PRICE_PRECISION)}`);
-			console.log(` .        vAsk: ${convertToNumber(vAsk, PRICE_PRECISION)}`);
-			console.log(
-				` .        oraclePrice: ${convertToNumber(
-					oracle.price,
-					PRICE_PRECISION
-				)}`
-			);
-			console.log(` .        oracleSlot:  ${oracle.slot.toString()}`);
-			console.log(` .        oracleConf:  ${oracle.confidence.toString()}`);
-		}
 
 		// cancel orders if not quoting both sides of the market
 		let placeNewOrders = openOrders.length === 0;
