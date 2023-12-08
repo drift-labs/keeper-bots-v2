@@ -213,8 +213,8 @@ const runBot = async () => {
 				resubTimeoutMs?: number;
 				commitment?: Commitment;
 		  } = {
-		type: 'polling',
-		frequency: 60_000,
+		type: 'websocket',
+		resubTimeoutMs: 30_000,
 		commitment: stateCommitment,
 	};
 
@@ -239,8 +239,8 @@ const runBot = async () => {
 			frequency: config.global.eventSubscriberPollingInterval,
 		};
 		userMapSubscriptionConfig = {
-			type: 'websocket',
-			resubTimeoutMs: 30_000,
+			type: 'polling',
+			frequency: 60_000,
 			commitment: stateCommitment,
 		};
 	}
@@ -628,12 +628,18 @@ const runBot = async () => {
 			await sleepMs(1000);
 		}
 	}
+	logger.info(`Checking user exists: ${needCheckDriftUser}`);
 	if (needCheckDriftUser) await checkUserExists(config, driftClient, wallet);
+	logger.info(`Checking if bot needs collateral: ${needForceCollateral}`);
 	if (needForceCollateral)
 		await checkAndForceCollateral(config, driftClient, wallet);
+	logger.info(`Checking if need eventSubscriber: ${eventSubscriber}`);
 	if (eventSubscriber) await eventSubscriber.subscribe();
+	logger.info(`Checking if need usermap: ${needUserMapSubscribe}`);
 	if (needUserMapSubscribe) await userMap.subscribe();
+	logger.info(`Checking if need auctionSubscriber: ${auctionSubscriber}`);
 	if (auctionSubscriber) await auctionSubscriber.subscribe();
+	logger.info(`Checking if need jitter: ${jitter}`);
 	if (jitter) {
 		const freeCollateral = driftClient
 			.getUser()

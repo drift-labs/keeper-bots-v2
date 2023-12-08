@@ -47,7 +47,7 @@
 		"clean": "rm -rf lib",
 		"start": "node lib/index.js",
 		"dev": "NODE_OPTIONS=--max-old-space-size=8192 ts-node src/index.ts",
-		"dev:inspect": "node --inspect-brk --require ts-node/register",
+		"dev:inspect": "node --inspect --require ts-node/register src/index.ts",
 		"dev:filler": "ts-node src/index.ts --filler",
 		"dev:trigger": "ts-node src/index.ts --trigger",
 		"dev:jitmaker": "ts-node src/index.ts --jit-maker",
