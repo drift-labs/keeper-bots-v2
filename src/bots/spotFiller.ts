@@ -32,6 +32,7 @@ import {
 	TEN,
 	NodeToTrigger,
 	PriorityFeeCalculator,
+	BulkAccountLoader,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -378,6 +379,17 @@ export class SpotFillerBot implements Bot {
 
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
 		for (const spotMarketConfig of config.SPOT_MARKETS) {
+			const bulkAccountLoader =
+				(
+					this.driftClient
+						.accountSubscriber as PollingDriftClientAccountSubscriber
+				).accountLoader ??
+				new BulkAccountLoader(
+					this.driftClient.connection,
+					'confirmed',
+					this.pollingIntervalMs
+				);
+
 			if (spotMarketConfig.serumMarket) {
 				// set up fulfillment config
 				await this.serumFulfillmentConfigMap.add(
@@ -385,9 +397,14 @@ export class SpotFillerBot implements Bot {
 					spotMarketConfig.serumMarket
 				);
 
-				const serumConfigAccount = this.serumFulfillmentConfigMap.get(
-					spotMarketConfig.marketIndex
-				);
+				// const serumConfigAccount = this.serumFulfillmentConfigMap.get(
+				// 	spotMarketConfig.marketIndex
+				// );
+				const serumConfigAccount =
+					await this.driftClient.getSerumV3FulfillmentConfig(
+						spotMarketConfig.serumMarket
+					);
+
 				if (isVariant(serumConfigAccount.status, 'enabled')) {
 					// set up serum price subscriber
 					const serumSubscriber = new SerumSubscriber({
@@ -396,10 +413,7 @@ export class SpotFillerBot implements Bot {
 						marketAddress: spotMarketConfig.serumMarket,
 						accountSubscription: {
 							type: 'polling',
-							accountLoader: (
-								this.driftClient
-									.accountSubscriber as PollingDriftClientAccountSubscriber
-							).accountLoader,
+							accountLoader: bulkAccountLoader,
 						},
 					});
 					initPromises.push(serumSubscriber.subscribe());
@@ -428,10 +442,7 @@ export class SpotFillerBot implements Bot {
 						marketAddress: spotMarketConfig.phoenixMarket,
 						accountSubscription: {
 							type: 'polling',
-							accountLoader: (
-								this.driftClient
-									.accountSubscriber as PollingDriftClientAccountSubscriber
-							).accountLoader,
+							accountLoader: bulkAccountLoader,
 						},
 					});
 					initPromises.push(phoenixSubscriber.subscribe());
