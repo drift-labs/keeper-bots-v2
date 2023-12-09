@@ -149,6 +149,9 @@ export class UserIdleFlipperBot implements Bot {
 		const success = await this.sendTxforChunk(usersChunk);
 		if (!success) {
 			const slice = usersChunk.length / 2;
+			if (slice < 1) {
+				return;
+			}
 			await sleepMs(SLEEP_MS);
 			await this.trySendTxforChunk(usersChunk.slice(0, slice));
 			await sleepMs(SLEEP_MS);
