@@ -379,16 +379,33 @@ export class SpotFillerBot implements Bot {
 
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
 		for (const spotMarketConfig of config.SPOT_MARKETS) {
-			const bulkAccountLoader =
+			let accountSubscription:
+				| {
+						type: 'polling';
+						accountLoader: BulkAccountLoader;
+				  }
+				| {
+						type: 'websocket';
+				  };
+			if (
 				(
 					this.driftClient
 						.accountSubscriber as PollingDriftClientAccountSubscriber
-				).accountLoader ??
-				new BulkAccountLoader(
-					this.driftClient.connection,
-					'confirmed',
-					this.pollingIntervalMs
-				);
+				).accountLoader
+			) {
+				accountSubscription = {
+					type: 'polling',
+					accountLoader: (
+						this.driftClient
+							.accountSubscriber as PollingDriftClientAccountSubscriber
+					).accountLoader,
+				};
+			} else {
+				console.log('here');
+				accountSubscription = {
+					type: 'websocket',
+				};
+			}
 
 			if (spotMarketConfig.serumMarket) {
 				// set up fulfillment config
@@ -411,10 +428,7 @@ export class SpotFillerBot implements Bot {
 						connection: this.driftClient.connection,
 						programId: new PublicKey(config.SERUM_V3),
 						marketAddress: spotMarketConfig.serumMarket,
-						accountSubscription: {
-							type: 'polling',
-							accountLoader: bulkAccountLoader,
-						},
+						accountSubscription,
 					});
 					initPromises.push(serumSubscriber.subscribe());
 					this.serumSubscribers.set(
@@ -440,10 +454,7 @@ export class SpotFillerBot implements Bot {
 						connection: this.driftClient.connection,
 						programId: new PublicKey(config.PHOENIX),
 						marketAddress: spotMarketConfig.phoenixMarket,
-						accountSubscription: {
-							type: 'polling',
-							accountLoader: bulkAccountLoader,
-						},
+						accountSubscription,
 					});
 					initPromises.push(phoenixSubscriber.subscribe());
 					this.phoenixSubscribers.set(
