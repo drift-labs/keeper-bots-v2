@@ -401,7 +401,6 @@ export class SpotFillerBot implements Bot {
 					).accountLoader,
 				};
 			} else {
-				console.log('here');
 				accountSubscription = {
 					type: 'websocket',
 				};
