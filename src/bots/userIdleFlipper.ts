@@ -17,6 +17,7 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 } from '@solana/web3.js';
+import {sleep} from "jito-ts/dist/sdk/rpc/utils";
 
 const USER_IDLE_CHUNKS = 9;
 
@@ -107,6 +108,7 @@ export class UserIdleFlipperBot implements Bot {
 
 	private async tryIdleUsers() {
 		try {
+			console.log('tryIdleUsers');
 			const currentSlot = await this.driftClient.connection.getSlot();
 			const usersToIdle: Array<[PublicKey, UserAccount]> = [];
 			for (const user of this.userMap.values()) {
@@ -122,45 +124,19 @@ export class UserIdleFlipperBot implements Bot {
 			}
 			logger.info(`Found ${usersToIdle.length} users to idle`);
 
-			const userIdlePromises: Array<Promise<TxSigAndSlot>> = [];
 			for (let i = 0; i < usersToIdle.length; i += USER_IDLE_CHUNKS) {
 				const usersChunk = usersToIdle.slice(i, i + USER_IDLE_CHUNKS);
-				try {
-					const ixs = [
-						ComputeBudgetProgram.setComputeUnitLimit({
-							units: 2_000_000,
-						}),
-					];
-					usersChunk.forEach(async ([userAccountPublicKey, userAccount]) => {
-						ixs.push(
-							await this.driftClient.getUpdateUserIdleIx(
-								userAccountPublicKey,
-								userAccount
-							)
-						);
-					});
-					userIdlePromises.push(
-						this.driftClient.txSender.sendVersionedTransaction(
-							await this.driftClient.txSender.getVersionedTransaction(
-								ixs,
-								[this.lookupTableAccount!],
-								[],
-								this.driftClient.opts
-							),
-							[],
-							this.driftClient.opts
-						)
-					);
-				} catch (err) {
-					if (!(err instanceof Error)) {
-						return;
+				// console log users chunk
+				console.log(usersChunk.map((user) => user[0].toBase58()));
+
+				const success = await this.sendTxforChunk(usersChunk);
+				await sleep(5000);
+				if (!success) {
+					for (const [userPubkey, userAccount] of usersChunk) {
+						await this.sendTxforChunk([[userPubkey, userAccount]]);
+						await sleep(5000);
 					}
-					logger.error(`Error idling user: ${err.message}`);
 				}
-			}
-			const txs = await Promise.all(userIdlePromises);
-			for (const tx of txs) {
-				logger.info(`https://solscan.io/tx/${tx.txSig}`);
 			}
 		} catch (err) {
 			console.error(err);
@@ -172,6 +148,58 @@ export class UserIdleFlipperBot implements Bot {
 			await this.watchdogTimerMutex.runExclusive(async () => {
 				this.watchdogTimerLastPatTime = Date.now();
 			});
+		}
+	}
+
+	private async sendTxforChunk(usersChunk: Array<[PublicKey, UserAccount]>): Promise<boolean> {
+		if (usersChunk.length === 0) {
+			return true;
+		}
+
+		let success = false;
+		try {
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 2_000_000,
+				}),
+			];
+			usersChunk.forEach(async ([userAccountPublicKey, userAccount]) => {
+				ixs.push(
+					await this.driftClient.getUpdateUserIdleIx(
+						userAccountPublicKey,
+						userAccount
+					)
+				);
+			});
+			const txSigAndSlot = await this.driftClient.txSender.sendVersionedTransaction(
+				await this.driftClient.txSender.getVersionedTransaction(
+					ixs,
+					[this.lookupTableAccount!],
+					[],
+					this.driftClient.opts
+				),
+				[],
+				this.driftClient.opts
+			);
+			this.logTxAndSlotForUsers(txSigAndSlot, usersChunk);
+			success = true;
+		} catch (e) {
+			const userKeys = usersChunk.map(([userAccountPublicKey, _]) => userAccountPublicKey.toBase58()).join(', ');
+			logger.error(`Failed to idle users: ${userKeys}`);
+			logger.error(e);
+		}
+		return success;
+	}
+
+	private logTxAndSlotForUsers(
+		txSigAndSlot: TxSigAndSlot,
+		usersChunk: Array<[PublicKey, UserAccount]>
+	) {
+		const txSig = txSigAndSlot.txSig;
+		for (const [userAccountPublicKey, _] of usersChunk) {
+			logger.info(
+				`Flipped user ${userAccountPublicKey.toBase58()} https://solscan.io/tx/${txSig}`
+			);
 		}
 	}
 }
