@@ -17,9 +17,10 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 } from '@solana/web3.js';
-import {sleepMs} from '../utils';
+import { sleepMs } from '../utils';
 
 const USER_IDLE_CHUNKS = 9;
+const SLEEP_MS = 1000;
 
 export class UserIdleFlipperBot implements Bot {
 	public readonly name: string;
@@ -50,6 +51,7 @@ export class UserIdleFlipperBot implements Bot {
 					type: 'polling',
 					accountLoader: bulkAccountLoader,
 				},
+				txSender: null, // force to default to retry tx send
 			})
 		);
 		this.userMap = new UserMap({
@@ -126,17 +128,7 @@ export class UserIdleFlipperBot implements Bot {
 
 			for (let i = 0; i < usersToIdle.length; i += USER_IDLE_CHUNKS) {
 				const usersChunk = usersToIdle.slice(i, i + USER_IDLE_CHUNKS);
-				// console log users chunk
-				console.log(usersChunk.map((user) => user[0].toBase58()));
-
-				const success = await this.sendTxforChunk(usersChunk);
-				await sleepMs(5000);
-				if (!success) {
-					for (const [userPubkey, userAccount] of usersChunk) {
-						await this.sendTxforChunk([[userPubkey, userAccount]]);
-						await sleepMs(5000);
-					}
-				}
+				await this.trySendTxforChunk(usersChunk);
 			}
 		} catch (err) {
 			console.error(err);
@@ -151,7 +143,23 @@ export class UserIdleFlipperBot implements Bot {
 		}
 	}
 
-	private async sendTxforChunk(usersChunk: Array<[PublicKey, UserAccount]>): Promise<boolean> {
+	private async trySendTxforChunk(
+		usersChunk: Array<[PublicKey, UserAccount]>
+	): Promise<void> {
+		const success = await this.sendTxforChunk(usersChunk);
+		if (!success) {
+			const slice = usersChunk.length / 2;
+			await sleepMs(SLEEP_MS);
+			await this.trySendTxforChunk(usersChunk.slice(0, slice));
+			await sleepMs(SLEEP_MS);
+			await this.trySendTxforChunk(usersChunk.slice(slice));
+		}
+		await sleepMs(SLEEP_MS);
+	}
+
+	private async sendTxforChunk(
+		usersChunk: Array<[PublicKey, UserAccount]>
+	): Promise<boolean> {
 		if (usersChunk.length === 0) {
 			return true;
 		}
@@ -171,20 +179,23 @@ export class UserIdleFlipperBot implements Bot {
 					)
 				);
 			});
-			const txSigAndSlot = await this.driftClient.txSender.sendVersionedTransaction(
-				await this.driftClient.txSender.getVersionedTransaction(
-					ixs,
-					[this.lookupTableAccount!],
+			const txSigAndSlot =
+				await this.driftClient.txSender.sendVersionedTransaction(
+					await this.driftClient.txSender.getVersionedTransaction(
+						ixs,
+						[this.lookupTableAccount!],
+						[],
+						this.driftClient.opts
+					),
 					[],
 					this.driftClient.opts
-				),
-				[],
-				this.driftClient.opts
-			);
+				);
 			this.logTxAndSlotForUsers(txSigAndSlot, usersChunk);
 			success = true;
 		} catch (e) {
-			const userKeys = usersChunk.map(([userAccountPublicKey, _]) => userAccountPublicKey.toBase58()).join(', ');
+			const userKeys = usersChunk
+				.map(([userAccountPublicKey, _]) => userAccountPublicKey.toBase58())
+				.join(', ');
 			logger.error(`Failed to idle users: ${userKeys}`);
 			logger.error(e);
 		}
