@@ -17,7 +17,7 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 } from '@solana/web3.js';
-import {sleep} from "jito-ts/dist/sdk/rpc/utils";
+import {sleepMs} from '../utils';
 
 const USER_IDLE_CHUNKS = 9;
 
@@ -130,11 +130,11 @@ export class UserIdleFlipperBot implements Bot {
 				console.log(usersChunk.map((user) => user[0].toBase58()));
 
 				const success = await this.sendTxforChunk(usersChunk);
-				await sleep(5000);
+				await sleepMs(5000);
 				if (!success) {
 					for (const [userPubkey, userAccount] of usersChunk) {
 						await this.sendTxforChunk([[userPubkey, userAccount]]);
-						await sleep(5000);
+						await sleepMs(5000);
 					}
 				}
 			}
