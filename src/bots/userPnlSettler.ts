@@ -196,10 +196,9 @@ export class UserPnlSettlerBot implements Bot {
 
 			for (const user of this.userMap!.values()) {
 				const userAccount = user.getUserAccount();
-				const isUsdcBorrow = isVariant(
-					userAccount.spotPositions[0].balanceType,
-					'borrow'
-				);
+				const isUsdcBorrow =
+					userAccount.spotPositions[0] &&
+					isVariant(userAccount.spotPositions[0].balanceType, 'borrow');
 				const usdcAmount = user.getTokenAmount(QUOTE_SPOT_MARKET_INDEX);
 
 				for (const settleePosition of user.getActivePerpPositions()) {
