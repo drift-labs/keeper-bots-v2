@@ -32,6 +32,7 @@ import {
 	TEN,
 	NodeToTrigger,
 	PriorityFeeCalculator,
+	BulkAccountLoader,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -378,6 +379,33 @@ export class SpotFillerBot implements Bot {
 
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
 		for (const spotMarketConfig of config.SPOT_MARKETS) {
+			let accountSubscription:
+				| {
+						type: 'polling';
+						accountLoader: BulkAccountLoader;
+				  }
+				| {
+						type: 'websocket';
+				  };
+			if (
+				(
+					this.driftClient
+						.accountSubscriber as PollingDriftClientAccountSubscriber
+				).accountLoader
+			) {
+				accountSubscription = {
+					type: 'polling',
+					accountLoader: (
+						this.driftClient
+							.accountSubscriber as PollingDriftClientAccountSubscriber
+					).accountLoader,
+				};
+			} else {
+				accountSubscription = {
+					type: 'websocket',
+				};
+			}
+
 			if (spotMarketConfig.serumMarket) {
 				// set up fulfillment config
 				await this.serumFulfillmentConfigMap.add(
@@ -385,22 +413,21 @@ export class SpotFillerBot implements Bot {
 					spotMarketConfig.serumMarket
 				);
 
-				const serumConfigAccount = this.serumFulfillmentConfigMap.get(
-					spotMarketConfig.marketIndex
-				);
+				// const serumConfigAccount = this.serumFulfillmentConfigMap.get(
+				// 	spotMarketConfig.marketIndex
+				// );
+				const serumConfigAccount =
+					await this.driftClient.getSerumV3FulfillmentConfig(
+						spotMarketConfig.serumMarket
+					);
+
 				if (isVariant(serumConfigAccount.status, 'enabled')) {
 					// set up serum price subscriber
 					const serumSubscriber = new SerumSubscriber({
 						connection: this.driftClient.connection,
 						programId: new PublicKey(config.SERUM_V3),
 						marketAddress: spotMarketConfig.serumMarket,
-						accountSubscription: {
-							type: 'polling',
-							accountLoader: (
-								this.driftClient
-									.accountSubscriber as PollingDriftClientAccountSubscriber
-							).accountLoader,
-						},
+						accountSubscription,
 					});
 					initPromises.push(serumSubscriber.subscribe());
 					this.serumSubscribers.set(
@@ -426,13 +453,7 @@ export class SpotFillerBot implements Bot {
 						connection: this.driftClient.connection,
 						programId: new PublicKey(config.PHOENIX),
 						marketAddress: spotMarketConfig.phoenixMarket,
-						accountSubscription: {
-							type: 'polling',
-							accountLoader: (
-								this.driftClient
-									.accountSubscriber as PollingDriftClientAccountSubscriber
-							).accountLoader,
-						},
+						accountSubscription,
 					});
 					initPromises.push(phoenixSubscriber.subscribe());
 					this.phoenixSubscribers.set(
