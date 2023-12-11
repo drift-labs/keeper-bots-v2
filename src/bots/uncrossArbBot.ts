@@ -11,6 +11,8 @@ import {
 	SlotSubscriber,
 	MakerInfo,
 	getUserStatsAccountPublicKey,
+	OrderSubscriber,
+	PollingDriftClientAccountSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -50,13 +52,14 @@ export class UncrossArbBot implements Bot {
 
 	private dlobSubscriber: DLOBSubscriber;
 	private slotSubscriber: SlotSubscriber;
-	private userMap: UserMap;
+	private orderSubscriber: OrderSubscriber;
+
+	private failedAttempts: Map<number, Map<string, number>> = new Map();
 
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
 		jitProxyClient: JitProxyClient,
 		slotSubscriber: SlotSubscriber,
-		userMap: UserMap,
 		config: BaseBotConfig,
 		driftEnv: DriftEnv
 	) {
@@ -66,14 +69,52 @@ export class UncrossArbBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.driftEnv = driftEnv;
 		this.slotSubscriber = slotSubscriber;
-		this.userMap = userMap;
+
+		let accountSubscription:
+			| {
+					type: 'polling';
+					frequency: number;
+					commitment: 'processed';
+			  }
+			| {
+					commitment: 'processed';
+					type: 'websocket';
+					resubTimeoutMs?: number;
+			  };
+		if (
+			(
+				this.driftClient
+					.accountSubscriber as PollingDriftClientAccountSubscriber
+			).accountLoader
+		) {
+			accountSubscription = {
+				type: 'polling',
+				frequency: 1000,
+				commitment: 'processed',
+			};
+		} else {
+			accountSubscription = {
+				commitment: 'processed',
+				type: 'websocket',
+				resubTimeoutMs: 30000,
+			};
+		}
+
+		this.orderSubscriber = new OrderSubscriber({
+			driftClient: this.driftClient,
+			subscriptionConfig: accountSubscription,
+		});
 
 		this.dlobSubscriber = new DLOBSubscriber({
-			dlobSource: this.userMap,
+			dlobSource: this.orderSubscriber,
 			slotSource: this.slotSubscriber,
 			updateFrequency: 1000,
 			driftClient: this.driftClient,
 		});
+
+		for (const perpMarket of this.driftClient.getPerpMarketAccounts()) {
+			this.failedAttempts.set(perpMarket.marketIndex, new Map());
+		}
 	}
 
 	/**
@@ -161,6 +202,7 @@ export class UncrossArbBot implements Bot {
 						oraclePriceData,
 						driftUser.userAccountPublicKey
 					);
+
 					if (!bestDriftBid || !bestDriftAsk) {
 						continue;
 					}
@@ -176,30 +218,30 @@ export class UncrossArbBot implements Bot {
 					);
 
 					const bidMakerInfo: MakerInfo = {
-						makerUserAccount: this.userMap
-							.get(bestDriftBid.userAccount!.toBase58())!
-							.getUserAccount(),
+						makerUserAccount: this.orderSubscriber.usersAccounts.get(
+							bestDriftBid.userAccount!.toBase58()
+						)!.userAccount,
 						order: bestDriftBid.order,
 						maker: bestDriftBid.userAccount!,
 						makerStats: getUserStatsAccountPublicKey(
 							this.driftClient.program.programId,
-							this.userMap
-								.get(bestDriftBid.userAccount!.toBase58())!
-								.getUserAccount().authority
+							this.orderSubscriber.usersAccounts.get(
+								bestDriftBid.userAccount!.toBase58()
+							)!.userAccount.authority
 						),
 					};
 
 					const askMakerInfo: MakerInfo = {
-						makerUserAccount: this.userMap
-							.get(bestDriftAsk.userAccount!.toBase58())!
-							.getUserAccount(),
+						makerUserAccount: this.orderSubscriber.usersAccounts.get(
+							bestDriftAsk.userAccount!.toBase58()
+						)!.userAccount,
 						order: bestDriftAsk.order,
 						maker: bestDriftAsk.userAccount!,
 						makerStats: getUserStatsAccountPublicKey(
 							this.driftClient.program.programId,
-							this.userMap
-								.get(bestDriftAsk.userAccount!.toBase58())!
-								.getUserAccount().authority
+							this.orderSubscriber.usersAccounts.get(
+								bestDriftAsk.userAccount!.toBase58()
+							)!.userAccount.authority
 						),
 					};
 

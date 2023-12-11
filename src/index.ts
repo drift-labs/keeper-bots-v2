@@ -607,7 +607,6 @@ const runBot = async () => {
 				driftClient,
 				jitProxyClient,
 				slotSubscriber,
-				userMap,
 				config.botConfigs!.uncrossArb!,
 				config.global.driftEnv!
 			)
