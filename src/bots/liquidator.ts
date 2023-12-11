@@ -69,6 +69,7 @@ import { SimulatedTransactionResponse } from '@solana/web3.js';
 
 const errorCodesToSuppress = [
 	6004, // Error Number: 6004. Error Message: Sufficient collateral.
+	6010, // Error Number: 6010. Error Message: User Has No Position In Market.
 ];
 
 const LIQUIDATE_THROTTLE_BACKOFF = 5000; // the time to wait before trying to liquidate a throttled user again
