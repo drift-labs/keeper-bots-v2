@@ -203,8 +203,8 @@ export class UncrossArbBot implements Bot {
 						),
 					};
 
-					console.log("best ask", bestDriftAsk.userAccount!.toBase58());
-					console.log("best bid", bestDriftBid.userAccount!.toBase58());
+					console.log('best ask', bestDriftAsk.userAccount!.toBase58());
+					console.log('best bid', bestDriftBid.userAccount!.toBase58());
 
 					const midPrice = (bestBidPrice + bestAskPrice) / 2;
 					if (

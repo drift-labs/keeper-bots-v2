@@ -69,15 +69,15 @@ export class UserIdleFlipperBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 
-		// await this.driftClient.subscribe();
-		// if (!(await this.driftClient.getUser().exists())) {
-		// 	throw new Error(
-		// 		`User for ${this.driftClient.wallet.publicKey.toString()} does not exist`
-		// 	);
-		// }
+		await this.driftClient.subscribe();
+		if (!(await this.driftClient.getUser().exists())) {
+			throw new Error(
+				`User for ${this.driftClient.wallet.publicKey.toString()} does not exist`
+			);
+		}
+		await this.userMap.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
-		logger.info(`${this.name} init done!`);
 	}
 
 	public async reset() {
@@ -132,6 +132,9 @@ export class UserIdleFlipperBot implements Bot {
 			}
 		} catch (err) {
 			console.error(err);
+			if (!(err instanceof Error)) {
+				return;
+			}
 		} finally {
 			logger.info('UserIdleSettler finished');
 			await this.watchdogTimerMutex.runExclusive(async () => {

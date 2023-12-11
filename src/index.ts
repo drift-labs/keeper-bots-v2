@@ -251,17 +251,17 @@ const runBot = async () => {
 		skipPreflight: false,
 		preflightCommitment: stateCommitment,
 	};
-	const sendTxConnection = new Connection(endpoint, {
-		wsEndpoint: wsEndpoint,
-		commitment: stateCommitment,
-		disableRetryOnRateLimit: true,
-	});
-	const txSender = new FastSingleTxSender({
-		connection: sendTxConnection,
-		blockhashRefreshInterval: 10_000,
-		wallet,
-		opts,
-	});
+	// const sendTxConnection = new Connection(endpoint, {
+	// 	wsEndpoint: wsEndpoint,
+	// 	commitment: stateCommitment,
+	// 	disableRetryOnRateLimit: true,
+	// });
+	// const txSender = new FastSingleTxSender({
+	// 	connection: sendTxConnection,
+	// 	blockhashRefreshInterval: 10_000,
+	// 	wallet,
+	// 	opts,
+	// });
 
 	/**
 	 * Creating and subscribing to the drift client
