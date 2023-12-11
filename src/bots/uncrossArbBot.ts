@@ -214,7 +214,7 @@ export class UncrossArbBot implements Bot {
 									await this.driftClient.txSender.getVersionedTransaction(
 										[
 											ComputeBudgetProgram.setComputeUnitLimit({
-												units: 1_000_000,
+												units: 1_400_000,
 											}),
 											await this.jitProxyClient.getArbPerpIx({
 												marketIndex: perpIdx,

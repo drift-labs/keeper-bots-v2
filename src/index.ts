@@ -80,6 +80,7 @@ program
 	.option('--jit-maker', 'Enable JIT auction maker bot')
 	.option('--floating-maker', 'Enable floating maker bot')
 	.option('--liquidator', 'Enable liquidator bot')
+	.option('--uncross-arb', 'Arb bot')
 	.option(
 		'--if-revenue-settler',
 		'Enable Insurance Fund revenue pool settler bot'
