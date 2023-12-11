@@ -31,7 +31,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
-import { decodeName } from '../utils';
+import { decodeName, sleepMs } from '../utils';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
@@ -48,6 +48,7 @@ type SettlePnlIxParams = {
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 const SETTLE_USER_CHUNKS = 4;
+const SLEEP_MS = 500;
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -398,64 +399,9 @@ export class UserPnlSettlerBot implements Bot {
 					throw new Error('Dry run - not sending settle pnl tx');
 				}
 
-				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
 				for (let i = 0; i < params.users.length; i += SETTLE_USER_CHUNKS) {
 					const usersChunk = params.users.slice(i, i + SETTLE_USER_CHUNKS);
-					try {
-						const ixs = [
-							ComputeBudgetProgram.setComputeUnitLimit({
-								units: 2_000_000,
-							}),
-						];
-						ixs.push(
-							...(await this.driftClient.getSettlePNLsIxs(usersChunk, [
-								params.marketIndex,
-							]))
-						);
-						settlePnlPromises.push(
-							this.driftClient.txSender.sendVersionedTransaction(
-								await this.driftClient.txSender.getVersionedTransaction(
-									ixs,
-									[this.lookupTableAccount!],
-									[],
-									this.driftClient.opts
-								),
-								[],
-								this.driftClient.opts
-							)
-						);
-					} catch (err) {
-						if (!(err instanceof Error)) {
-							return;
-						}
-						const errorCode = getErrorCode(err) ?? 0;
-						logger.error(
-							`Error code: ${errorCode} while settling pnls for ${marketStr}: ${err.message}`
-						);
-						console.error(err);
-						if (!errorCodesToSuppress.includes(errorCode)) {
-							if (err instanceof SendTransactionError) {
-								await webhookMessage(
-									`[${
-										this.name
-									}]: :x: Error code: ${errorCode} while settling pnls for ${marketStr}:\n${
-										err.logs ? (err.logs as Array<string>).join('\n') : ''
-									}\n${err.stack ? err.stack : err.message}`
-								);
-							}
-						}
-					}
-				}
-				try {
-					const txs = await Promise.all(settlePnlPromises);
-					for (const tx of txs) {
-						logger.info(`Settle PNL tx: ${JSON.stringify(tx)}`);
-					}
-				} catch (e) {
-					console.error(
-						`Caught error settling users for ${params.marketIndex}: ${marketStr}`
-					);
-					console.error(e);
+					await this.trySendTxForChunk(params.marketIndex, usersChunk);
 				}
 			}
 		} catch (err) {
@@ -490,6 +436,87 @@ export class UserPnlSettlerBot implements Bot {
 			await this.watchdogTimerMutex.runExclusive(async () => {
 				this.watchdogTimerLastPatTime = Date.now();
 			});
+		}
+	}
+
+	async trySendTxForChunk(
+		marketIndex: number,
+		users: {
+			settleeUserAccountPublicKey: PublicKey;
+			settleeUserAccount: UserAccount;
+		}[]
+	): Promise<void> {
+		const success = await this.sendTxForChunk(marketIndex, users);
+		if (!success) {
+			const slice = users.length / 2;
+			if (slice < 1) {
+				return;
+			}
+			await sleepMs(SLEEP_MS);
+			await this.sendTxForChunk(marketIndex, users.slice(0, slice));
+			await sleepMs(SLEEP_MS);
+			await this.sendTxForChunk(marketIndex, users.slice(slice));
+		}
+		await sleepMs(SLEEP_MS);
+	}
+
+	async sendTxForChunk(
+		marketIndex: number,
+		users: {
+			settleeUserAccountPublicKey: PublicKey;
+			settleeUserAccount: UserAccount;
+		}[]
+	): Promise<boolean> {
+		let success = false;
+		try {
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 2_000_000,
+				}),
+			];
+			ixs.push(
+				...(await this.driftClient.getSettlePNLsIxs(users, [marketIndex]))
+			);
+			const txSig = await this.driftClient.txSender.sendVersionedTransaction(
+				await this.driftClient.txSender.getVersionedTransaction(
+					ixs,
+					[this.lookupTableAccount!],
+					[],
+					this.driftClient.opts
+				),
+				[],
+				this.driftClient.opts
+			);
+			this.logTxAndSlotForUsers(
+				txSig,
+				marketIndex,
+				users.map(
+					({ settleeUserAccountPublicKey }) => settleeUserAccountPublicKey
+				)
+			);
+			success = true;
+		} catch (e) {
+			const userKeys = users
+				.map(({ settleeUserAccountPublicKey }) =>
+					settleeUserAccountPublicKey.toBase58()
+				)
+				.join(', ');
+			logger.error(`Failed to settle pnl for users: ${userKeys}`);
+			logger.error(e);
+		}
+		return success;
+	}
+
+	private logTxAndSlotForUsers(
+		txSigAndSlot: TxSigAndSlot,
+		marketIndex: number,
+		userAccountPublicKeys: Array<PublicKey>
+	) {
+		const txSig = txSigAndSlot.txSig;
+		for (const userAccountPublicKey of userAccountPublicKeys) {
+			logger.info(
+				`Settled pnl user ${userAccountPublicKey.toBase58()} in market ${marketIndex} https://solscan.io/tx/${txSig}`
+			);
 		}
 	}
 }
