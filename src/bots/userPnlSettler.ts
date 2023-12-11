@@ -467,6 +467,10 @@ export class UserPnlSettlerBot implements Bot {
 			settleeUserAccount: UserAccount;
 		}[]
 	): Promise<boolean> {
+		if (users.length == 0) {
+			return true;
+		}
+
 		let success = false;
 		try {
 			const ixs = [
@@ -495,14 +499,29 @@ export class UserPnlSettlerBot implements Bot {
 				)
 			);
 			success = true;
-		} catch (e) {
+		} catch (err) {
 			const userKeys = users
 				.map(({ settleeUserAccountPublicKey }) =>
 					settleeUserAccountPublicKey.toBase58()
 				)
 				.join(', ');
 			logger.error(`Failed to settle pnl for users: ${userKeys}`);
-			logger.error(e);
+			logger.error(err);
+
+			if (err instanceof Error) {
+				const errorCode = getErrorCode(err) ?? 0;
+				if (!errorCodesToSuppress.includes(errorCode) && users.length === 1) {
+					if (err instanceof SendTransactionError) {
+						await webhookMessage(
+							`[${
+								this.name
+							}]: :x: Error code: ${errorCode} while settling pnls for ${marketIndex}:\n${
+								err.logs ? (err.logs as Array<string>).join('\n') : ''
+							}\n${err.stack ? err.stack : err.message}`
+						);
+					}
+				}
+			}
 		}
 		return success;
 	}
