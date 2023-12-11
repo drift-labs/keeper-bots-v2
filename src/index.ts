@@ -568,6 +568,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userIdleFlipper')) {
+		needUserMapSubscribe = true;
 		bots.push(
 			new UserIdleFlipperBot(
 				driftClientConfig,

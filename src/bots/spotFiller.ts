@@ -13,7 +13,6 @@ import {
 	MarketType,
 	initialize,
 	SerumSubscriber,
-	PollingDriftClientAccountSubscriber,
 	SerumFulfillmentConfigMap,
 	SerumV3FulfillmentConfigAccount,
 	OrderActionRecord,
@@ -33,6 +32,7 @@ import {
 	NodeToTrigger,
 	PriorityFeeCalculator,
 	BulkAccountLoader,
+	PollingDriftClientAccountSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -362,20 +362,25 @@ export class SpotFillerBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 
-		const initPromises: Array<Promise<any>> = [];
-
+		const userStatsMapStart = Date.now();
+		logger.info(`Initializing UserStatsMap...`);
 		this.userStatsMap = new UserStatsMap(this.driftClient);
-		initPromises.push(
-			this.userStatsMap.sync(this.userMap.getUniqueAuthorities())
+		await this.userStatsMap.sync(this.userMap.getUniqueAuthorities());
+		logger.info(
+			`Initialized UserStatsMap in ${Date.now() - userStatsMapStart}ms`
 		);
 
+		const dlobSubscriberStart = Date.now();
+		logger.info(`Initializing DLOBSubscriber...`);
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
 			slotSource: this.slotSubscriber,
 			updateFrequency: this.pollingIntervalMs - 500,
 			driftClient: this.driftClient,
 		});
-		initPromises.push(this.dlobSubscriber.subscribe());
+		logger.info(
+			`Initialized DLOBSubscriber in ${Date.now() - dlobSubscriberStart}`
+		);
 
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
 		for (const spotMarketConfig of config.SPOT_MARKETS) {
@@ -429,10 +434,19 @@ export class SpotFillerBot implements Bot {
 						marketAddress: spotMarketConfig.serumMarket,
 						accountSubscription,
 					});
-					initPromises.push(serumSubscriber.subscribe());
+					const initSerumSubscriberStart = Date.now();
+					logger.info(
+						`Initializing SerumSubscriber for ${spotMarketConfig.symbol}...`
+					);
+					await serumSubscriber.subscribe();
 					this.serumSubscribers.set(
 						spotMarketConfig.marketIndex,
 						serumSubscriber
+					);
+					logger.info(
+						`Initialized SerumSubscriber in ${
+							Date.now() - initSerumSubscriberStart
+						}ms`
 					);
 				}
 			}
@@ -455,16 +469,23 @@ export class SpotFillerBot implements Bot {
 						marketAddress: spotMarketConfig.phoenixMarket,
 						accountSubscription,
 					});
-					initPromises.push(phoenixSubscriber.subscribe());
+					const initPhoenixSubscriberStart = Date.now();
+					logger.info(
+						`Initializing PhoenixSubscriber for ${spotMarketConfig.symbol}...`
+					);
+					await phoenixSubscriber.subscribe();
 					this.phoenixSubscribers.set(
 						spotMarketConfig.marketIndex,
 						phoenixSubscriber
 					);
+					logger.info(
+						`Initialized PhoenixSubscriber in ${
+							Date.now() - initPhoenixSubscriberStart
+						}ms`
+					);
 				}
 			}
 		}
-
-		await Promise.all(initPromises);
 
 		this.driftLutAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
