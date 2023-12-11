@@ -287,7 +287,7 @@ const runBot = async () => {
 		oracleInfos,
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts ?? [0],
-		txSender,
+		// txSender,
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	driftClient.eventEmitter.on('error', (e) => {
