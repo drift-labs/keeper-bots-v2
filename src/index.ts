@@ -80,6 +80,7 @@ program
 	.option('--jit-maker', 'Enable JIT auction maker bot')
 	.option('--floating-maker', 'Enable floating maker bot')
 	.option('--liquidator', 'Enable liquidator bot')
+	.option('--uncross-arb', 'Arb bot')
 	.option(
 		'--if-revenue-settler',
 		'Enable Insurance Fund revenue pool settler bot'
@@ -286,7 +287,7 @@ const runBot = async () => {
 		oracleInfos,
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts ?? [0],
-		txSender,
+		// txSender,
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	driftClient.eventEmitter.on('error', (e) => {

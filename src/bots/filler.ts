@@ -1098,7 +1098,7 @@ export class FillerBot implements Bot {
 
 			const takerBreachedMaintenanceMargin =
 				isTakerBreachedMaintenanceMarginLog(log);
-			if (takerBreachedMaintenanceMargin) {
+			if (takerBreachedMaintenanceMargin && nodesFilled[ixIdx]) {
 				const filledNode = nodesFilled[ixIdx];
 				const takerNodeSignature = filledNode.node.userAccount!.toBase58();
 				logger.error(
