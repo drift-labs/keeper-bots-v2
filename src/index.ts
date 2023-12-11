@@ -240,7 +240,7 @@ const runBot = async () => {
 		};
 		userMapSubscriptionConfig = {
 			type: 'polling',
-			frequency: 60_000,
+			frequency: 15_000, // reasonable refresh time since userMap calls getProgramAccounts to update.
 			commitment: stateCommitment,
 		};
 	}
@@ -421,10 +421,10 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'spotFiller')) {
 		needCheckDriftUser = true;
-		needUserMapSubscribe = true;
+		// to avoid long startup, spotFiller will fetch userAccounts as needed and build the map over time
+		needUserMapSubscribe = false;
 		bots.push(
 			new SpotFillerBot(
-				slotSubscriber,
 				driftClient,
 				userMap,
 				{

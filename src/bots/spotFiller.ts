@@ -22,7 +22,6 @@ import {
 	WrappedEvent,
 	DLOBNode,
 	DLOBSubscriber,
-	SlotSubscriber,
 	PhoenixFulfillmentConfigMap,
 	PhoenixSubscriber,
 	BN,
@@ -33,6 +32,8 @@ import {
 	PriorityFeeCalculator,
 	BulkAccountLoader,
 	PollingDriftClientAccountSubscriber,
+	OrderSubscriber,
+	UserAccount,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -129,12 +130,63 @@ type NodesToFillWithContext = {
 	fallbackBidSource?: FallbackLiquiditySource;
 };
 
+export type DLOBProvider = {
+	subscribe(): Promise<void>;
+	getDLOB(slot: number): Promise<DLOB>;
+	getUniqueAuthorities(): PublicKey[];
+	getUserAccounts(): Generator<{
+		userAccount: UserAccount;
+		publicKey: PublicKey;
+	}>;
+	getUserAccount(publicKey: PublicKey): UserAccount | undefined;
+	size(): number;
+	fetch(): Promise<void>;
+};
+
+export function getDLOBProviderFromOrderSubscriber(
+	orderSubscriber: OrderSubscriber
+): DLOBProvider {
+	return {
+		subscribe: async () => {
+			await orderSubscriber.subscribe();
+		},
+		getDLOB: async (slot: number) => {
+			return await orderSubscriber.getDLOB(slot);
+		},
+		getUniqueAuthorities: () => {
+			const authorities = new Set<string>();
+			for (const { userAccount } of orderSubscriber.usersAccounts.values()) {
+				authorities.add(userAccount.authority.toBase58());
+			}
+			const pubkeys = Array.from(authorities).map((a) => new PublicKey(a));
+			return pubkeys;
+		},
+		getUserAccounts: function* () {
+			for (const [
+				key,
+				{ userAccount },
+			] of orderSubscriber.usersAccounts.entries()) {
+				yield { userAccount: userAccount, publicKey: new PublicKey(key) };
+			}
+		},
+		getUserAccount: (publicKey) => {
+			return orderSubscriber.usersAccounts.get(publicKey.toString())
+				?.userAccount;
+		},
+		size(): number {
+			return orderSubscriber.usersAccounts.size;
+		},
+		fetch() {
+			return orderSubscriber.fetch();
+		},
+	};
+}
+
 export class SpotFillerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 2000;
 
-	private slotSubscriber: SlotSubscriber;
 	private driftClient: DriftClient;
 	private eventSubscriber?: EventSubscriber;
 	private pollingIntervalMs: number;
@@ -144,6 +196,7 @@ export class SpotFillerBot implements Bot {
 	private dlobSubscriber?: DLOBSubscriber;
 
 	private userMap: UserMap;
+	private orderSubscriber: OrderSubscriber;
 	private userStatsMap?: UserStatsMap;
 
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
@@ -185,7 +238,6 @@ export class SpotFillerBot implements Bot {
 	private userStatsMapAuthorityKeysGauge?: ObservableGauge;
 
 	constructor(
-		slotSubscriber: SlotSubscriber,
 		driftClient: DriftClient,
 		userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
@@ -194,10 +246,8 @@ export class SpotFillerBot implements Bot {
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
-		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		this.eventSubscriber = eventSubscriber;
-		this.userMap = userMap;
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
 			config.fillerPollingInterval ?? this.defaultIntervalMs;
@@ -218,6 +268,31 @@ export class SpotFillerBot implements Bot {
 		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
 		this.revertOnFailure = config.revertOnFailure ?? true;
 		logger.info(`${this.name}: revertOnFailure: ${this.revertOnFailure}`);
+
+		this.userMap = userMap;
+		if (this.driftClient.userAccountSubscriptionConfig.type === 'websocket') {
+			this.orderSubscriber = new OrderSubscriber({
+				driftClient: this.driftClient,
+				subscriptionConfig: {
+					type: 'websocket',
+					skipInitialLoad: false,
+					commitment: this.driftClient.opts?.commitment,
+				},
+			});
+		} else {
+			this.orderSubscriber = new OrderSubscriber({
+				driftClient: this.driftClient,
+				subscriptionConfig: {
+					type: 'polling',
+
+					// we find crossing orders from the OrderSubscriber, so we need to poll twice
+					// as frequently as main filler interval
+					frequency: this.pollingIntervalMs / 2,
+
+					commitment: this.driftClient.opts?.commitment,
+				},
+			});
+		}
 	}
 
 	private initializeMetrics() {
@@ -362,10 +437,23 @@ export class SpotFillerBot implements Bot {
 	public async init() {
 		logger.info(`${this.name} initing`);
 
+		const orderSubscriberInitStart = Date.now();
+		logger.info(`Initializing OrderSubscriber...`);
+		await this.orderSubscriber.subscribe();
+		logger.info(
+			`Initialized OrderSubscriber in ${
+				Date.now() - orderSubscriberInitStart
+			}ms`
+		);
+
+		const dlobProvider = getDLOBProviderFromOrderSubscriber(
+			this.orderSubscriber
+		);
+
 		const userStatsMapStart = Date.now();
 		logger.info(`Initializing UserStatsMap...`);
 		this.userStatsMap = new UserStatsMap(this.driftClient);
-		await this.userStatsMap.sync(this.userMap.getUniqueAuthorities());
+		await this.userStatsMap.sync(dlobProvider.getUniqueAuthorities());
 		logger.info(
 			`Initialized UserStatsMap in ${Date.now() - userStatsMapStart}ms`
 		);
@@ -373,11 +461,12 @@ export class SpotFillerBot implements Bot {
 		const dlobSubscriberStart = Date.now();
 		logger.info(`Initializing DLOBSubscriber...`);
 		this.dlobSubscriber = new DLOBSubscriber({
-			dlobSource: this.userMap,
-			slotSource: this.slotSubscriber,
+			dlobSource: dlobProvider,
+			slotSource: this.orderSubscriber,
 			updateFrequency: this.pollingIntervalMs - 500,
 			driftClient: this.driftClient,
 		});
+		await this.dlobSubscriber.subscribe();
 		logger.info(
 			`Initialized DLOBSubscriber in ${Date.now() - dlobSubscriberStart}`
 		);
@@ -513,7 +602,7 @@ export class SpotFillerBot implements Bot {
 
 		await this.dlobSubscriber!.unsubscribe();
 		await this.userStatsMap!.unsubscribe();
-		await this.userMap!.unsubscribe();
+		await this.orderSubscriber.unsubscribe();
 
 		for (const serumSubscriber of this.serumSubscribers.values()) {
 			await serumSubscriber.unsubscribe();
@@ -534,9 +623,6 @@ export class SpotFillerBot implements Bot {
 		this.eventSubscriber?.eventEmitter.on(
 			'newEvent',
 			async (record: WrappedEvent<any>) => {
-				await this.userMap!.updateWithEventRecord(record);
-				await this.userStatsMap!.updateWithEventRecord(record, this.userMap);
-
 				if (record.eventType === 'OrderActionRecord') {
 					const actionRecord = record as OrderActionRecord;
 
@@ -671,6 +757,7 @@ export class SpotFillerBot implements Bot {
 			const makerUserAccount = (
 				await this.userMap!.mustGet(makerNode.userAccount!.toString())
 			).getUserAccount();
+
 			const makerAuthority = makerUserAccount.authority;
 			const makerUserStats = (
 				await this.userStatsMap!.mustGet(makerAuthority.toString())
@@ -1162,7 +1249,7 @@ export class SpotFillerBot implements Bot {
 	) {
 		for (const nodesToFillWithContext of fillableNodes) {
 			for (const nodeToFill of nodesToFillWithContext.nodesToFill) {
-				this.tryFillSpotNode(
+				await this.tryFillSpotNode(
 					nodeToFill,
 					nodesToFillWithContext.fallbackAskSource,
 					nodesToFillWithContext.fallbackBidSource
@@ -1255,6 +1342,7 @@ export class SpotFillerBot implements Bot {
 					fillableNodes.push(nodesToFill);
 					triggerableNodes = triggerableNodes.concat(nodesToTrigger);
 				}
+				logger.debug(`spot fillableNodes ${fillableNodes.length}`);
 
 				// filter out nodes that we know cannot be triggered (spot nodes will be filtered in executeFillableSpotNodesForMarket)
 				const filteredTriggerableNodes = triggerableNodes.filter(
