@@ -80,6 +80,7 @@ program
 	.option('--jit-maker', 'Enable JIT auction maker bot')
 	.option('--floating-maker', 'Enable floating maker bot')
 	.option('--liquidator', 'Enable liquidator bot')
+	.option('--uncross-arb', 'Enable uncross arb bot')
 	.option(
 		'--if-revenue-settler',
 		'Enable Insurance Fund revenue pool settler bot'
@@ -597,7 +598,6 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'uncrossArb')) {
 		needCheckDriftUser = true;
-		needUserMapSubscribe = true;
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),

@@ -54,8 +54,6 @@ export class UncrossArbBot implements Bot {
 	private slotSubscriber: SlotSubscriber;
 	private orderSubscriber: OrderSubscriber;
 
-	private failedAttempts: Map<number, Map<string, number>> = new Map();
-
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
 		jitProxyClient: JitProxyClient,
@@ -111,10 +109,6 @@ export class UncrossArbBot implements Bot {
 			updateFrequency: 1000,
 			driftClient: this.driftClient,
 		});
-
-		for (const perpMarket of this.driftClient.getPerpMarketAccounts()) {
-			this.failedAttempts.set(perpMarket.marketIndex, new Map());
-		}
 	}
 
 	/**
