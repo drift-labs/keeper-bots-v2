@@ -117,6 +117,7 @@ export class UncrossArbBot implements Bot {
 	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
 
+		await this.orderSubscriber.subscribe();
 		await this.dlobSubscriber.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
