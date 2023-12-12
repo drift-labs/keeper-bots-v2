@@ -24,6 +24,14 @@ import { ConfirmOptions, Signer } from '@solana/web3.js';
 
 const CRANK_TX_MARKET_CHUNK_SIZE = 2;
 
+function isCriticalError(e: Error): boolean {
+	// retrying on this error is standard
+	if (e.message.includes('Blockhash not found')) {
+		return false;
+	}
+	return true;
+}
+
 export async function sendVersionedTransaction(
 	driftClient: DriftClient,
 	tx: VersionedTransaction,
@@ -263,11 +271,13 @@ export class MakerBidAskTwapCrank implements Bot {
 					logger.info(`https://solscan.io/tx/${txSig}`);
 				} catch (e: any) {
 					console.error(e);
-					await webhookMessage(
-						`[${this.name}] failed to crank funding rate:\n${
-							e.logs ? (e.logs as Array<string>).join('\n') : ''
-						} \n${e.stack ? e.stack : e.message}`
-					);
+					if (isCriticalError(e as Error)) {
+						await webhookMessage(
+							`[${this.name}] failed to crank funding rate:\n${
+								e.logs ? (e.logs as Array<string>).join('\n') : ''
+							} \n${e.stack ? e.stack : e.message}`
+						);
+					}
 				}
 			}
 		} catch (e) {
