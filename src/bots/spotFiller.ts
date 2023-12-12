@@ -39,10 +39,8 @@ import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
 	AddressLookupTableAccount,
-	ComputeBudgetProgram,
 	GetVersionedTransactionConfig,
 	PublicKey,
-	Transaction,
 	TransactionResponse,
 } from '@solana/web3.js';
 
@@ -924,23 +922,13 @@ export class SpotFillerBot implements Bot {
 				this.throttledNodes.set(makerNodeSignature, Date.now());
 				errorThisFillIx = true;
 
-				const tx = new Transaction();
-				tx.add(
-					ComputeBudgetProgram.requestUnits({
-						units: 1_000_000,
-						additionalFee: 0,
-					})
-				);
-				tx.add(
-					await this.driftClient.getForceCancelOrdersIx(
+				this.driftClient
+					.forceCancelOrders(
 						makerNode.userAccount!,
 						(
 							await this.userMap!.mustGet(makerNode.userAccount!.toString())
 						).getUserAccount()
 					)
-				);
-				this.driftClient.txSender
-					.send(tx, [], this.driftClient.opts)
 					.then((txSig) => {
 						logger.info(
 							`Force cancelled orders for maker ${makerNode.userAccount!.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
@@ -948,7 +936,9 @@ export class SpotFillerBot implements Bot {
 					})
 					.catch((e) => {
 						console.error(e);
-						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
+						logger.error(
+							`Failed to send ForceCancelOrder Tx (error above), maker (${makerNode.userAccount!.toString()}) breach maint margin:`
+						);
 						webhookMessage(
 							`[${this.name}]: :x: error processing fill tx logs:\n${
 								e.stack ? e.stack : e.message
@@ -977,24 +967,13 @@ export class SpotFillerBot implements Bot {
 				this.throttledNodes.set(takerNodeSignature, Date.now());
 				errorThisFillIx = true;
 
-				const tx = new Transaction();
-				tx.add(
-					ComputeBudgetProgram.requestUnits({
-						units: 1_000_000,
-						additionalFee: 0,
-					})
-				);
-				tx.add(
-					await this.driftClient.getForceCancelOrdersIx(
+				this.driftClient
+					.forceCancelOrders(
 						node.userAccount!,
 						(
 							await this.userMap!.mustGet(node.userAccount!.toString())
 						).getUserAccount()
 					)
-				);
-
-				this.driftClient.txSender
-					.send(tx, [], this.driftClient.opts)
 					.then((txSig) => {
 						logger.info(
 							`Force cancelled orders for user ${node.userAccount!.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
@@ -1002,7 +981,9 @@ export class SpotFillerBot implements Bot {
 					})
 					.catch((e) => {
 						console.error(e);
-						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
+						logger.error(
+							`Failed to send ForceCancelOrder Tx (error above), taker (${node.userAccount!.toBase58()}) breach maint margin:`
+						);
 						webhookMessage(
 							`[${this.name}]: :x: error processing fill tx logs:\n${
 								e.stack ? e.stack : e.message
