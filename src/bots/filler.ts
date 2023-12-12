@@ -106,6 +106,7 @@ const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 
 const errorCodesToSuppress = [
+	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
 	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
@@ -1076,11 +1077,27 @@ export class FillerBot implements Bot {
 						logger.error(
 							`Failed to send ForceCancelOrder Tx for maker (${makerBreachedMaintenanceMargin}) breach margin (error above):`
 						);
-						webhookMessage(
-							`[${this.name}]: :x: error processing fill tx logs:\n${
-								e.stack ? e.stack : e.message
-							}`
-						);
+
+						const errorCode = getErrorCode(e);
+
+						if (
+							errorCode &&
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(e as Error).message.includes('Transaction was not confirmed')
+						) {
+							if (errorCode && this.txSimErrorCounter) {
+								this.txSimErrorCounter!.add(1, {
+									errorCode: errorCode.toString(),
+								});
+							}
+							webhookMessage(
+								`[${
+									this.name
+								}]: :x: error forceCancelling user ${makerBreachedMaintenanceMargin} for maker breaching margin tx logs:\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+						}
 					});
 
 				errorThisFillIx = true;
@@ -1113,17 +1130,32 @@ export class FillerBot implements Bot {
 						);
 					})
 					.catch((e) => {
+						const userCanceling = filledNode.node.userAccount!.toString();
 						console.error(e);
 						logger.error(
-							`Failed to send ForceCancelOrder Tx for taker (${filledNode.node.userAccount!.toString()} - ${
+							`Failed to send ForceCancelOrder Tx for taker (${userCanceling} - ${
 								filledNode.node.order!.orderId
 							}) breach maint. margin (error above):`
 						);
-						webhookMessage(
-							`[${this.name}]: :x: error processing fill tx logs:\n${
-								e.stack ? e.stack : e.message
-							}`
-						);
+						const errorCode = getErrorCode(e);
+						if (
+							errorCode &&
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(e as Error).message.includes('Transaction was not confirmed')
+						) {
+							if (errorCode && this.txSimErrorCounter) {
+								this.txSimErrorCounter!.add(1, {
+									errorCode: errorCode.toString(),
+								});
+							}
+							webhookMessage(
+								`[${
+									this.name
+								}]: :x: error forceCancelling user ${userCanceling} for taker breaching maint. margin tx logs:\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+						}
 					});
 
 				continue;
