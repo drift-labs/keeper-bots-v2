@@ -251,7 +251,7 @@ export class UncrossArbBot implements Bot {
 						2 * driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
 					) {
 						try {
-							this.driftClient.txSender
+							await this.driftClient.txSender
 								.sendVersionedTransaction(
 									await this.driftClient.txSender.getVersionedTransaction(
 										[
