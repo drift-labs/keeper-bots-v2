@@ -83,6 +83,9 @@ const errorCodesToSuppress = [
 	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
+
+	6111, // Error Message: OrderNotTriggerable.
+	6112, // Error Message: OrderDidNotSatisfyTriggerCondition.
 ];
 
 enum METRIC_TYPES {
