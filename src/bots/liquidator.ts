@@ -65,9 +65,11 @@ import {
 	getPerpMarketTierNumber,
 	perpTierIsAsSafeAs,
 } from '@drift-labs/sdk/lib/math/tiers';
+import { SimulatedTransactionResponse } from '@solana/web3.js';
 
 const errorCodesToSuppress = [
 	6004, // Error Number: 6004. Error Message: Sufficient collateral.
+	6010, // Error Number: 6010. Error Message: User Has No Position In Market.
 ];
 
 const LIQUIDATE_THROTTLE_BACKOFF = 5000; // the time to wait before trying to liquidate a throttled user again
@@ -1712,8 +1714,8 @@ tx: ${tx} `
 				this.driftClient.authority
 			);
 
-			this.driftClient
-				.liquidatePerpPnlForDeposit(
+			try {
+				const tx = await this.driftClient.liquidatePerpPnlForDeposit(
 					user.userAccountPublicKey,
 					user.getUserAccount(),
 					liquidateePosition.marketIndex,
@@ -1721,45 +1723,48 @@ tx: ${tx} `
 					depositAmountToLiq,
 					undefined,
 					this.getTxParamsWithPriorityFees()
-				)
-				.then((tx) => {
-					logger.info(
-						`did liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
-							liquidateePosition.marketIndex
-						} tx: ${tx} `
-					);
+				);
+				logger.info(
+					`did liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+						liquidateePosition.marketIndex
+					} tx: ${tx} `
+				);
+				webhookMessage(
+					`[${
+						this.name
+					}]: liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+						liquidateePosition.marketIndex
+					} tx: ${tx} `
+				);
+			} catch (err) {
+				logger.error(
+					`Error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+						liquidateePosition.marketIndex
+					}`
+				);
+				console.error(err);
+				const e = err as Error;
+				const errorCode = getErrorCode(e);
+				if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
+					const simError = err as SimulatedTransactionResponse;
 					webhookMessage(
 						`[${
 							this.name
-						}]: liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+						}]: :x: error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
 							liquidateePosition.marketIndex
-						} tx: ${tx} `
+						}: \n${
+							simError.logs ? (simError.logs as Array<string>).join('\n') : ''
+						} \n${e.stack ? e.stack : e.message} `
 					);
-				})
-				.catch((e) => {
-					console.error(e);
-					logger.error('Error in liquidatePerpPnlForDeposit');
-					const errorCode = getErrorCode(e);
-					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-						webhookMessage(
-							`[${
-								this.name
-							}]: :x: error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
-								liquidateePosition.marketIndex
-							}: \n${e.logs ? (e.logs as Array<string>).join('\n') : ''} \n${
-								e.stack ? e.stack : e.message
-							} `
-						);
-					} else {
-						this.throttledUsers.set(
-							user.userAccountPublicKey.toBase58(),
-							Date.now()
-						);
-					}
-				})
-				.finally(() => {
-					this.recordHistogram(start, 'liquidatePerpPnlForDeposit');
-				});
+				} else {
+					this.throttledUsers.set(
+						user.userAccountPublicKey.toBase58(),
+						Date.now()
+					);
+				}
+			} finally {
+				this.recordHistogram(start, 'liquidatePerpPnlForDeposit');
+			}
 		}
 	}
 

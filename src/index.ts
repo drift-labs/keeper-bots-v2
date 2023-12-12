@@ -80,7 +80,7 @@ program
 	.option('--jit-maker', 'Enable JIT auction maker bot')
 	.option('--floating-maker', 'Enable floating maker bot')
 	.option('--liquidator', 'Enable liquidator bot')
-	.option('--uncross-arb', 'Enable uncross arb bot')
+	.option('--uncross-arb', 'Arb bot')
 	.option(
 		'--if-revenue-settler',
 		'Enable Insurance Fund revenue pool settler bot'
@@ -241,7 +241,7 @@ const runBot = async () => {
 		};
 		userMapSubscriptionConfig = {
 			type: 'polling',
-			frequency: 60_000,
+			frequency: 15_000, // reasonable refresh time since userMap calls getProgramAccounts to update.
 			commitment: stateCommitment,
 		};
 	}
@@ -251,17 +251,17 @@ const runBot = async () => {
 		skipPreflight: false,
 		preflightCommitment: stateCommitment,
 	};
-	const sendTxConnection = new Connection(endpoint, {
-		wsEndpoint: wsEndpoint,
-		commitment: stateCommitment,
-		disableRetryOnRateLimit: true,
-	});
-	const txSender = new FastSingleTxSender({
-		connection: sendTxConnection,
-		blockhashRefreshInterval: 10_000,
-		wallet,
-		opts,
-	});
+	// const sendTxConnection = new Connection(endpoint, {
+	// 	wsEndpoint: wsEndpoint,
+	// 	commitment: stateCommitment,
+	// 	disableRetryOnRateLimit: true,
+	// });
+	// const txSender = new FastSingleTxSender({
+	// 	connection: sendTxConnection,
+	// 	blockhashRefreshInterval: 10_000,
+	// 	wallet,
+	// 	opts,
+	// });
 
 	/**
 	 * Creating and subscribing to the drift client
@@ -287,7 +287,7 @@ const runBot = async () => {
 		oracleInfos,
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts ?? [0],
-		txSender,
+		// txSender,
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	driftClient.eventEmitter.on('error', (e) => {
@@ -422,10 +422,10 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'spotFiller')) {
 		needCheckDriftUser = true;
-		needUserMapSubscribe = true;
+		// to avoid long startup, spotFiller will fetch userAccounts as needed and build the map over time
+		needUserMapSubscribe = false;
 		bots.push(
 			new SpotFillerBot(
-				slotSubscriber,
 				driftClient,
 				userMap,
 				{
@@ -569,6 +569,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userIdleFlipper')) {
+		needUserMapSubscribe = true;
 		bots.push(
 			new UserIdleFlipperBot(
 				driftClientConfig,

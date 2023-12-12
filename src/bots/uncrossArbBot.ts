@@ -239,6 +239,9 @@ export class UncrossArbBot implements Bot {
 						),
 					};
 
+					console.log('best ask', bestDriftAsk.userAccount!.toBase58());
+					console.log('best bid', bestDriftBid.userAccount!.toBase58());
+
 					const midPrice = (bestBidPrice + bestAskPrice) / 2;
 					if (
 						(bestBidPrice - bestAskPrice) / midPrice >
@@ -250,7 +253,7 @@ export class UncrossArbBot implements Bot {
 									await this.driftClient.txSender.getVersionedTransaction(
 										[
 											ComputeBudgetProgram.setComputeUnitLimit({
-												units: 1_000_000,
+												units: 1_400_000,
 											}),
 											await this.jitProxyClient.getArbPerpIx({
 												marketIndex: perpIdx,

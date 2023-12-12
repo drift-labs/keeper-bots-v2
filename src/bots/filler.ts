@@ -40,7 +40,6 @@ import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
 	SendTransactionError,
-	Transaction,
 	TransactionResponse,
 	TransactionSignature,
 	TransactionInstruction,
@@ -107,6 +106,7 @@ const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 
 const errorCodesToSuppress = [
+	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
 	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
@@ -1062,34 +1062,42 @@ export class FillerBot implements Bot {
 					`Throttling maker breached maintenance margin: ${makerBreachedMaintenanceMargin}`
 				);
 				this.throttledNodes.set(makerBreachedMaintenanceMargin, Date.now());
-				const tx = new Transaction();
-				tx.add(
-					ComputeBudgetProgram.requestUnits({
-						units: 1_000_000,
-						additionalFee: 0,
-					})
-				);
-				tx.add(
-					await this.driftClient.getForceCancelOrdersIx(
+				this.driftClient
+					.forceCancelOrders(
 						new PublicKey(makerBreachedMaintenanceMargin),
 						await this.getUserAccountFromMap(makerBreachedMaintenanceMargin)
 					)
-				);
-				this.driftClient.txSender
-					.send(tx, [], this.driftClient.opts)
 					.then((txSig) => {
 						logger.info(
 							`Force cancelled orders for makers due to breach of maintenance margin. Tx: ${txSig}`
 						);
 					})
 					.catch((e) => {
-						// console.error(e);
-						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
-						webhookMessage(
-							`[${this.name}]: :x: error processing fill tx logs:\n${
-								e.stack ? e.stack : e.message
-							}`
+						console.error(e);
+						logger.error(
+							`Failed to send ForceCancelOrder Tx for maker (${makerBreachedMaintenanceMargin}) breach margin (error above):`
 						);
+
+						const errorCode = getErrorCode(e);
+
+						if (
+							errorCode &&
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(e as Error).message.includes('Transaction was not confirmed')
+						) {
+							if (errorCode && this.txSimErrorCounter) {
+								this.txSimErrorCounter!.add(1, {
+									errorCode: errorCode.toString(),
+								});
+							}
+							webhookMessage(
+								`[${
+									this.name
+								}]: :x: error forceCancelling user ${makerBreachedMaintenanceMargin} for maker breaching margin tx logs:\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+						}
 					});
 
 				errorThisFillIx = true;
@@ -1098,7 +1106,7 @@ export class FillerBot implements Bot {
 
 			const takerBreachedMaintenanceMargin =
 				isTakerBreachedMaintenanceMarginLog(log);
-			if (takerBreachedMaintenanceMargin) {
+			if (takerBreachedMaintenanceMargin && nodesFilled[ixIdx]) {
 				const filledNode = nodesFilled[ixIdx];
 				const takerNodeSignature = filledNode.node.userAccount!.toBase58();
 				logger.error(
@@ -1109,37 +1117,45 @@ export class FillerBot implements Bot {
 				this.throttledNodes.set(takerNodeSignature, Date.now());
 				errorThisFillIx = true;
 
-				const tx = new Transaction();
-				tx.add(
-					ComputeBudgetProgram.requestUnits({
-						units: 1_000_000,
-						additionalFee: 0,
-					})
-				);
-				tx.add(
-					await this.driftClient.getForceCancelOrdersIx(
+				this.driftClient
+					.forceCancelOrders(
 						filledNode.node.userAccount!,
 						await this.getUserAccountFromMap(
 							filledNode.node.userAccount!.toString()
 						)
 					)
-				);
-
-				this.driftClient.txSender
-					.send(tx, [], this.driftClient.opts)
 					.then((txSig) => {
 						logger.info(
 							`Force cancelled orders for user ${filledNode.node.userAccount!.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
 						);
 					})
 					.catch((e) => {
+						const userCanceling = filledNode.node.userAccount!.toString();
 						console.error(e);
-						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
-						webhookMessage(
-							`[${this.name}]: :x: error processing fill tx logs:\n${
-								e.stack ? e.stack : e.message
-							}`
+						logger.error(
+							`Failed to send ForceCancelOrder Tx for taker (${userCanceling} - ${
+								filledNode.node.order!.orderId
+							}) breach maint. margin (error above):`
 						);
+						const errorCode = getErrorCode(e);
+						if (
+							errorCode &&
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(e as Error).message.includes('Transaction was not confirmed')
+						) {
+							if (errorCode && this.txSimErrorCounter) {
+								this.txSimErrorCounter!.add(1, {
+									errorCode: errorCode.toString(),
+								});
+							}
+							webhookMessage(
+								`[${
+									this.name
+								}]: :x: error forceCancelling user ${userCanceling} for taker breaching maint. margin tx logs:\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+						}
 					});
 
 				continue;
