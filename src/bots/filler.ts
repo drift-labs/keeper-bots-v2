@@ -40,7 +40,6 @@ import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
 	SendTransactionError,
-	Transaction,
 	TransactionResponse,
 	TransactionSignature,
 	TransactionInstruction,
@@ -1062,29 +1061,21 @@ export class FillerBot implements Bot {
 					`Throttling maker breached maintenance margin: ${makerBreachedMaintenanceMargin}`
 				);
 				this.throttledNodes.set(makerBreachedMaintenanceMargin, Date.now());
-				const tx = new Transaction();
-				tx.add(
-					ComputeBudgetProgram.requestUnits({
-						units: 1_000_000,
-						additionalFee: 0,
-					})
-				);
-				tx.add(
-					await this.driftClient.getForceCancelOrdersIx(
+				this.driftClient
+					.forceCancelOrders(
 						new PublicKey(makerBreachedMaintenanceMargin),
 						await this.getUserAccountFromMap(makerBreachedMaintenanceMargin)
 					)
-				);
-				this.driftClient.txSender
-					.send(tx, [], this.driftClient.opts)
 					.then((txSig) => {
 						logger.info(
 							`Force cancelled orders for makers due to breach of maintenance margin. Tx: ${txSig}`
 						);
 					})
 					.catch((e) => {
-						// console.error(e);
-						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
+						console.error(e);
+						logger.error(
+							`Failed to send ForceCancelOrder Tx for maker (${makerBreachedMaintenanceMargin}) breach margin (error above):`
+						);
 						webhookMessage(
 							`[${this.name}]: :x: error processing fill tx logs:\n${
 								e.stack ? e.stack : e.message
@@ -1109,24 +1100,13 @@ export class FillerBot implements Bot {
 				this.throttledNodes.set(takerNodeSignature, Date.now());
 				errorThisFillIx = true;
 
-				const tx = new Transaction();
-				tx.add(
-					ComputeBudgetProgram.requestUnits({
-						units: 1_000_000,
-						additionalFee: 0,
-					})
-				);
-				tx.add(
-					await this.driftClient.getForceCancelOrdersIx(
+				this.driftClient
+					.forceCancelOrders(
 						filledNode.node.userAccount!,
 						await this.getUserAccountFromMap(
 							filledNode.node.userAccount!.toString()
 						)
 					)
-				);
-
-				this.driftClient.txSender
-					.send(tx, [], this.driftClient.opts)
 					.then((txSig) => {
 						logger.info(
 							`Force cancelled orders for user ${filledNode.node.userAccount!.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
@@ -1134,7 +1114,11 @@ export class FillerBot implements Bot {
 					})
 					.catch((e) => {
 						console.error(e);
-						logger.error(`Failed to send ForceCancelOrder Ixs (error above):`);
+						logger.error(
+							`Failed to send ForceCancelOrder Tx for taker (${filledNode.node.userAccount!.toString()} - ${
+								filledNode.node.order!.orderId
+							}) breach maint. margin (error above):`
+						);
 						webhookMessage(
 							`[${this.name}]: :x: error processing fill tx logs:\n${
 								e.stack ? e.stack : e.message
