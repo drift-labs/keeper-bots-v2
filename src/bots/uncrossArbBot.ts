@@ -212,33 +212,40 @@ export class UncrossArbBot implements Bot {
 						PRICE_PRECISION
 					);
 
-					const bidMakerInfo: MakerInfo = {
-						makerUserAccount: this.orderSubscriber.usersAccounts.get(
-							bestDriftBid.userAccount!.toBase58()
-						)!.userAccount,
-						order: bestDriftBid.order,
-						maker: bestDriftBid.userAccount!,
-						makerStats: getUserStatsAccountPublicKey(
-							this.driftClient.program.programId,
-							this.orderSubscriber.usersAccounts.get(
+					let bidMakerInfo: MakerInfo;
+					let askMakerInfo: MakerInfo;
+					try {
+						bidMakerInfo = {
+							makerUserAccount: this.orderSubscriber.usersAccounts.get(
 								bestDriftBid.userAccount!.toBase58()
-							)!.userAccount.authority
-						),
-					};
+							)!.userAccount,
+							order: bestDriftBid.order,
+							maker: bestDriftBid.userAccount!,
+							makerStats: getUserStatsAccountPublicKey(
+								this.driftClient.program.programId,
+								this.orderSubscriber.usersAccounts.get(
+									bestDriftBid.userAccount!.toBase58()
+								)!.userAccount.authority
+							),
+						};
 
-					const askMakerInfo: MakerInfo = {
-						makerUserAccount: this.orderSubscriber.usersAccounts.get(
-							bestDriftAsk.userAccount!.toBase58()
-						)!.userAccount,
-						order: bestDriftAsk.order,
-						maker: bestDriftAsk.userAccount!,
-						makerStats: getUserStatsAccountPublicKey(
-							this.driftClient.program.programId,
-							this.orderSubscriber.usersAccounts.get(
+						askMakerInfo = {
+							makerUserAccount: this.orderSubscriber.usersAccounts.get(
 								bestDriftAsk.userAccount!.toBase58()
-							)!.userAccount.authority
-						),
-					};
+							)!.userAccount,
+							order: bestDriftAsk.order,
+							maker: bestDriftAsk.userAccount!,
+							makerStats: getUserStatsAccountPublicKey(
+								this.driftClient.program.programId,
+								this.orderSubscriber.usersAccounts.get(
+									bestDriftAsk.userAccount!.toBase58()
+								)!.userAccount.authority
+							),
+						};
+					} catch (error) {
+						console.log('Order Subscriber race condition');
+						continue;
+					}
 
 					console.log('best ask', bestDriftAsk.userAccount!.toBase58());
 					console.log('best bid', bestDriftBid.userAccount!.toBase58());
