@@ -599,7 +599,6 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'uncrossArb')) {
 		needCheckDriftUser = true;
-		needUserMapSubscribe = true;
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
@@ -609,7 +608,6 @@ const runBot = async () => {
 				driftClient,
 				jitProxyClient,
 				slotSubscriber,
-				userMap,
 				config.botConfigs!.uncrossArb!,
 				config.global.driftEnv!
 			)
