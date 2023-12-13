@@ -13,6 +13,7 @@ import {
 	getUserStatsAccountPublicKey,
 	OrderSubscriber,
 	PollingDriftClientAccountSubscriber,
+	TxSigAndSlot,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -29,7 +30,13 @@ import { BaseBotConfig } from 'src/config';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
+	PublicKey,
 } from '@solana/web3.js';
+import { getErrorCode } from '../error';
+
+const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
+const SETTLE_PNL_CHUNKS = 4;
+const MAX_POSITIONS_PER_USER = 8;
 
 /**
  * This is an example of a bot that implements the Bot interface.
@@ -53,6 +60,9 @@ export class UncrossArbBot implements Bot {
 	private dlobSubscriber: DLOBSubscriber;
 	private slotSubscriber: SlotSubscriber;
 	private orderSubscriber: OrderSubscriber;
+
+	private lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
+	private throttledNodes: Map<string, number> = new Map();
 
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
@@ -143,6 +153,13 @@ export class UncrossArbBot implements Bot {
 		);
 		this.intervalIds.push(intervalId);
 
+		this.intervalIds.push(
+			setInterval(
+				this.settlePnls.bind(this),
+				SETTLE_POSITIVE_PNL_COOLDOWN_MS / 2
+			)
+		);
+
 		logger.info(`${this.name} Bot started! driftEnv: ${this.driftEnv}`);
 	}
 
@@ -186,7 +203,7 @@ export class UncrossArbBot implements Bot {
 						MarketType.PERP,
 						oraclePriceData.slot.toNumber(),
 						oraclePriceData,
-						driftUser.userAccountPublicKey
+						[driftUser.userAccountPublicKey.toString()]
 					);
 
 					const bestDriftAsk = getBestLimitAskExcludePubKey(
@@ -195,7 +212,7 @@ export class UncrossArbBot implements Bot {
 						MarketType.PERP,
 						oraclePriceData.slot.toNumber(),
 						oraclePriceData,
-						driftUser.userAccountPublicKey
+						[driftUser.userAccountPublicKey.toString()]
 					);
 
 					if (!bestDriftBid || !bestDriftAsk) {
@@ -243,12 +260,11 @@ export class UncrossArbBot implements Bot {
 							),
 						};
 					} catch (e) {
-						console.log(e);
 						continue;
 					}
 
-					console.log('best ask', bestDriftAsk.userAccount!.toBase58());
-					console.log('best bid', bestDriftBid.userAccount!.toBase58());
+					// console.log('best ask', bestDriftAsk.userAccount!.toBase58());
+					// console.log('best bid', bestDriftBid.userAccount!.toBase58());
 
 					const midPrice = (bestBidPrice + bestAskPrice) / 2;
 					if (
@@ -310,7 +326,6 @@ export class UncrossArbBot implements Bot {
 						}
 					}
 				}
-
 				logger.debug(`done: ${Date.now() - start}ms`);
 				ran = true;
 			});
@@ -328,6 +343,72 @@ export class UncrossArbBot implements Bot {
 				await this.watchdogTimerMutex.runExclusive(async () => {
 					this.watchdogTimerLastPatTime = Date.now();
 				});
+			}
+		}
+	}
+
+	private async settlePnls() {
+		const user = this.driftClient.getUser();
+		const marketIds = user
+			.getActivePerpPositions()
+			.map((pos) => pos.marketIndex);
+		const now = Date.now();
+		if (marketIds.length === MAX_POSITIONS_PER_USER) {
+			if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
+				logger.info(`Want to settle positive pnl, but in cooldown...`);
+			} else {
+				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
+				for (let i = 0; i < marketIds.length; i += SETTLE_PNL_CHUNKS) {
+					const marketIdChunks = marketIds.slice(i, i + SETTLE_PNL_CHUNKS);
+					try {
+						const ixs = [
+							ComputeBudgetProgram.setComputeUnitLimit({
+								units: 2_000_000,
+							}),
+						];
+						ixs.push(
+							...(await this.driftClient.getSettlePNLsIxs(
+								[
+									{
+										settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
+										settleeUserAccount: this.driftClient.getUserAccount()!,
+									},
+								],
+								marketIdChunks
+							))
+						);
+						settlePnlPromises.push(
+							this.driftClient.txSender.sendVersionedTransaction(
+								await this.driftClient.txSender.getVersionedTransaction(
+									ixs,
+									[this.lookupTableAccount!],
+									[],
+									this.driftClient.opts
+								),
+								[],
+								this.driftClient.opts
+							)
+						);
+					} catch (err) {
+						if (!(err instanceof Error)) {
+							return;
+						}
+						const errorCode = getErrorCode(err) ?? 0;
+						logger.error(
+							`Error code: ${errorCode} while settling pnls for markets ${JSON.stringify(
+								marketIds
+							)}: ${err.message}`
+						);
+						console.error(err);
+					}
+				}
+				const txs = await Promise.all(settlePnlPromises);
+				for (const tx of txs) {
+					logger.info(
+						`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
+					);
+				}
+				this.lastSettlePnl = now;
 			}
 		}
 	}
