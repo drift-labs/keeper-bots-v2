@@ -31,12 +31,32 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 	PublicKey,
+	SendTransactionError,
 } from '@solana/web3.js';
 import { getErrorCode } from '../error';
+import { webhookMessage } from '../webhook';
+import {
+	isArbIxLog,
+	isEndIxLog,
+	isErrArb,
+	isErrArbNoAsk,
+	isErrArbNoBid,
+	isIxLog,
+	isMakerBreachedMaintenanceMarginLog,
+} from './common/txLogParse';
+import { Counter } from '@opentelemetry/api';
 
 const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
+const THROTTLED_NODE_COOLDOWN = 2000;
+const ARB_ERROR_THRESHOLD_PER_USER = 3;
+
+const errorCodesToSuppress = [
+	6004, // 0x1774 Error Number: 6004. Error Message: NoBestBid.
+	6005, // 0x1775 Error Number: 6005. Error Message: NoBestAsk.
+	6006, // 0x1776 Error Number: 6006. Error Message: NoArbOpportunity.
+];
 
 /**
  * This is an example of a bot that implements the Bot interface.
@@ -62,7 +82,8 @@ export class UncrossArbBot implements Bot {
 	private orderSubscriber: OrderSubscriber;
 
 	private lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
-	private throttledNodes: Map<string, number> = new Map();
+	private throttledNodes: Map<number, Map<string, number>> = new Map();
+	private noArbErrors: Map<number, Map<string, number>> = new Map();
 
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
@@ -132,6 +153,13 @@ export class UncrossArbBot implements Bot {
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 
+		for (const marketIndex of this.driftClient
+			.getPerpMarketAccounts()
+			.map((m) => m.marketIndex)) {
+			this.throttledNodes.set(marketIndex, new Map());
+			this.noArbErrors.set(marketIndex, new Map());
+		}
+
 		logger.info(`${this.name} init done`);
 	}
 
@@ -176,10 +204,168 @@ export class UncrossArbBot implements Bot {
 		return healthy;
 	}
 
-	/**
-	 * Typical bot loop that runs periodically and pats the watchdog timer on completion.
-	 *
-	 */
+	protected getOrderSignatureFromMakerInfo(makerInfo: MakerInfo): string {
+		return (
+			makerInfo.maker.toString() + '_' + makerInfo.order!.orderId.toString()
+		);
+	}
+
+	protected async handleTransactionLogs(
+		bidMakerInfo: MakerInfo,
+		askMakerInfo: MakerInfo,
+		logs: string[] | null | undefined
+	): Promise<void> {
+		if (!logs) {
+			return;
+		}
+
+		const marketIndex = bidMakerInfo.order?.marketIndex;
+		if (!marketIndex) return;
+
+		let inArbIx = false;
+		for (const log of logs) {
+			if (log === null) {
+				logger.error(`log is null`);
+				continue;
+			}
+
+			// Log which program is causing the error
+			if (isIxLog(log)) {
+				if (isArbIxLog(log)) {
+					// can also print this from parsing the log record in upcoming
+					console.log('Failed in arb ix');
+					inArbIx = true;
+				} else {
+					inArbIx = false;
+					console.log('Failed in drift ix');
+				}
+				continue;
+			}
+
+			if (isEndIxLog(this.driftClient.program.programId.toBase58(), log)) {
+				continue;
+			}
+
+			if (!inArbIx) {
+				// this is not a log for a fill instruction
+				const makerBreachedMaintenanceMargin =
+					isMakerBreachedMaintenanceMarginLog(log);
+				if (makerBreachedMaintenanceMargin !== null) {
+					logger.error(
+						`Throttling maker breached maintenance margin: ${makerBreachedMaintenanceMargin}`
+					);
+					this.throttledNodes
+						.get(marketIndex)!
+						.set(makerBreachedMaintenanceMargin, Date.now());
+					this.driftClient
+						.forceCancelOrders(
+							new PublicKey(makerBreachedMaintenanceMargin),
+							makerBreachedMaintenanceMargin === bidMakerInfo.maker.toBase58()
+								? bidMakerInfo.makerUserAccount
+								: askMakerInfo.makerUserAccount
+						)
+						.then((txSig) => {
+							logger.info(
+								`Force cancelled orders for makers due to breach of maintenance margin. Tx: ${txSig}`
+							);
+						})
+						.catch((e) => {
+							console.error(e);
+							logger.error(
+								`Failed to send ForceCancelOrder Tx for maker (${makerBreachedMaintenanceMargin}) breach margin (error above):`
+							);
+
+							const errorCode = getErrorCode(e);
+
+							if (
+								errorCode &&
+								!errorCodesToSuppress.includes(errorCode) &&
+								!(e as Error).message.includes('Transaction was not confirmed')
+							) {
+								webhookMessage(
+									`[${
+										this.name
+									}]: :x: error forceCancelling user ${makerBreachedMaintenanceMargin} for maker breaching margin tx logs:\n${
+										e.stack ? e.stack : e.message
+									}`
+								);
+							}
+						});
+
+					break;
+				} else {
+					continue;
+				}
+			}
+
+			// Throttle nodes that aren't filling
+			const errArbing = isErrArb(log);
+			const errNoAsk = isErrArbNoAsk(log);
+			const errNoBid = isErrArbNoBid(log);
+			if (inArbIx && errArbing) {
+				const noArbErrorsMap = this.noArbErrors.get(marketIndex)!;
+				const bidMakerSig = this.getOrderSignatureFromMakerInfo(bidMakerInfo);
+				const askMakerSig = this.getOrderSignatureFromMakerInfo(askMakerInfo);
+				if (!noArbErrorsMap.has(bidMakerSig))
+					noArbErrorsMap.set(bidMakerSig, 0);
+				if (!noArbErrorsMap.has(askMakerSig))
+					noArbErrorsMap.set(bidMakerSig, 0);
+
+				noArbErrorsMap.set(bidMakerSig, noArbErrorsMap.get(bidMakerSig)! + 1);
+				noArbErrorsMap.set(askMakerSig, noArbErrorsMap.get(askMakerSig)! + 1);
+
+				if (noArbErrorsMap.get(bidMakerSig)! > ARB_ERROR_THRESHOLD_PER_USER) {
+					this.throttledNodes.get(marketIndex)!.set(bidMakerSig, Date.now());
+					noArbErrorsMap.set(bidMakerSig, 0);
+					logger.warn(
+						`Throttling ${bidMakerSig} due to NoArbError on ${marketIndex}`
+					);
+				}
+
+				if (noArbErrorsMap.get(askMakerSig)! > ARB_ERROR_THRESHOLD_PER_USER) {
+					this.throttledNodes.get(marketIndex)!.set(askMakerSig, Date.now());
+					noArbErrorsMap.set(askMakerSig, 0);
+					logger.warn(
+						`Throttling ${askMakerSig} due to NoArbError on ${marketIndex}`
+					);
+				}
+				continue;
+			} else if (inArbIx && errNoAsk) {
+				const noArbErrorsMap = this.noArbErrors.get(marketIndex)!;
+				const askMakerSig = this.getOrderSignatureFromMakerInfo(askMakerInfo);
+
+				if (!noArbErrorsMap.has(askMakerSig))
+					noArbErrorsMap.set(askMakerSig, 0);
+
+				noArbErrorsMap.set(askMakerSig, noArbErrorsMap.get(askMakerSig)! + 1);
+
+				if (noArbErrorsMap.get(askMakerSig)! > ARB_ERROR_THRESHOLD_PER_USER) {
+					this.throttledNodes.get(marketIndex)!.set(askMakerSig, Date.now());
+					noArbErrorsMap.set(askMakerSig, 0);
+					logger.warn(
+						`Throttling ${askMakerSig} due to NoArbError on ${marketIndex}`
+					);
+				}
+			} else if (inArbIx && errNoBid) {
+				const noArbErrorsMap = this.noArbErrors.get(marketIndex)!;
+				const bidMakerSig = this.getOrderSignatureFromMakerInfo(bidMakerInfo);
+
+				if (!noArbErrorsMap.has(bidMakerSig))
+					noArbErrorsMap.set(bidMakerSig, 0);
+
+				noArbErrorsMap.set(bidMakerSig, noArbErrorsMap.get(bidMakerSig)! + 1);
+
+				if (noArbErrorsMap.get(bidMakerSig)! > ARB_ERROR_THRESHOLD_PER_USER) {
+					this.throttledNodes.get(marketIndex)!.set(bidMakerSig, Date.now());
+					noArbErrorsMap.set(bidMakerSig, 0);
+					logger.warn(
+						`Throttling ${bidMakerSig} due to NoArbError on ${marketIndex}`
+					);
+				}
+			}
+		}
+	}
+
 	private async runPeriodicTasks() {
 		const start = Date.now();
 		let ran = false;
@@ -192,10 +378,26 @@ export class UncrossArbBot implements Bot {
 				for (let i = 0; i < perpMarkets.length; i++) {
 					const perpIdx = perpMarkets[i].marketIndex;
 					const driftUser = this.driftClient.getUser();
+
 					const perpMarketAccount =
 						this.driftClient.getPerpMarketAccount(perpIdx)!;
 					const oraclePriceData =
 						this.driftClient.getOracleDataForPerpMarket(perpIdx);
+
+					// Go through throttled nodes so we can exlcude them
+					const excludedPubKeysOrderIdPairs: [string, number][] = [];
+					const throttledNodesForMarket = this.throttledNodes.get(perpIdx)!;
+					if (throttledNodesForMarket) {
+						for (const [pubKeySig, time] of throttledNodesForMarket.entries()) {
+							if (Date.now() - time < THROTTLED_NODE_COOLDOWN) {
+								excludedPubKeysOrderIdPairs.push(
+									pubKeySig.split('_') as [string, number]
+								);
+							} else {
+								throttledNodesForMarket.delete(pubKeySig);
+							}
+						}
+					}
 
 					const bestDriftBid = getBestLimitBidExcludePubKey(
 						this.dlobSubscriber.dlob,
@@ -203,7 +405,8 @@ export class UncrossArbBot implements Bot {
 						MarketType.PERP,
 						oraclePriceData.slot.toNumber(),
 						oraclePriceData,
-						[driftUser.userAccountPublicKey.toString()]
+						driftUser.getUserAccountPublicKey().toBase58(),
+						excludedPubKeysOrderIdPairs
 					);
 
 					const bestDriftAsk = getBestLimitAskExcludePubKey(
@@ -212,7 +415,8 @@ export class UncrossArbBot implements Bot {
 						MarketType.PERP,
 						oraclePriceData.slot.toNumber(),
 						oraclePriceData,
-						[driftUser.userAccountPublicKey.toString()]
+						driftUser.getUserAccountPublicKey().toBase58(),
+						excludedPubKeysOrderIdPairs
 					);
 
 					if (!bestDriftBid || !bestDriftAsk) {
@@ -229,49 +433,45 @@ export class UncrossArbBot implements Bot {
 						PRICE_PRECISION
 					);
 
-					let bidMakerInfo: MakerInfo;
-					let askMakerInfo: MakerInfo;
-					try {
-						bidMakerInfo = {
-							makerUserAccount: this.orderSubscriber.usersAccounts.get(
-								bestDriftBid.userAccount!.toBase58()
-							)!.userAccount,
-							order: bestDriftBid.order,
-							maker: bestDriftBid.userAccount!,
-							makerStats: getUserStatsAccountPublicKey(
-								this.driftClient.program.programId,
-								this.orderSubscriber.usersAccounts.get(
-									bestDriftBid.userAccount!.toBase58()
-								)!.userAccount.authority
-							),
-						};
-
-						askMakerInfo = {
-							makerUserAccount: this.orderSubscriber.usersAccounts.get(
-								bestDriftAsk.userAccount!.toBase58()
-							)!.userAccount,
-							order: bestDriftAsk.order,
-							maker: bestDriftAsk.userAccount!,
-							makerStats: getUserStatsAccountPublicKey(
-								this.driftClient.program.programId,
-								this.orderSubscriber.usersAccounts.get(
-									bestDriftAsk.userAccount!.toBase58()
-								)!.userAccount.authority
-							),
-						};
-					} catch (e) {
-						continue;
-					}
-
-					// console.log('best ask', bestDriftAsk.userAccount!.toBase58());
-					// console.log('best bid', bestDriftBid.userAccount!.toBase58());
-
 					const midPrice = (bestBidPrice + bestAskPrice) / 2;
 					if (
 						(bestBidPrice - bestAskPrice) / midPrice >
 						2 * driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
 					) {
 						try {
+							let bidMakerInfo: MakerInfo;
+							let askMakerInfo: MakerInfo;
+							try {
+								bidMakerInfo = {
+									makerUserAccount: this.orderSubscriber.usersAccounts.get(
+										bestDriftBid.userAccount!.toBase58()
+									)!.userAccount,
+									order: bestDriftBid.order,
+									maker: bestDriftBid.userAccount!,
+									makerStats: getUserStatsAccountPublicKey(
+										this.driftClient.program.programId,
+										this.orderSubscriber.usersAccounts.get(
+											bestDriftBid.userAccount!.toBase58()
+										)!.userAccount.authority
+									),
+								};
+
+								askMakerInfo = {
+									makerUserAccount: this.orderSubscriber.usersAccounts.get(
+										bestDriftAsk.userAccount!.toBase58()
+									)!.userAccount,
+									order: bestDriftAsk.order,
+									maker: bestDriftAsk.userAccount!,
+									makerStats: getUserStatsAccountPublicKey(
+										this.driftClient.program.programId,
+										this.orderSubscriber.usersAccounts.get(
+											bestDriftAsk.userAccount!.toBase58()
+										)!.userAccount.authority
+									),
+								};
+							} catch (e) {
+								continue;
+							}
 							await this.driftClient.txSender
 								.sendVersionedTransaction(
 									await this.driftClient.txSender.getVersionedTransaction(
@@ -299,20 +499,43 @@ export class UncrossArbBot implements Bot {
 										`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
 									);
 								})
-								.catch((e) => {
-									if (e.logs && e.logs.length > 0) {
-										let noArbOpError = false;
-										for (const log of e.logs) {
-											if (log.includes('NoArbOpportunity')) {
-												noArbOpError = true;
-												break;
+								.catch(async (e) => {
+									const simError = e as SendTransactionError;
+									const errorCode = getErrorCode(e);
+
+									if (simError.logs && simError.logs.length > 0) {
+										const start = Date.now();
+										await this.handleTransactionLogs(
+											bidMakerInfo,
+											askMakerInfo,
+											simError.logs
+										);
+										logger.error(
+											`Failed to send tx, sim error tx logs took: ${
+												Date.now() - start
+											}ms)`
+										);
+
+										if (
+											errorCode &&
+											!errorCodesToSuppress.includes(errorCode) &&
+											!(e as Error).message.includes(
+												'Transaction was not confirmed'
+											)
+										) {
+											console.error(`Unsurpressed error:\n`);
+											webhookMessage(
+												`[${this.name}]: :x: error simulating tx:\n${
+													simError.logs ? simError.logs.join('\n') : ''
+												}\n${e.stack || e}`
+											);
+										} else {
+											if (errorCode === 6006) {
+												logger.warn('No arb opportunity');
+											} else if (errorCode === 6004 || errorCode === 6005) {
+												logger.warn('No bid/ask, Orderbook was slow');
 											}
 										}
-										console.error(`Not no arb opp error:\n`);
-										console.error(e);
-									} else {
-										console.error(`Caught unknown error:\n`);
-										console.error(e);
 									}
 								});
 						} catch (e) {
@@ -333,6 +556,7 @@ export class UncrossArbBot implements Bot {
 			if (e === E_ALREADY_LOCKED) {
 				return;
 			} else {
+				console.log('here');
 				throw e;
 			}
 		} finally {

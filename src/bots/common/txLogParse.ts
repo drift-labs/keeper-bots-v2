@@ -22,6 +22,12 @@ export function isFillIxLog(log: string): boolean {
 	return match !== null;
 }
 
+export function isArbIxLog(log: string): boolean {
+	const match = log.match(new RegExp('Program log: Instruction: ArbPerp'));
+
+	return match !== null;
+}
+
 export function isOrderDoesNotExistLog(log: string): number | null {
 	const match = log.match(new RegExp('.*Order does not exist ([0-9]+)'));
 
@@ -75,6 +81,36 @@ export function isErrFillingLog(log: string): [string, string] | null {
 	}
 
 	return [match[1], match[2]];
+}
+
+export function isErrArb(log: string): boolean {
+	const match = log.match(new RegExp('.*NoArbOpportunity*'));
+
+	if (!match) {
+		return false;
+	}
+
+	return true;
+}
+
+export function isErrArbNoBid(log: string): boolean {
+	const match = log.match(new RegExp('.*NoBestBid*'));
+
+	if (!match) {
+		return false;
+	}
+
+	return true;
+}
+
+export function isErrArbNoAsk(log: string): boolean {
+	const match = log.match(new RegExp('.*NoBestAsk*'));
+
+	if (!match) {
+		return false;
+	}
+
+	return true;
 }
 
 export function isErrStaleOracle(log: string): boolean {

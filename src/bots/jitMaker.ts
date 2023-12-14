@@ -253,7 +253,7 @@ export class JitMaker implements Bot {
 						MarketType.PERP,
 						oraclePriceData.slot.toNumber(),
 						oraclePriceData,
-						[driftUser.userAccountPublicKey.toString()]
+						driftUser.userAccountPublicKey.toString()
 					);
 
 					const bestDriftAsk = getBestLimitAskExcludePubKey(
@@ -262,7 +262,7 @@ export class JitMaker implements Bot {
 						MarketType.PERP,
 						oraclePriceData.slot.toNumber(),
 						oraclePriceData,
-						[driftUser.userAccountPublicKey.toString()]
+						driftUser.userAccountPublicKey.toString()
 					);
 					if (!bestDriftBid || !bestDriftAsk) {
 						logger.warn('skipping, no best bid/ask');
