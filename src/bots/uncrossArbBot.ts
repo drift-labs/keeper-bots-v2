@@ -395,6 +395,8 @@ export class UncrossArbBot implements Bot {
 								);
 							} else {
 								throttledNodesForMarket.delete(pubKeySig);
+								if (this.noArbErrors.get(perpIdx)!.has(pubKeySig))
+									this.noArbErrors.get(perpIdx)!.delete(pubKeySig);
 							}
 						}
 					}
