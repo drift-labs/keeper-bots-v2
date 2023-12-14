@@ -49,7 +49,7 @@ import { Counter } from '@opentelemetry/api';
 const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
-const THROTTLED_NODE_COOLDOWN = 2000;
+const THROTTLED_NODE_COOLDOWN = 5000;
 const ARB_ERROR_THRESHOLD_PER_USER = 3;
 
 const errorCodesToSuppress = [
@@ -388,6 +388,8 @@ export class UncrossArbBot implements Bot {
 					const excludedPubKeysOrderIdPairs: [string, number][] = [];
 					const throttledNodesForMarket = this.throttledNodes.get(perpIdx)!;
 					if (throttledNodesForMarket) {
+						console.log('Throttled nodes for market:', perpIdx);
+						console.log(JSON.stringify(throttledNodesForMarket, null, 2));
 						for (const [pubKeySig, time] of throttledNodesForMarket.entries()) {
 							if (Date.now() - time < THROTTLED_NODE_COOLDOWN) {
 								excludedPubKeysOrderIdPairs.push(
@@ -440,42 +442,42 @@ export class UncrossArbBot implements Bot {
 						(bestBidPrice - bestAskPrice) / midPrice >
 						2 * driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
 					) {
+						let bidMakerInfo: MakerInfo;
+						let askMakerInfo: MakerInfo;
 						try {
-							let bidMakerInfo: MakerInfo;
-							let askMakerInfo: MakerInfo;
-							try {
-								bidMakerInfo = {
-									makerUserAccount: this.orderSubscriber.usersAccounts.get(
+							bidMakerInfo = {
+								makerUserAccount: this.orderSubscriber.usersAccounts.get(
+									bestDriftBid.userAccount!.toBase58()
+								)!.userAccount,
+								order: bestDriftBid.order,
+								maker: bestDriftBid.userAccount!,
+								makerStats: getUserStatsAccountPublicKey(
+									this.driftClient.program.programId,
+									this.orderSubscriber.usersAccounts.get(
 										bestDriftBid.userAccount!.toBase58()
-									)!.userAccount,
-									order: bestDriftBid.order,
-									maker: bestDriftBid.userAccount!,
-									makerStats: getUserStatsAccountPublicKey(
-										this.driftClient.program.programId,
-										this.orderSubscriber.usersAccounts.get(
-											bestDriftBid.userAccount!.toBase58()
-										)!.userAccount.authority
-									),
-								};
+									)!.userAccount.authority
+								),
+							};
 
-								askMakerInfo = {
-									makerUserAccount: this.orderSubscriber.usersAccounts.get(
+							askMakerInfo = {
+								makerUserAccount: this.orderSubscriber.usersAccounts.get(
+									bestDriftAsk.userAccount!.toBase58()
+								)!.userAccount,
+								order: bestDriftAsk.order,
+								maker: bestDriftAsk.userAccount!,
+								makerStats: getUserStatsAccountPublicKey(
+									this.driftClient.program.programId,
+									this.orderSubscriber.usersAccounts.get(
 										bestDriftAsk.userAccount!.toBase58()
-									)!.userAccount,
-									order: bestDriftAsk.order,
-									maker: bestDriftAsk.userAccount!,
-									makerStats: getUserStatsAccountPublicKey(
-										this.driftClient.program.programId,
-										this.orderSubscriber.usersAccounts.get(
-											bestDriftAsk.userAccount!.toBase58()
-										)!.userAccount.authority
-									),
-								};
-							} catch (e) {
-								continue;
-							}
-							await this.driftClient.txSender
-								.sendVersionedTransaction(
+									)!.userAccount.authority
+								),
+							};
+						} catch (e) {
+							continue;
+						}
+						try {
+							const txResult =
+								await this.driftClient.txSender.sendVersionedTransaction(
 									await this.driftClient.txSender.getVersionedTransaction(
 										[
 											ComputeBudgetProgram.setComputeUnitLimit({
@@ -495,58 +497,57 @@ export class UncrossArbBot implements Bot {
 									),
 									[],
 									this.driftClient.opts
-								)
-								.then((txResult) => {
-									logger.info(
-										`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
+								);
+							logger.info(
+								`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
+							);
+						} catch (e) {
+							try {
+								const simError = e as SendTransactionError;
+								const errorCode = getErrorCode(simError);
+
+								if (simError.logs && simError.logs.length > 0) {
+									const start = Date.now();
+									await this.handleTransactionLogs(
+										bidMakerInfo,
+										askMakerInfo,
+										simError.logs
 									);
-								})
-								.catch(async (e) => {
-									const simError = e as SendTransactionError;
-									const errorCode = getErrorCode(e);
+									logger.error(
+										`Failed to send tx, sim error tx logs took: ${
+											Date.now() - start
+										}ms)`
+									);
 
-									if (simError.logs && simError.logs.length > 0) {
-										const start = Date.now();
-										await this.handleTransactionLogs(
-											bidMakerInfo,
-											askMakerInfo,
-											simError.logs
+									if (
+										errorCode &&
+										!errorCodesToSuppress.includes(errorCode) &&
+										!(e as Error).message.includes(
+											'Transaction was not confirmed'
+										)
+									) {
+										console.error(`Unsurpressed error:\n`);
+										webhookMessage(
+											`[${this.name}]: :x: error simulating tx:\n${
+												simError.logs ? simError.logs.join('\n') : ''
+											}\n${simError.stack || e}`
 										);
-										logger.error(
-											`Failed to send tx, sim error tx logs took: ${
-												Date.now() - start
-											}ms)`
-										);
-
-										if (
-											errorCode &&
-											!errorCodesToSuppress.includes(errorCode) &&
-											!(e as Error).message.includes(
-												'Transaction was not confirmed'
-											)
-										) {
-											console.error(`Unsurpressed error:\n`);
-											webhookMessage(
-												`[${this.name}]: :x: error simulating tx:\n${
-													simError.logs ? simError.logs.join('\n') : ''
-												}\n${e.stack || e}`
-											);
-										} else {
-											if (errorCode === 6006) {
-												logger.warn('No arb opportunity');
-											} else if (errorCode === 6004 || errorCode === 6005) {
-												logger.warn('No bid/ask, Orderbook was slow');
-											}
+									} else {
+										if (errorCode === 6006) {
+											logger.warn('No arb opportunity');
+										} else if (errorCode === 6004 || errorCode === 6005) {
+											logger.warn('No bid/ask, Orderbook was slow');
 										}
 									}
-								});
-						} catch (e) {
-							if (e instanceof Error) {
-								logger.error(
-									`Error sending arb tx on market index ${perpIdx} with detected market ${bestBidPrice}@${bestAskPrice}: ${
-										e.stack ? e.stack : e.message
-									}`
-								);
+								}
+							} catch (e) {
+								if (e instanceof Error) {
+									logger.error(
+										`Error sending arb tx on market index ${perpIdx} with detected market ${bestBidPrice}@${bestAskPrice}: ${
+											e.stack ? e.stack : e.message
+										}`
+									);
+								}
 							}
 						}
 					}
@@ -558,7 +559,6 @@ export class UncrossArbBot implements Bot {
 			if (e === E_ALREADY_LOCKED) {
 				return;
 			} else {
-				console.log('here');
 				throw e;
 			}
 		} finally {
