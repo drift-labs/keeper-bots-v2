@@ -49,7 +49,7 @@ import { Counter } from '@opentelemetry/api';
 const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
-const THROTTLED_NODE_COOLDOWN = 5000;
+const THROTTLED_NODE_COOLDOWN = 10000;
 const ARB_ERROR_THRESHOLD_PER_USER = 3;
 
 const errorCodesToSuppress = [
@@ -391,12 +391,17 @@ export class UncrossArbBot implements Bot {
 						for (const [pubKeySig, time] of throttledNodesForMarket.entries()) {
 							if (Date.now() - time < THROTTLED_NODE_COOLDOWN) {
 								excludedPubKeysOrderIdPairs.push(
-									pubKeySig.split('_') as [string, number]
+									((sig: string) => [
+										sig.split('_')[0],
+										parseInt(sig.split('_')[1]),
+									])(pubKeySig)
 								);
 							} else {
 								throttledNodesForMarket.delete(pubKeySig);
-								if (this.noArbErrors.get(perpIdx)!.has(pubKeySig))
+								if (this.noArbErrors.get(perpIdx)!.has(pubKeySig)) {
+									logger.warn(`Releasing throttled node ${pubKeySig}`);
 									this.noArbErrors.get(perpIdx)!.delete(pubKeySig);
+								}
 							}
 						}
 					}

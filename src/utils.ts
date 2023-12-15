@@ -217,7 +217,7 @@ export function getBestLimitAskExcludePubKey(
 			excludedUserAccountsAndOrder?.some(
 				(entry) =>
 					entry[0] === (ask.userAccount?.toBase58() ?? '') &&
-					entry[1] === (ask.order?.orderId ?? -1)
+					entry[1] === (ask.order?.orderId || -1)
 			)
 		) {
 			continue;
