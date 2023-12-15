@@ -213,14 +213,12 @@ export class UncrossArbBot implements Bot {
 	protected handleTransactionLogs(
 		bidMakerInfo: MakerInfo,
 		askMakerInfo: MakerInfo,
+		marketIndex: number,
 		logs: string[] | null | undefined
 	): void {
 		if (!logs) {
 			return;
 		}
-
-		const marketIndex = bidMakerInfo.order?.marketIndex;
-		if (!marketIndex) return;
 
 		let inArbIx = false;
 		for (const log of logs) {
@@ -306,10 +304,11 @@ export class UncrossArbBot implements Bot {
 				const noArbErrorsMap = this.noArbErrors.get(marketIndex)!;
 				const bidMakerSig = this.getOrderSignatureFromMakerInfo(bidMakerInfo);
 				const askMakerSig = this.getOrderSignatureFromMakerInfo(askMakerInfo);
+
 				if (!noArbErrorsMap.has(bidMakerSig))
 					noArbErrorsMap.set(bidMakerSig, 0);
 				if (!noArbErrorsMap.has(askMakerSig))
-					noArbErrorsMap.set(bidMakerSig, 0);
+					noArbErrorsMap.set(askMakerSig, 0);
 
 				noArbErrorsMap.set(bidMakerSig, noArbErrorsMap.get(bidMakerSig)! + 1);
 				noArbErrorsMap.set(askMakerSig, noArbErrorsMap.get(askMakerSig)! + 1);
@@ -329,6 +328,7 @@ export class UncrossArbBot implements Bot {
 						`Throttling ${askMakerSig} due to NoArbError on ${marketIndex}`
 					);
 				}
+
 				continue;
 			} else if (inArbIx && errNoAsk) {
 				const noArbErrorsMap = this.noArbErrors.get(marketIndex)!;
@@ -388,8 +388,6 @@ export class UncrossArbBot implements Bot {
 					const excludedPubKeysOrderIdPairs: [string, number][] = [];
 					const throttledNodesForMarket = this.throttledNodes.get(perpIdx)!;
 					if (throttledNodesForMarket) {
-						console.log('Throttled nodes for market:', perpIdx);
-						console.log(JSON.stringify(throttledNodesForMarket, null, 2));
 						for (const [pubKeySig, time] of throttledNodesForMarket.entries()) {
 							if (Date.now() - time < THROTTLED_NODE_COOLDOWN) {
 								excludedPubKeysOrderIdPairs.push(
@@ -472,6 +470,13 @@ export class UncrossArbBot implements Bot {
 									)!.userAccount.authority
 								),
 							};
+
+							console.log(`
+								Crossing market on marketIndex: ${perpIdx}
+								Market: ${bestBidPrice}@${bestAskPrice}
+								Bid maker: ${bidMakerInfo.maker.toBase58()}
+								ask maker: ${askMakerInfo.maker.toBase58()}
+							`);
 						} catch (e) {
 							continue;
 						}
@@ -511,6 +516,7 @@ export class UncrossArbBot implements Bot {
 									this.handleTransactionLogs(
 										bidMakerInfo,
 										askMakerInfo,
+										perpIdx,
 										simError.logs
 									);
 									logger.error(

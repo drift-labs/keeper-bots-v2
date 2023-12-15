@@ -176,8 +176,10 @@ export function getBestLimitBidExcludePubKey(
 	);
 
 	for (const bid of bids) {
+		if (bid.userAccount?.toBase58() === excludedPubKey) {
+			continue;
+		}
 		if (
-			bid.userAccount?.toBase58() === excludedPubKey ||
 			excludedUserAccountsAndOrder?.some(
 				(entry) =>
 					entry[0] === (bid.userAccount?.toBase58() ?? '') &&
@@ -208,8 +210,10 @@ export function getBestLimitAskExcludePubKey(
 		oraclePriceData
 	);
 	for (const ask of asks) {
+		if (ask.userAccount?.toBase58() === excludedPubKey) {
+			continue;
+		}
 		if (
-			ask.userAccount?.toBase58() === excludedPubKey ||
 			excludedUserAccountsAndOrder?.some(
 				(entry) =>
 					entry[0] === (ask.userAccount?.toBase58() ?? '') &&
