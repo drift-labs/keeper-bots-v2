@@ -210,11 +210,11 @@ export class UncrossArbBot implements Bot {
 		);
 	}
 
-	protected async handleTransactionLogs(
+	protected handleTransactionLogs(
 		bidMakerInfo: MakerInfo,
 		askMakerInfo: MakerInfo,
 		logs: string[] | null | undefined
-	): Promise<void> {
+	): void {
 		if (!logs) {
 			return;
 		}
@@ -508,7 +508,7 @@ export class UncrossArbBot implements Bot {
 
 								if (simError.logs && simError.logs.length > 0) {
 									const start = Date.now();
-									await this.handleTransactionLogs(
+									this.handleTransactionLogs(
 										bidMakerInfo,
 										askMakerInfo,
 										simError.logs
