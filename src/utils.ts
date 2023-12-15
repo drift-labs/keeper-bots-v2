@@ -165,7 +165,8 @@ export function getBestLimitBidExcludePubKey(
 	marketType: MarketType,
 	slot: number,
 	oraclePriceData: OraclePriceData,
-	excludedUserAccount: PublicKey
+	excludedPubKey: string,
+	excludedUserAccountsAndOrder?: [string, number][]
 ): DLOBNode | undefined {
 	const bids = dlob.getRestingLimitBids(
 		marketIndex,
@@ -175,7 +176,16 @@ export function getBestLimitBidExcludePubKey(
 	);
 
 	for (const bid of bids) {
-		if (bid.userAccount?.equals(excludedUserAccount)) {
+		if (bid.userAccount?.toBase58() === excludedPubKey) {
+			continue;
+		}
+		if (
+			excludedUserAccountsAndOrder?.some(
+				(entry) =>
+					entry[0] === (bid.userAccount?.toBase58() ?? '') &&
+					entry[1] === (bid.order?.orderId ?? -1)
+			)
+		) {
 			continue;
 		}
 		return bid;
@@ -190,7 +200,8 @@ export function getBestLimitAskExcludePubKey(
 	marketType: MarketType,
 	slot: number,
 	oraclePriceData: OraclePriceData,
-	excludedUserAccount: PublicKey
+	excludedPubKey: string,
+	excludedUserAccountsAndOrder?: [string, number][]
 ): DLOBNode | undefined {
 	const asks = dlob.getRestingLimitAsks(
 		marketIndex,
@@ -199,7 +210,16 @@ export function getBestLimitAskExcludePubKey(
 		oraclePriceData
 	);
 	for (const ask of asks) {
-		if (ask.userAccount?.equals(excludedUserAccount)) {
+		if (ask.userAccount?.toBase58() === excludedPubKey) {
+			continue;
+		}
+		if (
+			excludedUserAccountsAndOrder?.some(
+				(entry) =>
+					entry[0] === (ask.userAccount?.toBase58() ?? '') &&
+					entry[1] === (ask.order?.orderId || -1)
+			)
+		) {
 			continue;
 		}
 
