@@ -14,6 +14,8 @@ import {
 	OrderSubscriber,
 	PollingDriftClientAccountSubscriber,
 	TxSigAndSlot,
+	ZERO,
+	PriorityFeeSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -80,6 +82,7 @@ export class UncrossArbBot implements Bot {
 	private dlobSubscriber: DLOBSubscriber;
 	private slotSubscriber: SlotSubscriber;
 	private orderSubscriber: OrderSubscriber;
+	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	private lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 	private throttledNodes: Map<number, Map<string, number>> = new Map();
@@ -136,9 +139,17 @@ export class UncrossArbBot implements Bot {
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.orderSubscriber,
-			slotSource: this.slotSubscriber,
-			updateFrequency: 1000,
+			slotSource: this.orderSubscriber,
+			updateFrequency: 500,
 			driftClient: this.driftClient,
+		});
+
+		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
+			connection: this.driftClient.connection,
+			frequencyMs: 5000,
+			addresses: [
+				new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
+			],
 		});
 	}
 
@@ -150,6 +161,7 @@ export class UncrossArbBot implements Bot {
 
 		await this.orderSubscriber.subscribe();
 		await this.dlobSubscriber.subscribe();
+		await this.priorityFeeSubscriber.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 
@@ -486,12 +498,16 @@ export class UncrossArbBot implements Bot {
 							continue;
 						}
 						try {
+							const fee = this.priorityFeeSubscriber.avgPriorityFee * 1.1 || 1;
 							const txResult =
 								await this.driftClient.txSender.sendVersionedTransaction(
 									await this.driftClient.txSender.getVersionedTransaction(
 										[
 											ComputeBudgetProgram.setComputeUnitLimit({
 												units: 1_400_000,
+											}),
+											ComputeBudgetProgram.setComputeUnitPrice({
+												microLamports: fee,
 											}),
 											await this.jitProxyClient.getArbPerpIx({
 												marketIndex: perpIdx,
@@ -588,65 +604,68 @@ export class UncrossArbBot implements Bot {
 		const user = this.driftClient.getUser();
 		const marketIds = user
 			.getActivePerpPositions()
+			.filter((pos) => !pos.quoteAssetAmount.eq(ZERO))
 			.map((pos) => pos.marketIndex);
+		if (marketIds.length === 0) {
+			return;
+		}
+
 		const now = Date.now();
-		if (marketIds.length === MAX_POSITIONS_PER_USER) {
-			if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
-				logger.info(`Want to settle positive pnl, but in cooldown...`);
-			} else {
-				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
-				for (let i = 0; i < marketIds.length; i += SETTLE_PNL_CHUNKS) {
-					const marketIdChunks = marketIds.slice(i, i + SETTLE_PNL_CHUNKS);
-					try {
-						const ixs = [
-							ComputeBudgetProgram.setComputeUnitLimit({
-								units: 2_000_000,
-							}),
-						];
-						ixs.push(
-							...(await this.driftClient.getSettlePNLsIxs(
-								[
-									{
-										settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
-										settleeUserAccount: this.driftClient.getUserAccount()!,
-									},
-								],
-								marketIdChunks
-							))
-						);
-						settlePnlPromises.push(
-							this.driftClient.txSender.sendVersionedTransaction(
-								await this.driftClient.txSender.getVersionedTransaction(
-									ixs,
-									[this.lookupTableAccount!],
-									[],
-									this.driftClient.opts
-								),
+		if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
+			logger.info(`Want to settle positive pnl, but in cooldown...`);
+		} else {
+			const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
+			for (let i = 0; i < marketIds.length; i += SETTLE_PNL_CHUNKS) {
+				const marketIdChunks = marketIds.slice(i, i + SETTLE_PNL_CHUNKS);
+				try {
+					const ixs = [
+						ComputeBudgetProgram.setComputeUnitLimit({
+							units: 2_000_000,
+						}),
+					];
+					ixs.push(
+						...(await this.driftClient.getSettlePNLsIxs(
+							[
+								{
+									settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
+									settleeUserAccount: this.driftClient.getUserAccount()!,
+								},
+							],
+							marketIdChunks
+						))
+					);
+					settlePnlPromises.push(
+						this.driftClient.txSender.sendVersionedTransaction(
+							await this.driftClient.txSender.getVersionedTransaction(
+								ixs,
+								[this.lookupTableAccount!],
 								[],
 								this.driftClient.opts
-							)
-						);
-					} catch (err) {
-						if (!(err instanceof Error)) {
-							return;
-						}
-						const errorCode = getErrorCode(err) ?? 0;
-						logger.error(
-							`Error code: ${errorCode} while settling pnls for markets ${JSON.stringify(
-								marketIds
-							)}: ${err.message}`
-						);
-						console.error(err);
-					}
-				}
-				const txs = await Promise.all(settlePnlPromises);
-				for (const tx of txs) {
-					logger.info(
-						`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
+							),
+							[],
+							this.driftClient.opts
+						)
 					);
+				} catch (err) {
+					if (!(err instanceof Error)) {
+						return;
+					}
+					const errorCode = getErrorCode(err) ?? 0;
+					logger.error(
+						`Error code: ${errorCode} while settling pnls for markets ${JSON.stringify(
+							marketIds
+						)}: ${err.message}`
+					);
+					console.error(err);
 				}
-				this.lastSettlePnl = now;
 			}
+			const txs = await Promise.all(settlePnlPromises);
+			for (const tx of txs) {
+				logger.info(
+					`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
+				);
+			}
+			this.lastSettlePnl = now;
 		}
 	}
 }
