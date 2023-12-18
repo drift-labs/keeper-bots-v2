@@ -1254,12 +1254,29 @@ export class SpotFillerBot implements Bot {
 			const user = await this.userMap!.mustGet(
 				nodeToTrigger.node.userAccount.toString()
 			);
-			this.driftClient
-				.triggerOrder(
+
+			const ixs = [];
+			ixs.push(
+				await this.driftClient.getTriggerOrderIx(
 					nodeToTrigger.node.userAccount,
 					user.getUserAccount(),
 					nodeToTrigger.node.order
 				)
+			);
+
+			if (this.revertOnFailure) {
+				ixs.push(await this.driftClient.getRevertFillIx());
+			}
+
+			const tx = await this.driftClient.txSender.getVersionedTransaction(
+				ixs,
+				[this.driftLutAccount!],
+				undefined,
+				this.driftClient.opts
+			);
+
+			this.driftClient
+				.sendTransaction(tx)
 				.then((txSig) => {
 					logger.info(
 						`Triggered user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
