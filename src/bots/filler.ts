@@ -1601,6 +1601,10 @@ export class FillerBot implements Bot {
 			nodesSent.push(nodeToFill);
 		}
 
+		if (idxUsed === 0) {
+			return nodesSent.length;
+		}
+
 		logger.debug(
 			`txPacker took ${Date.now() - txPackerStart}ms (fillTxId: ${fillTxId})`
 		);
