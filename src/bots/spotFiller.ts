@@ -278,6 +278,7 @@ export class SpotFillerBot implements Bot {
 					type: 'websocket',
 					skipInitialLoad: false,
 					commitment: this.driftClient.opts?.commitment,
+					resyncIntervalMs: 10_000,
 				},
 			});
 		} else {
