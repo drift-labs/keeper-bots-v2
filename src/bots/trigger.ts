@@ -245,12 +245,27 @@ export class TriggerBot implements Bot {
 				const user = await this.userMap!.mustGet(
 					nodeToTrigger.node.userAccount.toString()
 				);
-				this.driftClient
-					.triggerOrder(
+
+				const ixs = [];
+				ixs.push(
+					await this.driftClient.getTriggerOrderIx(
 						nodeToTrigger.node.userAccount,
 						user.getUserAccount(),
 						nodeToTrigger.node.order
 					)
+				);
+
+				ixs.push(await this.driftClient.getRevertFillIx());
+
+				const tx = await this.driftClient.txSender.getVersionedTransaction(
+					ixs,
+					[],
+					undefined,
+					this.driftClient.opts
+				);
+
+				this.driftClient
+					.sendTransaction(tx)
 					.then((txSig) => {
 						logger.info(
 							`Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
