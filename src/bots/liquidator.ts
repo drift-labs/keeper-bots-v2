@@ -933,11 +933,19 @@ export class LiquidatorBot implements Bot {
 						logger.error(
 							`Error trying to settle negative perp pnl for market ${position.marketIndex}`
 						);
-						webhookMessage(
-							`[${this.name}]: :x: error in settlePNL for negative pnl\n:${
-								e.stack ? e.stack : e.message
-							} `
-						);
+
+						const errorCode = getErrorCode(e);
+						if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
+							webhookMessage(
+								`[${
+									this.name
+								}]: :x: Error settlePnl in deriskPerpPosition for userAccount ${userAccountPubkey.toBase58()} on market ${
+									position.marketIndex
+								}: \n${e.logs ? (e.logs as Array<string>).join('\n') : ''} \n${
+									e.stack ? e.stack : e.message
+								} `
+							);
+						}
 					})
 					.finally(() => {
 						this.sdkCallDurationHistogram!.record(Date.now() - start, {
@@ -971,11 +979,18 @@ export class LiquidatorBot implements Bot {
 							logger.error(
 								`Error trying to settle positive perp pnl for market ${position.marketIndex}`
 							);
-							webhookMessage(
-								`[${this.name}]: :x: error in settlePNL for positive pnl\n:${
-									e.stack ? e.stack : e.message
-								} `
-							);
+							const errorCode = getErrorCode(e);
+							if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
+								webhookMessage(
+									`[${
+										this.name
+									}]: :x: Error settlePnl in deriskPerpPosition (2) for userAccount ${userAccountPubkey.toBase58()} on market ${
+										position.marketIndex
+									}: \n${
+										e.logs ? (e.logs as Array<string>).join('\n') : ''
+									} \n${e.stack ? e.stack : e.message} `
+								);
+							}
 						})
 						.finally(() => {
 							this.sdkCallDurationHistogram!.record(Date.now() - start, {
@@ -1554,13 +1569,6 @@ tx: ${tx} `
 								liquidateePosition.marketIndex
 							}: ${tx} `
 						);
-						webhookMessage(
-							`[${
-								this.name
-							}]: settled positive pnl for ${user.userAccountPublicKey.toBase58()} for market ${
-								liquidateePosition.marketIndex
-							}: ${tx} `
-						);
 					})
 					.catch((e) => {
 						logger.error(e);
@@ -1569,13 +1577,19 @@ tx: ${tx} `
 								liquidateePosition.marketIndex
 							}`
 						);
-						webhookMessage(
-							`[${
-								this.name
-							}]: :x: Error settling positive pnl for ${user.userAccountPublicKey.toBase58()} for market ${
-								liquidateePosition.marketIndex
-							}: \n${e.stack ? e.stack : e.message} `
-						);
+
+						const errorCode = getErrorCode(e);
+						if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
+							webhookMessage(
+								`[${
+									this.name
+								}]: :x: Error settlePnl in liqPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+									liquidateePosition.marketIndex
+								}: \n${e.logs ? (e.logs as Array<string>).join('\n') : ''} \n${
+									e.stack ? e.stack : e.message
+								} `
+							);
+						}
 					});
 				return;
 			}
