@@ -7,7 +7,6 @@ import {
 	MarketType,
 	PRICE_PRECISION,
 	DLOBSubscriber,
-	UserMap,
 	SlotSubscriber,
 	MakerInfo,
 	getUserStatsAccountPublicKey,
@@ -112,6 +111,7 @@ export class UncrossArbBot implements Bot {
 					commitment: 'processed';
 					type: 'websocket';
 					resubTimeoutMs?: number;
+					resyncIntervalMs?: number;
 			  };
 		if (
 			(
@@ -129,6 +129,7 @@ export class UncrossArbBot implements Bot {
 				commitment: 'processed',
 				type: 'websocket',
 				resubTimeoutMs: 30000,
+				resyncIntervalMs: 10_000,
 			};
 		}
 
