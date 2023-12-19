@@ -56,7 +56,11 @@ export class FillerLiteBot extends FillerBot {
 
 		this.orderSubscriber = new OrderSubscriber({
 			driftClient: this.driftClient,
-			subscriptionConfig: { type: 'websocket', skipInitialLoad: true },
+			subscriptionConfig: {
+				type: 'websocket',
+				skipInitialLoad: true,
+				resyncIntervalMs: 10_000,
+			},
 		});
 	}
 
