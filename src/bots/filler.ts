@@ -33,7 +33,7 @@ import {
 	NodeToTrigger,
 	UserAccount,
 	getUserAccountPublicKey,
-	PriorityFeeCalculator,
+	PriorityFeeSubscriber,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -47,6 +47,7 @@ import {
 	GetVersionedTransactionConfig,
 	AddressLookupTableAccount,
 	Keypair,
+	Connection,
 } from '@solana/web3.js';
 
 import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
@@ -100,6 +101,7 @@ const FILL_ORDER_THROTTLE_BACKOFF = 10000; // the time to wait before trying to 
 const FILL_ORDER_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
+const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 10000; // cap the computeUnitPrice to pay per fill tx
 
 const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
@@ -225,7 +227,7 @@ export class FillerBot implements Bot {
 	protected fillTxId = 0;
 	protected lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 
-	protected priorityFeeCalculator: PriorityFeeCalculator;
+	protected priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	// metrics
 	protected metricsInitialized = false;
@@ -338,7 +340,13 @@ export class FillerBot implements Bot {
 			}`
 		);
 
-		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
+		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
+			connection: this.driftClient.connection,
+			frequencyMs: 5000,
+			addresses: [
+				new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC is good indicator of fees
+			],
+		});
 	}
 
 	protected initializeMetrics() {
@@ -522,10 +530,23 @@ export class FillerBot implements Bot {
 
 	public async init() {
 		const startInitUserStatsMap = Date.now();
+		logger.info(
+			`Initializing userStatsMap ${
+				this.userMap!.getUniqueAuthorities().length
+			} auths`
+		);
 
 		// sync userstats once
-		this.userStatsMap = new UserStatsMap(this.driftClient);
-		await this.userStatsMap.sync(this.userMap!.getUniqueAuthorities());
+		const userStatsLoader = new BulkAccountLoader(
+			new Connection(this.driftClient.connection.rpcEndpoint),
+			'confirmed',
+			0
+		);
+		this.userStatsMap = new UserStatsMap(this.driftClient, userStatsLoader);
+
+		// disable the initial sync since there are way too many authorties now
+		// userStats will be lazily loaded (this.userStatsMap.mustGet) as fills occur.
+		// await this.userStatsMap.sync(this.userMap!.getUniqueAuthorities());
 
 		logger.info(
 			`Initialized userMap: ${this.userMap!.size()}, userStatsMap: ${this.userStatsMap.size()}, took: ${
@@ -543,6 +564,8 @@ export class FillerBot implements Bot {
 
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
+
+		await this.priorityFeeSubscriber.subscribe();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}
@@ -1458,16 +1481,17 @@ export class FillerBot implements Bot {
 	protected async tryBulkFillPerpNodes(
 		nodesToFill: Array<NodeToFill>
 	): Promise<number> {
-		const usePriorityFee = this.priorityFeeCalculator.updatePriorityFee(
-			Date.now(),
-			this.driftClient.txSender.getTimeoutCount()
-		);
-		const ixs =
-			this.priorityFeeCalculator.generateComputeBudgetWithPriorityFeeIx(
-				10_000_000,
-				usePriorityFee,
-				1_000_000_000 // 1000 lamports
-			);
+		const ixs = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000,
+			}),
+			ComputeBudgetProgram.setComputeUnitPrice({
+				microLamports: Math.min(
+					this.priorityFeeSubscriber.avgPriorityFee,
+					MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+				),
+			}),
+		];
 
 		/**
 		 * At all times, the running Tx size is:

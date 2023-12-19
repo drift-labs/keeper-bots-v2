@@ -29,16 +29,17 @@ import {
 	EventSubscriber,
 	TEN,
 	NodeToTrigger,
-	PriorityFeeCalculator,
 	BulkAccountLoader,
 	PollingDriftClientAccountSubscriber,
 	OrderSubscriber,
 	UserAccount,
+	PriorityFeeSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
 	AddressLookupTableAccount,
+	ComputeBudgetProgram,
 	GetVersionedTransactionConfig,
 	PublicKey,
 	TransactionResponse,
@@ -77,6 +78,7 @@ import { getNodeToFillSignature, getNodeToTriggerSignature } from '../utils';
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_BACKOFF = 10000; // Time to wait before trying a node again
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
+const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 10000; // cap the computeUnitPrice to pay per fill tx
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
@@ -215,7 +217,7 @@ export class SpotFillerBot implements Bot {
 	private throttledNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
 
-	private priorityFeeCalculator: PriorityFeeCalculator;
+	private priorityFeeSubscriber: PriorityFeeSubscriber;
 	private revertOnFailure: boolean;
 
 	// metrics
@@ -266,7 +268,13 @@ export class SpotFillerBot implements Bot {
 			this.initializeMetrics();
 		}
 
-		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
+		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
+			connection: this.driftClient.connection,
+			frequencyMs: 5000,
+			addresses: [
+				new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC is good indicator of fees
+			],
+		});
 		this.revertOnFailure = config.revertOnFailure ?? true;
 		logger.info(`${this.name}: revertOnFailure: ${this.revertOnFailure}`);
 
@@ -455,7 +463,11 @@ export class SpotFillerBot implements Bot {
 		const userStatsMapStart = Date.now();
 		logger.info(`Initializing UserStatsMap...`);
 		this.userStatsMap = new UserStatsMap(this.driftClient);
-		await this.userStatsMap.sync(dlobProvider.getUniqueAuthorities());
+
+		// disable the initial sync since there are way too many authorties now
+		// userStats will be lazily loaded (this.userStatsMap.mustGet) as fills occur.
+		// await this.userStatsMap.sync(dlobProvider.getUniqueAuthorities());
+
 		logger.info(
 			`Initialized UserStatsMap in ${Date.now() - userStatsMapStart}ms`
 		);
@@ -590,6 +602,8 @@ export class SpotFillerBot implements Bot {
 				this.driftSpotLutAccount = lutAccount;
 			}
 		}
+
+		await this.priorityFeeSubscriber.subscribe();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}
@@ -1120,16 +1134,17 @@ export class SpotFillerBot implements Bot {
 			}
 		}
 
-		const usePriorityFee = this.priorityFeeCalculator.updatePriorityFee(
-			Date.now(),
-			this.driftClient.txSender.getTimeoutCount()
-		);
-		const ixs =
-			this.priorityFeeCalculator.generateComputeBudgetWithPriorityFeeIx(
-				1_000_000,
-				usePriorityFee,
-				1_000_000_000 // 1000 lamports
-			);
+		const ixs = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000,
+			}),
+			ComputeBudgetProgram.setComputeUnitPrice({
+				microLamports: Math.min(
+					this.priorityFeeSubscriber.avgPriorityFee,
+					MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+				),
+			}),
+		];
 
 		ixs.push(
 			await this.driftClient.getFillSpotOrderIx(
