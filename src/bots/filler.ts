@@ -1537,6 +1537,7 @@ export class FillerBot implements Bot {
 		const txPackerStart = Date.now();
 		const nodesSent: Array<NodeToFill> = [];
 		let idxUsed = 0;
+		const startingIxsSize = ixs.length;
 		const fillTxId = this.fillTxId++;
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			// do multi maker fills in a separate tx since they're larger
@@ -1598,7 +1599,7 @@ export class FillerBot implements Bot {
 				(runningTxSize + newIxCost + additionalAccountsCost >=
 					MAX_TX_PACK_SIZE ||
 					runningCUUsed + cuToUsePerFill >= MAX_CU_PER_TX) &&
-				ixs.length > 1 // ensure at least 1 attempted fill
+				ixs.length > startingIxsSize + 1 // ensure at least 1 attempted fill
 			) {
 				logger.info(
 					`Fully packed fill tx (ixs: ${ixs.length}): est. tx size ${
