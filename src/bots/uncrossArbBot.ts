@@ -528,6 +528,7 @@ export class UncrossArbBot implements Bot {
 								`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
 							);
 						} catch (e) {
+							logger.error("Failed to send tx", e);
 							try {
 								const simError = e as SendTransactionError;
 								const errorCode = getErrorCode(simError);
