@@ -1237,7 +1237,7 @@ export class SpotFillerBot implements Bot {
 			this.triggeringNodes.get(nodeToFillSignature);
 		if (timeStartedToTriggerNode) {
 			if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
-				false;
+				return false;
 			}
 		}
 
