@@ -367,8 +367,10 @@ const runBot = async () => {
 	let needCheckDriftUser = false;
 	let needForceCollateral = !!config.global.forceDeposit;
 	let needUserMapSubscribe = false;
+	const userMapConnection = new Connection(endpoint);
 	const userMap = new UserMap({
 		driftClient,
+		connection: userMapConnection,
 		subscriptionConfig: userMapSubscriptionConfig,
 		skipInitialLoad: false,
 		includeIdle: false,

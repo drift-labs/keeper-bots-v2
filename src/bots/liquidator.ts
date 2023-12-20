@@ -38,7 +38,7 @@ import {
 	OptionalOrderParams,
 	TEN,
 	TxParams,
-	PriorityFeeCalculator,
+	PriorityFeeSubscriber,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -65,7 +65,7 @@ import {
 	getPerpMarketTierNumber,
 	perpTierIsAsSafeAs,
 } from '@drift-labs/sdk/lib/math/tiers';
-import { SimulatedTransactionResponse } from '@solana/web3.js';
+import { PublicKey, SimulatedTransactionResponse } from '@solana/web3.js';
 
 const errorCodesToSuppress = [
 	6004, // Error Number: 6004. Error Message: Sufficient collateral.
@@ -73,6 +73,7 @@ const errorCodesToSuppress = [
 ];
 
 const LIQUIDATE_THROTTLE_BACKOFF = 5000; // the time to wait before trying to liquidate a throttled user again
+const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 10000; // cap the computeUnitPrice to pay per fill tx
 
 function calculateSpotTokenAmountToLiquidate(
 	driftClient: DriftClient,
@@ -296,7 +297,7 @@ export class LiquidatorBot implements Bot {
 	private minDepositToLiq: Map<number, number>;
 	private excludedAccounts: Set<string>;
 
-	private priorityFeeCalculator: PriorityFeeCalculator;
+	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
@@ -486,7 +487,13 @@ export class LiquidatorBot implements Bot {
 			});
 		}
 
-		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
+		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
+			connection: this.driftClient.connection,
+			frequencyMs: 5000,
+			addresses: [
+				new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC is good indicator of fees
+			],
+		});
 
 		if (!config.maxPositionTakeoverPctOfCollateral) {
 			// spend 50% of collateral by default
@@ -504,25 +511,13 @@ export class LiquidatorBot implements Bot {
 	}
 
 	private getTxParamsWithPriorityFees(): TxParams {
-		const usePriorityFee = this.priorityFeeCalculator.updatePriorityFee(
-			Date.now(),
-			this.driftClient.txSender.getTimeoutCount()
-		);
-		const computeUnits = 2_000_000;
-		let txParams: TxParams = { computeUnits };
-		if (usePriorityFee) {
-			const computeUnitsPrice =
-				this.priorityFeeCalculator.calculateComputeUnitPrice(
-					computeUnits,
-					1_000_000_000 // 1000 lamports
-				);
-			txParams = {
-				computeUnits,
-				computeUnitsPrice,
-			};
-		}
-
-		return txParams;
+		return {
+			computeUnits: 1_400_000,
+			computeUnitsPrice: Math.min(
+				this.priorityFeeSubscriber.avgPriorityFee,
+				MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+			),
+		};
 	}
 
 	private useTwap() {
@@ -553,6 +548,8 @@ export class LiquidatorBot implements Bot {
 				);
 			}
 		}
+
+		await this.priorityFeeSubscriber.subscribe();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}

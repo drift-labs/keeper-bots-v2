@@ -45,7 +45,6 @@ import {
 	isIxLog,
 	isMakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
-import { Counter } from '@opentelemetry/api';
 
 const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 const SETTLE_PNL_CHUNKS = 4;
