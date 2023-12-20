@@ -42,6 +42,7 @@ export type LiquidatorConfig = BaseBotConfig & {
 	minDepositToLiq?: Map<number, number>;
 	excludedAccounts?: Set<string>;
 	maxPositionTakeoverPctOfCollateral?: number;
+	notifyOnLiquidation?: boolean;
 };
 
 export type BotConfigMap = {
@@ -250,6 +251,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			maxSlippagePct: opts.maxSlippagePct ?? 0.05,
 			deriskAlgo: opts.deriskAlgo ?? OrderExecutionAlgoType.Market,
 			twapDurationSec: parseInt(opts.twapDurationSec ?? '300'),
+			notifyOnLiquidation: opts.notifyOnLiquidation ?? false,
 		};
 	}
 	if (opts.trigger) {
