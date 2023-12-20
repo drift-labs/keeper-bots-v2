@@ -19,6 +19,7 @@ const MAX_SETTLE_WAIT_TIME_S = 10 * 60; // 10 minutes
 
 const errorCodesToSuppress = [
 	6177, // NoRevenueToSettleToIF
+	6176, // RevenueSettingsCannotSettleToIF
 ];
 
 export class IFRevenueSettlerBot implements Bot {
