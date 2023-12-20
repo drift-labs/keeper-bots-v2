@@ -498,7 +498,9 @@ export class UncrossArbBot implements Bot {
 							continue;
 						}
 						try {
-							const fee = Number(Math.floor(this.priorityFeeSubscriber.avgPriorityFee * 1.1 || 1));
+							const fee = Number(
+								Math.floor(this.priorityFeeSubscriber.avgPriorityFee * 1.1 || 1)
+							);
 							const txResult =
 								await this.driftClient.txSender.sendVersionedTransaction(
 									await this.driftClient.txSender.getVersionedTransaction(
@@ -528,7 +530,7 @@ export class UncrossArbBot implements Bot {
 								`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
 							);
 						} catch (e) {
-							logger.error("Failed to send tx", e);
+							logger.error('Failed to send tx', e);
 							try {
 								const simError = e as SendTransactionError;
 								const errorCode = getErrorCode(simError);
@@ -668,7 +670,7 @@ export class UncrossArbBot implements Bot {
 					);
 				}
 			} catch (e) {
-				logger.error("Error settling pnls: ", e);
+				logger.error('Error settling pnls: ', e);
 			}
 			this.lastSettlePnl = now;
 		}
