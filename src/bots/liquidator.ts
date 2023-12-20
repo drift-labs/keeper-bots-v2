@@ -335,7 +335,7 @@ export class LiquidatorBot implements Bot {
 			this.disableAutoDerisking = config.disableAutoDerisking;
 		}
 		logger.info(
-			`${this.name} disableAutoDerisking: ${this.disableAutoDerisking}`
+			`${this.name} disableAutoDerisking: ${this.disableAutoDerisking}, notifyLiquidations: ${this.liquidatorConfig.notifyOnLiquidation}`
 		);
 
 		this.allSubaccounts = new Set<number>();
@@ -1364,22 +1364,19 @@ export class LiquidatorBot implements Bot {
 			logger.info(
 				`Resolving perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx} `
 			);
-			webhookMessage(
-				`[${
-					this.name
-				}]: Resolving perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx} `
-			);
+			if (this.liquidatorConfig.notifyOnLiquidation) {
+				webhookMessage(
+					`[${
+						this.name
+					}]: Resolving perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx} `
+				);
+			}
 			const start = Date.now();
 			this.driftClient
 				.resolvePerpBankruptcy(userKey, userAcc, perpIdx)
 				.then((tx) => {
 					logger.info(
 						`Resolved perp bankruptcy for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx}: ${tx} `
-					);
-					webhookMessage(
-						`[${
-							this.name
-						}]: Resolved perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx}: ${tx} `
 					);
 				})
 				.catch((e) => {
@@ -1404,22 +1401,19 @@ export class LiquidatorBot implements Bot {
 			logger.info(
 				`Resolving spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx} `
 			);
-			webhookMessage(
-				`[${
-					this.name
-				}]: Resolving spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx} `
-			);
+			if (this.liquidatorConfig.notifyOnLiquidation) {
+				webhookMessage(
+					`[${
+						this.name
+					}]: Resolving spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx} `
+				);
+			}
 			const start = Date.now();
 			this.driftClient
 				.resolveSpotBankruptcy(userKey, userAcc, spotIdx)
 				.then((tx) => {
 					logger.info(
 						`Resolved spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx}: ${tx} `
-					);
-					webhookMessage(
-						`[${
-							this.name
-						}]: Resolved spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx}: ${tx} `
 					);
 				})
 				.catch((e) => {
@@ -1493,14 +1487,16 @@ export class LiquidatorBot implements Bot {
 								maxBorrowAmount = ${borrowAmountToLiq.toString()})
 tx: ${tx} `
 				);
-				webhookMessage(
-					`[${
-						this.name
-					}]: liquidateSpot user = ${user.userAccountPublicKey.toString()}
-(deposit_index = ${depositMarketIndextoLiq} for borrow_index = ${borrowMarketIndextoLiq}
-								maxBorrowAmount = ${borrowAmountToLiq.toString()})
-tx: ${tx} `
-				);
+				if (this.liquidatorConfig.notifyOnLiquidation) {
+					webhookMessage(
+						`[${
+							this.name
+						}]: liquidateSpot user = ${user.userAccountPublicKey.toString()}
+	(deposit_index = ${depositMarketIndextoLiq} for borrow_index = ${borrowMarketIndextoLiq}
+									maxBorrowAmount = ${borrowAmountToLiq.toString()})
+	tx: ${tx} `
+					);
+				}
 			})
 			.catch((e) => {
 				logger.error(
@@ -1635,13 +1631,15 @@ tx: ${tx} `
 								liquidateePosition.marketIndex
 							} tx: ${tx} `
 						);
-						webhookMessage(
-							`[${
-								this.name
-							}]: liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
-								liquidateePosition.marketIndex
-							} tx: ${tx} `
-						);
+						if (this.liquidatorConfig.notifyOnLiquidation) {
+							webhookMessage(
+								`[${
+									this.name
+								}]: liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+									liquidateePosition.marketIndex
+								} tx: ${tx} `
+							);
+						}
 					})
 					.catch((e) => {
 						logger.error(
@@ -1740,13 +1738,15 @@ tx: ${tx} `
 						liquidateePosition.marketIndex
 					} tx: ${tx} `
 				);
-				webhookMessage(
-					`[${
-						this.name
-					}]: liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
-						liquidateePosition.marketIndex
-					} tx: ${tx} `
-				);
+				if (this.liquidatorConfig.notifyOnLiquidation) {
+					webhookMessage(
+						`[${
+							this.name
+						}]: liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+							liquidateePosition.marketIndex
+						} tx: ${tx} `
+					);
+				}
 			} catch (err) {
 				logger.error(
 					`Error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
@@ -1848,9 +1848,11 @@ tx: ${tx} `
 				}
 
 				logger.info(`liquidating auth: ${auth}, userAccount: ${userKey}...`);
-				webhookMessage(
-					`[${this.name}]: liquidating auth: ${auth}: userAccount: ${userKey} ...`
-				);
+				if (this.liquidatorConfig.notifyOnLiquidation) {
+					webhookMessage(
+						`[${this.name}]: liquidating auth: ${auth}: userAccount: ${userKey} ...`
+					);
+				}
 
 				const liquidatorUser = this.driftClient.getUser();
 				const liquidateeUserAccount = user.getUserAccount();
@@ -2004,13 +2006,15 @@ tx: ${tx} `
 							)
 							.then((tx) => {
 								logger.info(`liquidatePerp tx: ${tx} `);
-								webhookMessage(
-									`[${
-										this.name
-									}]: liquidatePerp for ${user.userAccountPublicKey.toBase58()} on market ${
-										liquidateePosition.marketIndex
-									} tx: ${tx} `
-								);
+								if (this.liquidatorConfig.notifyOnLiquidation) {
+									webhookMessage(
+										`[${
+											this.name
+										}]: liquidatePerp for ${user.userAccountPublicKey.toBase58()} on market ${
+											liquidateePosition.marketIndex
+										} tx: ${tx} `
+									);
+								}
 							})
 							.catch((e) => {
 								logger.error(

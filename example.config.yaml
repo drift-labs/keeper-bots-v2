@@ -138,6 +138,9 @@ botConfigs:
     # max % of collateral to spend when liquidating a user. In percentage terms (0.5 = 50%)
     maxPositionTakeoverPctOfCollateral: 0.5
 
+    # sends a webhook notification (slack, discord, etc.) when a liquidation is attempted (can be noisy due to partial liquidations)
+    notifyOnLiquidation: true
+
   trigger:
     botId: "trigger"
     dryRun: false
