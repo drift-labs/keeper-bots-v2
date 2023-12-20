@@ -2,7 +2,13 @@
 import { program, Option } from 'commander';
 import * as http from 'http';
 
-import { Connection, Commitment, Keypair, PublicKey } from '@solana/web3.js';
+import {
+	Connection,
+	Commitment,
+	Keypair,
+	PublicKey,
+	TransactionVersion,
+} from '@solana/web3.js';
 import {
 	SearcherClient,
 	searcherClient,
@@ -296,6 +302,7 @@ const runBot = async () => {
 		oracleInfos,
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts ?? [0],
+		txVersion: 0 as TransactionVersion,
 		txSender,
 	};
 	const driftClient = new DriftClient(driftClientConfig);
