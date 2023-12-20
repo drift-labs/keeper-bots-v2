@@ -27,6 +27,7 @@ import {
 	OracleInfo,
 	UserMap,
 	Wallet,
+	RetryTxSender,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -253,17 +254,23 @@ const runBot = async () => {
 		skipPreflight: false,
 		preflightCommitment: stateCommitment,
 	};
-	// const sendTxConnection = new Connection(endpoint, {
-	// 	wsEndpoint: wsEndpoint,
-	// 	commitment: stateCommitment,
-	// 	disableRetryOnRateLimit: true,
-	// });
+	const sendTxConnection = new Connection(endpoint, {
+		wsEndpoint: wsEndpoint,
+		commitment: stateCommitment,
+		disableRetryOnRateLimit: true,
+	});
 	// const txSender = new FastSingleTxSender({
 	// 	connection: sendTxConnection,
 	// 	blockhashRefreshInterval: 10_000,
 	// 	wallet,
 	// 	opts,
 	// });
+	const txSender = new RetryTxSender({
+		connection: sendTxConnection,
+		wallet,
+		opts,
+		timeout: 3000,
+	});
 
 	/**
 	 * Creating and subscribing to the drift client
@@ -289,7 +296,7 @@ const runBot = async () => {
 		oracleInfos,
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts ?? [0],
-		// txSender,
+		txSender,
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	driftClient.eventEmitter.on('error', (e) => {
