@@ -660,11 +660,15 @@ export class UncrossArbBot implements Bot {
 					console.error(err);
 				}
 			}
-			const txs = await Promise.all(settlePnlPromises);
-			for (const tx of txs) {
-				logger.info(
-					`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
-				);
+			try {
+				const txs = await Promise.all(settlePnlPromises);
+				for (const tx of txs) {
+					logger.info(
+						`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
+					);
+				}
+			} catch (e) {
+				logger.error("Error settling pnls: ", e);
 			}
 			this.lastSettlePnl = now;
 		}
