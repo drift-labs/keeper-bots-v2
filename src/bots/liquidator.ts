@@ -202,6 +202,8 @@ function findBestSpotPosition(
 			positionTakerOverPctDenominator
 		);
 
+		liquidatorUser.getSpotMarketAssetAndLiabilityValue();
+
 		if (isBorrow) {
 			if (spotMarket.maintenanceLiabilityWeight < currentLibWeight) {
 				bestAmount = tokenAmount;
