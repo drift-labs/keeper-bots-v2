@@ -129,13 +129,13 @@ program
 		'0'
 	)
 	.option(
-		'--perp-markets <string>',
-		'comma delimited list of perp market ID(s) for applicable bots (willing to inherit risk), omit for all',
+		'--perp-market-indicies <string>',
+		'comma delimited list of perp market index(s) for applicable bots (willing to inherit risk), omit for all',
 		''
 	)
 	.option(
-		'--spot-markets <string>',
-		'comma delimited list of spot market ID(s) for applicable bots (willing to inherit risk), omit for all',
+		'--spot-markets-indicies <string>',
+		'comma delimited list of spot market index(s) for applicable bots (willing to inherit risk), omit for all',
 		''
 	)
 	.option(

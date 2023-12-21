@@ -553,7 +553,7 @@ export class UncrossArbBot implements Bot {
 											'Transaction was not confirmed'
 										)
 									) {
-										console.error(`Unsurpressed error:\n`);
+										console.error(`Unsurpressed error:\n`, e);
 										webhookMessage(
 											`[${this.name}]: :x: error simulating tx:\n${
 												simError.logs ? simError.logs.join('\n') : ''
