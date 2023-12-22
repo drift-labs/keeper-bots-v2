@@ -1324,6 +1324,7 @@ export class FillerBot implements Bot {
 		if (this.jitoSearcherClient && this.jitoAuthKeypair) {
 			await this.sendFillTxThroughJito(fillTxId, ixs);
 		} else {
+			console.log(ixs);
 			const tx = await this.driftClient.txSender.getVersionedTransaction(
 				ixs,
 				[this.lookupTableAccount!],
@@ -1450,6 +1451,7 @@ export class FillerBot implements Bot {
 			if (!isVariant(marketType, 'perp')) {
 				throw new Error('expected perp market type');
 			}
+			console.log(ixs);
 
 			ixs.push(
 				await this.buildFillIxWithMaxMakers(
@@ -1466,7 +1468,7 @@ export class FillerBot implements Bot {
 				ixs.push(await this.driftClient.getRevertFillIx());
 			}
 
-			this.sendFillTx(fillTxId, [nodeToFill], ixs);
+			await this.sendFillTx(fillTxId, [nodeToFill], ixs);
 		} catch (e) {
 			if (e instanceof Error) {
 				logger.error(
@@ -1487,13 +1489,16 @@ export class FillerBot implements Bot {
 		let i = 0;
 		let numMakers = makerInfos.length;
 		while (numMakers > 0) {
+			console.log('loop', numMakers);
 			try {
-				return await this.buildFillIx(
+				const ix = await this.buildFillIx(
 					takerUser,
 					order,
 					makerInfos.slice(0, numMakers),
 					referrerInfo
 				);
+				await this.trySerializeMakMakerIx(ix);
+				return ix;
 			} catch (e) {
 				numMakers = Math.floor(numMakers / 2);
 				i++;
@@ -1523,6 +1528,35 @@ export class FillerBot implements Bot {
 			makerInfos,
 			referrerInfo
 		);
+	}
+
+	async trySerializeMakMakerIx(ix: TransactionInstruction) {
+		const ixs = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000,
+			}),
+			ComputeBudgetProgram.setComputeUnitPrice({
+				microLamports: Math.min(
+					this.priorityFeeSubscriber.avgPriorityFee,
+					MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+				),
+			}),
+			ix,
+			await this.driftClient.getRevertFillIx(),
+		];
+		const tx = await this.driftClient.txSender.getVersionedTransaction(
+			ixs,
+			[this.lookupTableAccount!],
+			[],
+			this.driftClient.opts
+		);
+		// @ts-ignore
+		tx.sign([this.driftClient.wallet.payer]);
+		const serialized = tx.serialize();
+		// if (serialized.length > 600) {
+		// 	throw new Error('too big');
+		// }
+		console.log('len', serialized.length);
 	}
 
 	protected async tryBulkFillPerpNodes(
@@ -1585,7 +1619,17 @@ export class FillerBot implements Bot {
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			// do multi maker fills in a separate tx since they're larger
 			if (nodeToFill.makerNodes.length > 1) {
-				await this.tryFillMultiMakerPerpNodes(nodeToFill, ixs);
+				await this.tryFillMultiMakerPerpNodes(nodeToFill, [
+					ComputeBudgetProgram.setComputeUnitLimit({
+						units: 1_400_000,
+					}),
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: Math.min(
+							this.priorityFeeSubscriber.avgPriorityFee,
+							MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+						),
+					}),
+				]);
 				nodesSent.push(nodeToFill);
 				continue;
 			}
