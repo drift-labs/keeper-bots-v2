@@ -1324,7 +1324,6 @@ export class FillerBot implements Bot {
 		if (this.jitoSearcherClient && this.jitoAuthKeypair) {
 			await this.sendFillTxThroughJito(fillTxId, ixs);
 		} else {
-			console.log(ixs);
 			const tx = await this.driftClient.txSender.getVersionedTransaction(
 				ixs,
 				[this.lookupTableAccount!],
@@ -1451,7 +1450,6 @@ export class FillerBot implements Bot {
 			if (!isVariant(marketType, 'perp')) {
 				throw new Error('expected perp market type');
 			}
-			console.log(ixs);
 
 			ixs.push(
 				await this.buildFillIxWithMaxMakers(

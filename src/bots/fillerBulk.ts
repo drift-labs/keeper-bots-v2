@@ -13,7 +13,7 @@ import {
 	calculateAskPrice,
 	calculateBidPrice,
 	MarketType,
-	BN,
+	BN, BN_MAX, ZERO,
 } from '@drift-labs/sdk';
 
 import { Keypair, PublicKey } from '@solana/web3.js';
@@ -26,6 +26,8 @@ import { metricAttrFromUserAccount, RuntimeSpec } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { FillerBot, SETTLE_POSITIVE_PNL_COOLDOWN_MS } from './filler';
 import { E_ALREADY_LOCKED, tryAcquire } from 'async-mutex';
+
+const MAX_NUM_MAKERS = 6;
 
 export class FillerBulkBot extends FillerBot {
 	private orderSubscriber: OrderSubscriber;
@@ -271,16 +273,23 @@ export class FillerBulkBot extends FillerBot {
 			MarketType.PERP,
 			oraclePriceData
 		);
-		const bestBid = BN.max(bestDLOBBid, vBid);
+		const bestBid = BN.max(bestDLOBBid ?? ZERO, vBid);
 
-		const topRestingBids = [
-			...dlob.getRestingLimitBids(
-				marketIndex,
-				fillSlot,
-				MarketType.PERP,
-				oraclePriceData
-			),
-		].slice(0, 8);
+		const seenBidMaker = new Set<string>();
+		const restingBids = dlob.getRestingLimitBids(
+			marketIndex,
+			fillSlot,
+			MarketType.PERP,
+			oraclePriceData
+		);
+		const topRestingBids = [];
+		for (const restingBid of restingBids) {
+			topRestingBids.push(restingBid);
+			seenBidMaker.add(restingBid.userAccount?.toString() || "");
+			if (seenBidMaker.size == MAX_NUM_MAKERS) {
+				break;
+			}
+		}
 
 		const bestDLOBAsk = dlob.getBestAsk(
 			marketIndex,
@@ -288,16 +297,23 @@ export class FillerBulkBot extends FillerBot {
 			MarketType.PERP,
 			oraclePriceData
 		);
-		const bestAsk = BN.min(bestDLOBAsk, vAsk);
+		const bestAsk = BN.min(bestDLOBAsk ?? BN_MAX, vAsk);
 
-		const topRestingAsks = [
-			...dlob.getRestingLimitAsks(
-				marketIndex,
-				fillSlot,
-				MarketType.PERP,
-				oraclePriceData
-			),
-		].slice(0, 8);
+		const seenAskMaker = new Set<string>();
+		const restingAsks = dlob.getRestingLimitAsks(
+			marketIndex,
+			fillSlot,
+			MarketType.PERP,
+			oraclePriceData
+		);
+		const topRestingAsks = [];
+		for (const restingAsk of restingAsks) {
+			topRestingAsks.push(restingAsk);
+			seenAskMaker.add(restingAsk.userAccount?.toString() || "");
+			if (seenAskMaker.size == MAX_NUM_MAKERS) {
+				break;
+			}
+		}
 
 		const takingBidsGenerator = dlob.getTakingBids(
 			marketIndex,
@@ -306,7 +322,8 @@ export class FillerBulkBot extends FillerBot {
 			oraclePriceData
 		);
 		for (const takingBid of takingBidsGenerator) {
-			if (takingBid.getPrice(oraclePriceData, fillSlot).gte(bestAsk)) {
+			const takingBidPrice = takingBid.getPrice(oraclePriceData, fillSlot);
+			if (!takingBidPrice || takingBidPrice.gte(bestAsk)) {
 				nodesToFill.push({
 					node: takingBid,
 					makerNodes: topRestingAsks,
@@ -321,7 +338,8 @@ export class FillerBulkBot extends FillerBot {
 			oraclePriceData
 		);
 		for (const takingAsk of takingAsksGenerator) {
-			if (takingAsk.getPrice(oraclePriceData, fillSlot).lte(bestBid)) {
+			const takingAskPrice = takingAsk.getPrice(oraclePriceData, fillSlot);
+			if (!takingAsk || takingAskPrice.lte(bestBid)) {
 				nodesToFill.push({
 					node: takingAsk,
 					makerNodes: topRestingBids,
