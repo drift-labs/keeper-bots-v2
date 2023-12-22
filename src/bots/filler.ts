@@ -1430,10 +1430,19 @@ export class FillerBot implements Bot {
 	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
 	 * @param node node with multiple makers
 	 */
-	protected async tryFillMultiMakerPerpNodes(
-		nodeToFill: NodeToFill,
-		ixs: Array<TransactionInstruction>
-	) {
+	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
+		const ixs = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000,
+			}),
+			ComputeBudgetProgram.setComputeUnitPrice({
+				microLamports: Math.min(
+					this.priorityFeeSubscriber.avgPriorityFee,
+					MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+				),
+			}),
+		];
+
 		const fillTxId = this.fillTxId++;
 		logger.info(
 			logMessageForNodeToFill(
@@ -1542,7 +1551,7 @@ export class FillerBot implements Bot {
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			// do multi maker fills in a separate tx since they're larger
 			if (nodeToFill.makerNodes.length > 1) {
-				await this.tryFillMultiMakerPerpNodes(nodeToFill, ixs);
+				await this.tryFillMultiMakerPerpNodes(nodeToFill);
 				nodesSent.push(nodeToFill);
 				continue;
 			}
