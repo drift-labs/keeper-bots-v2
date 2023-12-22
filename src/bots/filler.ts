@@ -34,6 +34,7 @@ import {
 	UserAccount,
 	getUserAccountPublicKey,
 	PriorityFeeSubscriber,
+	Order,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -1451,12 +1452,7 @@ export class FillerBot implements Bot {
 			}
 
 			ixs.push(
-				await this.driftClient.getFillPerpOrderIx(
-					await getUserAccountPublicKey(
-						this.driftClient.program.programId,
-						takerUser.authority,
-						takerUser.subAccountId
-					),
+				await this.buildFillIxWithMaxMakers(
 					takerUser,
 					nodeToFill.node.order!,
 					makerInfos,
@@ -1480,6 +1476,53 @@ export class FillerBot implements Bot {
 				);
 			}
 		}
+	}
+
+	async buildFillIxWithMaxMakers(
+		takerUser: UserAccount,
+		order: Order,
+		makerInfos: MakerInfo[],
+		referrerInfo: ReferrerInfo | undefined
+	): Promise<TransactionInstruction> {
+		let i = 0;
+		let numMakers = makerInfos.length;
+		while (numMakers > 0) {
+			try {
+				return await this.buildFillIx(
+					takerUser,
+					order,
+					makerInfos.slice(0, numMakers),
+					referrerInfo
+				);
+			} catch (e) {
+				numMakers = Math.floor(numMakers / 2);
+				i++;
+				if (i > MAX_MAKERS_PER_FILL) {
+					// inf loop guard
+					break;
+				}
+			}
+		}
+		return await this.buildFillIx(takerUser, order, [], referrerInfo);
+	}
+
+	async buildFillIx(
+		takerUser: UserAccount,
+		order: Order,
+		makerInfos: MakerInfo[],
+		referrerInfo: ReferrerInfo | undefined
+	): Promise<TransactionInstruction> {
+		return await this.driftClient.getFillPerpOrderIx(
+			await getUserAccountPublicKey(
+				this.driftClient.program.programId,
+				takerUser.authority,
+				takerUser.subAccountId
+			),
+			takerUser,
+			order,
+			makerInfos,
+			referrerInfo
+		);
 	}
 
 	protected async tryBulkFillPerpNodes(
