@@ -820,7 +820,8 @@ export class FillerBot implements Bot {
 				)!,
 				oraclePriceData,
 				this.slotSubscriber.currentSlot,
-				Date.now() / 1000
+				Date.now() / 1000,
+				this.driftClient.getStateAccount().minPerpAuctionDuration
 			)
 		) {
 			logger.warn(
@@ -838,7 +839,8 @@ export class FillerBot implements Bot {
 					)!,
 					oraclePriceData,
 					this.slotSubscriber.currentSlot,
-					Date.now() / 1000
+					Date.now() / 1000,
+					this.driftClient.getStateAccount().minPerpAuctionDuration
 				)}`
 			);
 			logger.warn(
