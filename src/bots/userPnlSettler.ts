@@ -50,7 +50,7 @@ type SettlePnlIxParams = {
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 const SETTLE_USER_CHUNKS = 4;
-const CU_PER_SETTLE_PNL = 300_000; // annecdotal: https://explorer.solana.com/tx/fLoSxBpBkowozkPMem9s3KLGQYt3KDHemTRzZPWFe48sZc1VJsgRTiYJUGXZGYRWQTwF42PjpgFLe6fpH9aCLh1#ix-1
+const CU_PER_SETTLE_PNL = 500_000; // annecdotal: https://explorer.solana.com/tx/fLoSxBpBkowozkPMem9s3KLGQYt3KDHemTRzZPWFe48sZc1VJsgRTiYJUGXZGYRWQTwF42PjpgFLe6fpH9aCLh1#ix-1
 const SLEEP_MS = 500;
 const PRIORITY_FEE_SUBSCRIBER_FREQ_MS = 1000;
 const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 50000; // cap the computeUnitPrice to pay for settlePnl txs
