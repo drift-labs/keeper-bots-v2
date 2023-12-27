@@ -58,7 +58,7 @@ export class FillerLiteBot extends FillerBot {
 			driftClient: this.driftClient,
 			subscriptionConfig: {
 				type: 'websocket',
-				skipInitialLoad: true,
+				skipInitialLoad: false,
 				resyncIntervalMs: 10_000,
 			},
 		});
