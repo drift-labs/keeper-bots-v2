@@ -101,7 +101,7 @@ const FILL_ORDER_THROTTLE_BACKOFF = 10000; // the time to wait before trying to 
 const FILL_ORDER_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
-const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 10000; // cap the computeUnitPrice to pay per fill tx
+const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 1_000_000; // cap the computeUnitPrice to pay per fill tx
 const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
 
 const SETTLE_PNL_CHUNKS = 4;
@@ -1438,9 +1438,11 @@ export class FillerBot implements Bot {
 				units: 1_400_000,
 			}),
 			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.min(
-					this.priorityFeeSubscriber.avgPriorityFee,
-					MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+				microLamports: Number(
+					Math.min(
+						Math.floor(this.priorityFeeSubscriber.maxPriorityFee * 1.2),
+						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+					)
 				),
 			}),
 		];
@@ -1501,9 +1503,11 @@ export class FillerBot implements Bot {
 				units: 1_400_000,
 			}),
 			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.min(
-					this.priorityFeeSubscriber.avgPriorityFee,
-					MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+				microLamports: Number(
+					Math.min(
+						Math.floor(this.priorityFeeSubscriber.maxPriorityFee * 1.2),
+						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+					)
 				),
 			}),
 		];

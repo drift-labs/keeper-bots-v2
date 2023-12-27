@@ -280,11 +280,16 @@ const runBot = async () => {
 			timeout: 3000,
 		});
 	} else {
+		const skipConfirmation =
+			configHasBot(config, 'fillerLite') ||
+			configHasBot(config, 'filler') ||
+			configHasBot(config, 'spotFiller');
 		txSender = new FastSingleTxSender({
 			connection: sendTxConnection,
-			blockhashRefreshInterval: 1000,
+			blockhashRefreshInterval: 500,
 			wallet,
 			opts,
+			skipConfirmation,
 		});
 	}
 

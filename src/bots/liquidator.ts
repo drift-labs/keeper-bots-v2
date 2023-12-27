@@ -73,7 +73,7 @@ const errorCodesToSuppress = [
 ];
 
 const LIQUIDATE_THROTTLE_BACKOFF = 5000; // the time to wait before trying to liquidate a throttled user again
-const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 10000; // cap the computeUnitPrice to pay per fill tx
+const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 1_000_000; // cap the computeUnitPrice to pay per fill tx
 
 function calculateSpotTokenAmountToLiquidate(
 	driftClient: DriftClient,
@@ -516,7 +516,7 @@ export class LiquidatorBot implements Bot {
 		return {
 			computeUnits: 1_400_000,
 			computeUnitsPrice: Math.min(
-				this.priorityFeeSubscriber.avgPriorityFee,
+				this.priorityFeeSubscriber.maxPriorityFee * 1.1,
 				MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 			),
 		};
