@@ -34,7 +34,6 @@ import {
 	UserAccount,
 	getUserAccountPublicKey,
 	PriorityFeeSubscriber,
-	Order,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -1431,7 +1430,7 @@ export class FillerBot implements Bot {
 
 	/**
 	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
-	 * @param node node with multiple makers
+	 * @param nodeToFill node with multiple makers
 	 */
 	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
 		const ixs = [
@@ -1463,7 +1462,12 @@ export class FillerBot implements Bot {
 			}
 
 			ixs.push(
-				await this.buildFillIxWithMaxMakers(
+				await this.driftClient.getFillPerpOrderIx(
+					await getUserAccountPublicKey(
+						this.driftClient.program.programId,
+						takerUser.authority,
+						takerUser.subAccountId
+					),
 					takerUser,
 					nodeToFill.node.order!,
 					makerInfos,
@@ -1487,85 +1491,6 @@ export class FillerBot implements Bot {
 				);
 			}
 		}
-	}
-
-	async buildFillIxWithMaxMakers(
-		takerUser: UserAccount,
-		order: Order,
-		makerInfos: MakerInfo[],
-		referrerInfo: ReferrerInfo | undefined
-	): Promise<TransactionInstruction> {
-		let i = 0;
-		let numMakers = makerInfos.length;
-		while (numMakers > 0) {
-			console.log('loop', numMakers);
-			try {
-				const ix = await this.buildFillIx(
-					takerUser,
-					order,
-					makerInfos.slice(0, numMakers),
-					referrerInfo
-				);
-				await this.trySerializeMakMakerIx(ix);
-				return ix;
-			} catch (e) {
-				numMakers = Math.floor(numMakers / 2);
-				i++;
-				if (i > MAX_MAKERS_PER_FILL) {
-					// inf loop guard
-					break;
-				}
-			}
-		}
-		return await this.buildFillIx(takerUser, order, [], referrerInfo);
-	}
-
-	async buildFillIx(
-		takerUser: UserAccount,
-		order: Order,
-		makerInfos: MakerInfo[],
-		referrerInfo: ReferrerInfo | undefined
-	): Promise<TransactionInstruction> {
-		return await this.driftClient.getFillPerpOrderIx(
-			await getUserAccountPublicKey(
-				this.driftClient.program.programId,
-				takerUser.authority,
-				takerUser.subAccountId
-			),
-			takerUser,
-			order,
-			makerInfos,
-			referrerInfo
-		);
-	}
-
-	async trySerializeMakMakerIx(ix: TransactionInstruction) {
-		const ixs = [
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 1_400_000,
-			}),
-			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.min(
-					this.priorityFeeSubscriber.avgPriorityFee,
-					MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
-				),
-			}),
-			ix,
-			await this.driftClient.getRevertFillIx(),
-		];
-		const tx = await this.driftClient.txSender.getVersionedTransaction(
-			ixs,
-			[this.lookupTableAccount!],
-			[],
-			this.driftClient.opts
-		);
-		// @ts-ignore
-		tx.sign([this.driftClient.wallet.payer]);
-		const serialized = tx.serialize();
-		// if (serialized.length > 600) {
-		// 	throw new Error('too big');
-		// }
-		console.log('len', serialized.length);
 	}
 
 	protected async tryBulkFillPerpNodes(
