@@ -231,7 +231,7 @@ export function loadConfigFromOpts(opts: any): Config {
 		config.enabledBots.push('fillerBulk');
 		config.botConfigs!.fillerBulk = {
 			dryRun: opts.dryRun ?? false,
-			botId: process.env.BOT_ID ?? 'fillerLite',
+			botId: process.env.BOT_ID ?? 'fillerBulk',
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
