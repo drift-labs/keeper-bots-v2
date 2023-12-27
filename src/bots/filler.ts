@@ -1438,9 +1438,11 @@ export class FillerBot implements Bot {
 				units: 1_400_000,
 			}),
 			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.min(
-					this.priorityFeeSubscriber.maxPriorityFee * 1.2,
-					MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+				microLamports: Number(
+					Math.min(
+						Math.floor(this.priorityFeeSubscriber.maxPriorityFee * 1.2),
+						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+					)
 				),
 			}),
 		];
@@ -1501,10 +1503,12 @@ export class FillerBot implements Bot {
 				units: 1_400_000,
 			}),
 			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Number(Math.min(
-					Math.floor(this.priorityFeeSubscriber.maxPriorityFee * 1.2),
-					MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
-				)),
+				microLamports: Number(
+					Math.min(
+						Math.floor(this.priorityFeeSubscriber.maxPriorityFee * 1.2),
+						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+					)
+				),
 			}),
 		];
 
