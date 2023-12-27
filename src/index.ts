@@ -149,6 +149,10 @@ program
 		'--event-susbcriber',
 		'Explicitly intialize an eventSubscriber (RPC heavy'
 	)
+	.option(
+		'--tx-sender-type <string>',
+		'Choose tx sender type, options are: fast, retry'
+	)
 	.parse();
 
 const opts = program.opts();
@@ -263,18 +267,24 @@ const runBot = async () => {
 		commitment: stateCommitment,
 		disableRetryOnRateLimit: true,
 	});
-	// const txSender = new FastSingleTxSender({
-	// 	connection: sendTxConnection,
-	// 	blockhashRefreshInterval: 10_000,
-	// 	wallet,
-	// 	opts,
-	// });
-	const txSender = new RetryTxSender({
-		connection: sendTxConnection,
-		wallet,
-		opts,
-		timeout: 3000,
-	});
+
+	const txSenderType = config.global.txSenderType || 'retry';
+	let txSender;
+	if (txSenderType === 'retry') {
+		txSender = new RetryTxSender({
+			connection: sendTxConnection,
+			wallet,
+			opts,
+			timeout: 3000,
+		});
+	} else {
+		txSender = new FastSingleTxSender({
+			connection: sendTxConnection,
+			blockhashRefreshInterval: 1000,
+			wallet,
+			opts,
+		});
+	}
 
 	/**
 	 * Creating and subscribing to the drift client
