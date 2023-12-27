@@ -7,6 +7,9 @@ import {
 	calculateBidPrice,
 	MarketType,
 	BN,
+	PositionDirection,
+	calculateMaxBaseAssetAmountFillable,
+	calculateUpdatedAMM,
 } from '@drift-labs/sdk';
 
 import { FillerLiteBot } from './fillerLite';
@@ -53,15 +56,28 @@ export class FillerBulkBot extends FillerLiteBot {
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
 
+		const updatedAMM = calculateUpdatedAMM(market.amm, oraclePriceData);
+		const vammCanFillLongs = calculateMaxBaseAssetAmountFillable(
+			updatedAMM,
+			PositionDirection.LONG
+		).gte(market.amm.minOrderSize);
+		const vammCanFillShorts = calculateMaxBaseAssetAmountFillable(
+			updatedAMM,
+			PositionDirection.SHORT
+		).gte(market.amm.minOrderSize);
+
 		const fillSlot = this.orderSubscriber.getSlot();
 
-		const bestDLOBBid = dlob.getBestBid(
+		let bestBid = dlob.getBestBid(
 			marketIndex,
 			fillSlot,
 			MarketType.PERP,
 			oraclePriceData
 		);
-		const bestBid = bestDLOBBid ? BN.max(bestDLOBBid, vBid) : vBid;
+		// only consider vamm if it has liquidity
+		if (vammCanFillShorts) {
+			bestBid = bestBid ? BN.max(bestBid, vBid) : vBid;
+		}
 
 		const seenBidMaker = new Set<string>();
 		const restingBids = dlob.getRestingLimitBids(
@@ -79,13 +95,16 @@ export class FillerBulkBot extends FillerLiteBot {
 			}
 		}
 
-		const bestDLOBAsk = dlob.getBestAsk(
+		let bestAsk = dlob.getBestAsk(
 			marketIndex,
 			fillSlot,
 			MarketType.PERP,
 			oraclePriceData
 		);
-		const bestAsk = bestDLOBAsk ? BN.min(bestDLOBAsk, vAsk) : vAsk;
+		// only consider vamm if it has liquidity
+		if (vammCanFillLongs) {
+			bestAsk = bestAsk ? BN.min(bestAsk, vAsk) : vAsk;
+		}
 
 		const seenAskMaker = new Set<string>();
 		const restingAsks = dlob.getRestingLimitAsks(
@@ -103,39 +122,45 @@ export class FillerBulkBot extends FillerLiteBot {
 			}
 		}
 
-		const takingBidsGenerator = dlob.getTakingBids(
-			marketIndex,
-			MarketType.PERP,
-			fillSlot,
-			oraclePriceData
-		);
-		for (const takingBid of takingBidsGenerator) {
-			const takingBidPrice = takingBid.getPrice(oraclePriceData, fillSlot);
-			if (!takingBidPrice || takingBidPrice.gte(bestAsk)) {
-				nodesToFill.push({
-					node: takingBid,
-					makerNodes: topRestingAsks.filter(
-						(node) => !node.userAccount!.equals(takingBid.userAccount!)
-					),
-				});
+		if (bestAsk) {
+			const takingBidsGenerator = dlob.getTakingBids(
+				marketIndex,
+				MarketType.PERP,
+				fillSlot,
+				oraclePriceData
+			);
+
+			for (const takingBid of takingBidsGenerator) {
+				const takingBidPrice = takingBid.getPrice(oraclePriceData, fillSlot);
+				if (!takingBidPrice || takingBidPrice.gte(bestAsk)) {
+					nodesToFill.push({
+						node: takingBid,
+						makerNodes: topRestingAsks.filter(
+							(node) => !node.userAccount!.equals(takingBid.userAccount!)
+						),
+					});
+				}
 			}
 		}
 
-		const takingAsksGenerator = dlob.getTakingAsks(
-			marketIndex,
-			MarketType.PERP,
-			fillSlot,
-			oraclePriceData
-		);
-		for (const takingAsk of takingAsksGenerator) {
-			const takingAskPrice = takingAsk.getPrice(oraclePriceData, fillSlot);
-			if (!takingAskPrice || takingAskPrice.lte(bestBid)) {
-				nodesToFill.push({
-					node: takingAsk,
-					makerNodes: topRestingBids.filter(
-						(node) => !node.userAccount!.equals(takingAsk.userAccount!)
-					),
-				});
+		if (bestBid) {
+			const takingAsksGenerator = dlob.getTakingAsks(
+				marketIndex,
+				MarketType.PERP,
+				fillSlot,
+				oraclePriceData
+			);
+
+			for (const takingAsk of takingAsksGenerator) {
+				const takingAskPrice = takingAsk.getPrice(oraclePriceData, fillSlot);
+				if (!takingAskPrice || takingAskPrice.lte(bestBid)) {
+					nodesToFill.push({
+						node: takingAsk,
+						makerNodes: topRestingBids.filter(
+							(node) => !node.userAccount!.equals(takingAsk.userAccount!)
+						),
+					});
+				}
 			}
 		}
 
