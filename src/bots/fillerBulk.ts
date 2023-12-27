@@ -15,7 +15,7 @@ import {
 	MarketType,
 	BN,
 	BN_MAX,
-	ZERO,
+	ZERO, FastSingleTxSender,
 } from '@drift-labs/sdk';
 
 import { Keypair, PublicKey } from '@solana/web3.js';
@@ -235,7 +235,7 @@ export class FillerBulkBot extends FillerBot {
 			if (!takingBidPrice || takingBidPrice.gte(bestAsk)) {
 				nodesToFill.push({
 					node: takingBid,
-					makerNodes: topRestingAsks,
+					makerNodes: topRestingAsks.filter(node => !node.userAccount!.equals(takingBid.userAccount!)),
 				});
 			}
 		}
@@ -248,10 +248,10 @@ export class FillerBulkBot extends FillerBot {
 		);
 		for (const takingAsk of takingAsksGenerator) {
 			const takingAskPrice = takingAsk.getPrice(oraclePriceData, fillSlot);
-			if (!takingAsk || takingAskPrice.lte(bestBid)) {
+			if (!takingAskPrice || takingAskPrice.lte(bestBid)) {
 				nodesToFill.push({
 					node: takingAsk,
-					makerNodes: topRestingBids,
+					makerNodes: topRestingBids.filter(node => !node.userAccount!.equals(takingAsk.userAccount!)),
 				});
 			}
 		}
