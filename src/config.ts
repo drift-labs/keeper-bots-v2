@@ -86,6 +86,7 @@ export interface GlobalConfig {
 	jitoBlockEngineUrl?: string;
 	jitoAuthPrivateKey?: string;
 	txRetryTimeoutMs?: number;
+	txSenderType?: 'fast' | 'retry';
 }
 
 export interface Config {
