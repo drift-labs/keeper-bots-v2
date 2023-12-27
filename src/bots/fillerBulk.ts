@@ -63,7 +63,7 @@ export class FillerBulkBot extends FillerLiteBot {
 			MarketType.PERP,
 			oraclePriceData
 		);
-		const bestBid = BN.max(bestDLOBBid ?? ZERO, vBid);
+		const bestBid = bestDLOBBid ? BN.max(bestDLOBBid, vBid) : vBid;
 
 		const seenBidMaker = new Set<string>();
 		const restingBids = dlob.getRestingLimitBids(
@@ -87,7 +87,7 @@ export class FillerBulkBot extends FillerLiteBot {
 			MarketType.PERP,
 			oraclePriceData
 		);
-		const bestAsk = BN.min(bestDLOBAsk ?? BN_MAX, vAsk);
+		const bestAsk = bestDLOBAsk ? BN.min(bestDLOBAsk, vAsk) : vAsk;
 
 		const seenAskMaker = new Set<string>();
 		const restingAsks = dlob.getRestingLimitAsks(
