@@ -7,8 +7,6 @@ import {
 	calculateBidPrice,
 	MarketType,
 	BN,
-	BN_MAX,
-	ZERO,
 } from '@drift-labs/sdk';
 
 import { FillerLiteBot } from './fillerLite';
@@ -139,6 +137,17 @@ export class FillerBulkBot extends FillerLiteBot {
 					),
 				});
 			}
+		}
+
+		const crossLimitOrderNodesToFill = dlob.findCrossingRestingLimitOrders(
+			marketIndex,
+			fillSlot,
+			MarketType.PERP,
+			oraclePriceData
+		);
+
+		for (const crossLimitOrderNodeToFill of crossLimitOrderNodesToFill) {
+			nodesToFill.push(crossLimitOrderNodeToFill);
 		}
 
 		return nodesToFill;
