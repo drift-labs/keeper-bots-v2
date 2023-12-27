@@ -13,7 +13,9 @@ import {
 	calculateAskPrice,
 	calculateBidPrice,
 	MarketType,
-	BN, BN_MAX, ZERO,
+	BN,
+	BN_MAX,
+	ZERO,
 } from '@drift-labs/sdk';
 
 import { Keypair, PublicKey } from '@solana/web3.js';
@@ -24,7 +26,7 @@ import { logger } from '../logger';
 import { FillerConfig } from '../config';
 import { webhookMessage } from '../webhook';
 import { FillerBot, SETTLE_POSITIVE_PNL_COOLDOWN_MS } from './filler';
-import {RuntimeSpec} from "../metrics";
+import { RuntimeSpec } from '../metrics';
 
 const MAX_NUM_MAKERS = 6;
 
@@ -192,7 +194,7 @@ export class FillerBulkBot extends FillerBot {
 		const topRestingBids = [];
 		for (const restingBid of restingBids) {
 			topRestingBids.push(restingBid);
-			seenBidMaker.add(restingBid.userAccount?.toString() || "");
+			seenBidMaker.add(restingBid.userAccount?.toString() || '');
 			if (seenBidMaker.size == MAX_NUM_MAKERS) {
 				break;
 			}
@@ -216,7 +218,7 @@ export class FillerBulkBot extends FillerBot {
 		const topRestingAsks = [];
 		for (const restingAsk of restingAsks) {
 			topRestingAsks.push(restingAsk);
-			seenAskMaker.add(restingAsk.userAccount?.toString() || "");
+			seenAskMaker.add(restingAsk.userAccount?.toString() || '');
 			if (seenAskMaker.size == MAX_NUM_MAKERS) {
 				break;
 			}
