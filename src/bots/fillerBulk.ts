@@ -22,10 +22,9 @@ import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
 
 import { logger } from '../logger';
 import { FillerConfig } from '../config';
-import { metricAttrFromUserAccount, RuntimeSpec } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { FillerBot, SETTLE_POSITIVE_PNL_COOLDOWN_MS } from './filler';
-import { E_ALREADY_LOCKED, tryAcquire } from 'async-mutex';
+import {RuntimeSpec} from "../metrics";
 
 const MAX_NUM_MAKERS = 6;
 
@@ -130,100 +129,8 @@ export class FillerBulkBot extends FillerBot {
 	}
 
 	protected async getDLOB() {
-		const currentSlot = this.slotSubscriber.getSlot();
+		const currentSlot = this.orderSubscriber.getSlot();
 		return await this.orderSubscriber.getDLOB(currentSlot);
-	}
-
-	protected async tryFill() {
-		const startTime = Date.now();
-		let ran = false;
-		try {
-			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-				const dlob = await this.getDLOB();
-
-				this.pruneThrottledNode();
-
-				// 1) get all fillable nodes
-				let fillableNodes: Array<NodeToFill> = [];
-				let triggerableNodes: Array<NodeToTrigger> = [];
-				for (const market of this.driftClient.getPerpMarketAccounts()) {
-					try {
-						const { nodesToFill, nodesToTrigger } = this.getPerpNodesForMarket(
-							market,
-							dlob
-						);
-						fillableNodes = fillableNodes.concat(nodesToFill);
-						triggerableNodes = triggerableNodes.concat(nodesToTrigger);
-					} catch (e) {
-						if (e instanceof Error) {
-							console.error(e);
-							webhookMessage(
-								`[${this.name}]: :x: Failed to get fillable nodes for market ${
-									market.marketIndex
-								}:\n${e.stack ? e.stack : e.message}`
-							);
-						}
-						continue;
-					}
-				}
-
-				// filter out nodes that we know cannot be filled
-				const { filteredFillableNodes, filteredTriggerableNodes } =
-					this.filterPerpNodesForMarket(fillableNodes, triggerableNodes);
-				logger.debug(
-					`filtered fillable nodes from ${fillableNodes.length} to ${filteredFillableNodes.length}, filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length}`
-				);
-
-				// fill the perp nodes
-				await Promise.all([
-					this.executeFillablePerpNodesForMarket(filteredFillableNodes),
-					this.executeTriggerablePerpNodesForMarket(filteredTriggerableNodes),
-				]);
-
-				// check if should settle positive pnl
-
-				ran = true;
-			});
-		} catch (e) {
-			if (e === E_ALREADY_LOCKED) {
-				const user = this.driftClient.getUser();
-				this.mutexBusyCounter!.add(
-					1,
-					metricAttrFromUserAccount(
-						user.getUserAccountPublicKey(),
-						user.getUserAccount()
-					)
-				);
-			} else {
-				if (e instanceof Error) {
-					webhookMessage(
-						`[${this.name}]: :x: uncaught error:\n${
-							e.stack ? e.stack : e.message
-						}`
-					);
-				}
-				throw e;
-			}
-		} finally {
-			if (ran) {
-				const duration = Date.now() - startTime;
-				const user = this.driftClient.getUser();
-				if (this.tryFillDurationHistogram) {
-					this.tryFillDurationHistogram!.record(
-						duration,
-						metricAttrFromUserAccount(
-							user.getUserAccountPublicKey(),
-							user.getUserAccount()
-						)
-					);
-				}
-				logger.debug(`tryFill done, took ${duration}ms`);
-
-				await this.watchdogTimerMutex.runExclusive(async () => {
-					this.watchdogTimerLastPatTime = Date.now();
-				});
-			}
-		}
 	}
 
 	protected getPerpNodesForMarket(
