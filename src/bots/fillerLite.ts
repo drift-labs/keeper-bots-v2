@@ -21,7 +21,7 @@ import { FillerBot, SETTLE_POSITIVE_PNL_COOLDOWN_MS } from './filler';
 import { sleepMs } from '../utils';
 
 export class FillerLiteBot extends FillerBot {
-	private orderSubscriber: OrderSubscriber;
+	protected orderSubscriber: OrderSubscriber;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -126,7 +126,7 @@ export class FillerLiteBot extends FillerBot {
 	}
 
 	protected async getDLOB() {
-		const currentSlot = this.slotSubscriber.getSlot();
+		const currentSlot = this.orderSubscriber.getSlot();
 		return await this.orderSubscriber.getDLOB(currentSlot);
 	}
 }
