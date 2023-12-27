@@ -1481,7 +1481,7 @@ export class FillerBot implements Bot {
 				ixs.push(await this.driftClient.getRevertFillIx());
 			}
 
-			await this.sendFillTx(fillTxId, [nodeToFill], ixs);
+			this.sendFillTx(fillTxId, [nodeToFill], ixs);
 		} catch (e) {
 			if (e instanceof Error) {
 				logger.error(
