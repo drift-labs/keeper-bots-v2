@@ -268,7 +268,7 @@ const runBot = async () => {
 		disableRetryOnRateLimit: true,
 	});
 
-	const txSenderType = config.global.txSenderType || 'fast';
+	const txSenderType = config.global.txSenderType || 'retry';
 	let txSender;
 	if (txSenderType === 'retry') {
 		txSender = new RetryTxSender({
