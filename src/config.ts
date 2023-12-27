@@ -38,6 +38,8 @@ export type LiquidatorConfig = BaseBotConfig & {
 	spotSubAccountConfig?: SubaccountConfig;
 	maxSlippagePct?: number;
 	deriskAlgo?: OrderExecutionAlgoType;
+	deriskAlgoSpot?: OrderExecutionAlgoType;
+	deriskAlgoPerp?: OrderExecutionAlgoType;
 	twapDurationSec?: number;
 	minDepositToLiq?: Map<number, number>;
 	excludedAccounts?: Set<string>;

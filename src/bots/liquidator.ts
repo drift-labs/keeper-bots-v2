@@ -30,6 +30,7 @@ import {
 	Route,
 	JupiterClient,
 	MarketType,
+	MarketTypeStr,
 	SwapMode,
 	SwapReduceOnly,
 	getVariant,
@@ -317,6 +318,12 @@ export class LiquidatorBot implements Bot {
 		defaultSubaccountId: number
 	) {
 		this.liquidatorConfig = config;
+
+		this.liquidatorConfig.deriskAlgoPerp =
+			config.deriskAlgoPerp ?? config.deriskAlgo;
+		this.liquidatorConfig.deriskAlgoSpot =
+			config.deriskAlgoSpot ?? config.deriskAlgo;
+
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
@@ -444,9 +451,9 @@ export class LiquidatorBot implements Bot {
 			logger.info(` * ${subAccountId}`);
 		}
 
-		if (this.useTwap()) {
-			const nowSec = Math.floor(Date.now() / 1000);
-			this.twapExecutionProgresses = new Map<string, TwapExecutionProgress>();
+		const nowSec = Math.floor(Date.now() / 1000);
+		this.twapExecutionProgresses = new Map<string, TwapExecutionProgress>();
+		if (this.useTwap('perp')) {
 			for (const marketIndex of this.perpMarketIndicies) {
 				const subaccount = this.perpMarketToSubaccount.get(marketIndex);
 				this.twapExecutionProgresses.set(
@@ -463,7 +470,9 @@ export class LiquidatorBot implements Bot {
 					})
 				);
 			}
+		}
 
+		if (this.useTwap('spot')) {
 			for (const marketIndex of this.spotMarketIndicies) {
 				const subaccount = this.spotMarketToSubaccount.get(marketIndex);
 				this.twapExecutionProgresses.set(
@@ -522,10 +531,16 @@ export class LiquidatorBot implements Bot {
 		};
 	}
 
-	private useTwap() {
+	private useTwap(marketType: MarketTypeStr) {
+		const derisk =
+			marketType === 'perp'
+				? this.liquidatorConfig.deriskAlgoPerp
+				: marketType === 'spot'
+				? this.liquidatorConfig.deriskAlgoSpot
+				: undefined;
+
 		return (
-			this.liquidatorConfig.deriskAlgo === 'twap' &&
-			this.liquidatorConfig.twapDurationSec !== undefined
+			derisk === 'twap' && this.liquidatorConfig.twapDurationSec !== undefined
 		);
 	}
 
@@ -790,7 +805,7 @@ export class LiquidatorBot implements Bot {
 		const nowSec = Math.floor(Date.now() / 1000);
 
 		let baseAssetAmount: BN;
-		if (this.useTwap()) {
+		if (this.useTwap('perp')) {
 			let twapProgress = this.twapExecutionProgresses!.get(
 				this.getTwapProgressKey(
 					MarketType.PERP,
@@ -1130,7 +1145,7 @@ export class LiquidatorBot implements Bot {
 			return undefined;
 		}
 
-		if (this.useTwap()) {
+		if (this.useTwap('spot')) {
 			let twapProgress = this.twapExecutionProgresses!.get(
 				this.getTwapProgressKey(
 					MarketType.SPOT,
