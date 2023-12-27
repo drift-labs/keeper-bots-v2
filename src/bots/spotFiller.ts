@@ -78,7 +78,7 @@ import { getNodeToFillSignature, getNodeToTriggerSignature } from '../utils';
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_BACKOFF = 10000; // Time to wait before trying a node again
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
-const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 10000; // cap the computeUnitPrice to pay per fill tx
+const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 1_000_000; // cap the computeUnitPrice to pay per fill tx
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
@@ -1140,7 +1140,7 @@ export class SpotFillerBot implements Bot {
 			}),
 			ComputeBudgetProgram.setComputeUnitPrice({
 				microLamports: Math.min(
-					this.priorityFeeSubscriber.avgPriorityFee,
+					this.priorityFeeSubscriber.maxPriorityFee * 1.2,
 					MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 				),
 			}),
