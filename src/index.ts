@@ -284,7 +284,7 @@ const runBot = async () => {
 			configHasBot(config, 'spotFiller');
 		txSender = new FastSingleTxSender({
 			connection: sendTxConnection,
-			blockhashRefreshInterval: 1000,
+			blockhashRefreshInterval: 500,
 			wallet,
 			opts,
 			skipConfirmation,
