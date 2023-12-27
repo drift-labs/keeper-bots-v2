@@ -652,6 +652,10 @@ export class FillerBot implements Bot {
 		return this.dlobSubscriber!.getDLOB();
 	}
 
+	protected getMaxSlot(): number {
+		return Math.max(this.slotSubscriber.getSlot(), this.userMap!.getSlot());
+	}
+
 	protected getPerpNodesForMarket(
 		market: PerpMarketAccount,
 		dlob: DLOB
@@ -667,7 +671,7 @@ export class FillerBot implements Bot {
 		const vAsk = calculateAskPrice(market, oraclePriceData);
 		const vBid = calculateBidPrice(market, oraclePriceData);
 
-		const fillSlot = oraclePriceData.slot.toNumber();
+		const fillSlot = this.getMaxSlot();
 
 		return {
 			nodesToFill: dlob.findNodesToFill(
@@ -819,7 +823,7 @@ export class FillerBot implements Bot {
 					nodeToFill.node.order.marketIndex
 				)!,
 				oraclePriceData,
-				this.slotSubscriber.currentSlot,
+				this.getMaxSlot(),
 				Date.now() / 1000,
 				this.driftClient.getStateAccount().minPerpAuctionDuration
 			)
@@ -838,7 +842,7 @@ export class FillerBot implements Bot {
 						nodeToFill.node.order.marketIndex
 					)!,
 					oraclePriceData,
-					this.slotSubscriber.currentSlot,
+					this.getMaxSlot(),
 					Date.now() / 1000,
 					this.driftClient.getStateAccount().minPerpAuctionDuration
 				)}`
@@ -850,7 +854,7 @@ export class FillerBot implements Bot {
 						nodeToFill.node.order.marketIndex
 					)!,
 					oraclePriceData,
-					this.slotSubscriber.currentSlot
+					this.getMaxSlot()
 				).toString()}`
 			);
 			return false;
@@ -864,7 +868,7 @@ export class FillerBot implements Bot {
 				)!.amm,
 				oraclePriceData,
 				this.driftClient.getStateAccount().oracleGuardRails,
-				this.slotSubscriber.currentSlot
+				this.getMaxSlot()
 			);
 			if (!oracleIsValid) {
 				logger.error(`Oracle is not valid for market ${marketIndex}`);
@@ -1261,8 +1265,7 @@ export class FillerBot implements Bot {
 		fillTxId: number,
 		ixs: Array<TransactionInstruction>
 	) {
-		const slotsUntilNextLeader =
-			this.jitoLeaderNextSlot! - this.slotSubscriber.getSlot();
+		const slotsUntilNextLeader = this.jitoLeaderNextSlot! - this.getMaxSlot();
 		logger.info(
 			`next jito leader is in ${slotsUntilNextLeader} slots (fillTxId: ${fillTxId})`
 		);
