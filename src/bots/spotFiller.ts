@@ -705,7 +705,7 @@ export class SpotFillerBot implements Bot {
 			'ask'
 		);
 
-		const fillSlot = oraclePriceData.slot.toNumber();
+		const fillSlot = this.orderSubscriber.getSlot();
 
 		const nodesToFill = dlob.findNodesToFill(
 			market.marketIndex,
@@ -872,10 +872,12 @@ export class SpotFillerBot implements Bot {
 
 			if (isEndIxLog(this.driftClient.program.programId.toBase58(), log)) {
 				if (!errorThisFillIx) {
-					this.successfulFillsCounter!.add(1, {
-						market: this.driftClient.getSpotMarketAccount(order.marketIndex)!
-							.name,
-					});
+					if (this.successfulFillsCounter) {
+						this.successfulFillsCounter!.add(1, {
+							market: this.driftClient.getSpotMarketAccount(order.marketIndex)!
+								.name,
+						});
+					}
 					successCount++;
 				}
 
@@ -1247,7 +1249,7 @@ export class SpotFillerBot implements Bot {
 			this.triggeringNodes.get(nodeToFillSignature);
 		if (timeStartedToTriggerNode) {
 			if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
-				false;
+				return false;
 			}
 		}
 
@@ -1384,21 +1386,26 @@ export class SpotFillerBot implements Bot {
 					this.executeTriggerableSpotNodesForMarket(filteredTriggerableNodes),
 				]);
 
-				const user = this.driftClient.getUser();
-				this.attemptedFillsCounter!.add(
-					fillableNodes.reduce((acc, curr) => acc + curr.nodesToFill.length, 0),
-					metricAttrFromUserAccount(
-						user.userAccountPublicKey,
-						user.getUserAccount()
-					)
-				);
-				this.attemptedTriggersCounter!.add(
-					filteredTriggerableNodes.length,
-					metricAttrFromUserAccount(
-						user.userAccountPublicKey,
-						user.getUserAccount()
-					)
-				);
+				if (this.attemptedFillsCounter && this.attemptedTriggersCounter) {
+					const user = this.driftClient.getUser();
+					this.attemptedFillsCounter!.add(
+						fillableNodes.reduce(
+							(acc, curr) => acc + curr.nodesToFill.length,
+							0
+						),
+						metricAttrFromUserAccount(
+							user.userAccountPublicKey,
+							user.getUserAccount()
+						)
+					);
+					this.attemptedTriggersCounter!.add(
+						filteredTriggerableNodes.length,
+						metricAttrFromUserAccount(
+							user.userAccountPublicKey,
+							user.getUserAccount()
+						)
+					);
+				}
 
 				ran = true;
 			});
@@ -1427,13 +1434,15 @@ export class SpotFillerBot implements Bot {
 			if (ran) {
 				const duration = Date.now() - startTime;
 				const user = this.driftClient.getUser();
-				this.tryFillDurationHistogram!.record(
-					duration,
-					metricAttrFromUserAccount(
-						user.getUserAccountPublicKey(),
-						user.getUserAccount()
-					)
-				);
+				if (this.tryFillDurationHistogram) {
+					this.tryFillDurationHistogram!.record(
+						duration,
+						metricAttrFromUserAccount(
+							user.getUserAccountPublicKey(),
+							user.getUserAccount()
+						)
+					);
+				}
 				logger.debug(`trySpotFill done, took ${duration} ms`);
 
 				await this.watchdogTimerMutex.runExclusive(async () => {

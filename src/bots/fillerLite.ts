@@ -126,7 +126,14 @@ export class FillerLiteBot extends FillerBot {
 	}
 
 	protected async getDLOB() {
-		const currentSlot = this.orderSubscriber.getSlot();
+		const currentSlot = this.getMaxSlot();
 		return await this.orderSubscriber.getDLOB(currentSlot);
+	}
+
+	protected getMaxSlot(): number {
+		return Math.max(
+			this.slotSubscriber.getSlot(),
+			this.orderSubscriber!.getSlot()
+		);
 	}
 }
