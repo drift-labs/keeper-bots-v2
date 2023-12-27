@@ -1200,7 +1200,15 @@ export class SpotFillerBot implements Bot {
 				if (!errorCode) {
 					console.error(e);
 				} else {
-					logger.error(`Failed to fill spot order(errorCode: ${errorCode}): `);
+					logger.error(
+						`Failed to fill spot order for ${chUser
+							.getUserAccountPublicKey()
+							.toBase58()} order ${nodeToFill.node.order!.orderId} on market ${
+							nodeToFill.node.order!.marketIndex
+						} makers: ${
+							nodeToFill.makerNodes.length
+						} (errorCode: ${errorCode}): `
+					);
 				}
 
 				if (e.logs) {
