@@ -705,7 +705,7 @@ export class SpotFillerBot implements Bot {
 			'ask'
 		);
 
-		const fillSlot = oraclePriceData.slot.toNumber();
+		const fillSlot = this.orderSubscriber.getSlot();
 
 		const nodesToFill = dlob.findNodesToFill(
 			market.marketIndex,
