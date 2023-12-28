@@ -567,7 +567,8 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				config.botConfigs!.liquidator!,
-				config.global.subaccounts![0]
+				config.global.subaccounts![0],
+				new PublicKey(sdkConfig.SERUM_LOOKUP_TABLE as string)
 			)
 		);
 	}

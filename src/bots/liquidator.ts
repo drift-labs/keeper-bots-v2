@@ -27,12 +27,9 @@ import {
 	TEN_THOUSAND,
 	PositionDirection,
 	isUserBankrupt,
-	Route,
 	JupiterClient,
 	MarketType,
 	MarketTypeStr,
-	SwapMode,
-	SwapReduceOnly,
 	getVariant,
 	OraclePriceData,
 	UserAccount,
@@ -40,6 +37,7 @@ import {
 	TEN,
 	TxParams,
 	PriorityFeeSubscriber,
+	QuoteResponse,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -66,7 +64,12 @@ import {
 	getPerpMarketTierNumber,
 	perpTierIsAsSafeAs,
 } from '@drift-labs/sdk/lib/math/tiers';
-import { PublicKey, SimulatedTransactionResponse } from '@solana/web3.js';
+import {
+	ComputeBudgetProgram,
+	PublicKey,
+	SimulatedTransactionResponse,
+	AddressLookupTableAccount,
+} from '@solana/web3.js';
 
 const errorCodesToSuppress = [
 	6004, // Error Number: 6004. Error Message: Sufficient collateral.
@@ -283,6 +286,10 @@ export class LiquidatorBot implements Bot {
 	private userMapUserAccountKeysGauge?: ObservableGauge;
 
 	private driftClient: DriftClient;
+	private serumLookupTableAddress: PublicKey;
+	private driftLookupTables?: AddressLookupTableAccount;
+	private driftSpotLookupTables?: AddressLookupTableAccount;
+
 	private perpMarketIndicies: number[];
 	private spotMarketIndicies: number[];
 	private activeSubAccountId: number;
@@ -315,7 +322,8 @@ export class LiquidatorBot implements Bot {
 		userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
 		config: LiquidatorConfig,
-		defaultSubaccountId: number
+		defaultSubaccountId: number,
+		SERUM_LOOKUP_TABLE: PublicKey
 	) {
 		this.liquidatorConfig = config;
 
@@ -519,6 +527,7 @@ export class LiquidatorBot implements Bot {
 				config.maxPositionTakeoverPctOfCollateral * 100.0
 			);
 		}
+		this.serumLookupTableAddress = SERUM_LOOKUP_TABLE;
 	}
 
 	private getTxParamsWithPriorityFees(): TxParams {
@@ -554,6 +563,21 @@ export class LiquidatorBot implements Bot {
 
 	public async init() {
 		logger.info(`${this.name} initing`);
+
+		this.driftLookupTables =
+			await this.driftClient.fetchMarketLookupTableAccount();
+		const serumLut = (
+			await this.driftClient.connection.getAddressLookupTable(
+				this.serumLookupTableAddress
+			)
+		).value;
+		if (serumLut === null && this.liquidatorConfig.useJupiter) {
+			throw new Error(
+				`Failed to load LUT for drift spot accounts at ${this.serumLookupTableAddress.toBase58()}, jupiter swaps will fail`
+			);
+		} else {
+			this.driftSpotLookupTables = serumLut!;
+		}
 
 		const config = initialize({ env: this.runtimeSpecs.driftEnv as DriftEnv });
 		for (const spotMarketConfig of config.SPOT_MARKETS) {
@@ -706,72 +730,63 @@ export class LiquidatorBot implements Bot {
 	private async jupiterSpotSwap(
 		orderDirection: PositionDirection,
 		spotMarketIndex: number,
-		standardizedTokenAmount: BN,
-		route: Route,
-		slippageBps: number,
-		slippageDenom: number
+		quote: QuoteResponse,
+		slippageBps: number
 	) {
 		let outMarketIndex: number;
 		let inMarketIndex: number;
-		let jupSwapMode: SwapMode;
-		let jupReduceOnly: SwapReduceOnly;
-		let amountIn = standardizedTokenAmount;
 		if (isVariant(orderDirection, 'long')) {
 			// sell USDC, buy spotMarketIndex
 			inMarketIndex = 0;
 			outMarketIndex = spotMarketIndex;
-			jupSwapMode = 'ExactOut';
-			jupReduceOnly = SwapReduceOnly.Out;
-
-			// drift takes input token as amount, so we calculate the max that we're
-			// willing to spend (which is max slippage from the oracle price).
-			const oracle =
-				this.driftClient.getOracleDataForSpotMarket(spotMarketIndex);
-			const outMarket = this.driftClient.getSpotMarketAccount(outMarketIndex);
-			const inMarket = this.driftClient.getSpotMarketAccount(inMarketIndex);
-			const outMarketPrecision = TEN.pow(new BN(outMarket!.decimals));
-			const inMarketPrecision = TEN.pow(new BN(inMarket!.decimals));
-			amountIn = standardizedTokenAmount
-				.mul(oracle.price)
-				.mul(inMarketPrecision)
-				.div(outMarketPrecision)
-				.div(PRICE_PRECISION);
-
-			// allow spend up to slippageBps over oracle price
-			const slippageBpsBN = new BN(slippageBps);
-			const slippageDenomBN = new BN(slippageDenom);
-			amountIn = amountIn
-				.mul(slippageBpsBN.add(slippageDenomBN))
-				.div(slippageDenomBN);
 		} else {
 			// sell spotMarketIndex, buy USDC
 			inMarketIndex = spotMarketIndex;
 			outMarketIndex = 0;
-			jupSwapMode = 'ExactIn';
-			jupReduceOnly = SwapReduceOnly.In;
 		}
-
-		logger.info(
-			`Jupiter swap: ${getVariant(
-				orderDirection
-			)}: stdTokenAmount: ${standardizedTokenAmount.toString()} -> amountIn: ${amountIn.toString()}, inMarket: ${inMarketIndex}, outMarket: ${outMarketIndex}, jupReduceOnly: ${getVariant(
-				jupReduceOnly
-			)}, jupSwapMode: ${jupSwapMode}`
-		);
 
 		const start = Date.now();
 		const subaccountIdStart = this.driftClient.activeSubAccountId;
 		try {
-			const tx = await this.driftClient.swap({
+			const swapIx = await this.driftClient.getJupiterSwapIxV6({
 				jupiterClient: this.jupiterClient!,
 				outMarketIndex,
 				inMarketIndex,
-				amount: amountIn,
-				swapMode: jupSwapMode,
-				route,
-				reduceOnly: jupReduceOnly,
+				amount: new BN(quote.inAmount),
+				quote,
 				slippageBps,
+				userAccountPublicKey: await this.driftClient.getUserAccountPublicKey(
+					subaccountIdStart
+				),
 			});
+			swapIx.ixs.unshift(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.min(
+						Math.floor(this.priorityFeeSubscriber!.maxPriorityFee),
+						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+					),
+				})
+			);
+			swapIx.ixs.unshift(
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000,
+				})
+			);
+			const tx = await this.driftClient.txSender.sendVersionedTransaction(
+				await this.driftClient.txSender.getVersionedTransaction(
+					swapIx.ixs,
+					[
+						...swapIx.lookupTables,
+						this.driftLookupTables!,
+						this.driftSpotLookupTables!,
+					],
+					[],
+					this.driftClient.opts
+				),
+				[],
+				this.driftClient.opts
+			);
+
 			logger.info(
 				`closed spot position for market ${spotMarketIndex.toString()} on subaccount ${subaccountIdStart}: ${tx} `
 			);
@@ -1019,8 +1034,9 @@ export class LiquidatorBot implements Bot {
 	private async determineBestSpotSwapRoute(
 		spotMarketIndex: number,
 		orderDirection: PositionDirection,
-		baseAmountIn: BN
-	): Promise<Route | undefined> {
+		baseAmountIn: BN,
+		slippageBps: number
+	): Promise<QuoteResponse | undefined> {
 		if (!this.jupiterClient) {
 			return undefined;
 		}
@@ -1045,17 +1061,26 @@ export class LiquidatorBot implements Bot {
 
 		let outMarket: SpotMarketAccount | undefined;
 		let inMarket: SpotMarketAccount | undefined;
-		let jupSwapMode: SwapMode;
+		let amountIn: BN | undefined;
 		if (isVariant(orderDirection, 'long')) {
 			// sell USDC, buy spotMarketIndex
 			inMarket = this.driftClient.getSpotMarketAccount(0);
 			outMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
-			jupSwapMode = 'ExactOut';
+			if (!inMarket || !outMarket) {
+				logger.error('failed to get spot markets');
+				return undefined;
+			}
+			const inPrecision = TEN.pow(new BN(inMarket.decimals));
+			const outPrecision = TEN.pow(new BN(outMarket.decimals));
+			amountIn = oraclePriceData.price
+				.mul(baseAmountIn)
+				.mul(inPrecision)
+				.div(PRICE_PRECISION.mul(outPrecision));
 		} else {
 			// sell spotMarketIndex, buy USDC
 			inMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
 			outMarket = this.driftClient.getSpotMarketAccount(0);
-			jupSwapMode = 'ExactIn';
+			amountIn = baseAmountIn;
 		}
 
 		if (!inMarket || !outMarket) {
@@ -1063,58 +1088,66 @@ export class LiquidatorBot implements Bot {
 			return undefined;
 		}
 
-		let jupiterRoutes = await this.jupiterClient.getRoutes({
-			inputMint: inMarket.mint,
-			outputMint: outMarket.mint,
-			amount: baseAmountIn.abs(),
-			swapMode: jupSwapMode,
-		});
-
-		if (!jupiterRoutes) {
+		logger.info(
+			`Getting jupiter quote, ${getVariant(
+				orderDirection
+			)} amount: ${amountIn.toString()}, inMarketIdx: ${
+				inMarket.marketIndex
+			}, outMarketIdx: ${outMarket.marketIndex}, slippageBps: ${slippageBps}`
+		);
+		let quote: QuoteResponse | undefined;
+		try {
+			quote = await this.jupiterClient.getQuote({
+				inputMint: inMarket.mint,
+				outputMint: outMarket.mint,
+				amount: amountIn.abs(),
+				slippageBps: slippageBps,
+				maxAccounts: 25,
+				excludeDexes: ['Raydium CLMM'],
+			});
+		} catch (e) {
+			logger.error(`Error getting Jupiter quote: ${(e as Error).message}`);
+			console.error(e);
 			return undefined;
 		}
 
-		console.log('routes');
-		console.log(JSON.stringify(jupiterRoutes, null, 2));
+		if (!quote) {
+			return undefined;
+		}
 
-		// fills containing Openbook will be too big, filter them out
-		jupiterRoutes = jupiterRoutes.filter((route: Route) =>
-			route.marketInfos.every(
-				(marketInfo) => !marketInfo.label.includes('Openbook')
-			)
-		);
+		console.log('Jupiter quote:');
+		console.log(JSON.stringify(quote, null, 2));
 
-		if (jupiterRoutes.length === 0) {
+		if (!quote.routePlan || quote.routePlan.length === 0) {
 			logger.info(`Found no jupiter route`);
 			return undefined;
 		}
 
-		const bestRoute = jupiterRoutes[0];
-		logger.info(`Found jupiter route: ${JSON.stringify(bestRoute)}`);
 		if (isVariant(orderDirection, 'long')) {
 			// buying spotMarketIndex, want min in
-			const jupAmountIn = new BN(bestRoute.inAmount);
+			const jupAmountIn = new BN(quote.inAmount);
+
 			if (
 				dlobFillQuoteAmount?.gt(ZERO) &&
 				dlobFillQuoteAmount?.lt(jupAmountIn)
 			) {
 				logger.info(
-					`Want long, dlob fill amount ${dlobFillQuoteAmount} < jup amount in ${jupAmountIn}, dont trade on jup`
+					`Want to long spot market ${spotMarketIndex}, dlob fill amount ${dlobFillQuoteAmount} < jup amount in ${jupAmountIn}, dont trade on jup`
 				);
 				return undefined;
 			} else {
-				return bestRoute;
+				return quote;
 			}
 		} else {
 			// selling spotMarketIndex, want max out
-			const jupAmountOut = new BN(bestRoute.outAmount);
+			const jupAmountOut = new BN(quote.outAmount);
 			if (dlobFillQuoteAmount?.gt(jupAmountOut)) {
 				logger.info(
-					`Want short , dlob fill amount ${dlobFillQuoteAmount} > jup amount out ${jupAmountOut}, dont trade on jup`
+					`Want to short spot market ${spotMarketIndex}, dlob fill amount ${dlobFillQuoteAmount} > jup amount out ${jupAmountOut}, dont trade on jup`
 				);
 				return undefined;
 			} else {
-				return bestRoute;
+				return quote;
 			}
 		}
 	}
@@ -1214,12 +1247,13 @@ export class LiquidatorBot implements Bot {
 
 			const slippageDenom = 10000;
 			const slippageBps = this.liquidatorConfig.maxSlippagePct! * slippageDenom;
-			const jupRoute = await this.determineBestSpotSwapRoute(
+			const jupQuote = await this.determineBestSpotSwapRoute(
 				position.marketIndex,
 				orderParams.direction,
-				orderParams.tokenAmount
+				orderParams.tokenAmount,
+				slippageBps
 			);
-			if (!jupRoute) {
+			if (!jupQuote) {
 				await this.driftSpotTrade(
 					orderParams.direction,
 					position.marketIndex,
@@ -1230,10 +1264,8 @@ export class LiquidatorBot implements Bot {
 				await this.jupiterSpotSwap(
 					orderParams.direction,
 					position.marketIndex,
-					orderParams.tokenAmount,
-					jupRoute,
-					slippageBps,
-					slippageDenom
+					jupQuote,
+					slippageBps
 				);
 			}
 		}
