@@ -1088,12 +1088,19 @@ export class LiquidatorBot implements Bot {
 			return undefined;
 		}
 
+		logger.info(
+			`Getting jupiter quote, ${getVariant(
+				orderDirection
+			)} amount: ${amountIn.toString()}, inMarketIdx: ${
+				inMarket.marketIndex
+			}, outMarketIdx: ${outMarket.marketIndex}, slippageBps: ${slippageBps}`
+		);
 		let quote: QuoteResponse | undefined;
 		try {
 			quote = await this.jupiterClient.getQuote({
 				inputMint: inMarket.mint,
 				outputMint: outMarket.mint,
-				amount: amountIn,
+				amount: amountIn.abs(),
 				slippageBps: slippageBps,
 				maxAccounts: 25,
 				excludeDexes: ['Raydium CLMM'],
@@ -1111,7 +1118,7 @@ export class LiquidatorBot implements Bot {
 		console.log('Jupiter quote:');
 		console.log(JSON.stringify(quote, null, 2));
 
-		if (quote.routePlan.length === 0) {
+		if (!quote.routePlan || quote.routePlan.length === 0) {
 			logger.info(`Found no jupiter route`);
 			return undefined;
 		}
