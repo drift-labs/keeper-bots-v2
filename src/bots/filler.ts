@@ -34,6 +34,9 @@ import {
 	UserAccount,
 	getUserAccountPublicKey,
 	PriorityFeeSubscriber,
+	BN,
+	PERCENTAGE_PRECISION,
+	ZERO,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -897,6 +900,51 @@ export class FillerBot implements Bot {
 		return true;
 	}
 
+	protected selectSubsetOfMakers(nodeToFill: NodeToFill) {
+		let makerNodes = nodeToFill.makerNodes;
+		if (makerNodes.length >= MAX_MAKERS_PER_FILL) {
+			// Calculate the values for each item and sum them up
+			const values: BN[] = [];
+			const totalValue = ZERO;
+			for (const node of makerNodes) {
+				if (node.order) {
+					const value = node.order.baseAssetAmount.sub(
+						node.order.baseAssetAmountFilled
+					);
+					values.push(value);
+					totalValue.add(value);
+				}
+			}
+
+			// Calculate probabilities of skipping for each item
+			const probabilities: number[] = values.map((value) =>
+				value.mul(PERCENTAGE_PRECISION).div(totalValue).toNumber()
+			);
+
+			// Select 6 items, biasing towards the ones in the front
+			const selectedItems: DLOBNode[] = [];
+			for (let i = 0; i < MAX_MAKERS_PER_FILL; i++) {
+				const skipProbability = Math.random(); // Random number between 0 and 1
+
+				let selectedNodeIndex = i;
+				let cumulativeProbability = 0;
+
+				for (let j = 0; j < probabilities.length; j++) {
+					cumulativeProbability += probabilities[j];
+					if (skipProbability < cumulativeProbability) {
+						selectedNodeIndex = j;
+						break;
+					}
+				}
+
+				selectedItems.push(makerNodes[selectedNodeIndex]);
+			}
+			makerNodes = selectedItems;
+		}
+
+		return makerNodes;
+	}
+
 	protected async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
 		makerInfos: Array<MakerInfo>;
 		takerUser: UserAccount;
@@ -908,7 +956,12 @@ export class FillerBot implements Bot {
 		// set to track whether maker account has already been included
 		const makersIncluded = new Set<string>();
 		if (nodeToFill.makerNodes.length > 0) {
-			for (const makerNode of nodeToFill.makerNodes) {
+			const makerNodes = this.selectSubsetOfMakers(nodeToFill);
+			for (const makerNode of makerNodes) {
+				if (makersIncluded.size >= MAX_MAKERS_PER_FILL) {
+					break;
+				}
+
 				if (this.isDLOBNodeThrottled(makerNode)) {
 					continue;
 				}
@@ -919,9 +972,6 @@ export class FillerBot implements Bot {
 				const makerAccount = makerNode.userAccount.toBase58();
 				if (makersIncluded.has(makerAccount)) {
 					continue;
-				}
-				if (makersIncluded.size >= MAX_MAKERS_PER_FILL) {
-					break;
 				}
 
 				const makerUserAccount = await this.getUserAccountFromMap(makerAccount);
