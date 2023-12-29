@@ -921,12 +921,14 @@ export class FillerBot implements Bot {
 				value.mul(PERCENTAGE_PRECISION).div(totalValue).toNumber()
 			);
 
-			// Select 6 items, biasing towards the ones in the front
+			// Select MAX_MAKERS_PER_FILL unique items, biasing towards the ones in the front
 			const selectedItems: DLOBNode[] = [];
-			for (let i = 0; i < MAX_MAKERS_PER_FILL; i++) {
+			let tries = 0;
+
+			while (selectedItems.length < MAX_MAKERS_PER_FILL && tries < 10) {
 				const skipProbability = Math.random(); // Random number between 0 and 1
 
-				let selectedNodeIndex = i;
+				let selectedNodeIndex = -1;
 				let cumulativeProbability = 0;
 
 				for (let j = 0; j < probabilities.length; j++) {
@@ -937,8 +939,27 @@ export class FillerBot implements Bot {
 					}
 				}
 
-				selectedItems.push(makerNodes[selectedNodeIndex]);
+				// Check if the selected node is not already in the list
+				if (
+					selectedNodeIndex !== -1 &&
+					!selectedItems.includes(makerNodes[selectedNodeIndex])
+				) {
+					selectedItems.push(makerNodes[selectedNodeIndex]);
+				}
+
+				tries++;
 			}
+
+			// If the number of selected items is still less than MAX_MAKERS_PER_FILL, take from the top of makerNodes
+			if (selectedItems.length < MAX_MAKERS_PER_FILL) {
+				const remainingItems = MAX_MAKERS_PER_FILL - selectedItems.length;
+				for (let i = 0; i < remainingItems && i < makerNodes.length; i++) {
+					if (!selectedItems.includes(makerNodes[i])) {
+						selectedItems.push(makerNodes[i]);
+					}
+				}
+			}
+
 			makerNodes = selectedItems;
 		}
 
