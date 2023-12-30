@@ -148,11 +148,9 @@ function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
 	if (prefix) {
 		msg += `${prefix}\n`;
 	}
-	msg += `taker on market ${
-		takerOrder.marketIndex
-	}: ${takerNode.userAccount?.toBase58()}-${takerOrder.orderId} ${getVariant(
-		takerOrder.direction
-	)} ${convertToNumber(
+	msg += `taker on market ${takerOrder.marketIndex}: ${takerNode.userAccount}-${
+		takerOrder.orderId
+	} ${getVariant(takerOrder.direction)} ${convertToNumber(
 		takerOrder.baseAssetAmountFilled,
 		BASE_PRECISION
 	)}/${convertToNumber(
@@ -169,9 +167,9 @@ function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
 			const makerOrder = makerNode.order!;
 			msg += `  [${i}] market ${
 				makerOrder.marketIndex
-			}: ${makerNode.userAccount!.toBase58()}-${
-				makerOrder.orderId
-			} ${getVariant(makerOrder.direction)} ${convertToNumber(
+			}: ${makerNode.userAccount!}-${makerOrder.orderId} ${getVariant(
+				makerOrder.direction
+			)} ${convertToNumber(
 				makerOrder.baseAssetAmountFilled,
 				BASE_PRECISION
 			)}/${convertToNumber(
@@ -716,7 +714,7 @@ export class FillerBot implements Bot {
 		}
 
 		// first check if the userAccount itself is throttled
-		const userAccountPubkey = dlobNode.userAccount.toBase58();
+		const userAccountPubkey = dlobNode.userAccount;
 		if (this.throttledNodes.has(userAccountPubkey)) {
 			if (this.isThrottledNodeStillThrottled(userAccountPubkey)) {
 				return true;
@@ -727,7 +725,7 @@ export class FillerBot implements Bot {
 
 		// then check if the specific order is throttled
 		const orderSignature = getFillSignatureFromUserAccountAndOrderId(
-			dlobNode.userAccount.toBase58(),
+			dlobNode.userAccount,
 			dlobNode.order.orderId.toString()
 		);
 		if (this.throttledNodes.has(orderSignature)) {
@@ -916,7 +914,7 @@ export class FillerBot implements Bot {
 					continue;
 				}
 
-				const makerAccount = makerNode.userAccount.toBase58();
+				const makerAccount = makerNode.userAccount;
 				if (makersIncluded.has(makerAccount)) {
 					continue;
 				}
@@ -930,7 +928,7 @@ export class FillerBot implements Bot {
 					await this.userStatsMap!.mustGet(makerAuthority.toString())
 				).userStatsAccountPublicKey;
 				makerInfos.push({
-					maker: makerNode.userAccount,
+					maker: new PublicKey(makerNode.userAccount),
 					makerUserAccount: makerUserAccount,
 					order: makerNode.order,
 					makerStats: makerUserStats,
@@ -1141,7 +1139,7 @@ export class FillerBot implements Bot {
 				isTakerBreachedMaintenanceMarginLog(log);
 			if (takerBreachedMaintenanceMargin && nodesFilled[ixIdx]) {
 				const filledNode = nodesFilled[ixIdx];
-				const takerNodeSignature = filledNode.node.userAccount!.toBase58();
+				const takerNodeSignature = filledNode.node.userAccount!;
 				logger.error(
 					`taker breach maint. margin, assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${
 						filledNode.node.order!.orderId
@@ -1152,14 +1150,15 @@ export class FillerBot implements Bot {
 
 				this.driftClient
 					.forceCancelOrders(
-						filledNode.node.userAccount!,
+						new PublicKey(filledNode.node.userAccount!),
 						await this.getUserAccountFromMap(
 							filledNode.node.userAccount!.toString()
 						)
 					)
 					.then((txSig) => {
 						logger.info(
-							`Force cancelled orders for user ${filledNode.node.userAccount!.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
+							`Force cancelled orders for user ${filledNode.node
+								.userAccount!} due to breach of maintenance margin. Tx: ${txSig}`
 						);
 					})
 					.catch((e) => {
@@ -1752,7 +1751,7 @@ export class FillerBot implements Bot {
 			const ixs = [];
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
-					nodeToTrigger.node.userAccount,
+					new PublicKey(nodeToTrigger.node.userAccount),
 					user,
 					nodeToTrigger.node.order
 				)

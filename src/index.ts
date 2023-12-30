@@ -34,6 +34,7 @@ import {
 	UserMap,
 	Wallet,
 	RetryTxSender,
+	ConfirmationStrategy,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -276,6 +277,7 @@ const runBot = async () => {
 			wallet,
 			opts,
 			timeout: 3000,
+			confirmationStrategy: ConfirmationStrategy.Polling,
 		});
 	} else {
 		const skipConfirmation =
