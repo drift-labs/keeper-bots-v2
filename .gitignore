@@ -138,6 +138,9 @@ src/**.js
 src/**.js.map
 .idea
 
+# 6 mb+ binary file that needs to be downloaded
+jupiter-swap-api
+
 .env
 lib
 yarn.lock
