@@ -1,15 +1,10 @@
 #!/bin/bash
 
-# Parse the YAML file using yq
 
 FILE_DIR="$(dirname "$(realpath "$0")")"
-#!/bin/bash
-
 
 commands="$FILE_DIR/jupiter-swap-api "
 # Read the YAML file line by line
-
-
 while read -r line; do
   # Check if the line starts with a # using grep. If it does, skip to the next iteration.
     if echo "$line" | grep -q '^#'; then
