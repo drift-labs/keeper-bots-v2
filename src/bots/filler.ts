@@ -656,6 +656,12 @@ export class FillerBot implements Bot {
 		return Math.max(this.slotSubscriber.getSlot(), this.userMap!.getSlot());
 	}
 
+	protected logSlots() {
+		logger.info(
+			`slotSubscriber slot: ${this.slotSubscriber.getSlot()}, userMap slot: ${this.userMap!.getSlot()}`
+		);
+	}
+
 	protected getPerpNodesForMarket(
 		market: PerpMarketAccount,
 		dlob: DLOB
@@ -1458,6 +1464,8 @@ export class FillerBot implements Bot {
 			)
 		);
 
+		this.logSlots();
+
 		try {
 			const { makerInfos, takerUser, referrerInfo, marketType } =
 				await this.getNodeFillInfo(nodeToFill);
@@ -1570,6 +1578,8 @@ export class FillerBot implements Bot {
 					`Filling perp node ${idx} (fillTxId: ${fillTxId})`
 				)
 			);
+
+			this.logSlots();
 
 			const { makerInfos, takerUser, referrerInfo, marketType } =
 				await this.getNodeFillInfo(nodeToFill);
