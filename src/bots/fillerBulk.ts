@@ -13,6 +13,7 @@ import {
 } from '@drift-labs/sdk';
 
 import { FillerLiteBot } from './fillerLite';
+import {logger} from "../logger";
 
 const MAX_NUM_MAKERS = 6;
 
@@ -141,6 +142,8 @@ export class FillerBulkBot extends FillerLiteBot {
 					});
 				}
 			}
+		} else {
+			logger.info(`No best ask for ${marketIndex.toString()}`);
 		}
 
 		if (bestBid) {
@@ -162,6 +165,8 @@ export class FillerBulkBot extends FillerLiteBot {
 					});
 				}
 			}
+		}  else {
+			logger.info(`No best bid for ${marketIndex.toString()}`);
 		}
 
 		const crossLimitOrderNodesToFill = dlob.findCrossingRestingLimitOrders(
