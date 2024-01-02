@@ -9,6 +9,7 @@ import {
 	DLOBSubscriber,
 	PriorityFeeCalculator,
 	TxParams,
+	PublicKey,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -249,7 +250,7 @@ export class TriggerBot implements Bot {
 				const ixs = [];
 				ixs.push(
 					await this.driftClient.getTriggerOrderIx(
-						nodeToTrigger.node.userAccount,
+						new PublicKey(nodeToTrigger.node.userAccount),
 						user.getUserAccount(),
 						nodeToTrigger.node.order
 					)
@@ -369,7 +370,7 @@ export class TriggerBot implements Bot {
 
 				this.driftClient
 					.triggerOrder(
-						nodeToTrigger.node.userAccount,
+						new PublicKey(nodeToTrigger.node.userAccount),
 						user.getUserAccount(),
 						nodeToTrigger.node.order,
 						txParams
