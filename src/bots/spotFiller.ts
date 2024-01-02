@@ -779,7 +779,7 @@ export class SpotFillerBot implements Bot {
 				await this.userStatsMap!.mustGet(makerAuthority.toString())
 			).userStatsAccountPublicKey;
 			makerInfo = {
-				maker: makerNode.userAccount!,
+				maker: new PublicKey(makerNode.userAccount!),
 				makerUserAccount: makerUserAccount,
 				order: makerNode.order,
 				makerStats: makerUserStats,
@@ -944,14 +944,14 @@ export class SpotFillerBot implements Bot {
 
 				this.driftClient
 					.forceCancelOrders(
-						makerNode.userAccount!,
+						new PublicKey(makerNode.userAccount!),
 						(
 							await this.userMap!.mustGet(makerNode.userAccount!.toString())
 						).getUserAccount()
 					)
 					.then((txSig) => {
 						logger.info(
-							`Force cancelled orders for maker ${makerNode.userAccount!.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
+							`Force cancelled orders for maker ${makerNode.userAccount!} due to breach of maintenance margin. Tx: ${txSig}`
 						);
 					})
 					.catch((e) => {
@@ -989,20 +989,20 @@ export class SpotFillerBot implements Bot {
 
 				this.driftClient
 					.forceCancelOrders(
-						node.userAccount!,
+						new PublicKey(node.userAccount!),
 						(
 							await this.userMap!.mustGet(node.userAccount!.toString())
 						).getUserAccount()
 					)
 					.then((txSig) => {
 						logger.info(
-							`Force cancelled orders for user ${node.userAccount!.toBase58()} due to breach of maintenance margin. Tx: ${txSig}`
+							`Force cancelled orders for user ${node.userAccount!} due to breach of maintenance margin. Tx: ${txSig}`
 						);
 					})
 					.catch((e) => {
 						console.error(e);
 						logger.error(
-							`Failed to send ForceCancelOrder Tx (error above), taker (${node.userAccount!.toBase58()}) breach maint margin:`
+							`Failed to send ForceCancelOrder Tx (error above), taker (${node.userAccount!}) breach maint margin:`
 						);
 						webhookMessage(
 							`[${this.name}]: :x: error processing fill tx logs:\n${
@@ -1078,7 +1078,7 @@ export class SpotFillerBot implements Bot {
 		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
 		if (makerNode) {
 			logger.info(
-				`filling spot node:\ntaker: ${node.userAccount!.toBase58()}-${
+				`filling spot node:\ntaker: ${node.userAccount!}-${
 					order.orderId
 				} ${convertToNumber(
 					order.baseAssetAmountFilled,
@@ -1089,7 +1089,7 @@ export class SpotFillerBot implements Bot {
 				)} @ ${convertToNumber(
 					order.price,
 					PRICE_PRECISION
-				)}\nmaker: ${makerNode.userAccount!.toBase58()}-${
+				)}\nmaker: ${makerNode.userAccount!}-${
 					makerNode.order!.orderId
 				} ${convertToNumber(
 					makerNode.order!.baseAssetAmountFilled,
@@ -1101,7 +1101,7 @@ export class SpotFillerBot implements Bot {
 			);
 		} else {
 			logger.info(
-				`filling spot node\ntaker: ${node.userAccount!.toBase58()}-${
+				`filling spot node\ntaker: ${node.userAccount!}-${
 					order.orderId
 				} ${convertToNumber(
 					order.baseAssetAmountFilled,
@@ -1286,7 +1286,7 @@ export class SpotFillerBot implements Bot {
 			const ixs = [];
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
-					nodeToTrigger.node.userAccount,
+					new PublicKey(nodeToTrigger.node.userAccount),
 					user.getUserAccount(),
 					nodeToTrigger.node.order
 				)
@@ -1349,7 +1349,7 @@ export class SpotFillerBot implements Bot {
 				if (orderRecord && dlob) {
 					dlob.insertOrder(
 						orderRecord.order,
-						orderRecord.user,
+						orderRecord.user.toBase58(),
 						orderRecord.order.slot.toNumber()
 					);
 				}

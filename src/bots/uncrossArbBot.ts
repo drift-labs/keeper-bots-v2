@@ -462,28 +462,28 @@ export class UncrossArbBot implements Bot {
 						try {
 							bidMakerInfo = {
 								makerUserAccount: this.orderSubscriber.usersAccounts.get(
-									bestDriftBid.userAccount!.toBase58()
+									bestDriftBid.userAccount!
 								)!.userAccount,
 								order: bestDriftBid.order,
-								maker: bestDriftBid.userAccount!,
+								maker: new PublicKey(bestDriftBid.userAccount!),
 								makerStats: getUserStatsAccountPublicKey(
 									this.driftClient.program.programId,
 									this.orderSubscriber.usersAccounts.get(
-										bestDriftBid.userAccount!.toBase58()
+										bestDriftBid.userAccount!
 									)!.userAccount.authority
 								),
 							};
 
 							askMakerInfo = {
 								makerUserAccount: this.orderSubscriber.usersAccounts.get(
-									bestDriftAsk.userAccount!.toBase58()
+									bestDriftAsk.userAccount!
 								)!.userAccount,
 								order: bestDriftAsk.order,
-								maker: bestDriftAsk.userAccount!,
+								maker: new PublicKey(bestDriftAsk.userAccount!),
 								makerStats: getUserStatsAccountPublicKey(
 									this.driftClient.program.programId,
 									this.orderSubscriber.usersAccounts.get(
-										bestDriftAsk.userAccount!.toBase58()
+										bestDriftAsk.userAccount!
 									)!.userAccount.authority
 								),
 							};
