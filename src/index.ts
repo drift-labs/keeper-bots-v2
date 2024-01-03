@@ -570,7 +570,9 @@ const runBot = async () => {
 				},
 				config.botConfigs!.liquidator!,
 				config.global.subaccounts![0],
-				new PublicKey(sdkConfig.SERUM_LOOKUP_TABLE as string)
+				sdkConfig.SERUM_LOOKUP_TABLE
+					? new PublicKey(sdkConfig.SERUM_LOOKUP_TABLE as string)
+					: undefined
 			)
 		);
 	}
