@@ -288,7 +288,7 @@ export class LiquidatorBot implements Bot {
 	private userMapUserAccountKeysGauge?: ObservableGauge;
 
 	private driftClient: DriftClient;
-	private serumLookupTableAddress: PublicKey;
+	private serumLookupTableAddress?: PublicKey;
 	private driftLookupTables?: AddressLookupTableAccount;
 	private driftSpotLookupTables?: AddressLookupTableAccount;
 
@@ -325,7 +325,7 @@ export class LiquidatorBot implements Bot {
 		runtimeSpec: RuntimeSpec,
 		config: LiquidatorConfig,
 		defaultSubaccountId: number,
-		SERUM_LOOKUP_TABLE: PublicKey
+		SERUM_LOOKUP_TABLE?: PublicKey
 	) {
 		this.liquidatorConfig = config;
 		if (this.liquidatorConfig.maxSlippageBps === undefined) {
@@ -572,14 +572,22 @@ export class LiquidatorBot implements Bot {
 
 		this.driftLookupTables =
 			await this.driftClient.fetchMarketLookupTableAccount();
-		const serumLut = (
-			await this.driftClient.connection.getAddressLookupTable(
-				this.serumLookupTableAddress
-			)
-		).value;
-		if (serumLut === null && this.liquidatorConfig.useJupiter) {
+
+		let serumLut: AddressLookupTableAccount | null = null;
+		if (this.serumLookupTableAddress !== undefined) {
+			serumLut = (
+				await this.driftClient.connection.getAddressLookupTable(
+					this.serumLookupTableAddress
+				)
+			).value;
+		}
+		if (
+			this.runtimeSpecs.driftEnv === 'mainnet-beta' &&
+			serumLut === null &&
+			this.liquidatorConfig.useJupiter
+		) {
 			throw new Error(
-				`Failed to load LUT for drift spot accounts at ${this.serumLookupTableAddress.toBase58()}, jupiter swaps will fail`
+				`Failed to load LUT for drift spot accounts at ${this.serumLookupTableAddress?.toBase58()}, jupiter swaps will fail`
 			);
 		} else {
 			this.driftSpotLookupTables = serumLut!;
@@ -821,14 +829,14 @@ export class LiquidatorBot implements Bot {
 					units: 1_400_000,
 				})
 			);
+			const lookupTables = [...swapIx.lookupTables, this.driftLookupTables!];
+			if (this.driftSpotLookupTables) {
+				lookupTables.push(this.driftSpotLookupTables);
+			}
 			const tx = await this.driftClient.txSender.sendVersionedTransaction(
 				await this.driftClient.txSender.getVersionedTransaction(
 					swapIx.ixs,
-					[
-						...swapIx.lookupTables,
-						this.driftLookupTables!,
-						this.driftSpotLookupTables!,
-					],
+					lookupTables,
 					[],
 					this.driftClient.opts
 				),
