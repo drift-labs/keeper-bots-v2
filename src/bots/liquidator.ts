@@ -157,11 +157,11 @@ function findBestSpotPosition(
 		// for the specific market
 		const minAmount = new BN(minDepositToLiq.get(position.marketIndex) ?? 0);
 		logger.debug(
-			`liqPerpPnl: Min liquidation for market ${position.marketIndex} is ${minAmount}`
+			`findBestspotPosition: Min liquidation for market ${position.marketIndex} is ${minAmount}`
 		);
 		if (position.scaledBalance.abs().lt(minAmount)) {
 			logger.debug(
-				`liqPerpPnl: Amount ${position.scaledBalance} below ${minAmount} liquidation threshold`
+				`findBestspotPosition: Amount ${position.scaledBalance} below ${minAmount} liquidation threshold`
 			);
 			continue;
 		}
@@ -296,8 +296,8 @@ export class LiquidatorBot implements Bot {
 	private spotMarketIndicies: number[];
 	private activeSubAccountId: number;
 	private allSubaccounts: Set<number>;
-	private perpMarketToSubaccount: Map<number, number>;
-	private spotMarketToSubaccount: Map<number, number>;
+	private perpMarketToSubAccount: Map<number, number>;
+	private spotMarketToSubAccount: Map<number, number>;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private deriskMutex = new Uint8Array(new SharedArrayBuffer(1));
@@ -364,8 +364,8 @@ export class LiquidatorBot implements Bot {
 		this.allSubaccounts = new Set<number>();
 		this.allSubaccounts.add(defaultSubaccountId);
 		this.activeSubAccountId = defaultSubaccountId;
-		this.perpMarketToSubaccount = new Map<number, number>();
-		this.spotMarketToSubaccount = new Map<number, number>();
+		this.perpMarketToSubAccount = new Map<number, number>();
+		this.spotMarketToSubAccount = new Map<number, number>();
 
 		const allPerpMarkets = this.driftClient.getPerpMarketAccounts().map((m) => {
 			return m.marketIndex;
@@ -379,7 +379,7 @@ export class LiquidatorBot implements Bot {
 				const marketsForAccount =
 					config.perpSubAccountConfig[parseInt(subAccount)] || allPerpMarkets;
 				for (const market of marketsForAccount) {
-					this.perpMarketToSubaccount.set(market, parseInt(subAccount));
+					this.perpMarketToSubAccount.set(market, parseInt(subAccount));
 					this.allSubaccounts.add(parseInt(subAccount));
 				}
 			}
@@ -393,12 +393,12 @@ export class LiquidatorBot implements Bot {
 				this.perpMarketIndicies = allPerpMarkets;
 			}
 			for (const market of this.perpMarketIndicies) {
-				this.perpMarketToSubaccount.set(market, this.activeSubAccountId);
+				this.perpMarketToSubAccount.set(market, this.activeSubAccountId);
 			}
 		}
 		logger.info(`${this.name} perpMarketIndicies: ${this.perpMarketIndicies}`);
 		console.log('this.perpMarketToSubaccount:');
-		console.log(this.perpMarketToSubaccount);
+		console.log(this.perpMarketToSubAccount);
 
 		const allSpotMarkets = this.driftClient.getSpotMarketAccounts().map((m) => {
 			return m.marketIndex;
@@ -409,7 +409,7 @@ export class LiquidatorBot implements Bot {
 				const marketsForAccount =
 					config.spotSubAccountConfig[parseInt(subAccount)] || allSpotMarkets;
 				for (const market of marketsForAccount) {
-					this.spotMarketToSubaccount.set(market, parseInt(subAccount));
+					this.spotMarketToSubAccount.set(market, parseInt(subAccount));
 					this.allSubaccounts.add(parseInt(subAccount));
 				}
 			}
@@ -423,13 +423,13 @@ export class LiquidatorBot implements Bot {
 				this.spotMarketIndicies = allSpotMarkets;
 			}
 			for (const market of this.spotMarketIndicies) {
-				this.spotMarketToSubaccount.set(market, this.activeSubAccountId);
+				this.spotMarketToSubAccount.set(market, this.activeSubAccountId);
 			}
 		}
 
 		logger.info(`${this.name} spotMarketIndicies: ${this.spotMarketIndicies}`);
 		console.log('this.spotMarketToSubaccount:');
-		console.log(this.spotMarketToSubaccount);
+		console.log(this.spotMarketToSubAccount);
 
 		this.minDepositToLiq = new Map<number, number>();
 		if (config.minDepositToLiq != null) {
@@ -469,13 +469,14 @@ export class LiquidatorBot implements Bot {
 		this.twapExecutionProgresses = new Map<string, TwapExecutionProgress>();
 		if (this.useTwap('perp')) {
 			for (const marketIndex of this.perpMarketIndicies) {
-				const subaccount = this.perpMarketToSubaccount.get(marketIndex);
+				const subaccount = this.perpMarketToSubAccount.get(marketIndex);
+				if (subaccount === undefined) {
+					throw new Error(
+						`Misconfiguration: perp market ${marketIndex} is in perpMarketIndicies but not perpMarketToSubaccount`
+					);
+				}
 				this.twapExecutionProgresses.set(
-					this.getTwapProgressKey(
-						MarketType.PERP,
-						subaccount !== undefined ? subaccount : this.activeSubAccountId,
-						marketIndex
-					),
+					this.getTwapProgressKey(MarketType.PERP, subaccount, marketIndex),
 					new TwapExecutionProgress({
 						currentPosition: new BN(0),
 						targetPosition: new BN(0), // target positions to close
@@ -488,13 +489,14 @@ export class LiquidatorBot implements Bot {
 
 		if (this.useTwap('spot')) {
 			for (const marketIndex of this.spotMarketIndicies) {
-				const subaccount = this.spotMarketToSubaccount.get(marketIndex);
+				const subaccount = this.spotMarketToSubAccount.get(marketIndex);
+				if (subaccount === undefined) {
+					throw new Error(
+						`Misconfiguration: spot market ${marketIndex} is in spotMarketIndicies but not spotMarketToSubaccount`
+					);
+				}
 				this.twapExecutionProgresses.set(
-					this.getTwapProgressKey(
-						MarketType.SPOT,
-						subaccount !== undefined ? subaccount : this.activeSubAccountId,
-						marketIndex
-					),
+					this.getTwapProgressKey(MarketType.SPOT, subaccount, marketIndex),
 					new TwapExecutionProgress({
 						currentPosition: new BN(0),
 						targetPosition: new BN(0), // target positions to close
@@ -534,6 +536,32 @@ export class LiquidatorBot implements Bot {
 			);
 		}
 		this.serumLookupTableAddress = SERUM_LOOKUP_TABLE;
+	}
+
+	private getSubAccountIdToLiquidatePerp(
+		marketIndex: number
+	): number | undefined {
+		if (!this.perpMarketIndicies.includes(marketIndex)) {
+			return undefined;
+		}
+		const subAccountId = this.perpMarketToSubAccount.get(marketIndex);
+		if (subAccountId === undefined) {
+			return undefined;
+		}
+		return subAccountId;
+	}
+
+	private getSubAccountIdToLiquidateSpot(
+		marketIndex: number
+	): number | undefined {
+		if (!this.spotMarketIndicies.includes(marketIndex)) {
+			return undefined;
+		}
+		const subAccountId = this.spotMarketToSubAccount.get(marketIndex);
+		if (subAccountId === undefined) {
+			return undefined;
+		}
+		return subAccountId;
 	}
 
 	private getTxParamsWithPriorityFees(): TxParams {
@@ -1557,29 +1585,15 @@ export class LiquidatorBot implements Bot {
 			`liqBorrow: ${user.userAccountPublicKey.toBase58()} value ${borrowAmountToLiq}`
 		);
 
-		if (!this.spotMarketIndicies.includes(borrowMarketIndextoLiq)) {
-			logger.info(
-				`Skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because borrowMarketIndextoLiq(${borrowMarketIndextoLiq}) is not in spotMarketIndicies`
-			);
-			return;
-		}
-
-		const subAccountToUse = this.spotMarketToSubaccount.get(
+		const subAccountToLiqSpot = this.getSubAccountIdToLiquidateSpot(
 			borrowMarketIndextoLiq
 		);
-		if (subAccountToUse === undefined) {
+		if (subAccountToLiqSpot === undefined) {
 			logger.info(
 				`skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
 			);
 			return;
 		}
-		logger.info(
-			`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
-		);
-		await this.driftClient.switchActiveUser(
-			subAccountToUse,
-			this.driftClient.authority
-		);
 
 		const start = Date.now();
 		this.driftClient
@@ -1591,7 +1605,7 @@ export class LiquidatorBot implements Bot {
 				borrowAmountToLiq,
 				undefined,
 				this.getTxParamsWithPriorityFees(),
-				subAccountToUse
+				subAccountToLiqSpot
 			)
 			.then((tx) => {
 				logger.info(
@@ -1648,7 +1662,7 @@ tx: ${tx} `
 		borrowMarketIndextoLiq: number,
 		borrowAmountToLiq: BN
 	) {
-		logger.debug(
+		logger.info(
 			`liqPerpPnl: ${user.userAccountPublicKey.toBase58()} deposit: ${depositAmountToLiq.toString()}, from ${depositMarketIndextoLiq} borrow: ${borrowAmountToLiq.toString()} from ${borrowMarketIndextoLiq}`
 		);
 
@@ -1709,24 +1723,14 @@ tx: ${tx} `
 			}
 
 			if (frac.lt(new BN(100000000))) {
-				if (!this.spotMarketIndicies.includes(borrowMarketIndextoLiq)) {
+				const subAccountToLiqBorrow = this.getSubAccountIdToLiquidateSpot(
+					borrowMarketIndextoLiq
+				);
+				if (subAccountToLiqBorrow === undefined) {
 					logger.info(
-						`skipping liquidateBorrowForPerpPnl of ${user.userAccountPublicKey.toBase58()} on market ${borrowMarketIndextoLiq} because it is not in spotMarketIndices`
+						`skipping liquidateBorrowForPerpPnl of ${user.userAccountPublicKey.toBase58()} on market ${borrowMarketIndextoLiq}`
 					);
 					return;
-				} else {
-					const subAccountToUse = this.spotMarketToSubaccount.get(
-						borrowMarketIndextoLiq
-					);
-					logger.info(
-						`Switching to subaccount ${subAccountToUse} for spot market ${borrowMarketIndextoLiq}`
-					);
-					this.driftClient.switchActiveUser(
-						subAccountToUse !== undefined
-							? subAccountToUse
-							: this.activeSubAccountId,
-						this.driftClient.authority
-					);
 				}
 
 				const start = Date.now();
@@ -1738,7 +1742,8 @@ tx: ${tx} `
 						borrowMarketIndextoLiq,
 						borrowAmountToLiq.div(frac),
 						undefined,
-						this.getTxParamsWithPriorityFees()
+						this.getTxParamsWithPriorityFees(),
+						subAccountToLiqBorrow
 					)
 					.then((tx) => {
 						logger.info(
@@ -1810,33 +1815,17 @@ tx: ${tx} `
 				return;
 			}
 
-			if (!this.perpMarketIndicies.includes(liquidateePosition.marketIndex)) {
-				logger.info(
-					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on perp market ${
-						liquidateePosition.marketIndex
-					} because it is not in perpMarketIndices`
-				);
-				return;
-			}
-
-			const subAccountToUse = this.perpMarketToSubaccount.get(
+			const subAccountToTakeOverPerpPnl = this.getSubAccountIdToLiquidatePerp(
 				liquidateePosition.marketIndex
 			);
-			if (subAccountToUse === undefined) {
+			if (subAccountToTakeOverPerpPnl === undefined) {
 				logger.info(
-					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on perp market ${
+					`skipping over liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on perp market ${
 						liquidateePosition.marketIndex
-					} because it is not in perpMarketIndices`
+					}`
 				);
 				return;
 			}
-			logger.info(
-				`Switching to subaccount ${subAccountToUse} for perp market ${liquidateePosition.marketIndex}`
-			);
-			this.driftClient.switchActiveUser(
-				subAccountToUse,
-				this.driftClient.authority
-			);
 
 			try {
 				const tx = await this.driftClient.liquidatePerpPnlForDeposit(
@@ -1846,7 +1835,8 @@ tx: ${tx} `
 					depositMarketIndextoLiq,
 					depositAmountToLiq,
 					undefined,
-					this.getTxParamsWithPriorityFees()
+					this.getTxParamsWithPriorityFees(),
+					subAccountToTakeOverPerpPnl
 				);
 				logger.info(
 					`did liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
@@ -1943,7 +1933,6 @@ tx: ${tx} `
 		} of usersCanBeLiquidated) {
 			const userAcc = user.getUserAccount();
 			const auth = userAcc.authority.toBase58();
-			let subAccountToLiqPerp = this.driftClient.activeSubAccountId;
 
 			if (isUserBankrupt(user) || user.isBankrupt()) {
 				await this.tryResolveBankruptUser(user);
@@ -2076,39 +2065,20 @@ tx: ${tx} `
 						)[0]
 					);
 
+					const subAccountToLiqPerp = this.getSubAccountIdToLiquidatePerp(
+						liquidateePosition.marketIndex
+					);
+					if (subAccountToLiqPerp === undefined) {
+						logger.info(
+							`skipping liquidatePerp call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
+						);
+						continue;
+					}
+
 					if (baseAmountToLiquidate.gt(ZERO)) {
 						if (this.dryRun) {
 							logger.warn('--dry run flag enabled - not sending liquidate tx');
 							continue;
-						}
-
-						if (
-							!this.perpMarketIndicies.includes(liquidateePosition.marketIndex)
-						) {
-							logger.info(
-								`Skipping liquidatePerp call for ${user.userAccountPublicKey.toBase58()} because marketIndex(${
-									liquidateePosition.marketIndex
-								}) is not in perpMarketIndicies`
-							);
-							continue;
-						} else {
-							const newSubAccountId = this.perpMarketToSubaccount.get(
-								liquidateePosition.marketIndex
-							);
-							if (newSubAccountId === undefined) {
-								logger.info(
-									`skipping liquidatePerp call for ${user.userAccountPublicKey.toBase58()} because it is not in subaccounts`
-								);
-								continue;
-							}
-							logger.info(
-								`Switching to subaccount ${newSubAccountId} for perp market ${liquidateePosition.marketIndex}`
-							);
-							this.driftClient.switchActiveUser(
-								newSubAccountId,
-								this.driftClient.authority
-							);
-							subAccountToLiqPerp = newSubAccountId;
 						}
 
 						const start = Date.now();
@@ -2162,6 +2132,7 @@ tx: ${tx} `
 								liquidateePosition.marketIndex
 							} has lp shares but no perp pos, trying to clear it:`
 						);
+
 						this.driftClient
 							.liquidatePerp(
 								user.userAccountPublicKey,
@@ -2209,6 +2180,17 @@ tx: ${tx} `
 							user.userAccountPublicKey.toBase58(),
 							Date.now()
 						);
+
+						const subAccountToLiqPerp = this.getSubAccountIdToLiquidatePerp(
+							liquidateePerpIndexWithOpenOrders
+						);
+						if (subAccountToLiqPerp === undefined) {
+							logger.info(
+								`skipping liquidatePerp call for ${user.userAccountPublicKey.toBase58()} on market with only open orders (${liquidateePerpIndexWithOpenOrders}) because it is not in subaccounts`
+							);
+							continue;
+						}
+
 						this.driftClient
 							.liquidatePerp(
 								user.userAccountPublicKey,
@@ -2239,10 +2221,10 @@ tx: ${tx} `
 							Date.now()
 						);
 						const subAccountToLiqSpot =
-							this.spotMarketToSubaccount.get(indexWithOpenOrders);
+							this.getSubAccountIdToLiquidateSpot(indexWithOpenOrders);
 						if (subAccountToLiqSpot === undefined) {
-							logger.error(
-								`subAccountToUse is undefined for spot market ${indexWithOpenOrders}`
+							logger.info(
+								`skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} on market with open orders ${indexWithOpenOrders}`
 							);
 							break;
 						}
@@ -2277,6 +2259,8 @@ tx: ${tx} `
 						this.name
 					}]: user stuck in beingLiquidated status, need to clear it for ${user.userAccountPublicKey.toBase58()}`
 				);
+
+				// can liquidate with any subaccount, no liability transfer
 				this.driftClient
 					.liquidatePerp(
 						user.userAccountPublicKey,
@@ -2284,8 +2268,7 @@ tx: ${tx} `
 						0,
 						ZERO,
 						undefined,
-						this.getTxParamsWithPriorityFees(),
-						subAccountToLiqPerp
+						this.getTxParamsWithPriorityFees()
 					)
 					.then((tx) => {
 						logger.info(
