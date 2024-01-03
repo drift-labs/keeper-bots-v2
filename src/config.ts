@@ -37,6 +37,7 @@ export type LiquidatorConfig = BaseBotConfig & {
 	perpSubAccountConfig?: SubaccountConfig;
 	spotSubAccountConfig?: SubaccountConfig;
 	maxSlippagePct?: number;
+	deriskAuctionDurationSlots?: number;
 	deriskAlgo?: OrderExecutionAlgoType;
 	deriskAlgoSpot?: OrderExecutionAlgoType;
 	deriskAlgoPerp?: OrderExecutionAlgoType;
@@ -252,6 +253,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			spotMarketIndicies: loadCommaDelimitToArray(opts.spotMarketIndicies),
 			runOnce: opts.runOnce ?? false,
 			maxSlippagePct: opts.maxSlippagePct ?? 0.05,
+			deriskAuctionDurationSlots: opts.deriskAuctionDurationSlots ?? 100,
 			deriskAlgo: opts.deriskAlgo ?? OrderExecutionAlgoType.Market,
 			twapDurationSec: parseInt(opts.twapDurationSec ?? '300'),
 			notifyOnLiquidation: opts.notifyOnLiquidation ?? false,

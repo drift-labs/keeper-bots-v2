@@ -20,7 +20,6 @@ import {
 	SerumFulfillmentConfigMap,
 	initialize,
 	DriftEnv,
-	getMarketOrderParams,
 	findDirectionToClose,
 	getSignedTokenAmount,
 	standardizeBaseAssetAmount,
@@ -38,6 +37,7 @@ import {
 	TxParams,
 	PriorityFeeSubscriber,
 	QuoteResponse,
+	getLimitOrderParams,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -665,6 +665,19 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
+	private calculateDeriskAuctionStartPrice(
+		oracle: OraclePriceData,
+		direction: PositionDirection
+	): BN {
+		let auctionStartPrice: BN;
+		if (isVariant(direction, 'long')) {
+			auctionStartPrice = oracle.price.sub(oracle.confidence);
+		} else {
+			auctionStartPrice = oracle.price.add(oracle.confidence);
+		}
+		return auctionStartPrice;
+	}
+
 	private async driftSpotTrade(
 		orderDirection: PositionDirection,
 		marketIndex: number,
@@ -696,13 +709,22 @@ export class LiquidatorBot implements Bot {
 				return;
 			}
 
+			const oracle = this.driftClient.getOracleDataForSpotMarket(marketIndex);
+			const auctionStartPrice = this.calculateDeriskAuctionStartPrice(
+				oracle,
+				orderDirection
+			);
+
 			const tx = await this.driftClient.placeSpotOrder(
-				getMarketOrderParams({
+				getLimitOrderParams({
 					marketIndex: marketIndex,
 					direction: orderDirection,
 					baseAssetAmount: standardizedTokenAmount,
 					reduceOnly: true,
 					price: limitPrice,
+					auctionDuration: this.liquidatorConfig.deriskAuctionDurationSlots!,
+					auctionStartPrice,
+					auctionEndPrice: limitPrice,
 				})
 			);
 			logger.info(
@@ -892,13 +914,20 @@ export class LiquidatorBot implements Bot {
 		);
 		const direction = findDirectionToClose(position);
 		const limitPrice = this.calculateOrderLimitPrice(oracle, direction);
+		const auctionStartPrice = this.calculateDeriskAuctionStartPrice(
+			oracle,
+			direction
+		);
 
-		return getMarketOrderParams({
+		return getLimitOrderParams({
 			direction,
 			baseAssetAmount,
 			reduceOnly: true,
 			marketIndex: position.marketIndex,
 			price: limitPrice,
+			auctionDuration: this.liquidatorConfig.deriskAuctionDurationSlots!,
+			auctionEndPrice: limitPrice,
+			auctionStartPrice,
 		});
 	}
 

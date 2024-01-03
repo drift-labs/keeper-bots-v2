@@ -117,6 +117,9 @@ botConfigs:
     # max slippage (from oracle price) to incur allow when derisking
     maxSlippagePct: 0.005
 
+    # duration of jit auction for derisk orders
+    deriskAuctionDurationSlots: 100
+
     # what algo to use for derisking. Options are "market" or "twap"
     deriskAlgo: "market"
 
