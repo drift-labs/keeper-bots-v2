@@ -540,7 +540,7 @@ export class LiquidatorBot implements Bot {
 		return {
 			computeUnits: 1_400_000,
 			computeUnitsPrice: Math.min(
-				this.priorityFeeSubscriber.maxPriorityFee * 1.1,
+				Math.floor(this.priorityFeeSubscriber.maxPriorityFee),
 				MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 			),
 		};
