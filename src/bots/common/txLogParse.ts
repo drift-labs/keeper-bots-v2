@@ -57,7 +57,7 @@ export function isMakerBreachedMaintenanceMarginLog(
 	log: string
 ): string | null {
 	const regex =
-		/^maker \(([1-9A-HJ-NP-Za-km-z]+)\) breached (maintenance|fill) requirements.*$/;
+		/.*maker \(([1-9A-HJ-NP-Za-km-z]+)\) breached (maintenance|fill) requirements.*$/;
 	const match = log.match(regex);
 
 	return match ? match[1] : null;
