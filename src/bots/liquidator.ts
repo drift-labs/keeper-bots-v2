@@ -38,6 +38,7 @@ import {
 	PriorityFeeSubscriber,
 	QuoteResponse,
 	getLimitOrderParams,
+	PERCENTAGE_PRECISION,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -76,6 +77,7 @@ const errorCodesToSuppress = [
 	6010, // Error Number: 6010. Error Message: User Has No Position In Market.
 ];
 
+const BPS_PRECISION = 10000;
 const LIQUIDATE_THROTTLE_BACKOFF = 5000; // the time to wait before trying to liquidate a throttled user again
 const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 20_000; // cap the computeUnitPrice to pay per fill tx
 
@@ -326,6 +328,10 @@ export class LiquidatorBot implements Bot {
 		SERUM_LOOKUP_TABLE: PublicKey
 	) {
 		this.liquidatorConfig = config;
+		if (this.liquidatorConfig.maxSlippageBps === undefined) {
+			this.liquidatorConfig.maxSlippageBps =
+				this.liquidatorConfig.maxSlippagePct!;
+		}
 
 		this.liquidatorConfig.deriskAlgoPerp =
 			config.deriskAlgoPerp ?? config.deriskAlgo;
@@ -653,18 +659,37 @@ export class LiquidatorBot implements Bot {
 		return healthy;
 	}
 
+	/**
+	 * Calculates the worse price to execute at (used for auction end when derisking)
+	 * @param oracle for asset we trading
+	 * @param direction of trade
+	 * @returns
+	 */
 	private calculateOrderLimitPrice(
 		oracle: OraclePriceData,
 		direction: PositionDirection
 	): BN {
-		const slippageBN = new BN(this.liquidatorConfig.maxSlippagePct! * 10000);
+		const slippageBN = new BN(
+			(this.liquidatorConfig.maxSlippageBps! / BPS_PRECISION) *
+				PERCENTAGE_PRECISION.toNumber()
+		);
 		if (isVariant(direction, 'long')) {
-			return oracle.price.mul(new BN(10000).add(slippageBN)).div(new BN(10000));
+			return oracle.price
+				.mul(PERCENTAGE_PRECISION.add(slippageBN))
+				.div(PERCENTAGE_PRECISION);
 		} else {
-			return oracle.price.mul(new BN(10000).sub(slippageBN)).div(new BN(10000));
+			return oracle.price
+				.mul(PERCENTAGE_PRECISION.sub(slippageBN))
+				.div(PERCENTAGE_PRECISION);
 		}
 	}
 
+	/**
+	 * Calcualtes the auctionStart price when derisking (the best price we want to execute at)
+	 * @param oracle for asset we trading
+	 * @param direction of trade
+	 * @returns
+	 */
 	private calculateDeriskAuctionStartPrice(
 		oracle: OraclePriceData,
 		direction: PositionDirection
@@ -1274,8 +1299,7 @@ export class LiquidatorBot implements Bot {
 				continue;
 			}
 
-			const slippageDenom = 10000;
-			const slippageBps = this.liquidatorConfig.maxSlippagePct! * slippageDenom;
+			const slippageBps = this.liquidatorConfig.maxSlippageBps! * BPS_PRECISION;
 			const jupQuote = await this.determineBestSpotSwapRoute(
 				position.marketIndex,
 				orderParams.direction,
