@@ -39,6 +39,8 @@ import {
 	QuoteResponse,
 	getLimitOrderParams,
 	PERCENTAGE_PRECISION,
+	DLOB,
+	calculateEstimatedPerpEntryPrice,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -674,7 +676,7 @@ export class LiquidatorBot implements Bot {
 	 * @returns
 	 */
 	private calculateOrderLimitPrice(
-		oracle: OraclePriceData,
+		price: BN,
 		direction: PositionDirection
 	): BN {
 		const slippageBN = new BN(
@@ -682,11 +684,11 @@ export class LiquidatorBot implements Bot {
 				PERCENTAGE_PRECISION.toNumber()
 		);
 		if (isVariant(direction, 'long')) {
-			return oracle.price
+			return price
 				.mul(PERCENTAGE_PRECISION.add(slippageBN))
 				.div(PERCENTAGE_PRECISION);
 		} else {
-			return oracle.price
+			return price
 				.mul(PERCENTAGE_PRECISION.sub(slippageBN))
 				.div(PERCENTAGE_PRECISION);
 		}
@@ -870,7 +872,8 @@ export class LiquidatorBot implements Bot {
 
 	private getOrderParamsForPerpDerisk(
 		subaccountId: number,
-		position: PerpPosition
+		position: PerpPosition,
+		dlob: DLOB
 	): OptionalOrderParams | undefined {
 		const nowSec = Math.floor(Date.now() / 1000);
 
@@ -946,11 +949,17 @@ export class LiquidatorBot implements Bot {
 			position.marketIndex
 		);
 		const direction = findDirectionToClose(position);
-		const limitPrice = this.calculateOrderLimitPrice(oracle, direction);
-		const auctionStartPrice = this.calculateDeriskAuctionStartPrice(
+		const { entryPrice, bestPrice } = calculateEstimatedPerpEntryPrice(
+			'base',
+			baseAssetAmount,
+			direction,
+			this.driftClient.getPerpMarketAccount(position.marketIndex)!,
 			oracle,
-			direction
+			dlob,
+			this.userMap.getSlot()
 		);
+		const limitPrice = this.calculateOrderLimitPrice(entryPrice, direction);
+		const auctionStartPrice = bestPrice;
 
 		return getLimitOrderParams({
 			direction,
@@ -964,7 +973,7 @@ export class LiquidatorBot implements Bot {
 		});
 	}
 
-	private async deriskPerpPositions(userAccount: UserAccount) {
+	private async deriskPerpPositions(userAccount: UserAccount, dlob: DLOB) {
 		for (const position of userAccount.perpPositions) {
 			const perpMarket = this.driftClient.getPerpMarketAccount(
 				position.marketIndex
@@ -976,7 +985,8 @@ export class LiquidatorBot implements Bot {
 
 				const orderParams = this.getOrderParamsForPerpDerisk(
 					userAccount.subAccountId,
-					position
+					position,
+					dlob
 				);
 				if (orderParams === undefined) {
 					continue;
@@ -1284,7 +1294,7 @@ export class LiquidatorBot implements Bot {
 		const oracle = this.driftClient.getOracleDataForSpotMarket(
 			position.marketIndex
 		);
-		const limitPrice = this.calculateOrderLimitPrice(oracle, direction);
+		const limitPrice = this.calculateOrderLimitPrice(oracle.price, direction);
 
 		return {
 			tokenAmount,
@@ -1332,7 +1342,7 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
-	private async deriskForSubaccount(subaccountId: number) {
+	private async deriskForSubaccount(subaccountId: number, dlob: DLOB) {
 		this.driftClient.switchActiveUser(subaccountId, this.driftClient.authority);
 		const userAccount = this.driftClient.getUserAccount();
 		if (!userAccount) {
@@ -1345,7 +1355,7 @@ export class LiquidatorBot implements Bot {
 		}
 
 		// need to await, otherwise driftClient.activeUserAccount will get rugged on next iter
-		await this.deriskPerpPositions(userAccount);
+		await this.deriskPerpPositions(userAccount, dlob);
 		await this.deriskSpotPositions(userAccount);
 	}
 
@@ -1372,9 +1382,10 @@ export class LiquidatorBot implements Bot {
 			return;
 		}
 
+		const dlob = await this.userMap.getDLOB(this.userMap.getSlot());
 		try {
 			for (const subAccountId of this.allSubaccounts) {
-				await this.deriskForSubaccount(subAccountId);
+				await this.deriskForSubaccount(subAccountId, dlob);
 			}
 		} finally {
 			this.releaseMutex(this.deriskMutex);
