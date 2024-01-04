@@ -41,6 +41,10 @@ import {
 	PERCENTAGE_PRECISION,
 	DLOB,
 	calculateEstimatedPerpEntryPrice,
+	deriveOracleAuctionParams,
+	getTriggerMarketOrderParams,
+	getOrderParams,
+	OrderType,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -959,17 +963,25 @@ export class LiquidatorBot implements Bot {
 			this.userMap.getSlot()
 		);
 		const limitPrice = this.calculateOrderLimitPrice(entryPrice, direction);
-		const auctionStartPrice = bestPrice;
+		const { auctionStartPrice, auctionEndPrice, oraclePriceOffset } =
+			deriveOracleAuctionParams({
+				direction,
+				oraclePrice: oracle.price,
+				auctionStartPrice: bestPrice,
+				auctionEndPrice: limitPrice,
+				limitPrice,
+			});
 
-		return getLimitOrderParams({
+		return getOrderParams({
+			orderType: OrderType.ORACLE,
 			direction,
 			baseAssetAmount,
 			reduceOnly: true,
 			marketIndex: position.marketIndex,
-			price: limitPrice,
 			auctionDuration: this.liquidatorConfig.deriskAuctionDurationSlots!,
-			auctionEndPrice: limitPrice,
 			auctionStartPrice,
+			auctionEndPrice,
+			oraclePriceOffset,
 		});
 	}
 
