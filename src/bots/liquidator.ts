@@ -42,7 +42,6 @@ import {
 	DLOB,
 	calculateEstimatedPerpEntryPrice,
 	deriveOracleAuctionParams,
-	getTriggerMarketOrderParams,
 	getOrderParams,
 	OrderType,
 } from '@drift-labs/sdk';
@@ -337,6 +336,9 @@ export class LiquidatorBot implements Bot {
 		if (this.liquidatorConfig.maxSlippageBps === undefined) {
 			this.liquidatorConfig.maxSlippageBps =
 				this.liquidatorConfig.maxSlippagePct!;
+		}
+		if (this.liquidatorConfig.deriskAuctionDurationSlots === undefined) {
+			this.liquidatorConfig.deriskAuctionDurationSlots = 100;
 		}
 
 		this.liquidatorConfig.deriskAlgoPerp =
@@ -1040,9 +1042,8 @@ export class LiquidatorBot implements Bot {
 						);
 					})
 					.catch((e) => {
-						logger.error(e);
 						logger.error(
-							`Error trying to close perp position for market ${position.marketIndex}`
+							`Error trying to close perp position for market ${position.marketIndex}: ${e.message}\n${e.stack}`
 						);
 						webhookMessage(
 							`[${this.name}]: :x: error in placePerpOrder\n:${
