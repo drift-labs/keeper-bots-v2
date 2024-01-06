@@ -102,7 +102,7 @@ const FILL_ORDER_BACKOFF = 2000; // the time to wait before trying to a node in 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 20_000; // cap the computeUnitPrice to pay per fill tx
-const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
+export const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
 
 const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
