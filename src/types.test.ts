@@ -1,6 +1,8 @@
 import { expect } from 'chai';
 import { BN, isVariant } from '@drift-labs/sdk';
 import { TwapExecutionProgress } from './types';
+import { selectMakers } from './makerSelection';
+import { MAX_MAKERS_PER_FILL } from './bots/filler';
 
 describe('TwapExecutionProgress', () => {
 	const startTs = 1000;
@@ -263,5 +265,63 @@ describe('TwapExecutionProgress', () => {
 		slice = twap.getExecutionSlice(startTs + 400);
 		twap.updateExecution(startTs + 400);
 		expect(slice.toString()).to.be.equal(new BN(0).toString());
+	});
+});
+
+describe('selectMakers', () => {
+	let originalRandom: { (): number; (): number };
+
+	beforeEach(() => {
+		// Mock Math.random
+		let seed = 12345;
+		originalRandom = Math.random;
+		Math.random = () => {
+			const x = Math.sin(seed++) * 10000;
+			return x - Math.floor(x);
+		};
+	});
+
+	afterEach(() => {
+		// Restore original Math.random
+		Math.random = originalRandom;
+	});
+
+	it('more than 6', function () {
+		// Mock DLOBNode and Order
+		const mockOrder = (filledAmount: number, orderId: number) => ({
+			orderId,
+			baseAssetAmount: new BN(100),
+			baseAssetAmountFilled: new BN(filledAmount),
+		});
+
+		const mockDLOBNode = (filledAmount: number, orderId: number) => ({
+			order: mockOrder(filledAmount, orderId),
+			// Include other necessary properties of DLOBNode if needed
+		});
+
+		const makers = [
+			mockDLOBNode(10, 0),
+			mockDLOBNode(20, 1),
+			mockDLOBNode(30, 2),
+			mockDLOBNode(40, 3),
+			mockDLOBNode(50, 4),
+			mockDLOBNode(60, 5),
+			mockDLOBNode(70, 6),
+			mockDLOBNode(80, 7),
+			mockDLOBNode(90, 8),
+		];
+
+		// @ts-ignore
+		const selectedMakers = selectMakers(makers);
+
+		expect(selectedMakers).to.be.an('array');
+		expect(selectedMakers.length).to.be.equal(MAX_MAKERS_PER_FILL);
+
+		expect(selectedMakers[0].order!.orderId).to.be.equal(1);
+		expect(selectedMakers[1].order!.orderId).to.be.equal(2);
+		expect(selectedMakers[2].order!.orderId).to.be.equal(6);
+		expect(selectedMakers[3].order!.orderId).to.be.equal(3);
+		expect(selectedMakers[4].order!.orderId).to.be.equal(0);
+		expect(selectedMakers[5].order!.orderId).to.be.equal(5);
 	});
 });
