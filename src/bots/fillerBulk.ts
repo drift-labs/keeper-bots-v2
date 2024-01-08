@@ -10,10 +10,11 @@ import {
 	PositionDirection,
 	calculateMaxBaseAssetAmountFillable,
 	calculateUpdatedAMM,
+	ZERO,
 } from '@drift-labs/sdk';
 
 import { FillerLiteBot } from './fillerLite';
-import {logger} from "../logger";
+import { logger } from '../logger';
 
 const MAX_NUM_MAKERS = 6;
 
@@ -67,7 +68,7 @@ export class FillerBulkBot extends FillerLiteBot {
 			PositionDirection.SHORT
 		).gte(market.amm.minOrderSize);
 
-		const fillSlot = this.orderSubscriber.getSlot();
+		const fillSlot = this.getMaxSlot();
 
 		let bestBid = dlob.getBestBid(
 			marketIndex,
@@ -78,22 +79,6 @@ export class FillerBulkBot extends FillerLiteBot {
 		// only consider vamm if it has liquidity
 		if (vammCanFillShorts) {
 			bestBid = bestBid ? BN.max(bestBid, vBid) : vBid;
-		}
-
-		const seenBidMaker = new Set<string>();
-		const restingBids = dlob.getRestingLimitBids(
-			marketIndex,
-			fillSlot,
-			MarketType.PERP,
-			oraclePriceData
-		);
-		const topRestingBids = [];
-		for (const restingBid of restingBids) {
-			topRestingBids.push(restingBid);
-			seenBidMaker.add(restingBid.userAccount?.toString() || '');
-			if (seenBidMaker.size == MAX_NUM_MAKERS) {
-				break;
-			}
 		}
 
 		let bestAsk = dlob.getBestAsk(
@@ -107,22 +92,6 @@ export class FillerBulkBot extends FillerLiteBot {
 			bestAsk = bestAsk ? BN.min(bestAsk, vAsk) : vAsk;
 		}
 
-		const seenAskMaker = new Set<string>();
-		const restingAsks = dlob.getRestingLimitAsks(
-			marketIndex,
-			fillSlot,
-			MarketType.PERP,
-			oraclePriceData
-		);
-		const topRestingAsks = [];
-		for (const restingAsk of restingAsks) {
-			topRestingAsks.push(restingAsk);
-			seenAskMaker.add(restingAsk.userAccount?.toString() || '');
-			if (seenAskMaker.size == MAX_NUM_MAKERS) {
-				break;
-			}
-		}
-
 		if (bestAsk) {
 			const takingBidsGenerator = dlob.getTakingBids(
 				marketIndex,
@@ -134,11 +103,39 @@ export class FillerBulkBot extends FillerLiteBot {
 			for (const takingBid of takingBidsGenerator) {
 				const takingBidPrice = takingBid.getPrice(oraclePriceData, fillSlot);
 				if (!takingBidPrice || takingBidPrice.gte(bestAsk)) {
+					const makerNodes = [];
+					const makersSeens = new Set<string>();
+					let takerBaseAmountUnfilled = takingBid.order!.baseAssetAmount.sub(
+						takingBid.order!.baseAssetAmountFilled
+					);
+					const restingAsks = dlob.getRestingLimitAsks(
+						marketIndex,
+						fillSlot,
+						MarketType.PERP,
+						oraclePriceData
+					);
+
+					for (const restingAsk of restingAsks) {
+						const makerBaseAmountUnfilled =
+							restingAsk.order!.baseAssetAmount.sub(
+								restingAsk.order!.baseAssetAmountFilled
+							);
+						makerNodes.push(restingAsk);
+						makersSeens.add(restingAsk.userAccount!);
+						takerBaseAmountUnfilled = takerBaseAmountUnfilled.sub(
+							makerBaseAmountUnfilled
+						);
+						if (
+							makersSeens.size >= MAX_NUM_MAKERS &&
+							takerBaseAmountUnfilled.lte(ZERO)
+						) {
+							break;
+						}
+					}
+
 					nodesToFill.push({
 						node: takingBid,
-						makerNodes: topRestingAsks.filter(
-							(node) => !node.userAccount!.equals(takingBid.userAccount!)
-						),
+						makerNodes,
 					});
 				}
 			}
@@ -157,15 +154,43 @@ export class FillerBulkBot extends FillerLiteBot {
 			for (const takingAsk of takingAsksGenerator) {
 				const takingAskPrice = takingAsk.getPrice(oraclePriceData, fillSlot);
 				if (!takingAskPrice || takingAskPrice.lte(bestBid)) {
+					const makerNodes = [];
+					const makersSeens = new Set<string>();
+					let takerBaseAmountUnfilled = takingAsk.order!.baseAssetAmount.sub(
+						takingAsk.order!.baseAssetAmountFilled
+					);
+					const restingBids = dlob.getRestingLimitBids(
+						marketIndex,
+						fillSlot,
+						MarketType.PERP,
+						oraclePriceData
+					);
+
+					for (const restingBid of restingBids) {
+						const makerBaseAmountUnfilled =
+							restingBid.order!.baseAssetAmount.sub(
+								restingBid.order!.baseAssetAmountFilled
+							);
+						makerNodes.push(restingBid);
+						makersSeens.add(restingBid.userAccount!);
+						takerBaseAmountUnfilled = takerBaseAmountUnfilled.sub(
+							makerBaseAmountUnfilled
+						);
+						if (
+							makersSeens.size >= MAX_NUM_MAKERS &&
+							takerBaseAmountUnfilled.lte(ZERO)
+						) {
+							break;
+						}
+					}
+
 					nodesToFill.push({
 						node: takingAsk,
-						makerNodes: topRestingBids.filter(
-							(node) => !node.userAccount!.equals(takingAsk.userAccount!)
-						),
+						makerNodes,
 					});
 				}
 			}
-		}  else {
+		} else {
 			logger.info(`No best bid for ${marketIndex.toString()}`);
 		}
 
