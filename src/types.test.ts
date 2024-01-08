@@ -299,29 +299,32 @@ describe('selectMakers', () => {
 			// Include other necessary properties of DLOBNode if needed
 		});
 
-		const makers = [
-			mockDLOBNode(10, 0),
-			mockDLOBNode(20, 1),
-			mockDLOBNode(30, 2),
-			mockDLOBNode(40, 3),
-			mockDLOBNode(50, 4),
-			mockDLOBNode(60, 5),
-			mockDLOBNode(70, 6),
-			mockDLOBNode(80, 7),
-			mockDLOBNode(90, 8),
-		];
+		const makerNodeMap = new Map([
+			['0', [mockDLOBNode(10, 0)]],
+			['1', [mockDLOBNode(20, 1)]],
+			['2', [mockDLOBNode(30, 2)]],
+			['3', [mockDLOBNode(40, 3)]],
+			['4', [mockDLOBNode(50, 4)]],
+			['5', [mockDLOBNode(60, 5)]],
+			['6', [mockDLOBNode(70, 6)]],
+			['7', [mockDLOBNode(80, 7)]],
+			['8', [mockDLOBNode(90, 8)]],
+		]);
 
 		// @ts-ignore
-		const selectedMakers = selectMakers(makers);
+		const selectedMakers = selectMakers(makerNodeMap);
 
-		expect(selectedMakers).to.be.an('array');
-		expect(selectedMakers.length).to.be.equal(MAX_MAKERS_PER_FILL);
+		expect(selectedMakers).to.not.be.undefined;
+		expect(selectedMakers.size).to.be.equal(MAX_MAKERS_PER_FILL);
 
-		expect(selectedMakers[0].order!.orderId).to.be.equal(1);
-		expect(selectedMakers[1].order!.orderId).to.be.equal(2);
-		expect(selectedMakers[2].order!.orderId).to.be.equal(6);
-		expect(selectedMakers[3].order!.orderId).to.be.equal(3);
-		expect(selectedMakers[4].order!.orderId).to.be.equal(0);
-		expect(selectedMakers[5].order!.orderId).to.be.equal(5);
+		expect(selectedMakers.get('0')).to.not.be.undefined;
+		expect(selectedMakers.get('1')).to.not.be.undefined;
+		expect(selectedMakers.get('2')).to.not.be.undefined;
+		expect(selectedMakers.get('3')).to.not.be.undefined;
+		expect(selectedMakers.get('4')).to.be.undefined;
+		expect(selectedMakers.get('5')).to.not.be.undefined;
+		expect(selectedMakers.get('6')).to.not.be.undefined;
+		expect(selectedMakers.get('7')).to.be.undefined;
+		expect(selectedMakers.get('8')).to.be.undefined;
 	});
 });

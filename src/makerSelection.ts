@@ -1,44 +1,40 @@
-import {
-	BN,
-	convertToNumber,
-	divCeil,
-	DLOBNode,
-	ZERO,
-} from '@drift-labs/sdk';
-import { MAX_MAKERS_PER_FILL } from './bots/filler';
+import { BN, convertToNumber, divCeil, DLOBNode, ZERO } from '@drift-labs/sdk';
+import { MakerNodeMap, MAX_MAKERS_PER_FILL } from './bots/filler';
 
 const PROBABILITY_PRECISION = new BN(1000);
 
-export function selectMakers(makerNodes: DLOBNode[]): DLOBNode[] {
-	const selectedMakers = [];
+export function selectMakers(makerNodeMap: MakerNodeMap): MakerNodeMap {
+	const selectedMakers: MakerNodeMap = new Map();
 
-	while (selectedMakers.length < MAX_MAKERS_PER_FILL && makerNodes.length > 0) {
-		const makerIndex = selectMakerIndex(makerNodes);
-		if (makerIndex === -1) {
+	while (selectedMakers.size < MAX_MAKERS_PER_FILL && makerNodeMap.size > 0) {
+		const maker = selectMaker(makerNodeMap);
+		if (maker === undefined) {
 			break;
 		}
-		const maker = makerNodes[makerIndex];
-		selectedMakers.push(maker);
-		makerNodes.splice(makerIndex, 1);
+		const makerNodes = makerNodeMap.get(maker)!;
+		selectedMakers.set(maker, makerNodes);
+		makerNodeMap.delete(maker);
 	}
 
 	return selectedMakers;
 }
 
-function selectMakerIndex(makers: DLOBNode[]): number {
-	const probabilities = [];
-	const totalLiquidity = makers.reduce(
-		(sum, maker) =>
-			sum.add(
-				maker.order!.baseAssetAmount.sub(maker.order!.baseAssetAmountFilled)
-			),
-		ZERO
-	);
-	for (const maker of makers) {
-		probabilities.push(getProbability(maker, totalLiquidity));
+function selectMaker(makerNodeMap: MakerNodeMap): string | undefined {
+	if (makerNodeMap.size === 0) {
+		return undefined;
 	}
 
-	let makerIndex = -1;
+	let totalLiquidity = ZERO;
+	for (const [_, dlobNodes] of makerNodeMap) {
+		totalLiquidity = totalLiquidity.add(getMakerLiquidity(dlobNodes));
+	}
+
+	const probabilities = [];
+	for (const [_, dlobNodes] of makerNodeMap) {
+		probabilities.push(getProbability(dlobNodes, totalLiquidity));
+	}
+
+	let makerIndex = 0;
 	const random = Math.random();
 	let sum = 0;
 	for (let i = 0; i < probabilities.length; i++) {
@@ -49,17 +45,25 @@ function selectMakerIndex(makers: DLOBNode[]): number {
 		}
 	}
 
-	return makerIndex;
+	return Array.from(makerNodeMap.keys())[makerIndex];
 }
 
-function getProbability(maker: DLOBNode, totalLiquidity: BN): number {
+function getProbability(dlobNodes: DLOBNode[], totalLiquidity: BN): number {
+	const makerLiquidity = getMakerLiquidity(dlobNodes);
 	return convertToNumber(
-		divCeil(
-			maker
-				.order!.baseAssetAmount.sub(maker.order!.baseAssetAmountFilled)
-				.mul(PROBABILITY_PRECISION),
-			totalLiquidity
-		),
+		divCeil(makerLiquidity.mul(PROBABILITY_PRECISION), totalLiquidity),
 		PROBABILITY_PRECISION
+	);
+}
+
+function getMakerLiquidity(dlobNodes: DLOBNode[]): BN {
+	return dlobNodes.reduce(
+		(acc, dlobNode) =>
+			acc.add(
+				dlobNode.order!.baseAssetAmount.sub(
+					dlobNode.order!.baseAssetAmountFilled
+				)
+			),
+		ZERO
 	);
 }
