@@ -136,4 +136,10 @@ export class FillerLiteBot extends FillerBot {
 			this.orderSubscriber!.getSlot()
 		);
 	}
+
+	protected logSlots() {
+		logger.info(
+			`slotSubscriber slot: ${this.slotSubscriber.getSlot()}, orderSubscriber slot: ${this.orderSubscriber.getSlot()}`
+		);
+	}
 }

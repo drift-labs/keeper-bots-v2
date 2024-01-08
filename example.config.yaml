@@ -114,8 +114,16 @@ botConfigs:
     spotSubAccountConfig:
       0: # subaccount 0 will watch all spot markets
 
-    # max slippage (from oracle price) to incur allow when derisking
-    maxSlippagePct: 0.05
+    # deprecated (bad naming): use maxSlippageBps
+    maxSlippagePct: 50
+
+    # Max slippage to incur allow when derisking (in bps).
+    # This is used to calculate the auction end price (worse price) when derisking
+    # and also passed into jupiter when doing swaps.
+    maxSlippageBps: 50
+
+    # duration of jit auction for derisk orders
+    deriskAuctionDurationSlots: 100
 
     # what algo to use for derisking. Options are "market" or "twap"
     deriskAlgo: "market"

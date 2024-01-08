@@ -36,8 +36,15 @@ export type LiquidatorConfig = BaseBotConfig & {
 	spotMarketIndicies?: Array<number>;
 	perpSubAccountConfig?: SubaccountConfig;
 	spotSubAccountConfig?: SubaccountConfig;
+
+	// deprecated: use maxSlippageBps (misnamed)
 	maxSlippagePct?: number;
+	maxSlippageBps?: number;
+
+	deriskAuctionDurationSlots?: number;
 	deriskAlgo?: OrderExecutionAlgoType;
+	deriskAlgoSpot?: OrderExecutionAlgoType;
+	deriskAlgoPerp?: OrderExecutionAlgoType;
 	twapDurationSec?: number;
 	minDepositToLiq?: Map<number, number>;
 	excludedAccounts?: Set<string>;
@@ -260,7 +267,10 @@ export function loadConfigFromOpts(opts: any): Config {
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
 			spotMarketIndicies: loadCommaDelimitToArray(opts.spotMarketIndicies),
 			runOnce: opts.runOnce ?? false,
-			maxSlippagePct: opts.maxSlippagePct ?? 0.05,
+			// deprecated: use maxSlippageBps
+			maxSlippagePct: opts.maxSlippagePct ?? 50,
+			maxSlippageBps: opts.maxSlippageBps ?? 50,
+			deriskAuctionDurationSlots: opts.deriskAuctionDurationSlots ?? 100,
 			deriskAlgo: opts.deriskAlgo ?? OrderExecutionAlgoType.Market,
 			twapDurationSec: parseInt(opts.twapDurationSec ?? '300'),
 			notifyOnLiquidation: opts.notifyOnLiquidation ?? false,
