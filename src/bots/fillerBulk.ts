@@ -116,6 +116,23 @@ export class FillerBulkBot extends FillerLiteBot {
 					);
 
 					for (const restingAsk of restingAsks) {
+						// only want to keep adding makers past max num makers if the taker is still crossing
+						if (makersSeens.size >= MAX_NUM_MAKERS) {
+							const askPrice = restingAsk.getPrice(oraclePriceData, fillSlot)!;
+
+							if (takingBidPrice && takingBidPrice.lt(askPrice)) {
+								break;
+							}
+						}
+
+						// stop adding makers if all of taker size is filled and we have seen max num makers
+						if (
+							makersSeens.size >= MAX_NUM_MAKERS &&
+							takerBaseAmountUnfilled.lte(ZERO)
+						) {
+							break;
+						}
+
 						const makerBaseAmountUnfilled =
 							restingAsk.order!.baseAssetAmount.sub(
 								restingAsk.order!.baseAssetAmountFilled
@@ -125,12 +142,6 @@ export class FillerBulkBot extends FillerLiteBot {
 						takerBaseAmountUnfilled = takerBaseAmountUnfilled.sub(
 							makerBaseAmountUnfilled
 						);
-						if (
-							makersSeens.size >= MAX_NUM_MAKERS &&
-							takerBaseAmountUnfilled.lte(ZERO)
-						) {
-							break;
-						}
 					}
 
 					nodesToFill.push({
@@ -167,6 +178,23 @@ export class FillerBulkBot extends FillerLiteBot {
 					);
 
 					for (const restingBid of restingBids) {
+						// only want to keep adding makers past max num makers if the taker is still crossing
+						if (makersSeens.size >= MAX_NUM_MAKERS) {
+							const bidPrice = restingBid.getPrice(oraclePriceData, fillSlot)!;
+
+							if (takingAskPrice && takingAskPrice.gt(bidPrice)) {
+								break;
+							}
+						}
+
+						// stop adding makers if all of taker size is filled and we have seen max num makers
+						if (
+							makersSeens.size >= MAX_NUM_MAKERS &&
+							takerBaseAmountUnfilled.lte(ZERO)
+						) {
+							break;
+						}
+
 						const makerBaseAmountUnfilled =
 							restingBid.order!.baseAssetAmount.sub(
 								restingBid.order!.baseAssetAmountFilled
@@ -176,12 +204,6 @@ export class FillerBulkBot extends FillerLiteBot {
 						takerBaseAmountUnfilled = takerBaseAmountUnfilled.sub(
 							makerBaseAmountUnfilled
 						);
-						if (
-							makersSeens.size >= MAX_NUM_MAKERS &&
-							takerBaseAmountUnfilled.lte(ZERO)
-						) {
-							break;
-						}
 					}
 
 					nodesToFill.push({
@@ -192,17 +214,6 @@ export class FillerBulkBot extends FillerLiteBot {
 			}
 		} else {
 			logger.info(`No best bid for ${marketIndex.toString()}`);
-		}
-
-		const crossLimitOrderNodesToFill = dlob.findCrossingRestingLimitOrders(
-			marketIndex,
-			fillSlot,
-			MarketType.PERP,
-			oraclePriceData
-		);
-
-		for (const crossLimitOrderNodeToFill of crossLimitOrderNodesToFill) {
-			nodesToFill.push(crossLimitOrderNodeToFill);
 		}
 
 		return nodesToFill;
