@@ -55,6 +55,7 @@ export type LiquidatorConfig = BaseBotConfig & {
 export type BotConfigMap = {
 	filler?: FillerConfig;
 	fillerLite?: FillerConfig;
+	fillerBulk?: FillerConfig;
 	spotFiller?: FillerConfig;
 	trigger?: BaseBotConfig;
 	liquidator?: LiquidatorConfig;
@@ -229,6 +230,16 @@ export function loadConfigFromOpts(opts: any): Config {
 		config.botConfigs!.fillerLite = {
 			dryRun: opts.dryRun ?? false,
 			botId: process.env.BOT_ID ?? 'fillerLite',
+			fillerPollingInterval: 5000,
+			metricsPort: 9464,
+			runOnce: opts.runOnce ?? false,
+		};
+	}
+	if (opts.fillerBulk) {
+		config.enabledBots.push('fillerBulk');
+		config.botConfigs!.fillerBulk = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'fillerBulk',
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,

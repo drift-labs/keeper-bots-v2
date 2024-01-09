@@ -1438,7 +1438,7 @@ export class FillerBot implements Bot {
 
 	/**
 	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
-	 * @param node node with multiple makers
+	 * @param nodeToFill node with multiple makers
 	 */
 	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
 		const ixs = [

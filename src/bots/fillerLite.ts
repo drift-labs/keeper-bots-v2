@@ -21,7 +21,7 @@ import { FillerBot, SETTLE_POSITIVE_PNL_COOLDOWN_MS } from './filler';
 import { sleepMs } from '../utils';
 
 export class FillerLiteBot extends FillerBot {
-	private orderSubscriber: OrderSubscriber;
+	protected orderSubscriber: OrderSubscriber;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -58,7 +58,7 @@ export class FillerLiteBot extends FillerBot {
 			driftClient: this.driftClient,
 			subscriptionConfig: {
 				type: 'websocket',
-				skipInitialLoad: true,
+				skipInitialLoad: false,
 				resyncIntervalMs: 10_000,
 			},
 		});
