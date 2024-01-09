@@ -1405,10 +1405,8 @@ export class FillerBot implements Bot {
 						});
 				})
 				.catch(async (e) => {
-					console.error(e);
-					logger.error(
-						`Failed to send packed tx (error above) (fillTxId: ${fillTxId}):`
-					);
+					// console.error(e);
+					logger.error(`Failed to send packed tx (fillTxId: ${fillTxId}):`);
 					const simError = e as SendTransactionError;
 
 					if (simError.logs && simError.logs.length > 0) {
