@@ -91,6 +91,7 @@ import {
 	getNodeToTriggerSignature,
 	sleepMs,
 } from '../utils';
+import { selectMakers } from '../makerSelection';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
@@ -102,7 +103,7 @@ const FILL_ORDER_BACKOFF = 2000; // the time to wait before trying to a node in 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 20_000; // cap the computeUnitPrice to pay per fill tx
-const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
+export const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
 
 const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
@@ -185,6 +186,8 @@ function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
 	}
 	return msg;
 }
+
+export type MakerNodeMap = Map<string, DLOBNode[]>;
 
 export class FillerBot implements Bot {
 	public readonly name: string;
@@ -909,24 +912,32 @@ export class FillerBot implements Bot {
 	}> {
 		const makerInfos: Array<MakerInfo> = [];
 
-		// set to track whether maker account has already been included
-		const makersIncluded = new Set<string>();
 		if (nodeToFill.makerNodes.length > 0) {
+			let makerNodesMap: MakerNodeMap = new Map<string, DLOBNode[]>();
 			for (const makerNode of nodeToFill.makerNodes) {
 				if (this.isDLOBNodeThrottled(makerNode)) {
 					continue;
 				}
+
 				if (!makerNode.userAccount) {
 					continue;
 				}
 
-				const makerAccount = makerNode.userAccount;
-				if (makersIncluded.has(makerAccount)) {
-					continue;
+				if (makerNodesMap.has(makerNode.userAccount!)) {
+					makerNodesMap.get(makerNode.userAccount!)!.push(makerNode);
+				} else {
+					makerNodesMap.set(makerNode.userAccount!, [makerNode]);
 				}
-				if (makersIncluded.size >= MAX_MAKERS_PER_FILL) {
-					break;
-				}
+			}
+
+			if (makerNodesMap.size > MAX_MAKERS_PER_FILL) {
+				logger.info(`selecting from ${makerNodesMap.size} makers`);
+				makerNodesMap = selectMakers(makerNodesMap);
+				logger.info(`selected: ${Array.from(makerNodesMap.keys()).join(',')}`);
+			}
+
+			for (const [makerAccount, makerNodes] of makerNodesMap) {
+				const makerNode = makerNodes[0];
 
 				const makerUserAccount = await this.getUserAccountFromMap(makerAccount);
 				const makerAuthority = makerUserAccount.authority;
@@ -934,12 +945,11 @@ export class FillerBot implements Bot {
 					await this.userStatsMap!.mustGet(makerAuthority.toString())
 				).userStatsAccountPublicKey;
 				makerInfos.push({
-					maker: new PublicKey(makerNode.userAccount),
+					maker: new PublicKey(makerAccount),
 					makerUserAccount: makerUserAccount,
 					order: makerNode.order,
 					makerStats: makerUserStats,
 				});
-				makersIncluded.add(makerAccount);
 			}
 		}
 
