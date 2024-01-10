@@ -48,6 +48,7 @@ import {
 	AddressLookupTableAccount,
 	Keypair,
 	Connection,
+	VersionedTransaction,
 } from '@solana/web3.js';
 
 import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
@@ -104,6 +105,7 @@ const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to be
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 20_000; // cap the computeUnitPrice to pay per fill tx
 export const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
+const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana-labs/solana/issues/27241
 
 const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
@@ -176,10 +178,9 @@ function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
 			)}/${convertToNumber(
 				makerOrder.baseAssetAmount,
 				BASE_PRECISION
-			)} @ ${convertToNumber(
-				makerOrder.price,
-				PRICE_PRECISION
-			)} (orderType: ${getVariant(makerOrder.orderType)})\n`;
+			)} @ ${convertToNumber(makerOrder.price, PRICE_PRECISION)} (offset: ${
+				makerOrder.oraclePriceOffset / PRICE_PRECISION.toNumber()
+			}) (orderType: ${getVariant(makerOrder.orderType)})\n`;
 		}
 	} else {
 		msg += `  vAMM`;
@@ -752,6 +753,10 @@ export class FillerBot implements Bot {
 		this.throttledNodes.delete(signature);
 	}
 
+	protected setThrottledNode(signature: string) {
+		this.throttledNodes.set(signature, Date.now());
+	}
+
 	protected removeTriggeringNodes(node: NodeToTrigger) {
 		this.triggeringNodes.delete(getNodeToTriggerSignature(node));
 	}
@@ -1094,9 +1099,7 @@ export class FillerBot implements Bot {
 							filledNode.node.order!.orderId
 						}; does not exist (filled by someone else); ${log}`
 					);
-					this.clearThrottledNode(getNodeToFillSignature(filledNode));
-				} else {
-					logger.error(`Tried to fill node filled by someone else; ${log}`);
+					this.setThrottledNode(getNodeToFillSignature(filledNode));
 				}
 				errorThisFillIx = true;
 				continue;
@@ -1108,7 +1111,7 @@ export class FillerBot implements Bot {
 				logger.error(
 					`Throttling maker breached maintenance margin: ${makerBreachedMaintenanceMargin}`
 				);
-				this.throttledNodes.set(makerBreachedMaintenanceMargin, Date.now());
+				this.setThrottledNode(makerBreachedMaintenanceMargin);
 				this.driftClient
 					.forceCancelOrders(
 						new PublicKey(makerBreachedMaintenanceMargin),
@@ -1161,7 +1164,7 @@ export class FillerBot implements Bot {
 						filledNode.node.order!.orderId
 					}; (throttling ${takerNodeSignature} and force cancelling orders); ${log}`
 				);
-				this.throttledNodes.set(takerNodeSignature, Date.now());
+				this.setThrottledNode(takerNodeSignature);
 				errorThisFillIx = true;
 
 				this.driftClient
@@ -1217,7 +1220,7 @@ export class FillerBot implements Bot {
 					userAcc,
 					orderId
 				);
-				this.throttledNodes.set(extractedSig, Date.now());
+				this.setThrottledNode(extractedSig);
 
 				const filledNode = nodesFilled[ixIdx];
 				const assocNodeSig = getNodeToFillSignature(filledNode);
@@ -1278,7 +1281,7 @@ export class FillerBot implements Bot {
 
 	protected async sendFillTxThroughJito(
 		fillTxId: number,
-		ixs: Array<TransactionInstruction>
+		tx: VersionedTransaction
 	) {
 		const slotsUntilNextLeader = this.jitoLeaderNextSlot! - this.getMaxSlot();
 		logger.info(
@@ -1297,9 +1300,6 @@ export class FillerBot implements Bot {
 				'confirmed'
 			);
 
-		const tx = await this.driftClient.txSender.getVersionedTransaction(ixs, [
-			this.lookupTableAccount!,
-		]);
 		// @ts-ignore
 		tx.sign([this.driftClient.wallet.payer]);
 		// const signedTx = await this.driftClient.provider.wallet.signTransaction(tx);
@@ -1336,19 +1336,35 @@ export class FillerBot implements Bot {
 	protected async sendFillTx(
 		fillTxId: number,
 		nodesSent: Array<NodeToFill>,
-		ixs: Array<TransactionInstruction>
+		tx: VersionedTransaction
 	) {
 		let txResp: Promise<TxSigAndSlot> | undefined = undefined;
+		let estTxSize: number | undefined = undefined;
+		let txAccounts = 0;
+		let writeAccs = 0;
+		const accountMetas: any[] = [];
 		const txStart = Date.now();
 		if (this.jitoSearcherClient && this.jitoAuthKeypair) {
-			await this.sendFillTxThroughJito(fillTxId, ixs);
+			await this.sendFillTxThroughJito(fillTxId, tx);
 		} else {
-			const tx = await this.driftClient.txSender.getVersionedTransaction(
-				ixs,
-				[this.lookupTableAccount!],
-				[],
-				this.driftClient.opts
-			);
+			estTxSize = tx.message.serialize().length;
+			const acc = tx.message.getAccountKeys({
+				addressLookupTableAccounts: [this.lookupTableAccount!],
+			});
+			txAccounts = acc.length;
+			for (let i = 0; i < txAccounts; i++) {
+				const meta: any = {};
+				if (tx.message.isAccountWritable(i)) {
+					writeAccs++;
+					meta['writeable'] = true;
+				}
+				if (tx.message.isAccountSigner(i)) {
+					meta['signer'] = true;
+				}
+				meta['address'] = acc.get(i)!.toBase58();
+				accountMetas.push(meta);
+			}
+
 			txResp = this.driftClient.txSender.sendVersionedTransaction(
 				tx,
 				[],
@@ -1405,9 +1421,20 @@ export class FillerBot implements Bot {
 						});
 				})
 				.catch(async (e) => {
-					// console.error(e);
-					logger.error(`Failed to send packed tx (fillTxId: ${fillTxId}):`);
+					logger.error(
+						`Failed to send packed tx txAccountKeys: ${txAccounts} (${writeAccs} writeable) (fillTxId: ${fillTxId}):\n${e.message}\n${e.stack}`
+					);
 					const simError = e as SendTransactionError;
+
+					if (e.message.includes('too large:')) {
+						logger.error(
+							`[${this.name}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${e.message}`
+						);
+						webhookMessage(
+							`[${this.name}]: :boxing_glove: Tx too large (fillId: ${fillTxId}). ${e.message}`
+						);
+						return;
+					}
 
 					if (simError.logs && simError.logs.length > 0) {
 						const start = Date.now();
@@ -1456,7 +1483,7 @@ export class FillerBot implements Bot {
 			ComputeBudgetProgram.setComputeUnitPrice({
 				microLamports: Number(
 					Math.min(
-						Math.floor(this.priorityFeeSubscriber.maxPriorityFee * 1.2),
+						Math.floor(this.priorityFeeSubscriber.lastMaxStrategyResult),
 						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 					)
 				),
@@ -1481,27 +1508,62 @@ export class FillerBot implements Bot {
 				throw new Error('expected perp market type');
 			}
 
-			ixs.push(
-				await this.driftClient.getFillPerpOrderIx(
-					await getUserAccountPublicKey(
-						this.driftClient.program.programId,
-						takerUser.authority,
-						takerUser.subAccountId
-					),
-					takerUser,
-					nodeToFill.node.order!,
-					makerInfos,
-					referrerInfo
-				)
-			);
+			let makerInfosToUse = makerInfos;
+			const buildTxWithMakerInfos = async (
+				makers: MakerInfo[]
+			): Promise<VersionedTransaction> => {
+				const startBuildTx = Date.now();
+				ixs.push(
+					await this.driftClient.getFillPerpOrderIx(
+						await getUserAccountPublicKey(
+							this.driftClient.program.programId,
+							takerUser.authority,
+							takerUser.subAccountId
+						),
+						takerUser,
+						nodeToFill.node.order!,
+						makers,
+						referrerInfo
+					)
+				);
 
-			this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
+				this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
 
-			if (this.revertOnFailure) {
-				ixs.push(await this.driftClient.getRevertFillIx());
+				if (this.revertOnFailure) {
+					ixs.push(await this.driftClient.getRevertFillIx());
+				}
+				logger.info(
+					`(fillTxId: ${fillTxId}) buildTxWithMakerInfos took: ${
+						Date.now() - startBuildTx
+					}ms`
+				);
+				return this.driftClient.txSender.getVersionedTransaction(
+					ixs,
+					[this.lookupTableAccount!],
+					[],
+					this.driftClient.opts
+				);
+			};
+
+			let tx = await buildTxWithMakerInfos(makerInfosToUse);
+			let txAccounts = tx.message.getAccountKeys({
+				addressLookupTableAccounts: [this.lookupTableAccount!],
+			}).length;
+			let attempt = 0;
+			while (txAccounts > MAX_ACCOUNTS_PER_TX) {
+				logger.info(
+					`(fillTxId: ${fillTxId} attempt ${attempt++}) Too many accounts, remove 1 and try again (had ${
+						makerInfosToUse.length
+					} maker and ${txAccounts} accounts)`
+				);
+				makerInfosToUse = makerInfos.slice(0, makerInfos.length - 1);
+				tx = await buildTxWithMakerInfos(makerInfos);
+				txAccounts = tx.message.getAccountKeys({
+					addressLookupTableAccounts: [this.lookupTableAccount!],
+				}).length;
 			}
 
-			this.sendFillTx(fillTxId, [nodeToFill], ixs);
+			this.sendFillTx(fillTxId, [nodeToFill], tx);
 		} catch (e) {
 			if (e instanceof Error) {
 				logger.error(
@@ -1523,7 +1585,7 @@ export class FillerBot implements Bot {
 			ComputeBudgetProgram.setComputeUnitPrice({
 				microLamports: Number(
 					Math.min(
-						Math.floor(this.priorityFeeSubscriber.maxPriorityFee * 1.2),
+						Math.floor(this.priorityFeeSubscriber.lastMaxStrategyResult),
 						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 					)
 				),
@@ -1689,7 +1751,13 @@ export class FillerBot implements Bot {
 			ixs.push(await this.driftClient.getRevertFillIx());
 		}
 
-		this.sendFillTx(fillTxId, nodesSent, ixs);
+		const tx = await this.driftClient.txSender.getVersionedTransaction(
+			ixs,
+			[this.lookupTableAccount!],
+			[],
+			this.driftClient.opts
+		);
+		this.sendFillTx(fillTxId, nodesSent, tx);
 
 		return nodesSent.length;
 	}

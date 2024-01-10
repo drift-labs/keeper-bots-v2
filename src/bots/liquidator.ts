@@ -576,7 +576,7 @@ export class LiquidatorBot implements Bot {
 		return {
 			computeUnits: 1_400_000,
 			computeUnitsPrice: Math.min(
-				Math.floor(this.priorityFeeSubscriber.maxPriorityFee),
+				Math.floor(this.priorityFeeSubscriber.lastMaxStrategyResult),
 				MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 			),
 		};
@@ -855,7 +855,7 @@ export class LiquidatorBot implements Bot {
 			swapIx.ixs.unshift(
 				ComputeBudgetProgram.setComputeUnitPrice({
 					microLamports: Math.min(
-						Math.floor(this.priorityFeeSubscriber!.maxPriorityFee),
+						Math.floor(this.priorityFeeSubscriber!.lastMaxStrategyResult),
 						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 					),
 				})

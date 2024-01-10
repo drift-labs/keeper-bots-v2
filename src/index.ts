@@ -808,7 +808,9 @@ async function checkUserExists(
 	wallet: Wallet
 ) {
 	if (!(await driftClient.getUser().exists())) {
-		logger.error(`User for ${wallet.publicKey} does not exist`);
+		logger.error(
+			`User for ${wallet.publicKey} does not exist (subAccountId: ${driftClient.activeSubAccountId})`
+		);
 		if (config.global.initUser) {
 			logger.info(`Creating User for ${wallet.publicKey}`);
 			const [txSig] = await driftClient.initializeUserAccount();

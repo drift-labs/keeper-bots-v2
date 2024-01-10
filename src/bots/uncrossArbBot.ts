@@ -499,7 +499,9 @@ export class UncrossArbBot implements Bot {
 						}
 						try {
 							const fee = Number(
-								Math.floor(this.priorityFeeSubscriber.avgPriorityFee * 1.1 || 1)
+								Math.floor(
+									this.priorityFeeSubscriber.lastAvgStrategyResult * 1.1 || 1
+								)
 							);
 							const txResult =
 								await this.driftClient.txSender.sendVersionedTransaction(
