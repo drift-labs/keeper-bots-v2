@@ -68,6 +68,7 @@ import { FillerLiteBot } from './bots/fillerLite';
 import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
 import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 import { UncrossArbBot } from './bots/uncrossArbBot';
+import { FillerBulkBot } from './bots/fillerBulk';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -83,6 +84,7 @@ program
 	)
 	.option('--filler', 'Enable filler bot')
 	.option('--filler-lite', 'Enable filler lite bot')
+	.option('--filler-bulk', 'Enable filler bulk bot')
 	.option('--spot-filler', 'Enable spot filler bot')
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
@@ -453,6 +455,28 @@ const runBot = async () => {
 		);
 	}
 
+	if (configHasBot(config, 'fillerBulk')) {
+		needCheckDriftUser = true;
+		logger.info(`Starting filler bulk bot`);
+		bots.push(
+			new FillerBulkBot(
+				slotSubscriber,
+				driftClient,
+				{
+					rpcEndpoint: endpoint,
+					commit: commitHash,
+					driftEnv: config.global.driftEnv!,
+					driftPid: driftPublicKey.toBase58(),
+					walletAuthority: wallet.publicKey.toBase58(),
+				},
+				config.botConfigs!.fillerBulk!,
+				jitoSearcherClient,
+				jitoAuthKeypair,
+				keypair
+			)
+		);
+	}
+
 	if (configHasBot(config, 'spotFiller')) {
 		needCheckDriftUser = true;
 		// to avoid long startup, spotFiller will fetch userAccounts as needed and build the map over time
@@ -784,7 +808,9 @@ async function checkUserExists(
 	wallet: Wallet
 ) {
 	if (!(await driftClient.getUser().exists())) {
-		logger.error(`User for ${wallet.publicKey} does not exist`);
+		logger.error(
+			`User for ${wallet.publicKey} does not exist (subAccountId: ${driftClient.activeSubAccountId})`
+		);
 		if (config.global.initUser) {
 			logger.info(`Creating User for ${wallet.publicKey}`);
 			const [txSig] = await driftClient.initializeUserAccount();

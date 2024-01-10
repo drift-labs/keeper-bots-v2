@@ -576,7 +576,7 @@ export class LiquidatorBot implements Bot {
 		return {
 			computeUnits: 1_400_000,
 			computeUnitsPrice: Math.min(
-				Math.floor(this.priorityFeeSubscriber.maxPriorityFee),
+				Math.floor(this.priorityFeeSubscriber.lastMaxStrategyResult),
 				MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 			),
 		};
@@ -855,7 +855,7 @@ export class LiquidatorBot implements Bot {
 			swapIx.ixs.unshift(
 				ComputeBudgetProgram.setComputeUnitPrice({
 					microLamports: Math.min(
-						Math.floor(this.priorityFeeSubscriber!.maxPriorityFee),
+						Math.floor(this.priorityFeeSubscriber!.lastMaxStrategyResult),
 						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 					),
 				})
@@ -957,14 +957,14 @@ export class LiquidatorBot implements Bot {
 		// check if open orders already net out with current position before placing new order
 		if (baseAssetAmount.gt(ZERO) && positionPlusOpenOrders.lte(ZERO)) {
 			logger.info(
-				`position already netted out on subaccount ${subaccountId} for market ${position.marketIndex}, skipping`
+				`already have open orders on subaccount ${subaccountId} for market ${position.marketIndex}, skipping closing`
 			);
 			return undefined;
 		}
 
 		if (baseAssetAmount.lt(ZERO) && positionPlusOpenOrders.gte(ZERO)) {
 			logger.info(
-				`position already netted out on subaccount ${subaccountId} for market ${position.marketIndex}, skipping`
+				`already have open orders on subaccount ${subaccountId} for market ${position.marketIndex}, skipping`
 			);
 			return undefined;
 		}
@@ -983,15 +983,26 @@ export class LiquidatorBot implements Bot {
 			position.marketIndex
 		);
 		const direction = findDirectionToClose(position);
-		const { entryPrice, bestPrice } = calculateEstimatedPerpEntryPrice(
-			'base',
-			baseAssetAmount,
-			direction,
-			this.driftClient.getPerpMarketAccount(position.marketIndex)!,
-			oracle,
-			dlob,
-			this.userMap.getSlot()
-		);
+		let entryPrice;
+		let bestPrice;
+		try {
+			({ entryPrice, bestPrice } = calculateEstimatedPerpEntryPrice(
+				'base',
+				baseAssetAmount.abs(),
+				direction,
+				this.driftClient.getPerpMarketAccount(position.marketIndex)!,
+				oracle,
+				dlob,
+				this.userMap.getSlot()
+			));
+		} catch (e) {
+			logger.error(
+				`Failed to calculate estimated perp entry price on market: ${
+					position.marketIndex
+				}, amt: ${baseAssetAmount.toString()}, ${getVariant(direction)}`
+			);
+			throw e;
+		}
 		const limitPrice = this.calculateOrderLimitPrice(entryPrice, direction);
 		const { auctionStartPrice, auctionEndPrice, oraclePriceOffset } =
 			deriveOracleAuctionParams({

@@ -507,7 +507,7 @@ export class UserPnlSettlerBot implements Bot {
 		let success = false;
 		logger.info(
 			`Using maxPriorityFee: ${
-				this.priorityFeeSubscriber!.maxPriorityFee
+				this.priorityFeeSubscriber!.lastMaxStrategyResult
 			} (clamp to ${MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS})`
 		);
 		try {
@@ -517,7 +517,7 @@ export class UserPnlSettlerBot implements Bot {
 				}),
 				ComputeBudgetProgram.setComputeUnitPrice({
 					microLamports: Math.min(
-						this.priorityFeeSubscriber!.maxPriorityFee,
+						this.priorityFeeSubscriber!.lastMaxStrategyResult,
 						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 					),
 				}),

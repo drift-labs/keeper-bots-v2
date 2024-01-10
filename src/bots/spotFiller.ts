@@ -1143,7 +1143,7 @@ export class SpotFillerBot implements Bot {
 			ComputeBudgetProgram.setComputeUnitPrice({
 				microLamports: Number(
 					Math.min(
-						Math.floor(this.priorityFeeSubscriber.maxPriorityFee * 1.2),
+						Math.floor(this.priorityFeeSubscriber.lastMaxStrategyResult),
 						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
 					)
 				),
