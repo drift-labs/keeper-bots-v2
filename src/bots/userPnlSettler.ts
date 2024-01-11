@@ -176,6 +176,7 @@ export class UserPnlSettlerBot implements Bot {
 	}
 
 	private async trySettlePnl() {
+		const start = Date.now();
 		try {
 			const perpMarketAndOracleData: {
 				[marketIndex: number]: {
@@ -465,7 +466,7 @@ export class UserPnlSettlerBot implements Bot {
 				}
 			}
 		} finally {
-			logger.info('Settle PNLs finished');
+			logger.info(`Settle PNLs finished in ${Date.now() - start}ms`);
 			await this.watchdogTimerMutex.runExclusive(async () => {
 				this.watchdogTimerLastPatTime = Date.now();
 			});
