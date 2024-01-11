@@ -1421,17 +1421,19 @@ export class FillerBot implements Bot {
 						});
 				})
 				.catch(async (e) => {
-					logger.error(
-						`Failed to send packed tx txAccountKeys: ${txAccounts} (${writeAccs} writeable) (fillTxId: ${fillTxId}):\n${e.message}\n${e.stack}`
-					);
 					const simError = e as SendTransactionError;
+					logger.error(
+						`Failed to send packed tx txAccountKeys: ${txAccounts} (${writeAccs} writeable) (fillTxId: ${fillTxId}):\n${
+							e.message
+						}\n${e.stack}\n${simError.logs ? simError.logs.join('\n') : ''}`
+					);
 
 					if (e.message.includes('too large:')) {
 						logger.error(
-							`[${this.name}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${e.message}`
+							`[${this.name}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${e.message}\n${accountMetas}`
 						);
 						webhookMessage(
-							`[${this.name}]: :boxing_glove: Tx too large (fillId: ${fillTxId}). ${e.message}`
+							`[${this.name}]: :boxing_glove: Tx too large (fillId: ${fillTxId}). ${e.message}\n${accountMetas}`
 						);
 						return;
 					}
