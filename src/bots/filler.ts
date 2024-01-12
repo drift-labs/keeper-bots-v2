@@ -1430,10 +1430,18 @@ export class FillerBot implements Bot {
 
 					if (e.message.includes('too large:')) {
 						logger.error(
-							`[${this.name}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${e.message}\n${accountMetas}`
+							`[${
+								this.name
+							}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${
+								e.message
+							}\n${JSON.stringify(accountMetas)}`
 						);
 						webhookMessage(
-							`[${this.name}]: :boxing_glove: Tx too large (fillId: ${fillTxId}). ${e.message}\n${accountMetas}`
+							`[${
+								this.name
+							}]: :boxing_glove: Tx too large (fillId: ${fillTxId}). ${
+								e.message
+							}\n${JSON.stringify(accountMetas)}`
 						);
 						return;
 					}
