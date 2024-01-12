@@ -1566,8 +1566,8 @@ export class FillerBot implements Bot {
 						makerInfosToUse.length
 					} maker and ${txAccounts} accounts)`
 				);
-				makerInfosToUse = makerInfos.slice(0, makerInfos.length - 1);
-				tx = await buildTxWithMakerInfos(makerInfos);
+				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
+				tx = await buildTxWithMakerInfos(makerInfosToUse);
 				txAccounts = tx.message.getAccountKeys({
 					addressLookupTableAccounts: [this.lookupTableAccount!],
 				}).length;
