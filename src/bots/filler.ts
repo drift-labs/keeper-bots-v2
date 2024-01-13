@@ -1562,7 +1562,7 @@ export class FillerBot implements Bot {
 				addressLookupTableAccounts: [this.lookupTableAccount!],
 			}).length;
 			let attempt = 0;
-			while (txAccounts > MAX_ACCOUNTS_PER_TX) {
+			while (txAccounts > MAX_ACCOUNTS_PER_TX && makerInfosToUse.length > 0) {
 				logger.info(
 					`(fillTxId: ${fillTxId} attempt ${attempt++}) Too many accounts, remove 1 and try again (had ${
 						makerInfosToUse.length
@@ -1575,6 +1575,12 @@ export class FillerBot implements Bot {
 				}).length;
 			}
 
+			if (makerInfosToUse.length === 0) {
+				logger.error(
+					`No makerInfos left to use for multi maker perp node (fillTxId: ${fillTxId})`
+				);
+				return;
+			}
 			this.sendFillTx(fillTxId, [nodeToFill], tx);
 		} catch (e) {
 			if (e instanceof Error) {
