@@ -1452,7 +1452,9 @@ export class FillerBot implements Bot {
 						logger.error(
 							`Failed to send tx, sim error tx logs took: ${
 								Date.now() - start
-							}ms (fillTxId: ${fillTxId})`
+							}ms (fillTxId: ${fillTxId}) sim logs:\n${
+								simError.logs ? simError.logs.join('\n') : ''
+							}\n${e.stack || e}`
 						);
 
 						const errorCode = getErrorCode(e);
