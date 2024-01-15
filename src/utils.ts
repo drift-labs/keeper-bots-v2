@@ -321,9 +321,21 @@ export function isSetComputeUnitsIx(ix: TransactionInstruction): boolean {
 	// Compute budget program discriminator is first byte
 	// 2: set compute unit limit
 	// 3: set compute unit price
-	return ix.data.at(0) === 2;
+	if (
+		ix.programId.equals(ComputeBudgetProgram.programId) &&
+		ix.data.at(0) === 2
+	) {
+		return true;
+	}
+	return false;
 }
 
+export type SimulateAndGetTxWithCUsResponse = {
+	cuEstimate: number;
+	simTxLogs: Array<string> | null;
+	simError: TransactionError | string | null;
+	tx: VersionedTransaction;
+};
 export async function simulateAndGetTxWithCUs(
 	ixs: Array<TransactionInstruction>,
 	connection: Connection,
@@ -333,7 +345,7 @@ export async function simulateAndGetTxWithCUs(
 	opts?: ConfirmOptions,
 	cuLimitMultiplier = 1.0,
 	logSimDuration = false
-): Promise<[number, TransactionError | string | null, VersionedTransaction]> {
+): Promise<SimulateAndGetTxWithCUsResponse> {
 	if (ixs.length === 0) {
 		throw new Error('cannot simulate empty tx');
 	}
@@ -375,6 +387,7 @@ export async function simulateAndGetTxWithCUs(
 		throw new Error(`Failed to get units consumed from simulateTransaction`);
 	}
 
+	const simTxLogs = resp.value.logs;
 	const cuEstimate = resp.value.unitsConsumed!;
 	if (setCULimitIxIdx === -1) {
 		ixs.unshift(
@@ -388,14 +401,15 @@ export async function simulateAndGetTxWithCUs(
 		});
 	}
 
-	return [
+	return {
 		cuEstimate,
-		resp.value.err,
-		await txSender.getVersionedTransaction(
+		simTxLogs,
+		simError: resp.value.err,
+		tx: await txSender.getVersionedTransaction(
 			ixs,
 			lookupTableAccounts,
 			additionalSigners,
 			opts
 		),
-	];
+	};
 }

@@ -49,7 +49,6 @@ import {
 	Keypair,
 	Connection,
 	VersionedTransaction,
-	TransactionError,
 } from '@solana/web3.js';
 
 import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
@@ -87,6 +86,7 @@ import {
 } from './common/txLogParse';
 import { getErrorCode } from '../error';
 import {
+	SimulateAndGetTxWithCUsResponse,
 	decodeName,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
@@ -1526,7 +1526,7 @@ export class FillerBot implements Bot {
 			let makerInfosToUse = makerInfos;
 			const buildTxWithMakerInfos = async (
 				makers: MakerInfo[]
-			): Promise<[TransactionError | string | null, VersionedTransaction]> => {
+			): Promise<SimulateAndGetTxWithCUsResponse> => {
 				const startBuildTx = Date.now();
 				ixs.push(
 					await this.driftClient.getFillPerpOrderIx(
@@ -1552,27 +1552,21 @@ export class FillerBot implements Bot {
 						Date.now() - startBuildTx
 					}ms`
 				);
-				const [estimatedCU, simError, simulatedTx] =
-					await simulateAndGetTxWithCUs(
-						ixs,
-						this.driftClient.connection,
-						this.driftClient.txSender,
-						[this.lookupTableAccount!],
-						[],
-						this.driftClient.opts,
-						SIM_CU_ESTIMATE_MULTIPLIER,
-						true
-					);
-				logger.info(
-					`buildTxWithMakerInfos estimated CUs: ${estimatedCU} (simError: ${JSON.stringify(
-						simError
-					)}) (fillTxId: ${fillTxId})`
+				const simResult = await simulateAndGetTxWithCUs(
+					ixs,
+					this.driftClient.connection,
+					this.driftClient.txSender,
+					[this.lookupTableAccount!],
+					[],
+					this.driftClient.opts,
+					SIM_CU_ESTIMATE_MULTIPLIER,
+					true
 				);
-				return [simError, simulatedTx];
+				return simResult;
 			};
 
-			let [simError, tx] = await buildTxWithMakerInfos(makerInfosToUse);
-			let txAccounts = tx.message.getAccountKeys({
+			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
+			let txAccounts = simResult.tx.message.getAccountKeys({
 				addressLookupTableAccounts: [this.lookupTableAccount!],
 			}).length;
 			let attempt = 0;
@@ -1583,8 +1577,8 @@ export class FillerBot implements Bot {
 					} maker and ${txAccounts} accounts)`
 				);
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
-				[simError, tx] = await buildTxWithMakerInfos(makerInfosToUse);
-				txAccounts = tx.message.getAccountKeys({
+				simResult = await buildTxWithMakerInfos(makerInfosToUse);
+				txAccounts = simResult.tx.message.getAccountKeys({
 					addressLookupTableAccounts: [this.lookupTableAccount!],
 				}).length;
 			}
@@ -1595,10 +1589,26 @@ export class FillerBot implements Bot {
 				);
 				return;
 			}
-			if (!this.dryRun && !simError) {
-				this.sendFillTxAndParseLogs(fillTxId, [nodeToFill], tx);
+
+			logger.info(
+				`tryFillMultiMakerPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
+			);
+
+			if (simResult.simError) {
+				logger.error(
+					`Error simulating multi maker perp node (fillTxId: ${fillTxId}): ${JSON.stringify(
+						simResult.simError
+					)}`
+				);
+				if (simResult.simTxLogs) {
+					await this.handleTransactionLogs([nodeToFill], simResult.simTxLogs);
+				}
 			} else {
-				logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
+				if (!this.dryRun) {
+					this.sendFillTxAndParseLogs(fillTxId, [nodeToFill], simResult.tx);
+				} else {
+					logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
+				}
 			}
 		} catch (e) {
 			if (e instanceof Error) {
@@ -1787,7 +1797,7 @@ export class FillerBot implements Bot {
 			ixs.push(await this.driftClient.getRevertFillIx());
 		}
 
-		const [estimatedCU, simError, tx] = await simulateAndGetTxWithCUs(
+		const simResult = await simulateAndGetTxWithCUs(
 			ixs,
 			this.driftClient.connection,
 			this.driftClient.txSender,
@@ -1798,14 +1808,23 @@ export class FillerBot implements Bot {
 			true
 		);
 		logger.info(
-			`tryBulkFillPerpNodes estimated CUs: ${estimatedCU} (simError: ${JSON.stringify(
-				simError
-			)}) (fillTxId: ${fillTxId})`
+			`tryBulkFillPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
 		);
-		if (!this.dryRun && !simError) {
-			this.sendFillTxAndParseLogs(fillTxId, nodesSent, tx);
+		if (simResult.simError) {
+			logger.error(
+				`simError: ${JSON.stringify(
+					simResult.simError
+				)} (fillTxId: ${fillTxId})`
+			);
+			if (simResult.simTxLogs) {
+				await this.handleTransactionLogs(nodesToFill, simResult.simTxLogs);
+			}
 		} else {
-			logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
+			if (!this.dryRun) {
+				this.sendFillTxAndParseLogs(fillTxId, nodesSent, simResult.tx);
+			} else {
+				logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
+			}
 		}
 
 		return nodesSent.length;
@@ -1896,7 +1915,7 @@ export class FillerBot implements Bot {
 				ixs.push(await this.driftClient.getRevertFillIx());
 			}
 
-			const [estimatedCUs, simError, tx] = await simulateAndGetTxWithCUs(
+			const simResult = await simulateAndGetTxWithCUs(
 				ixs,
 				this.driftClient.connection,
 				this.driftClient.txSender,
@@ -1907,47 +1926,55 @@ export class FillerBot implements Bot {
 				true
 			);
 			logger.info(
-				`executeTriggerablePerpNodesForMarket estimated CUs: ${estimatedCUs}`
+				`executeTriggerablePerpNodesForMarket estimated CUs: ${simResult.cuEstimate}`
 			);
 
-			if (!this.dryRun && !simError) {
-				this.driftClient
-					.sendTransaction(tx)
-					.then((txSig) => {
-						logger.info(
-							`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-						);
-						logger.info(`Tx: ${txSig}`);
-					})
-					.catch((error) => {
-						nodeToTrigger.node.haveTrigger = false;
-
-						const errorCode = getErrorCode(error);
-						if (
-							errorCode &&
-							!errorCodesToSuppress.includes(errorCode) &&
-							!(error as Error).message.includes(
-								'Transaction was not confirmed'
-							)
-						) {
-							logger.error(
-								`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-							);
-							logger.error(error);
-							webhookMessage(
-								`[${
-									this.name
-								}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-									error.stack ? error.stack : error.message
-								}`
-							);
-						}
-					})
-					.finally(() => {
-						this.removeTriggeringNodes(nodeToTrigger);
-					});
+			if (simResult.simError) {
+				logger.error(
+					`executeTriggerablePerpNodesForMarket simError: (simError: ${JSON.stringify(
+						simResult.simError
+					)})`
+				);
 			} else {
-				logger.info(`dry run, not triggering node`);
+				if (!this.dryRun) {
+					this.driftClient
+						.sendTransaction(simResult.tx)
+						.then((txSig) => {
+							logger.info(
+								`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+							);
+							logger.info(`Tx: ${txSig}`);
+						})
+						.catch((error) => {
+							nodeToTrigger.node.haveTrigger = false;
+
+							const errorCode = getErrorCode(error);
+							if (
+								errorCode &&
+								!errorCodesToSuppress.includes(errorCode) &&
+								!(error as Error).message.includes(
+									'Transaction was not confirmed'
+								)
+							) {
+								logger.error(
+									`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+								);
+								logger.error(error);
+								webhookMessage(
+									`[${
+										this.name
+									}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+										error.stack ? error.stack : error.message
+									}`
+								);
+							}
+						})
+						.finally(() => {
+							this.removeTriggeringNodes(nodeToTrigger);
+						});
+				} else {
+					logger.info(`dry run, not triggering node`);
+				}
 			}
 		}
 
@@ -1994,7 +2021,7 @@ export class FillerBot implements Bot {
 							))
 						);
 
-						const [estimatedCU, simError, tx] = await simulateAndGetTxWithCUs(
+						const simResult = await simulateAndGetTxWithCUs(
 							ixs,
 							this.driftClient.connection,
 							this.driftClient.txSender,
@@ -2004,22 +2031,23 @@ export class FillerBot implements Bot {
 							SIM_CU_ESTIMATE_MULTIPLIER,
 							true
 						);
-						logger.info(
-							`settlePnls estimatedCUs: ${estimatedCU} (simError: ${JSON.stringify(
-								simError
-							)})`
-						);
-
-						if (!this.dryRun && !simError) {
-							settlePnlPromises.push(
-								this.driftClient.txSender.sendVersionedTransaction(
-									tx,
-									[],
-									this.driftClient.opts
-								)
+						logger.info(`settlePnls estimatedCUs: ${simResult.cuEstimate}`);
+						if (simResult.simError) {
+							logger.info(
+								`settlePnls simError: ${JSON.stringify(simResult.simError)}`
 							);
 						} else {
-							logger.info(`dry run, skipping settlePnls)`);
+							if (!this.dryRun) {
+								settlePnlPromises.push(
+									this.driftClient.txSender.sendVersionedTransaction(
+										simResult.tx,
+										[],
+										this.driftClient.opts
+									)
+								);
+							} else {
+								logger.info(`dry run, skipping settlePnls)`);
+							}
 						}
 					} catch (err) {
 						if (!(err instanceof Error)) {
