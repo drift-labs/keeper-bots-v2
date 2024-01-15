@@ -227,7 +227,7 @@ export class UserPnlSettlerBot implements Bot {
 			}
 
 			const usersToSettle: SettlePnlIxParams[] = [];
-			const nowTs = await this.driftClient.connection.getBlockTime(slot);
+			const nowTs = Date.now() / 1000;
 
 			for (const user of this.userMap!.values()) {
 				const userAccount = user.getUserAccount();
