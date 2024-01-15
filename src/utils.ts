@@ -13,6 +13,7 @@ import {
 	PRICE_PRECISION,
 	PerpMarketAccount,
 	QUOTE_PRECISION,
+	TxSender,
 	Wallet,
 	convertToNumber,
 	getOrderSignature,
@@ -21,7 +22,19 @@ import {
 	createAssociatedTokenAccountInstruction,
 	getAssociatedTokenAddress,
 } from '@solana/spl-token';
-import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js';
+import {
+	AddressLookupTableAccount,
+	ComputeBudgetProgram,
+	ConfirmOptions,
+	Connection,
+	Keypair,
+	PublicKey,
+	Signer,
+	Transaction,
+	TransactionError,
+	TransactionInstruction,
+	VersionedTransaction,
+} from '@solana/web3.js';
 
 // devnet only
 export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
@@ -302,4 +315,87 @@ export function isMarketVolatile(
 	}
 
 	return false;
+}
+
+export function isSetComputeUnitsIx(ix: TransactionInstruction): boolean {
+	// Compute budget program discriminator is first byte
+	// 2: set compute unit limit
+	// 3: set compute unit price
+	return ix.data.at(0) === 2;
+}
+
+export async function simulateAndGetTxWithCUs(
+	ixs: Array<TransactionInstruction>,
+	connection: Connection,
+	txSender: TxSender,
+	lookupTableAccounts: AddressLookupTableAccount[],
+	additionalSigners: Array<Signer>,
+	opts?: ConfirmOptions,
+	cuLimitMultiplier = 1.0,
+	logSimDuration = false
+): Promise<[number, TransactionError | string | null, VersionedTransaction]> {
+	if (ixs.length === 0) {
+		throw new Error('cannot simulate empty tx');
+	}
+
+	let setCULimitIxIdx = -1;
+	for (let idx = 0; idx < ixs.length; idx++) {
+		if (isSetComputeUnitsIx(ixs[idx])) {
+			setCULimitIxIdx = idx;
+			break;
+		}
+	}
+
+	const tx = await txSender.getVersionedTransaction(
+		ixs,
+		lookupTableAccounts,
+		additionalSigners,
+		opts
+	);
+
+	let resp;
+	try {
+		const start = Date.now();
+		resp = await connection.simulateTransaction(tx, {
+			sigVerify: false,
+			replaceRecentBlockhash: true,
+			commitment: connection.commitment,
+		});
+		if (logSimDuration) {
+			console.log(`Simulated tx took: ${Date.now() - start}ms`);
+		}
+	} catch (e) {
+		console.error(e);
+	}
+	if (!resp) {
+		throw new Error('Failed to simulate transaction');
+	}
+
+	if (resp.value.unitsConsumed === undefined) {
+		throw new Error(`Failed to get units consumed from simulateTransaction`);
+	}
+
+	const cuEstimate = resp.value.unitsConsumed!;
+	if (setCULimitIxIdx === -1) {
+		ixs.unshift(
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: cuEstimate * cuLimitMultiplier,
+			})
+		);
+	} else {
+		ixs[setCULimitIxIdx] = ComputeBudgetProgram.setComputeUnitLimit({
+			units: cuEstimate * cuLimitMultiplier,
+		});
+	}
+
+	return [
+		cuEstimate,
+		resp.value.err,
+		await txSender.getVersionedTransaction(
+			ixs,
+			lookupTableAccounts,
+			additionalSigners,
+			opts
+		),
+	];
 }
