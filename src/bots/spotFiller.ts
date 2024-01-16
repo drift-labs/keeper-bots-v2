@@ -73,12 +73,17 @@ import {
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
 import { FillerConfig } from '../config';
-import { getNodeToFillSignature, getNodeToTriggerSignature } from '../utils';
+import {
+	getNodeToFillSignature,
+	getNodeToTriggerSignature,
+	simulateAndGetTxWithCUs,
+} from '../utils';
 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_BACKOFF = 10000; // Time to wait before trying a node again
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 50_000; // cap the computeUnitPrice to pay per fill tx
+const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
@@ -195,6 +200,7 @@ export class SpotFillerBot implements Bot {
 	private pollingIntervalMs: number;
 	private driftLutAccount?: AddressLookupTableAccount;
 	private driftSpotLutAccount?: AddressLookupTableAccount;
+	private fillTxId = 0;
 
 	private dlobSubscriber?: DLOBSubscriber;
 
@@ -1043,12 +1049,13 @@ export class SpotFillerBot implements Bot {
 
 	private async tryFillSpotNode(
 		nodeToFill: NodeToFill,
+		fillTxId: number,
 		fallbackAskSource?: FallbackLiquiditySource,
 		fallbackBidSource?: FallbackLiquiditySource
 	) {
 		const nodeSignature = getNodeToFillSignature(nodeToFill);
 		if (this.nodeIsThrottled(nodeSignature)) {
-			logger.info(`Throttling ${nodeSignature}`);
+			logger.info(`Throttling ${nodeSignature} (fillTxId: ${fillTxId})`);
 			return Promise.resolve(undefined);
 		}
 		this.throttleNode(nodeSignature);
@@ -1057,7 +1064,9 @@ export class SpotFillerBot implements Bot {
 		const order = node.order!;
 
 		logger.info(
-			`filling spot node: ${node.userAccount!.toString()}, ${order.orderId}`
+			`filling spot node: ${node.userAccount!.toString()}, ${
+				order.orderId
+			} (fillTxId: ${fillTxId})`
 		);
 
 		const fallbackSource = isVariant(order.direction, 'short')
@@ -1078,7 +1087,7 @@ export class SpotFillerBot implements Bot {
 		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
 		if (makerNode) {
 			logger.info(
-				`filling spot node:\ntaker: ${node.userAccount!}-${
+				`filling spot node (fillTxId: ${fillTxId}):\ntaker: ${node.userAccount!}-${
 					order.orderId
 				} ${convertToNumber(
 					order.baseAssetAmountFilled,
@@ -1101,7 +1110,7 @@ export class SpotFillerBot implements Bot {
 			);
 		} else {
 			logger.info(
-				`filling spot node\ntaker: ${node.userAccount!}-${
+				`filling spot node (fillTxId: ${fillTxId})\ntaker: ${node.userAccount!}-${
 					order.orderId
 				} ${convertToNumber(
 					order.baseAssetAmountFilled,
@@ -1131,7 +1140,7 @@ export class SpotFillerBot implements Bot {
 				);
 			} else {
 				logger.error(
-					`makerInfo doesnt exist and unknown fallback source: ${fallbackSource}`
+					`makerInfo doesnt exist and unknown fallback source: ${fallbackSource} (fillTxId: ${fillTxId})`
 				);
 			}
 		}
@@ -1169,73 +1178,92 @@ export class SpotFillerBot implements Bot {
 		const lutAccounts: Array<AddressLookupTableAccount> = [];
 		this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
 		this.driftSpotLutAccount && lutAccounts.push(this.driftSpotLutAccount);
-		this.driftClient.txSender
-			.sendVersionedTransaction(
-				await this.driftClient.txSender.getVersionedTransaction(
-					ixs,
-					lutAccounts,
-					[],
-					this.driftClient.opts
-				),
-				[],
-				this.driftClient.opts
-			)
-			.then(async (txSig) => {
-				logger.info(
-					`Filled spot order ${nodeSignature}: https://solscan.io/tx/${txSig.txSig}`
-				);
+		const simResult = await simulateAndGetTxWithCUs(
+			ixs,
+			this.driftClient.connection,
+			this.driftClient.txSender,
+			lutAccounts,
+			[],
+			this.driftClient.opts,
+			SIM_CU_ESTIMATE_MULTIPLIER,
+			true
+		);
+		logger.info(
+			`tryFillSpotNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
+		);
 
-				const duration = Date.now() - txStart;
-				const user = this.driftClient.getUser();
-				if (this.sdkCallDurationHistogram) {
-					this.sdkCallDurationHistogram!.record(duration, {
-						...metricAttrFromUserAccount(
-							user.getUserAccountPublicKey(),
-							user.getUserAccount()
-						),
-						method: 'fillSpotOrder',
+		if (simResult.simError) {
+			logger.error(
+				`simError: ${JSON.stringify(
+					simResult.simError
+				)} (fillTxId: ${fillTxId})`
+			);
+			if (simResult.simTxLogs) {
+				await this.handleTransactionLogs(nodeToFill, simResult.simTxLogs);
+			}
+		} else {
+			if (!this.dryRun) {
+				this.driftClient.txSender
+					.sendVersionedTransaction(simResult.tx, [], this.driftClient.opts)
+					.then(async (txSig) => {
+						logger.info(
+							`Filled spot order ${nodeSignature} (fillTxId: ${fillTxId}): https://solscan.io/tx/${txSig.txSig}`
+						);
+
+						const duration = Date.now() - txStart;
+						const user = this.driftClient.getUser();
+						if (this.sdkCallDurationHistogram) {
+							this.sdkCallDurationHistogram!.record(duration, {
+								...metricAttrFromUserAccount(
+									user.getUserAccountPublicKey(),
+									user.getUserAccount()
+								),
+								method: 'fillSpotOrder',
+							});
+						}
+
+						await this.processBulkFillTxLogs(nodeToFill, txSig.txSig);
+					})
+					.catch(async (e) => {
+						const errorCode = getErrorCode(e);
+						if (!errorCode) {
+							console.error(e);
+						} else {
+							logger.error(
+								`Failed to fill spot order for (fillTxId: ${fillTxId}) ${chUser
+									.getUserAccountPublicKey()
+									.toBase58()} order ${
+									nodeToFill.node.order!.orderId
+								} on market ${nodeToFill.node.order!.marketIndex} makers: ${
+									nodeToFill.makerNodes.length
+								} (errorCode: ${errorCode}): `
+							);
+						}
+
+						if (e.logs) {
+							await this.handleTransactionLogs(nodeToFill, e.logs);
+						}
+
+						if (
+							errorCode &&
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(e as Error).message.includes('Transaction was not confirmed')
+						) {
+							const msg = `[${
+								this.name
+							}]: :x: error trying to fill spot orders: \n\nSim logs: \n${
+								e.logs ? (e.logs as Array<string>).join('\n') : ''
+							}\n\n${e.stack ? e.stack : e.message}`;
+							webhookMessage(msg);
+						}
+					})
+					.finally(() => {
+						this.unthrottleNode(nodeSignature);
 					});
-				}
-
-				await this.processBulkFillTxLogs(nodeToFill, txSig.txSig);
-			})
-			.catch(async (e) => {
-				const errorCode = getErrorCode(e);
-				if (!errorCode) {
-					console.error(e);
-				} else {
-					logger.error(
-						`Failed to fill spot order for ${chUser
-							.getUserAccountPublicKey()
-							.toBase58()} order ${nodeToFill.node.order!.orderId} on market ${
-							nodeToFill.node.order!.marketIndex
-						} makers: ${
-							nodeToFill.makerNodes.length
-						} (errorCode: ${errorCode}): `
-					);
-				}
-
-				if (e.logs) {
-					await this.handleTransactionLogs(nodeToFill, e.logs);
-				}
-
-				if (
-					errorCode &&
-					!errorCodesToSuppress.includes(errorCode) &&
-					!(e as Error).message.includes('Transaction was not confirmed')
-				) {
-					webhookMessage(
-						`[${
-							this.name
-						}]: :x: error trying to fill spot orders: \n\nSim logs: \n${
-							e.logs ? (e.logs as Array<string>).join('\n') : ''
-						}\n\n${e.stack ? e.stack : e.message}`
-					);
-				}
-			})
-			.finally(() => {
-				this.unthrottleNode(nodeSignature);
-			});
+			} else {
+				logger.info(`dry run, not filling spot order (fillTxId: ${fillTxId})`);
+			}
+		}
 	}
 
 	private filterTriggerableNodes(nodeToTrigger: NodeToTrigger): boolean {
@@ -1263,6 +1291,7 @@ export class SpotFillerBot implements Bot {
 			for (const nodeToFill of nodesToFillWithContext.nodesToFill) {
 				await this.tryFillSpotNode(
 					nodeToFill,
+					this.fillTxId++,
 					nodesToFillWithContext.fallbackAskSource,
 					nodesToFillWithContext.fallbackBidSource
 				);
@@ -1296,46 +1325,67 @@ export class SpotFillerBot implements Bot {
 				ixs.push(await this.driftClient.getRevertFillIx());
 			}
 
-			const tx = await this.driftClient.txSender.getVersionedTransaction(
+			const simResult = await simulateAndGetTxWithCUs(
 				ixs,
+				this.driftClient.connection,
+				this.driftClient.txSender,
 				[this.driftLutAccount!],
-				undefined,
-				this.driftClient.opts
+				[],
+				this.driftClient.opts,
+				SIM_CU_ESTIMATE_MULTIPLIER,
+				true
+			);
+			logger.info(
+				`executeTriggerableSpotNodesForMarket estimated CUs: ${simResult.cuEstimate}`
 			);
 
-			this.driftClient
-				.sendTransaction(tx)
-				.then((txSig) => {
-					logger.info(
-						`Triggered user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-					);
-					logger.info(`Tx: ${txSig}`);
-				})
-				.catch((error) => {
-					nodeToTrigger.node.haveTrigger = false;
+			if (simResult.simError) {
+				logger.error(
+					`executeTriggerableSpotNodesForMarket simError: (simError: ${JSON.stringify(
+						simResult.simError
+					)})`
+				);
+			} else {
+				if (!this.dryRun) {
+					this.driftClient
+						.sendTransaction(simResult.tx)
+						.then((txSig) => {
+							logger.info(
+								`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+							);
+							logger.info(`Tx: ${txSig}`);
+						})
+						.catch((error) => {
+							nodeToTrigger.node.haveTrigger = false;
 
-					const errorCode = getErrorCode(error);
-					if (
-						errorCode &&
-						!errorCodesToSuppress.includes(errorCode) &&
-						!(error as Error).message.includes('Transaction was not confirmed')
-					) {
-						logger.error(
-							`Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} `
-						);
-						logger.error(error);
-						webhookMessage(
-							`[${
-								this.name
-							}]: Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} \n${
-								error.stack ? error.stack : error.message
-							} `
-						);
-					}
-				})
-				.finally(() => {
-					this.removeTriggeringNodes(nodeToTrigger);
-				});
+							const errorCode = getErrorCode(error);
+							if (
+								errorCode &&
+								!errorCodesToSuppress.includes(errorCode) &&
+								!(error as Error).message.includes(
+									'Transaction was not confirmed'
+								)
+							) {
+								logger.error(
+									`Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} `
+								);
+								logger.error(error);
+								webhookMessage(
+									`[${
+										this.name
+									}]: Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} \n${
+										error.stack ? error.stack : error.message
+									} `
+								);
+							}
+						})
+						.finally(() => {
+							this.removeTriggeringNodes(nodeToTrigger);
+						});
+				} else {
+					logger.info(`dry run, not triggering node`);
+				}
+			}
 		}
 	}
 
