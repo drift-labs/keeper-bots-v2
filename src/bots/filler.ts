@@ -205,6 +205,7 @@ export class FillerBot implements Bot {
 	protected eventSubscriber?: EventSubscriber;
 	protected pollingIntervalMs: number;
 	protected revertOnFailure?: boolean;
+	protected simulateTxForCUEstimate?: boolean;
 	protected lookupTableAccount?: AddressLookupTableAccount;
 	protected jitoSearcherClient?: SearcherClient;
 	protected jitoAuthKeypair?: Keypair;
@@ -300,7 +301,10 @@ export class FillerBot implements Bot {
 		this.userMap = userMap;
 
 		this.revertOnFailure = config.revertOnFailure ?? true;
-		logger.info(`${this.name}: revertOnFailure: ${this.revertOnFailure}`);
+		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
+		logger.info(
+			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
+		);
 
 		this.jitoSearcherClient = jitoSearcherClient;
 		this.jitoAuthKeypair = jitoAuthKeypair;
@@ -1560,7 +1564,8 @@ export class FillerBot implements Bot {
 					[],
 					this.driftClient.opts,
 					SIM_CU_ESTIMATE_MULTIPLIER,
-					true
+					true,
+					this.simulateTxForCUEstimate
 				);
 				return simResult;
 			};
@@ -1594,7 +1599,7 @@ export class FillerBot implements Bot {
 				`tryFillMultiMakerPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
 			);
 
-			if (simResult.simError) {
+			if (this.simulateTxForCUEstimate && simResult.simError) {
 				logger.error(
 					`Error simulating multi maker perp node (fillTxId: ${fillTxId}): ${JSON.stringify(
 						simResult.simError
@@ -1805,12 +1810,13 @@ export class FillerBot implements Bot {
 			[],
 			this.driftClient.opts,
 			SIM_CU_ESTIMATE_MULTIPLIER,
-			true
+			true,
+			this.simulateTxForCUEstimate
 		);
 		logger.info(
 			`tryBulkFillPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
 		);
-		if (simResult.simError) {
+		if (this.simulateTxForCUEstimate && simResult.simError) {
 			logger.error(
 				`simError: ${JSON.stringify(
 					simResult.simError
@@ -1923,13 +1929,14 @@ export class FillerBot implements Bot {
 				[],
 				this.driftClient.opts,
 				SIM_CU_ESTIMATE_MULTIPLIER,
-				true
+				true,
+				this.simulateTxForCUEstimate
 			);
 			logger.info(
 				`executeTriggerablePerpNodesForMarket estimated CUs: ${simResult.cuEstimate}`
 			);
 
-			if (simResult.simError) {
+			if (this.simulateTxForCUEstimate && simResult.simError) {
 				logger.error(
 					`executeTriggerablePerpNodesForMarket simError: (simError: ${JSON.stringify(
 						simResult.simError
@@ -2029,10 +2036,11 @@ export class FillerBot implements Bot {
 							[],
 							this.driftClient.opts,
 							SIM_CU_ESTIMATE_MULTIPLIER,
-							true
+							true,
+							this.simulateTxForCUEstimate
 						);
 						logger.info(`settlePnls estimatedCUs: ${simResult.cuEstimate}`);
-						if (simResult.simError) {
+						if (this.simulateTxForCUEstimate && simResult.simError) {
 							logger.info(
 								`settlePnls simError: ${JSON.stringify(simResult.simError)}`
 							);

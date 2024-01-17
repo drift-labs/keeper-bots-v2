@@ -85,11 +85,17 @@ botConfigs:
     # Default is true
     revertOnFailure: true
 
+    # calls simulateTransaction before sending to get an accurate CU estimate
+    # as well as stop before sending the transaction (Default is true)
+    simulateTxForCUEstimate: true
+
   spotFiller:
     botId: "spot-filler"
     dryRun: false
     fillerPollingInterval: 6000
     metricsPort: 9464
+    revertOnFailure: true
+    simulateTxForCUEstimate: true
 
   liquidator:
     botId: "liquidator"

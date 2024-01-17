@@ -225,6 +225,7 @@ export class SpotFillerBot implements Bot {
 
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
 	private revertOnFailure: boolean;
+	private simulateTxForCUEstimate?: boolean;
 
 	// metrics
 	private metricsInitialized = false;
@@ -282,7 +283,10 @@ export class SpotFillerBot implements Bot {
 			],
 		});
 		this.revertOnFailure = config.revertOnFailure ?? true;
-		logger.info(`${this.name}: revertOnFailure: ${this.revertOnFailure}`);
+		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
+		logger.info(
+			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
+		);
 
 		this.userMap = userMap;
 		if (this.driftClient.userAccountSubscriptionConfig.type === 'websocket') {
@@ -1186,13 +1190,14 @@ export class SpotFillerBot implements Bot {
 			[],
 			this.driftClient.opts,
 			SIM_CU_ESTIMATE_MULTIPLIER,
-			true
+			true,
+			this.simulateTxForCUEstimate
 		);
 		logger.info(
 			`tryFillSpotNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
 		);
 
-		if (simResult.simError) {
+		if (this.simulateTxForCUEstimate && simResult.simError) {
 			logger.error(
 				`simError: ${JSON.stringify(
 					simResult.simError
@@ -1333,13 +1338,18 @@ export class SpotFillerBot implements Bot {
 				[],
 				this.driftClient.opts,
 				SIM_CU_ESTIMATE_MULTIPLIER,
-				true
+				true,
+				this.simulateTxForCUEstimate
 			);
 			logger.info(
 				`executeTriggerableSpotNodesForMarket estimated CUs: ${simResult.cuEstimate}`
 			);
 
-			if (simResult.simError) {
+			if (
+				this.simulateTxForCUEstimate &&
+				this.simulateTxForCUEstimate &&
+				simResult.simError
+			) {
 				logger.error(
 					`executeTriggerableSpotNodesForMarket simError: (simError: ${JSON.stringify(
 						simResult.simError

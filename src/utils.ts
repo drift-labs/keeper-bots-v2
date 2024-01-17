@@ -344,7 +344,8 @@ export async function simulateAndGetTxWithCUs(
 	additionalSigners: Array<Signer>,
 	opts?: ConfirmOptions,
 	cuLimitMultiplier = 1.0,
-	logSimDuration = false
+	logSimDuration = false,
+	skipSimulation = false
 ): Promise<SimulateAndGetTxWithCUsResponse> {
 	if (ixs.length === 0) {
 		throw new Error('cannot simulate empty tx');
@@ -364,6 +365,14 @@ export async function simulateAndGetTxWithCUs(
 		additionalSigners,
 		opts
 	);
+	if (skipSimulation) {
+		return {
+			cuEstimate: -1,
+			simTxLogs: null,
+			simError: null,
+			tx,
+		};
+	}
 
 	let resp;
 	try {
