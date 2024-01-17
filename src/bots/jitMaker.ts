@@ -112,19 +112,21 @@ export class JitMaker implements Bot {
 	) {
 		this.subAccountIds = config.subaccounts ?? [0];
 		this.marketIndexes = config.perpMarketIndicies ?? [0];
-		this.marketType = config.marketType
+		this.marketType = config.marketType;
 
 		const initLen = this.subAccountIds.length;
-        const dedupLen = new Set(this.subAccountIds).size;
-        if (initLen !== dedupLen) {
-            throw new Error("You CANNOT make multiple markets with the same sub account id");
-        }
+		const dedupLen = new Set(this.subAccountIds).size;
+		if (initLen !== dedupLen) {
+			throw new Error(
+				'You CANNOT make multiple markets with the same sub account id'
+			);
+		}
 
-        // Check for 1:1 unique sub account id to market index ratio
-        const marketLen = this.marketIndexes.length;
-        if (dedupLen !== marketLen) {
-            throw new Error("You must have 1 sub account id per market to jit");
-        }
+		// Check for 1:1 unique sub account id to market index ratio
+		const marketLen = this.marketIndexes.length;
+		if (dedupLen !== marketLen) {
+			throw new Error('You must have 1 sub account id per market to jit');
+		}
 
 		this.jitter = jitter;
 		this.driftClient = driftClient;
@@ -203,9 +205,9 @@ export class JitMaker implements Bot {
 				);
 				for (let i = 0; i < this.marketIndexes.length; i++) {
 					if (isVariant(this.marketType, 'PERP')) {
-						await this.jitPerp(i)
+						await this.jitPerp(i);
 					} else {
-						await this.jitSpot(i)
+						await this.jitSpot(i);
 					}
 				}
 				await sleepMs(10000); // 10 seconds
@@ -232,39 +234,42 @@ export class JitMaker implements Bot {
 	}
 
 	private async jitPerp(index: number) {
-		const perpIdx = this.marketIndexes[index]
-		const subId = this.subAccountIds[index]
-		this.driftClient.switchActiveUser(subId)
+		const perpIdx = this.marketIndexes[index];
+		const subId = this.subAccountIds[index];
+		this.driftClient.switchActiveUser(subId);
 
-		const driftUser = this.driftClient.getUser(subId)
-		const perpMarketAccount =
-			this.driftClient.getPerpMarketAccount(perpIdx)!;
+		const driftUser = this.driftClient.getUser(subId);
+		const perpMarketAccount = this.driftClient.getPerpMarketAccount(perpIdx)!;
 		const oraclePriceData =
 			this.driftClient.getOracleDataForPerpMarket(perpIdx);
 
-		const numMarketsForSubaccount = this.subAccountIds.filter (
+		const numMarketsForSubaccount = this.subAccountIds.filter(
 			(num) => num === subId
-		).length
+		).length;
 
-		const targetLeverage = TARGET_LEVERAGE_PER_ACCOUNT / numMarketsForSubaccount
-		const actualLeverage = driftUser.getLeverage().div(new BN(10_000))
+		const targetLeverage =
+			TARGET_LEVERAGE_PER_ACCOUNT / numMarketsForSubaccount;
+		const actualLeverage = driftUser.getLeverage().div(new BN(10_000));
 
 		const maxBase: number = calculateBaseAmountToMarketMakePerp(
 			perpMarketAccount,
 			driftUser.getNetSpotMarketValue(),
 			targetLeverage
-		)
+		);
 
-		let overleveredLong = false
-		let overleveredShort = false
+		let overleveredLong = false;
+		let overleveredShort = false;
 
-		if (actualLeverage.toNumber() >= (targetLeverage * 0.95)) {
-			logger.warn(`jit maker at or above max leverage actual: ${actualLeverage} target: ${targetLeverage}`)
-			const overleveredBaseAssetAmount = driftUser.getPerpPosition(perpIdx)!.baseAssetAmount
-			if (overleveredBaseAssetAmount.gt(new BN (0))) {
-				overleveredLong = true
-			} else if (overleveredBaseAssetAmount.lt(new BN (0))) {
-				overleveredShort = true
+		if (actualLeverage.toNumber() >= targetLeverage * 0.95) {
+			logger.warn(
+				`jit maker at or above max leverage actual: ${actualLeverage} target: ${targetLeverage}`
+			);
+			const overleveredBaseAssetAmount =
+				driftUser.getPerpPosition(perpIdx)!.baseAssetAmount;
+			if (overleveredBaseAssetAmount.gt(new BN(0))) {
+				overleveredLong = true;
+			} else if (overleveredBaseAssetAmount.lt(new BN(0))) {
+				overleveredShort = true;
 			}
 		}
 
@@ -321,18 +326,17 @@ export class JitMaker implements Bot {
 			this.dlobSubscriber.slotSource.getSlot()
 		);
 
-
 		const bidOffset = bestBidPrice.sub(oraclePriceData.price);
 
 		const askOffset = bestAskPrice.sub(oraclePriceData.price);
 
-		let perpMinPosition = new BN((-maxBase) * BASE_PRECISION.toNumber())
-		let perpMaxPosition = new BN((maxBase) * BASE_PRECISION.toNumber())
+		let perpMinPosition = new BN(-maxBase * BASE_PRECISION.toNumber());
+		let perpMaxPosition = new BN(maxBase * BASE_PRECISION.toNumber());
 
 		if (overleveredLong) {
-			perpMaxPosition = new BN(0)
+			perpMaxPosition = new BN(0);
 		} else if (overleveredShort) {
-			perpMinPosition = new BN(0)
+			perpMinPosition = new BN(0);
 		}
 
 		this.jitter.updatePerpParams(perpIdx, {
@@ -346,40 +350,45 @@ export class JitMaker implements Bot {
 	}
 
 	private async jitSpot(index: number) {
-		const spotIdx = this.marketIndexes[index]
-		const subId = this.subAccountIds[index]
-		this.driftClient.switchActiveUser(subId)
+		const spotIdx = this.marketIndexes[index];
+		const subId = this.subAccountIds[index];
+		this.driftClient.switchActiveUser(subId);
 
-		const driftUser = this.driftClient.getUser(subId)
-		const spotMarketAccount = this.driftClient.getSpotMarketAccount(spotIdx)!
-		const oraclePriceData = this.driftClient.getOracleDataForSpotMarket(spotIdx)
+		const driftUser = this.driftClient.getUser(subId);
+		const spotMarketAccount = this.driftClient.getSpotMarketAccount(spotIdx)!;
+		const oraclePriceData =
+			this.driftClient.getOracleDataForSpotMarket(spotIdx);
 
 		const numMarketsForSubaccount = this.subAccountIds.filter(
 			(num) => num === subId
-		).length
+		).length;
 
-		const targetLeverage = TARGET_LEVERAGE_PER_ACCOUNT / numMarketsForSubaccount
-		const actualLeverage = driftUser.getLeverage().div(new BN(10_000))
+		const targetLeverage =
+			TARGET_LEVERAGE_PER_ACCOUNT / numMarketsForSubaccount;
+		const actualLeverage = driftUser.getLeverage().div(new BN(10_000));
 
 		const maxBase: number = calculateBaseAmountToMarketMakeSpot(
 			spotMarketAccount,
 			driftUser.getNetSpotMarketValue(),
 			targetLeverage
-		)
+		);
 
-		let overleveredLong = false
-		let overleveredShort = false
+		let overleveredLong = false;
+		let overleveredShort = false;
 
-		if (actualLeverage.toNumber() >= (targetLeverage * 0.95)) {
-			logger.warn(`jit maker at or above max leverage actual: ${actualLeverage} target: ${targetLeverage}`)
-			const overleveredBaseAssetAmount = driftUser.getSpotPosition(spotIdx)!.scaledBalance
-			if (overleveredBaseAssetAmount.gt(new BN (0))) {
-				overleveredLong = true
-			} else if (overleveredBaseAssetAmount.lt(new BN (0))) {
-				overleveredShort = true
+		if (actualLeverage.toNumber() >= targetLeverage * 0.95) {
+			logger.warn(
+				`jit maker at or above max leverage actual: ${actualLeverage} target: ${targetLeverage}`
+			);
+			const overleveredBaseAssetAmount =
+				driftUser.getSpotPosition(spotIdx)!.scaledBalance;
+			if (overleveredBaseAssetAmount.gt(new BN(0))) {
+				overleveredLong = true;
+			} else if (overleveredBaseAssetAmount.lt(new BN(0))) {
+				overleveredShort = true;
 			}
 		}
-		
+
 		this.jitter.setUserFilter((userAccount, userKey) => {
 			let skip = userKey == driftUser.userAccountPublicKey.toBase58();
 
@@ -400,7 +409,7 @@ export class JitMaker implements Bot {
 
 			return skip;
 		});
-		
+
 		const bestDriftBid = getBestLimitBidExcludePubKey(
 			this.dlobSubscriber.dlob,
 			spotMarketAccount.marketIndex,
@@ -437,16 +446,16 @@ export class JitMaker implements Bot {
 		const bidOffset = bestBidPrice.sub(oraclePriceData.price);
 
 		const askOffset = bestAskPrice.sub(oraclePriceData.price);
-		
-		const spotMarketPrecision = 10 ** spotMarketAccount.decimals
-		
-		let spotMinPosition = new BN((-maxBase) * spotMarketPrecision)
-		let spotMaxPosition = new BN((maxBase) * spotMarketPrecision)
+
+		const spotMarketPrecision = 10 ** spotMarketAccount.decimals;
+
+		let spotMinPosition = new BN(-maxBase * spotMarketPrecision);
+		let spotMaxPosition = new BN(maxBase * spotMarketPrecision);
 
 		if (overleveredLong) {
-			spotMaxPosition = new BN(0)
+			spotMaxPosition = new BN(0);
 		} else if (overleveredShort) {
-			spotMinPosition = new BN(0)
+			spotMinPosition = new BN(0);
 		}
 
 		this.jitter.updateSpotParams(spotIdx, {

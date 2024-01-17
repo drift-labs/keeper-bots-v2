@@ -84,14 +84,14 @@ export function loadCommaDelimitToArray(str: string): number[] {
 }
 
 export function convertToMarketType(input: string): MarketType {
-    switch (input.toUpperCase()) {
-        case "PERP":
-            return MarketType.PERP;
-        case "SPOT":
-            return MarketType.SPOT;
-        default:
-            throw new Error(`Invalid market type: ${input}`);
-    }
+	switch (input.toUpperCase()) {
+		case 'PERP':
+			return MarketType.PERP;
+		case 'SPOT':
+			return MarketType.SPOT;
+		default:
+			throw new Error(`Invalid market type: ${input}`);
+	}
 }
 
 export function loadKeypair(privateKey: string): Keypair {
@@ -241,10 +241,6 @@ export function getBestLimitAskExcludePubKey(
 	return undefined;
 }
 
-function roundDownToNearest(num: number, nearest = 100) {
-	return Math.floor(num / nearest) * nearest;
-}
-
 export function calculateBaseAmountToMarketMakePerp(
 	perpMarketAccount: PerpMarketAccount,
 	netSpotMarketValue: BN,
@@ -254,7 +250,7 @@ export function calculateBaseAmountToMarketMakePerp(
 		perpMarketAccount.amm.historicalOracleData.lastOraclePriceTwap
 	);
 
-	const tcNormalized = convertToNumber(netSpotMarketValue, QUOTE_PRECISION)
+	const tcNormalized = convertToNumber(netSpotMarketValue, QUOTE_PRECISION);
 
 	logger.info(netSpotMarketValue.toString() + '->' + tcNormalized.toString());
 
@@ -264,7 +260,7 @@ export function calculateBaseAmountToMarketMakePerp(
 	const marketSymbol = decodeName(perpMarketAccount.name);
 
 	logger.info(
-		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${tcNormed.toString()} / ${basePriceNormed.toString()} * ${targetLeverage.toString()}`
+		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${tcNormalized.toString()} / ${basePriceNormed.toString()} * ${targetLeverage.toString()}`
 	);
 
 	return maxBase;
@@ -277,9 +273,9 @@ export function calculateBaseAmountToMarketMakeSpot(
 ) {
 	const basePriceNormalized = convertToNumber(
 		spotMarketAccount.historicalOracleData.lastOraclePriceTwap
-	)
+	);
 
-	const tcNormalized = convertToNumber(netSpotMarketValue, QUOTE_PRECISION)
+	const tcNormalized = convertToNumber(netSpotMarketValue, QUOTE_PRECISION);
 
 	logger.info(netSpotMarketValue.toString() + '->' + tcNormalized.toString());
 
@@ -289,7 +285,7 @@ export function calculateBaseAmountToMarketMakeSpot(
 	const marketSymbol = decodeName(spotMarketAccount.name);
 
 	logger.info(
-		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${tcNormed.toString()} / ${basePriceNormed.toString()} * ${targetLeverage.toString()}`
+		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${tcNormalized.toString()} / ${basePriceNormalized.toString()} * ${targetLeverage.toString()}`
 	);
 
 	return maxBase;
@@ -350,10 +346,7 @@ export function isSpotMarketVolatile(
 			currentPrice.sub(twapPrice).mul(PRICE_PRECISION).div(minDenom).toNumber()
 		) / PERCENTAGE_PRECISION.toNumber();
 
-	if (
-		cVsT > volatileThreshold ||
-		cVsL > volatileThreshold
-	) {
+	if (cVsT > volatileThreshold || cVsL > volatileThreshold) {
 		return true;
 	}
 

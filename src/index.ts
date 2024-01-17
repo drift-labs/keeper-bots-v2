@@ -156,7 +156,11 @@ program
 		'--tx-sender-type <string>',
 		'Choose tx sender type, options are: fast, retry'
 	)
-	.option('--market-type <type>', 'Set the market type for the JIT Maker bot', 'PERP')
+	.option(
+		'--market-type <type>',
+		'Set the market type for the JIT Maker bot',
+		'PERP'
+	)
 	.parse();
 
 const opts = program.opts();

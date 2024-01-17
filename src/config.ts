@@ -14,7 +14,7 @@ export type BaseBotConfig = {
 export type JitMakerConfig = BaseBotConfig & {
 	perpMarketIndicies?: Array<number>;
 	subaccounts?: Array<number>;
-	marketType: MarketType
+	marketType: MarketType;
 };
 
 export type MarkTwapCrankConfig = BaseBotConfig & {
@@ -297,7 +297,7 @@ export function loadConfigFromOpts(opts: any): Config {
 				0,
 			],
 			subaccounts: loadCommaDelimitToArray(opts.subaccounts) ?? [0],
-			marketType: convertToMarketType(opts.marketType) ?? MarketType.PERP
+			marketType: convertToMarketType(opts.marketType) ?? MarketType.PERP,
 		};
 	}
 	if (opts.ifRevenueSettler) {
