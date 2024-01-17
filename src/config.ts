@@ -23,6 +23,7 @@ export type MarkTwapCrankConfig = BaseBotConfig & {
 export type FillerConfig = BaseBotConfig & {
 	fillerPollingInterval?: number;
 	revertOnFailure?: boolean;
+	simulateTxForCUEstimate?: boolean;
 };
 
 export type SubaccountConfig = {
@@ -223,6 +224,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
+			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
 		};
 	}
 	if (opts.fillerLite) {
@@ -233,6 +235,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
+			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
 		};
 	}
 	if (opts.fillerBulk) {
@@ -243,6 +246,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
+			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
 		};
 	}
 	if (opts.spotFiller) {
@@ -253,6 +257,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			fillerPollingInterval: 5000,
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
+			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
 		};
 	}
 	if (opts.liquidator) {
