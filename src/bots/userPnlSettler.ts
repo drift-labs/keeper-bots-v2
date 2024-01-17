@@ -71,6 +71,7 @@ export class UserPnlSettlerBot implements Bot {
 	private driftClient: DriftClient;
 	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
+	private bulkAccountLoader: BulkAccountLoader;
 	private userMap: UserMap;
 	private priorityFeeSubscriber?: PriorityFeeSubscriber;
 
@@ -87,6 +88,7 @@ export class UserPnlSettlerBot implements Bot {
 			driftClientConfigs.connection.commitment || 'processed',
 			0
 		);
+		this.bulkAccountLoader = bulkAccountLoader;
 		this.driftClient = new DriftClient(
 			Object.assign({}, driftClientConfigs, {
 				accountSubscription: {
@@ -208,7 +210,7 @@ export class UserPnlSettlerBot implements Bot {
 				};
 			}
 
-			const slot = await this.driftClient.connection.getSlot();
+			const slot = (await this.bulkAccountLoader.mostRecentSlot) ?? 0;
 
 			const validOracleMarketMap = new Map<number, boolean>();
 			for (const market of this.driftClient.getPerpMarketAccounts()) {
@@ -227,7 +229,7 @@ export class UserPnlSettlerBot implements Bot {
 			}
 
 			const usersToSettle: SettlePnlIxParams[] = [];
-			const nowTs = await this.driftClient.connection.getBlockTime(slot);
+			const nowTs = Date.now() / 1000;
 
 			for (const user of this.userMap!.values()) {
 				const userAccount = user.getUserAccount();
