@@ -290,7 +290,11 @@ export class UserLpSettlerBot implements Bot {
 			);
 
 			if (simResult.simError !== null) {
-				logger.error(`Sim error: ${JSON.stringify(simResult.simError)}`);
+				logger.error(
+					`Sim error: ${JSON.stringify(simResult.simError)}\n${
+						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+					}`
+				);
 				success = false;
 			} else {
 				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
@@ -338,7 +342,7 @@ export class UserLpSettlerBot implements Bot {
 		const rpcRequestArgs = [
 			this.driftClient.program.programId.toBase58(),
 			{
-				commitment: 'finalized',
+				commitment: 'confirmed',
 				filters: [
 					getUserFilter(),
 					getNonIdleUserFilter(),
