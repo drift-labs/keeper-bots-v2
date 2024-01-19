@@ -1,17 +1,14 @@
 import {
 	DriftClient,
-	UserAccount,
-	PublicKey,
 	UserMap,
 	ZERO,
 	DriftClientConfig,
 	BulkAccountLoader,
 	RetryTxSender,
 	PriorityFeeSubscriber,
-	getUserFilter,
-	getNonIdleUserFilter,
+	BN,
+	timeRemainingUntilUpdate,
 } from '@drift-labs/sdk';
-import { decodeUser } from '@drift-labs/sdk/lib/decode/user';
 import { Mutex } from 'async-mutex';
 
 import { getErrorCode } from '../error';
@@ -22,7 +19,6 @@ import { BaseBotConfig } from '../config';
 import { simulateAndGetTxWithCUs, sleepMs } from '../utils';
 import {
 	AddressLookupTableAccount,
-	RpcResponseAndContext,
 	SendTransactionError,
 	TransactionInstruction,
 } from '@solana/web3.js';
@@ -85,7 +81,7 @@ export class UserLpSettlerBot implements Bot {
 				frequency: 0,
 				commitment: this.driftClient.opts?.commitment,
 			},
-			skipInitialLoad: false,
+			skipInitialLoad: true,
 			includeIdle: false,
 			disableSyncOnTotalAccountsChange: true,
 		});
@@ -159,28 +155,55 @@ export class UserLpSettlerBot implements Bot {
 		const start = Date.now();
 		try {
 			const lpsPerMarket: { [key: number]: number } = {};
-			const settleLpIxs: Array<TransactionInstruction> = [];
 
 			logger.info(`Loading users that have been LPs...`);
 			const fetchLpUsersStart = Date.now();
-			const users = await this.fetchLpUsers();
+			await this.driftClient.fetchAccounts();
+			await this.userMap.sync();
 			logger.info(`Fetch LPs took ${Date.now() - fetchLpUsersStart}`);
-			let usersDoneCount = 0;
 
-			// logger.info(`Going through ${this.userMap!.size()} users...`);
-			// for (const user of this.userMap!.values()) {
-			logger.info(`Going through ${users.length} users...`);
-			for (const userData of users) {
-				const user = userData.userAccount;
-				usersDoneCount++;
-				if (usersDoneCount % 100 === 0) {
-					logger.info(
-						`Processed ${usersDoneCount}/${this.userMap.size()} users...`
-					);
-				}
+			const nowTs = new BN(Date.now() / 1000);
+
+			const marketIxMap = new Map<number, TransactionInstruction[]>();
+			logger.info(`Going through ${this.userMap.size()} users...`);
+			for (const user of this.userMap.values()) {
+				const userAccount = user.getUserAccount();
+
+				const freeCollateral = user.getFreeCollateral('Initial');
+
 				// for (const pos of user.getActivePerpPositions()) {
-				for (const pos of user.perpPositions) {
+				for (const pos of userAccount.perpPositions) {
 					if (pos.lpShares.eq(ZERO)) {
+						continue;
+					}
+
+					let shouldSettle = false;
+					if (freeCollateral.lte(ZERO)) {
+						console.log(`user ${user.getUserAccountPublicKey()} free collateral is ${freeCollateral.toString()}`);
+						shouldSettle = true;
+					}
+
+					const perpMarketAccount = this.driftClient.getPerpMarketAccount(
+						pos.marketIndex
+					);
+
+					const timeTillFunding = timeRemainingUntilUpdate(
+						nowTs,
+						perpMarketAccount!.amm
+							.lastFundingRateTs,
+						perpMarketAccount!.amm
+							.fundingPeriod
+					);
+
+					// five min away from funding
+					if (timeTillFunding.lte(new BN(300))) {
+						console.log(
+							`user ${user.getUserAccountPublicKey()} funding within 5 min`
+						);
+						shouldSettle = true;
+					}
+
+					if (!shouldSettle) {
 						continue;
 					}
 
@@ -190,24 +213,25 @@ export class UserLpSettlerBot implements Bot {
 						lpsPerMarket[pos.marketIndex] += 1;
 					}
 
-					settleLpIxs.push(
-						await this.driftClient.settleLPIx(
-							userData.publicKey,
-							pos.marketIndex
-						)
+					if (marketIxMap.get(pos.marketIndex) === undefined) {
+						marketIxMap.set(pos.marketIndex, []);
+					}
+
+					const settleIx = await this.driftClient.settleLPIx(
+						user.getUserAccountPublicKey(),
+						pos.marketIndex
 					);
+
+					marketIxMap.get(pos.marketIndex)!.push(settleIx);
 				}
 			}
 
-			logger.info(
-				`Settling ${
-					settleLpIxs.length
-				} LP positions. LPs per market: ${JSON.stringify(lpsPerMarket)}`
-			);
-
-			for (let i = 0; i < settleLpIxs.length; i += SETTLE_LP_CHUNKS) {
-				const chunk = settleLpIxs.slice(i, i + SETTLE_LP_CHUNKS);
-				await this.trySendTxForChunk(chunk);
+			for (const [marketIndex, settleLpIxs] of marketIxMap.entries()) {
+				console.log(`Settling ${settleLpIxs.length} LPs for market ${marketIndex}`);
+				for (let i = 0; i < settleLpIxs.length; i += SETTLE_LP_CHUNKS) {
+					const chunk = settleLpIxs.slice(i, i + SETTLE_LP_CHUNKS);
+					await this.trySendTxForChunk(chunk);
+				}
 			}
 		} catch (err) {
 			console.error(err);
@@ -331,53 +355,5 @@ export class UserLpSettlerBot implements Bot {
 			// }
 		}
 		return success;
-	}
-
-	private async fetchLpUsers(): Promise<
-		Array<{
-			publicKey: PublicKey;
-			userAccount: UserAccount;
-		}>
-	> {
-		const rpcRequestArgs = [
-			this.driftClient.program.programId.toBase58(),
-			{
-				commitment: 'confirmed',
-				filters: [
-					getUserFilter(),
-					getNonIdleUserFilter(),
-					// getUserThatHasBeenLP()], // doesn't work
-				],
-				encoding: 'base64',
-				withContext: true,
-			},
-		];
-
-		const rpcJSONResponse: any =
-			// @ts-ignore
-			await this.driftClient.connection._rpcRequest(
-				'getProgramAccounts',
-				rpcRequestArgs
-			);
-
-		const rpcResponseAndContext: RpcResponseAndContext<
-			Array<{
-				pubkey: PublicKey;
-				account: {
-					data: [string, string];
-				};
-			}>
-		> = rpcJSONResponse.result;
-
-		console.log(`Users: ${rpcResponseAndContext.value.length}`);
-		return rpcResponseAndContext.value.map((programAccount) => {
-			const data = programAccount.account.data;
-			// @ts-ignore
-			const buffer = Buffer.from(data[0], data[1]);
-			return {
-				publicKey: programAccount.pubkey,
-				userAccount: decodeUser(buffer),
-			};
-		});
 	}
 }
