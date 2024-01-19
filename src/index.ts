@@ -49,6 +49,7 @@ import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { IFRevenueSettlerBot } from './bots/ifRevenueSettler';
 import { UserPnlSettlerBot } from './bots/userPnlSettler';
+import { UserLpSettlerBot } from './bots/userLpSettler';
 import { UserIdleFlipperBot } from './bots/userIdleFlipper';
 import {
 	getOrCreateAssociatedTokenAccount,
@@ -97,6 +98,7 @@ program
 	)
 	.option('--funding-rate-updater', 'Enable Funding Rate updater bot')
 	.option('--user-pnl-settler', 'Enable User PnL settler bot')
+	.option('--user-lp-settler', 'Settle active LP positions')
 	.option('--user-idle-flipper', 'Flips eligible users to idle')
 	.option('--mark-twap-crank', 'Enable bid/ask twap crank bot')
 	.option('--test-liveness', 'Purposefully fail liveness test after 1 minute')
@@ -628,6 +630,12 @@ const runBot = async () => {
 		);
 	}
 
+	if (configHasBot(config, 'userLpSettler')) {
+		bots.push(
+			new UserLpSettlerBot(driftClientConfig, config.botConfigs!.userLpSettler!)
+		);
+	}
+
 	if (configHasBot(config, 'userIdleFlipper')) {
 		needUserMapSubscribe = true;
 		bots.push(
@@ -710,6 +718,12 @@ const runBot = async () => {
 			);
 		}
 		await jitter.subscribe();
+	}
+
+	if (bots.length === 0) {
+		throw new Error(
+			`No active bot specified. You must specify a bot through --config-file, or a cli arg. Check the README.md for more information`
+		);
 	}
 
 	// Initialize bots
