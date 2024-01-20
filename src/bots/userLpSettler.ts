@@ -179,7 +179,9 @@ export class UserLpSettlerBot implements Bot {
 
 					let shouldSettle = false;
 					if (freeCollateral.lte(ZERO)) {
-						console.log(`user ${user.getUserAccountPublicKey()} free collateral is ${freeCollateral.toString()}`);
+						console.log(
+							`user ${user.getUserAccountPublicKey()} free collateral is ${freeCollateral.toString()}`
+						);
 						shouldSettle = true;
 					}
 
@@ -189,10 +191,8 @@ export class UserLpSettlerBot implements Bot {
 
 					const timeTillFunding = timeRemainingUntilUpdate(
 						nowTs,
-						perpMarketAccount!.amm
-							.lastFundingRateTs,
-						perpMarketAccount!.amm
-							.fundingPeriod
+						perpMarketAccount!.amm.lastFundingRateTs,
+						perpMarketAccount!.amm.fundingPeriod
 					);
 
 					// five min away from funding
@@ -227,7 +227,9 @@ export class UserLpSettlerBot implements Bot {
 			}
 
 			for (const [marketIndex, settleLpIxs] of marketIxMap.entries()) {
-				console.log(`Settling ${settleLpIxs.length} LPs for market ${marketIndex}`);
+				console.log(
+					`Settling ${settleLpIxs.length} LPs for market ${marketIndex}`
+				);
 				for (let i = 0; i < settleLpIxs.length; i += SETTLE_LP_CHUNKS) {
 					const chunk = settleLpIxs.slice(i, i + SETTLE_LP_CHUNKS);
 					await this.trySendTxForChunk(chunk);
