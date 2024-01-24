@@ -536,7 +536,10 @@ const runBot = async () => {
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
 		});
 
-		auctionSubscriber = new AuctionSubscriber({ driftClient });
+		auctionSubscriber = new AuctionSubscriber({
+			driftClient,
+			opts: { commitment: stateCommitment },
+		});
 		await auctionSubscriber.subscribe();
 
 		jitter = new JitterSniper({
