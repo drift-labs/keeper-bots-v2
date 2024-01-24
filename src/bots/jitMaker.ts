@@ -204,7 +204,7 @@ export class JitMaker implements Bot {
 					`[${new Date().toISOString()}] Running JIT periodic tasks...`
 				);
 				for (let i = 0; i < this.marketIndexes.length; i++) {
-					if (isVariant(this.marketType, 'PERP')) {
+					if (this.marketType === 'PERP') {
 						await this.jitPerp(i);
 					} else {
 						await this.jitSpot(i);
