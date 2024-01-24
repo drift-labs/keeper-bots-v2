@@ -1629,6 +1629,28 @@ export class FillerBot implements Bot {
 	protected async tryBulkFillPerpNodes(
 		nodesToFill: Array<NodeToFill>
 	): Promise<number> {
+		let nodesSent = 0;
+		const marketNodeMap = new Map<number, Array<NodeToFill>>();
+		for (const nodeToFill of nodesToFill) {
+			const marketIndex = nodeToFill.node.order!.marketIndex;
+			if (!marketNodeMap.has(marketIndex)) {
+				marketNodeMap.set(marketIndex, []);
+			}
+			marketNodeMap.get(marketIndex)!.push(nodeToFill);
+		}
+
+		for (const nodesToFillForMarket of marketNodeMap.values()) {
+			nodesSent += await this.tryBulkFillPerpNodesForMarket(
+				nodesToFillForMarket
+			);
+		}
+
+		return nodesSent;
+	}
+
+	protected async tryBulkFillPerpNodesForMarket(
+		nodesToFill: Array<NodeToFill>
+	): Promise<number> {
 		const ixs = [
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,

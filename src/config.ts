@@ -66,6 +66,7 @@ export type BotConfigMap = {
 	ifRevenueSettler?: BaseBotConfig;
 	fundingRateUpdater?: BaseBotConfig;
 	userPnlSettler?: BaseBotConfig;
+	userLpSettler?: BaseBotConfig;
 	userIdleFlipper?: BaseBotConfig;
 	markTwapCrank?: MarkTwapCrankConfig;
 	uncrossArb?: BaseBotConfig;
@@ -212,6 +213,8 @@ export function loadConfigFromOpts(opts: any): Config {
 			debug: opts.debug ?? false,
 			subaccounts: loadCommaDelimitToArray(opts.subaccount),
 			useJito: opts.useJito ?? false,
+			txRetryTimeoutMs: opts.txRetryTimeoutMs ?? 30000,
+			txSenderType: opts.txSenderType ?? 'fast',
 		},
 		enabledBots: [],
 		botConfigs: {},
@@ -319,6 +322,15 @@ export function loadConfigFromOpts(opts: any): Config {
 		config.botConfigs!.userPnlSettler = {
 			dryRun: opts.dryRun ?? false,
 			botId: process.env.BOT_ID ?? 'userPnlSettler',
+			metricsPort: 9464,
+			runOnce: opts.runOnce ?? false,
+		};
+	}
+	if (opts.userLpSettler) {
+		config.enabledBots.push('userLpSettler');
+		config.botConfigs!.userLpSettler = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'userLpSettler',
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
 		};
