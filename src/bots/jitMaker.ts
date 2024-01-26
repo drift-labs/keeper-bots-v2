@@ -294,41 +294,24 @@ export class JitMaker implements Bot {
 			return skip;
 		});
 
-		const bestDriftBid = getBestLimitBidExcludePubKey(
-			this.dlobSubscriber.dlob,
-			perpMarketAccount.marketIndex,
-			MarketType.PERP,
-			oraclePriceData.slot.toNumber(),
-			oraclePriceData,
-			driftUser.userAccountPublicKey.toString()
-		);
+		const l2 = this.dlobSubscriber.getL2({
+			marketIndex: perpMarketAccount.marketIndex,
+			marketType: MarketType.PERP,
+			includeVamm: true,
+			depth: 50,
+		});
 
-		const bestDriftAsk = getBestLimitAskExcludePubKey(
-			this.dlobSubscriber.dlob,
-			perpMarketAccount.marketIndex,
-			MarketType.PERP,
-			oraclePriceData.slot.toNumber(),
-			oraclePriceData,
-			driftUser.userAccountPublicKey.toString()
-		);
-		if (!bestDriftBid || !bestDriftAsk) {
+		const bestBidPrice = l2.bids[0].price;
+		const bestAskPrice = l2.asks[0].price;
+
+		if (!bestBidPrice || !bestAskPrice) {
 			logger.warn('skipping, no best bid/ask');
 			return;
 		}
 
-		const bestBidPrice = bestDriftBid.getPrice(
-			oraclePriceData,
-			this.dlobSubscriber.slotSource.getSlot()
-		);
+		const bidOffset = bestBidPrice.muln(1001).divn(1000);
 
-		const bestAskPrice = bestDriftAsk.getPrice(
-			oraclePriceData,
-			this.dlobSubscriber.slotSource.getSlot()
-		);
-
-		const bidOffset = bestBidPrice.sub(oraclePriceData.price);
-
-		const askOffset = bestAskPrice.sub(oraclePriceData.price);
+		const askOffset = bestAskPrice.muln(999).divn(1000);
 
 		let perpMinPosition = new BN(-maxBase * BASE_PRECISION.toNumber());
 		let perpMaxPosition = new BN(maxBase * BASE_PRECISION.toNumber());
@@ -344,7 +327,7 @@ export class JitMaker implements Bot {
 			minPosition: perpMinPosition,
 			bid: bidOffset,
 			ask: askOffset,
-			priceType: PriceType.ORACLE,
+			priceType: PriceType.LIMIT,
 			subAccountId: subId,
 		});
 	}
