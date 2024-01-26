@@ -280,7 +280,7 @@ const runBot = async () => {
 			connection: sendTxConnection,
 			wallet,
 			opts,
-			timeout: 3000,
+			timeout: config.global.txRetryTimeoutMs,
 			confirmationStrategy: ConfirmationStrategy.Polling,
 		});
 	} else {
