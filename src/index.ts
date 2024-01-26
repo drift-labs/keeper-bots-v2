@@ -529,7 +529,6 @@ const runBot = async () => {
 	if (configHasBot(config, 'jitMaker')) {
 		// Subscribe to drift client
 
-		needUserMapSubscribe = true;
 		needForceCollateral;
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
@@ -569,7 +568,6 @@ const runBot = async () => {
 			new JitMaker(
 				driftClient,
 				jitter,
-				userMap,
 				config.botConfigs!.jitMaker!,
 				config.global.driftEnv!
 			)

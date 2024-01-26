@@ -6,9 +6,9 @@ import {
 	DriftClient,
 	MarketType,
 	DLOBSubscriber,
-	UserMap,
 	SlotSubscriber,
 	PriorityFeeSubscriber,
+	OrderSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -61,13 +61,12 @@ export class JitMaker implements Bot {
 
 	private dlobSubscriber: DLOBSubscriber;
 	private slotSubscriber: SlotSubscriber;
-	private userMap: UserMap;
+	private orderSubscriber: OrderSubscriber;
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
 		jitter: JitterSniper | JitterShotgun,
-		userMap: UserMap,
 		config: JitMakerConfig,
 		driftEnv: DriftEnv
 	) {
@@ -75,17 +74,11 @@ export class JitMaker implements Bot {
 		this.marketIndexes = config.perpMarketIndicies ?? [0];
 		this.marketType = config.marketType;
 
-		const initLen = this.subAccountIds.length;
-		const dedupLen = new Set(this.subAccountIds).size;
-		if (initLen !== dedupLen) {
-			throw new Error(
-				'You CANNOT make multiple markets with the same sub account id'
-			);
-		}
+		const subAccountLen = this.subAccountIds.length;
 
 		// Check for 1:1 unique sub account id to market index ratio
 		const marketLen = this.marketIndexes.length;
-		if (dedupLen !== marketLen) {
+		if (subAccountLen !== marketLen) {
 			throw new Error('You must have 1 sub account id per market to jit');
 		}
 
@@ -94,13 +87,23 @@ export class JitMaker implements Bot {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftEnv = driftEnv;
-		this.userMap = userMap;
 
 		this.slotSubscriber = new SlotSubscriber(this.driftClient.connection);
+
+		this.orderSubscriber = new OrderSubscriber({
+			driftClient: this.driftClient,
+			subscriptionConfig: {
+				commitment: 'processed',
+				type: 'websocket',
+				resubTimeoutMs: 30000,
+				resyncIntervalMs: 300_000, // every 5 min
+			},
+		});
+
 		this.dlobSubscriber = new DLOBSubscriber({
-			dlobSource: this.userMap,
-			slotSource: this.slotSubscriber,
-			updateFrequency: 2000,
+			dlobSource: this.orderSubscriber,
+			slotSource: this.orderSubscriber,
+			updateFrequency: 1000,
 			driftClient: this.driftClient,
 		});
 
