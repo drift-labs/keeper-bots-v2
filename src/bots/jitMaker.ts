@@ -1,36 +1,14 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import {
-	DLOB,
 	DriftEnv,
 	BASE_PRECISION,
 	BN,
 	DriftClient,
-	JupiterClient,
-	getSignedTokenAmount,
-	getTokenAmount,
-	convertToNumber,
-	promiseTimeout,
-	PositionDirection,
 	MarketType,
-	ZERO,
-	PRICE_PRECISION,
 	DLOBSubscriber,
 	UserMap,
-	OrderType,
 	SlotSubscriber,
-	QUOTE_PRECISION,
-	DLOBNode,
-	OraclePriceData,
-	SwapMode,
-	getVariant,
-	isVariant,
-	User,
-	getLimitOrderParams,
-	getOrderParams,
-	ONE,
-	PostOnlyParams,
-	TEN,
-	PerpMarketAccount,
+	PriorityFeeSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -38,7 +16,6 @@ import { Bot } from '../types';
 import {
 	calculateBaseAmountToMarketMakePerp,
 	calculateBaseAmountToMarketMakeSpot,
-	decodeName,
 	getBestLimitAskExcludePubKey,
 	getBestLimitBidExcludePubKey,
 	isMarketVolatile,
@@ -50,30 +27,13 @@ import {
 	JitterSniper,
 	PriceType,
 } from '@drift-labs/jit-proxy/lib';
-import { assert } from '@drift-labs/sdk/lib/assert/assert';
 import dotenv from 'dotenv';
 
 dotenv.config();
-import {
-	ComputeBudgetProgram,
-	AddressLookupTableAccount,
-	VersionedTransaction,
-	Connection,
-	PublicKey,
-	TransactionInstruction,
-	Signer,
-	ConfirmOptions,
-	TransactionSignature,
-} from '@solana/web3.js';
-import { BaseBotConfig, JitMakerConfig } from '../config';
+import { PublicKey } from '@solana/web3.js';
+import { JitMakerConfig } from '../config';
 
 const TARGET_LEVERAGE_PER_ACCOUNT = 1;
-/// jupiter slippage, which is the difference between the quoted price, and the final swap price
-const JUPITER_SLIPPAGE_BPS = 10;
-/// this is the slippage away from the oracle price that we're willing to tolerate.
-/// i.e. we don't want to buy 50 bps above oracle, or sell 50 bps below oracle
-const JUPITER_ORACLE_SLIPPAGE_BPS = 50;
-const BASE_PCT_DEVIATION_BEFORE_HEDGE = 0.1;
 
 /**
  * This is an example of a bot that implements the Bot interface.
@@ -102,6 +62,7 @@ export class JitMaker implements Bot {
 	private dlobSubscriber: DLOBSubscriber;
 	private slotSubscriber: SlotSubscriber;
 	private userMap: UserMap;
+	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
@@ -139,8 +100,16 @@ export class JitMaker implements Bot {
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
 			slotSource: this.slotSubscriber,
-			updateFrequency: 30000,
+			updateFrequency: 2000,
 			driftClient: this.driftClient,
+		});
+
+		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
+			connection: this.driftClient.connection,
+			frequencyMs: 5000,
+			addresses: [
+				new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
+			],
 		});
 	}
 
@@ -153,6 +122,7 @@ export class JitMaker implements Bot {
 		// do stuff that takes some time
 		await this.slotSubscriber.subscribe();
 		await this.dlobSubscriber.subscribe();
+		await this.priorityFeeSubscriber.subscribe();
 
 		logger.info(`${this.name} init done`);
 	}
@@ -321,6 +291,11 @@ export class JitMaker implements Bot {
 		} else if (overleveredShort) {
 			perpMinPosition = new BN(0);
 		}
+
+		const priorityFee = Number(
+			Math.floor(this.priorityFeeSubscriber.lastAvgStrategyResult * 1.1 || 1)
+		);
+		this.jitter.setComputeUnitsPrice(priorityFee);
 
 		this.jitter.updatePerpParams(perpIdx, {
 			maxPosition: perpMaxPosition,
