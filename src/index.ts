@@ -66,7 +66,7 @@ import {
 } from './config';
 import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
 import { FillerLiteBot } from './bots/fillerLite';
-import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
+import { JitProxyClient, JitterShotgun } from '@drift-labs/jit-proxy/lib';
 import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 import { UncrossArbBot } from './bots/uncrossArbBot';
 import { FillerBulkBot } from './bots/fillerBulk';
@@ -157,6 +157,11 @@ program
 	.option(
 		'--tx-sender-type <string>',
 		'Choose tx sender type, options are: fast, retry'
+	)
+	.option(
+		'--market-type <type>',
+		'Set the market type for the JIT Maker bot',
+		'PERP'
 	)
 	.parse();
 
@@ -520,24 +525,25 @@ const runBot = async () => {
 	}
 
 	let auctionSubscriber: AuctionSubscriber | undefined = undefined;
-	let jitter: JitterSniper | undefined = undefined;
+	let jitter: JitterShotgun | undefined = undefined;
 	if (configHasBot(config, 'jitMaker')) {
 		// Subscribe to drift client
 
-		needUserMapSubscribe = true;
 		needForceCollateral;
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
 		});
 
-		auctionSubscriber = new AuctionSubscriber({ driftClient });
+		auctionSubscriber = new AuctionSubscriber({
+			driftClient,
+			opts: { commitment: stateCommitment },
+		});
 		await auctionSubscriber.subscribe();
 
-		jitter = new JitterSniper({
+		jitter = new JitterShotgun({
 			auctionSubscriber,
 			driftClient,
-			slotSubscriber,
 			jitProxyClient,
 		});
 		await jitter.subscribe();
@@ -550,14 +556,18 @@ const runBot = async () => {
 		driftClient.txSender = new FastSingleTxSender({
 			connection: txSenderConnection,
 			wallet,
-			blockhashRefreshInterval: 10_000,
+			blockhashRefreshInterval: 1000,
+			opts: {
+				preflightCommitment: 'processed',
+				skipPreflight: false,
+				commitment: 'processed',
+			},
 		});
 
 		bots.push(
 			new JitMaker(
 				driftClient,
 				jitter,
-				userMap,
 				config.botConfigs!.jitMaker!,
 				config.global.driftEnv!
 			)

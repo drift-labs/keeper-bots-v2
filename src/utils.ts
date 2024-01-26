@@ -13,6 +13,7 @@ import {
 	PRICE_PRECISION,
 	PerpMarketAccount,
 	QUOTE_PRECISION,
+	SpotMarketAccount,
 	TxSender,
 	Wallet,
 	convertToNumber,
@@ -92,6 +93,17 @@ export function loadCommaDelimitToArray(str: string): number[] {
 			});
 	} catch (e) {
 		return [];
+	}
+}
+
+export function convertToMarketType(input: string): MarketType {
+	switch (input.toUpperCase()) {
+		case 'PERP':
+			return MarketType.PERP;
+		case 'SPOT':
+			return MarketType.SPOT;
+		default:
+			throw new Error(`Invalid market type: ${input}`);
 	}
 }
 
@@ -242,11 +254,7 @@ export function getBestLimitAskExcludePubKey(
 	return undefined;
 }
 
-function roundDownToNearest(num: number, nearest = 100) {
-	return Math.floor(num / nearest) * nearest;
-}
-
-export function calculateBaseAmountToMarketMake(
+export function calculateBaseAmountToMarketMakePerp(
 	perpMarketAccount: PerpMarketAccount,
 	netSpotMarketValue: BN,
 	targetLeverage = 1
@@ -255,27 +263,42 @@ export function calculateBaseAmountToMarketMake(
 		perpMarketAccount.amm.historicalOracleData.lastOraclePriceTwap
 	);
 
-	let basePriceNormedTick = basePriceNormed;
-	while (basePriceNormedTick > 100) {
-		basePriceNormedTick /= 10;
-	}
+	const tcNormalized = convertToNumber(netSpotMarketValue, QUOTE_PRECISION);
 
-	const tcNormed = Math.min(
-		roundDownToNearest(
-			convertToNumber(netSpotMarketValue, QUOTE_PRECISION),
-			basePriceNormedTick
-		),
-		800000 // hard coded limit
-	);
-	logger.info(netSpotMarketValue.toString() + '->' + tcNormed.toString());
+	logger.info(netSpotMarketValue.toString() + '->' + tcNormalized.toString());
 
 	targetLeverage *= 0.95;
 
-	const maxBase = (tcNormed / basePriceNormed) * targetLeverage;
+	const maxBase = (tcNormalized / basePriceNormed) * targetLeverage;
 	const marketSymbol = decodeName(perpMarketAccount.name);
 
 	logger.info(
-		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${tcNormed.toString()} / ${basePriceNormed.toString()} * ${targetLeverage.toString()}`
+		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${tcNormalized.toString()} / ${basePriceNormed.toString()} * ${targetLeverage.toString()}`
+	);
+
+	return maxBase;
+}
+
+export function calculateBaseAmountToMarketMakeSpot(
+	spotMarketAccount: SpotMarketAccount,
+	netSpotMarketValue: BN,
+	targetLeverage = 1
+) {
+	const basePriceNormalized = convertToNumber(
+		spotMarketAccount.historicalOracleData.lastOraclePriceTwap
+	);
+
+	const tcNormalized = convertToNumber(netSpotMarketValue, QUOTE_PRECISION);
+
+	logger.info(netSpotMarketValue.toString() + '->' + tcNormalized.toString());
+
+	targetLeverage *= 0.95;
+
+	const maxBase = (tcNormalized / basePriceNormalized) * targetLeverage;
+	const marketSymbol = decodeName(spotMarketAccount.name);
+
+	logger.info(
+		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${tcNormalized.toString()} / ${basePriceNormalized.toString()} * ${targetLeverage.toString()}`
 	);
 
 	return maxBase;
@@ -317,6 +340,31 @@ export function isMarketVolatile(
 	return false;
 }
 
+export function isSpotMarketVolatile(
+	spotMarketAccount: SpotMarketAccount,
+	oraclePriceData: OraclePriceData,
+	volatileThreshold = 0.005
+) {
+	const twapPrice =
+		spotMarketAccount.historicalOracleData.lastOraclePriceTwap5Min;
+	const lastPrice = spotMarketAccount.historicalOracleData.lastOraclePrice;
+	const currentPrice = oraclePriceData.price;
+	const minDenom = BN.min(BN.min(currentPrice, lastPrice), twapPrice);
+	const cVsL =
+		Math.abs(
+			currentPrice.sub(lastPrice).mul(PRICE_PRECISION).div(minDenom).toNumber()
+		) / PERCENTAGE_PRECISION.toNumber();
+	const cVsT =
+		Math.abs(
+			currentPrice.sub(twapPrice).mul(PRICE_PRECISION).div(minDenom).toNumber()
+		) / PERCENTAGE_PRECISION.toNumber();
+
+	if (cVsT > volatileThreshold || cVsL > volatileThreshold) {
+		return true;
+	}
+
+	return false;
+}
 export function isSetComputeUnitsIx(ix: TransactionInstruction): boolean {
 	// Compute budget program discriminator is first byte
 	// 2: set compute unit limit
@@ -336,6 +384,7 @@ export type SimulateAndGetTxWithCUsResponse = {
 	simError: TransactionError | string | null;
 	tx: VersionedTransaction;
 };
+
 export async function simulateAndGetTxWithCUs(
 	ixs: Array<TransactionInstruction>,
 	connection: Connection,
