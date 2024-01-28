@@ -19,13 +19,13 @@ import { BaseBotConfig } from '../config';
 import { simulateAndGetTxWithCUs, sleepMs } from '../utils';
 import {
 	AddressLookupTableAccount,
+	ComputeBudgetProgram,
 	SendTransactionError,
 	TransactionInstruction,
 } from '@solana/web3.js';
 
 const SETTLE_LP_CHUNKS = 4;
 const SLEEP_MS = 500;
-const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 10000; // cap the computeUnitPrice to pay for settlePnl txs
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -292,12 +292,19 @@ export class UserLpSettlerBot implements Bot {
 		}
 
 		let success = false;
-		logger.info(
-			`Using avgPriorityFee: ${
-				this.priorityFeeSubscriber!.lastAvgStrategyResult
-			} (clamp to ${MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS})`
-		);
 		try {
+			ixs.unshift(
+				...[
+					ComputeBudgetProgram.setComputeUnitLimit({
+						units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
+					}),
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: Math.floor(
+							this.priorityFeeSubscriber!.getCustomStrategyResult()
+						),
+					}),
+				]
+			);
 			const simResult = await simulateAndGetTxWithCUs(
 				ixs,
 				this.driftClient.connection,

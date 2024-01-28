@@ -33,7 +33,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
-import { decodeName, sleepMs } from '../utils';
+import { decodeName, simulateAndGetTxWithCUs, sleepMs } from '../utils';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
@@ -50,9 +50,7 @@ type SettlePnlIxParams = {
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 const SETTLE_USER_CHUNKS = 4;
-const CU_PER_SETTLE_PNL = 500_000; // annecdotal: https://explorer.solana.com/tx/fLoSxBpBkowozkPMem9s3KLGQYt3KDHemTRzZPWFe48sZc1VJsgRTiYJUGXZGYRWQTwF42PjpgFLe6fpH9aCLh1#ix-1
 const SLEEP_MS = 500;
-const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 50000; // cap the computeUnitPrice to pay for settlePnl txs
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -508,44 +506,58 @@ export class UserPnlSettlerBot implements Bot {
 		}
 
 		let success = false;
-		logger.info(
-			`Using maxPriorityFee: ${
-				this.priorityFeeSubscriber!.lastMaxStrategyResult
-			} (clamp to ${MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS})`
-		);
 		try {
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
-					units: CU_PER_SETTLE_PNL * users.length,
+					units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
 				}),
 				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.min(
-						this.priorityFeeSubscriber!.lastMaxStrategyResult,
-						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber!.getCustomStrategyResult()
 					),
 				}),
 			];
 			ixs.push(
 				...(await this.driftClient.getSettlePNLsIxs(users, [marketIndex]))
 			);
-			const txSig = await this.driftClient.txSender.sendVersionedTransaction(
-				await this.driftClient.txSender.getVersionedTransaction(
-					ixs,
-					[this.lookupTableAccount!],
+
+			const simResult = await simulateAndGetTxWithCUs(
+				ixs,
+				this.driftClient.connection,
+				this.driftClient.txSender,
+				[this.lookupTableAccount!],
+				[],
+				undefined,
+				1.15,
+				true,
+				true
+			);
+			logger.info(
+				`Settle Pnl estimated ${simResult.cuEstimate} CUs for ${ixs.length} ixs, ${users.length} users.`
+			);
+			if (simResult.simError !== null) {
+				logger.error(
+					`Sim error: ${JSON.stringify(simResult.simError)}\n${
+						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+					}`
+				);
+				success = false;
+			} else {
+				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
+					simResult.tx,
 					[],
 					this.driftClient.opts
-				),
-				[],
-				this.driftClient.opts
-			);
-			this.logTxAndSlotForUsers(
-				txSig,
-				marketIndex,
-				users.map(
-					({ settleeUserAccountPublicKey }) => settleeUserAccountPublicKey
-				)
-			);
-			success = true;
+				);
+				success = true;
+
+				this.logTxAndSlotForUsers(
+					txSig,
+					marketIndex,
+					users.map(
+						({ settleeUserAccountPublicKey }) => settleeUserAccountPublicKey
+					)
+				);
+			}
 		} catch (err) {
 			const userKeys = users
 				.map(({ settleeUserAccountPublicKey }) =>
@@ -581,7 +593,7 @@ export class UserPnlSettlerBot implements Bot {
 		const txSig = txSigAndSlot.txSig;
 		for (const userAccountPublicKey of userAccountPublicKeys) {
 			logger.info(
-				`Settled pnl user ${userAccountPublicKey.toBase58()} in market ${marketIndex} https://solscan.io/tx/${txSig}`
+				`Settled pnl user ${userAccountPublicKey.toBase58()} in market ${marketIndex} https://solana.fm/tx/${txSig}`
 			);
 		}
 	}

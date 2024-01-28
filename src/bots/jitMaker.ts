@@ -292,8 +292,8 @@ export class JitMaker implements Bot {
 			perpMinPosition = new BN(0);
 		}
 
-		const priorityFee = Number(
-			Math.floor(this.priorityFeeSubscriber.lastAvgStrategyResult * 1.1 || 1)
+		const priorityFee = Math.floor(
+			this.priorityFeeSubscriber.getCustomStrategyResult() * 1.1
 		);
 		this.jitter.setComputeUnitsPrice(priorityFee);
 
