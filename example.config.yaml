@@ -4,8 +4,22 @@ global:
 
   # RPC endpoint to use
   endpoint: https://api.mainnet-beta.solana.com
-  # custom websocket endpoint to use (if null will be determined from rpc endpoint)
+
+  # Custom websocket endpoint to use (if null will be determined from `endpoint``)
+  # Note: the default wsEndpoint value simply replaces http(s) with ws(s), so if
+  #       your RPC provider requires a special path (i.e. /ws) for websocket connections
+  #       you must set this.
   wsEndpoint:
+
+  # optional if you want to use helius' global priority fee method AND `endpoint` is not
+  # already a helius url.
+  heliusEndpoint:
+
+  # `solana` or `helius`. If `helius` `endpoint` must be a helius RPC, or `heliusEndpoint`
+  #   must be set
+  # solana: uses https://solana.com/docs/rpc/http/getrecentprioritizationfees
+  # helius: uses https://docs.helius.dev/solana-rpc-nodes/alpha-priority-fee-api
+  priorityFeeMethod: solana
 
   # Private key to use to sign transactions.
   # will load from KEEPER_PRIVATE_KEY env var if null

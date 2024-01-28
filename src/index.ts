@@ -35,6 +35,8 @@ import {
 	Wallet,
 	RetryTxSender,
 	ConfirmationStrategy,
+	PriorityFeeSubscriber,
+	PriorityFeeMethod,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -193,8 +195,10 @@ setLogLevel(config.global.debug ? 'debug' : 'info');
 
 const endpoint = config.global.endpoint!;
 const wsEndpoint = config.global.wsEndpoint;
+const heliusEndpoint = config.global.heliusEndpoint;
 logger.info(`RPC endpoint: ${endpoint}`);
 logger.info(`WS endpoint:  ${wsEndpoint}`);
+logger.info(`Helius endpoint:  ${heliusEndpoint}`);
 logger.info(`DriftEnv:     ${config.global.driftEnv}`);
 logger.info(`Commit:       ${commitHash}`);
 
@@ -415,9 +419,27 @@ const runBot = async () => {
 		skipInitialLoad: false,
 		includeIdle: false,
 	});
+	let needPriorityFeeSubscriber = false;
+
+	const priorityFeeMethod =
+		(config.global.priorityFeeMethod as PriorityFeeMethod) ??
+		PriorityFeeMethod.SOLANA;
+	logger.info(`priorityFeeMethod: ${priorityFeeMethod}`);
+	const priorityFeeSubscriber = new PriorityFeeSubscriber({
+		connection: driftClient.connection,
+		frequencyMs: 5000,
+
+		// the specific bot will update this, if multiple bots are using this,
+		// the last one to update it will determine the addresses to use...
+		addresses: [],
+		heliusRpcUrl: heliusEndpoint,
+		priorityFeeMethod,
+	});
+
 	if (configHasBot(config, 'filler')) {
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
+		needPriorityFeeSubscriber = true;
 		bots.push(
 			new FillerBot(
 				slotSubscriber,
@@ -433,6 +455,7 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				config.botConfigs!.filler!,
+				priorityFeeSubscriber,
 				jitoSearcherClient,
 				jitoAuthKeypair,
 				keypair
@@ -442,6 +465,8 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'fillerLite')) {
 		needCheckDriftUser = true;
+		needPriorityFeeSubscriber = true;
+
 		logger.info(`Starting filler lite bot`);
 		bots.push(
 			new FillerLiteBot(
@@ -455,6 +480,7 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				config.botConfigs!.fillerLite!,
+				priorityFeeSubscriber,
 				jitoSearcherClient,
 				jitoAuthKeypair,
 				keypair
@@ -464,7 +490,10 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'fillerBulk')) {
 		needCheckDriftUser = true;
+		needPriorityFeeSubscriber = true;
+
 		logger.info(`Starting filler bulk bot`);
+
 		bots.push(
 			new FillerBulkBot(
 				slotSubscriber,
@@ -477,6 +506,7 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				config.botConfigs!.fillerBulk!,
+				priorityFeeSubscriber,
 				jitoSearcherClient,
 				jitoAuthKeypair,
 				keypair
@@ -488,6 +518,8 @@ const runBot = async () => {
 		needCheckDriftUser = true;
 		// to avoid long startup, spotFiller will fetch userAccounts as needed and build the map over time
 		needUserMapSubscribe = false;
+		needPriorityFeeSubscriber = true;
+
 		bots.push(
 			new SpotFillerBot(
 				driftClient,
@@ -500,6 +532,7 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				config.botConfigs!.spotFiller!,
+				priorityFeeSubscriber,
 				eventSubscriber
 			)
 		);
@@ -529,7 +562,10 @@ const runBot = async () => {
 	if (configHasBot(config, 'jitMaker')) {
 		// Subscribe to drift client
 
-		needForceCollateral;
+		needCheckDriftUser = true;
+		needForceCollateral = true;
+		needPriorityFeeSubscriber = true;
+
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
@@ -569,7 +605,8 @@ const runBot = async () => {
 				driftClient,
 				jitter,
 				config.botConfigs!.jitMaker!,
-				config.global.driftEnv!
+				config.global.driftEnv!,
+				priorityFeeSubscriber
 			)
 		);
 	}
@@ -593,6 +630,7 @@ const runBot = async () => {
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
 		needForceCollateral = true;
+		needPriorityFeeSubscriber = true;
 		bots.push(
 			new LiquidatorBot(
 				driftClient,
@@ -606,6 +644,7 @@ const runBot = async () => {
 				},
 				config.botConfigs!.liquidator!,
 				config.global.subaccounts![0],
+				priorityFeeSubscriber,
 				sdkConfig.SERUM_LOOKUP_TABLE
 					? new PublicKey(sdkConfig.SERUM_LOOKUP_TABLE as string)
 					: undefined
@@ -632,17 +671,24 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userPnlSettler')) {
+		needPriorityFeeSubscriber = true;
 		bots.push(
 			new UserPnlSettlerBot(
 				driftClientConfig,
-				config.botConfigs!.userPnlSettler!
+				config.botConfigs!.userPnlSettler!,
+				priorityFeeSubscriber
 			)
 		);
 	}
 
 	if (configHasBot(config, 'userLpSettler')) {
+		needPriorityFeeSubscriber = true;
 		bots.push(
-			new UserLpSettlerBot(driftClientConfig, config.botConfigs!.userLpSettler!)
+			new UserLpSettlerBot(
+				driftClientConfig,
+				config.botConfigs!.userLpSettler!,
+				priorityFeeSubscriber
+			)
 		);
 	}
 
@@ -677,17 +723,20 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'uncrossArb')) {
 		needCheckDriftUser = true;
+		needPriorityFeeSubscriber = true;
 		const jitProxyClient = new JitProxyClient({
 			driftClient,
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
 		});
+
 		bots.push(
 			new UncrossArbBot(
 				driftClient,
 				jitProxyClient,
 				slotSubscriber,
 				config.botConfigs!.uncrossArb!,
-				config.global.driftEnv!
+				config.global.driftEnv!,
+				priorityFeeSubscriber
 			)
 		);
 	}
@@ -701,22 +750,43 @@ const runBot = async () => {
 		jitter ||
 		needUserMapSubscribe
 	) {
+		const hrStart = process.hrtime();
 		while (!(await driftClient.subscribe())) {
-			logger.info('waiting to subscribe to DriftClient');
+			logger.info('retrying driftClient.subscribe in 1s...');
 			await sleepMs(1000);
 		}
+		const hrEnd = process.hrtime(hrStart);
+		logger.info(`driftClient.subscribe took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`);
 	}
+
 	logger.info(`Checking user exists: ${needCheckDriftUser}`);
 	if (needCheckDriftUser) await checkUserExists(config, driftClient, wallet);
+
 	logger.info(`Checking if bot needs collateral: ${needForceCollateral}`);
 	if (needForceCollateral)
 		await checkAndForceCollateral(config, driftClient, wallet);
+
 	logger.info(`Checking if need eventSubscriber: ${eventSubscriber}`);
 	if (eventSubscriber) await eventSubscriber.subscribe();
+
 	logger.info(`Checking if need usermap: ${needUserMapSubscribe}`);
-	if (needUserMapSubscribe) await userMap.subscribe();
+	if (needUserMapSubscribe) {
+		const hrStart = process.hrtime();
+		await userMap.subscribe();
+		const hrEnd = process.hrtime(hrStart);
+		logger.info(`userMap.subscribe took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`);
+	}
+
 	logger.info(`Checking if need auctionSubscriber: ${auctionSubscriber}`);
-	if (auctionSubscriber) await auctionSubscriber.subscribe();
+	if (auctionSubscriber) {
+		const hrStart = process.hrtime();
+		await auctionSubscriber.subscribe();
+		const hrEnd = process.hrtime(hrStart);
+		logger.info(
+			`auctionSubscriber.subscribe took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`
+		);
+	}
+
 	logger.info(`Checking if need jitter: ${jitter}`);
 	if (jitter) {
 		const freeCollateral = driftClient
@@ -727,7 +797,23 @@ const runBot = async () => {
 				`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
 			);
 		}
+
+		const hrStart = process.hrtime();
 		await jitter.subscribe();
+		const hrEnd = process.hrtime(hrStart);
+		logger.info(`jitter.subscribe took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`);
+	}
+
+	logger.info(
+		`Checking if need PriorityFeeSubscriber: ${needPriorityFeeSubscriber}`
+	);
+	if (needPriorityFeeSubscriber) {
+		const hrStart = process.hrtime();
+		await priorityFeeSubscriber.subscribe();
+		const hrEnd = process.hrtime(hrStart);
+		logger.info(
+			`priorityFeeSubscriber.subscribe() took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`
+		);
 	}
 
 	if (bots.length === 0) {

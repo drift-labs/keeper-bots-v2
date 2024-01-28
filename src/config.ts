@@ -76,6 +76,8 @@ export interface GlobalConfig {
 	driftEnv?: DriftEnv;
 	endpoint?: string;
 	wsEndpoint?: string;
+	heliusEndpoint?: string;
+	priorityFeeMethod?: string;
 	resubTimeoutMs?: number;
 	keeperPrivateKey?: string;
 	initUser?: boolean;
@@ -124,6 +126,8 @@ const defaultConfig: Partial<Config> = {
 
 		endpoint: process.env.ENDPOINT,
 		wsEndpoint: process.env.WS_ENDPOINT,
+		heliusEndpoint: process.env.HELIUS_ENDPOINT,
+		priorityFeeMethod: process.env.PRIORITY_FEE_METHOD ?? 'solana',
 		keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY,
 
 		useJito: false,
@@ -195,6 +199,9 @@ export function loadConfigFromOpts(opts: any): Config {
 			driftEnv: (process.env.ENV ?? 'devnet') as DriftEnv,
 			endpoint: opts.endpoint ?? process.env.ENDPOINT,
 			wsEndpoint: opts.wsEndpoint ?? process.env.WS_ENDPOINT,
+			heliusEndpoint: opts.heliusEndpoint ?? process.env.HELIUS_ENDPOINT,
+			priorityFeeMethod:
+				opts.priorityFeeMethod ?? process.env.PRIORITY_FEE_METHOD,
 			keeperPrivateKey: opts.privateKey ?? process.env.KEEPER_PRIVATE_KEY,
 			eventSubscriberPollingInterval: parseInt(
 				process.env.BULK_ACCOUNT_LOADER_POLLING_INTERVAL ?? '5000'

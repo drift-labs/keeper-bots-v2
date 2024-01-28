@@ -68,7 +68,8 @@ export class JitMaker implements Bot {
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
 		jitter: JitterSniper | JitterShotgun,
 		config: JitMakerConfig,
-		driftEnv: DriftEnv
+		driftEnv: DriftEnv,
+		priorityFeeSubscriber: PriorityFeeSubscriber
 	) {
 		this.subAccountIds = config.subaccounts ?? [0];
 		this.marketIndexes = config.perpMarketIndicies ?? [0];
@@ -107,13 +108,10 @@ export class JitMaker implements Bot {
 			driftClient: this.driftClient,
 		});
 
-		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
-			connection: this.driftClient.connection,
-			frequencyMs: 5000,
-			addresses: [
-				new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
-			],
-		});
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.priorityFeeSubscriber.updateAddresses([
+			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
+		]);
 	}
 
 	/**
@@ -125,7 +123,6 @@ export class JitMaker implements Bot {
 		// do stuff that takes some time
 		await this.slotSubscriber.subscribe();
 		await this.dlobSubscriber.subscribe();
-		await this.priorityFeeSubscriber.subscribe();
 
 		logger.info(`${this.name} init done`);
 	}

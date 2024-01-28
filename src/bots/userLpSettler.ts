@@ -25,7 +25,6 @@ import {
 
 const SETTLE_LP_CHUNKS = 4;
 const SLEEP_MS = 500;
-const PRIORITY_FEE_SUBSCRIBER_FREQ_MS = 1000;
 const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 10000; // cap the computeUnitPrice to pay for settlePnl txs
 
 const errorCodesToSuppress = [
@@ -50,7 +49,11 @@ export class UserLpSettlerBot implements Bot {
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(driftClientConfigs: DriftClientConfig, config: BaseBotConfig) {
+	constructor(
+		driftClientConfigs: DriftClientConfig,
+		config: BaseBotConfig,
+		priorityFeeSubscriber: PriorityFeeSubscriber
+	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
@@ -85,6 +88,17 @@ export class UserLpSettlerBot implements Bot {
 			includeIdle: false,
 			disableSyncOnTotalAccountsChange: true,
 		});
+
+		const perpMarkets = this.driftClient
+			.getPerpMarketAccounts()
+			.map((m) => m.pubkey);
+
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.priorityFeeSubscriber.updateAddresses([...perpMarkets]);
+
+		logger.info(
+			`Lp settler looking at ${perpMarkets.length} perp markets to determine priority fee`
+		);
 	}
 
 	public async init() {
@@ -98,22 +112,6 @@ export class UserLpSettlerBot implements Bot {
 		}
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
-
-		const perpMarkets = this.driftClient
-			.getPerpMarketAccounts()
-			.map((m) => m.pubkey);
-
-		logger.info(
-			`Lp settler looking at ${perpMarkets.length} perp markets to determine priority fee`
-		);
-
-		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
-			connection: this.driftClient.connection,
-			frequencyMs: PRIORITY_FEE_SUBSCRIBER_FREQ_MS,
-			addresses: [...perpMarkets],
-		});
-		await this.priorityFeeSubscriber.subscribe();
-		await sleepMs(PRIORITY_FEE_SUBSCRIBER_FREQ_MS);
 
 		// logger.info(`Initializing UserMap`);
 		// const startUserMapSub = Date.now();
