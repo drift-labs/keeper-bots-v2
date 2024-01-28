@@ -6,6 +6,7 @@ import {
 	OrderSubscriber,
 	UserAccount,
 	User,
+	PriorityFeeSubscriber,
 } from '@drift-labs/sdk';
 
 import { Keypair, PublicKey } from '@solana/web3.js';
@@ -28,6 +29,7 @@ export class FillerLiteBot extends FillerBot {
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
+		priorityFeeSubscriber: PriorityFeeSubscriber,
 		jitoSearcherClient?: SearcherClient,
 		jitoAuthKeypair?: Keypair,
 		tipPayerKeypair?: Keypair
@@ -40,6 +42,7 @@ export class FillerLiteBot extends FillerBot {
 			undefined,
 			runtimeSpec,
 			config,
+			priorityFeeSubscriber,
 			jitoSearcherClient,
 			jitoAuthKeypair,
 			tipPayerKeypair

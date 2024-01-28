@@ -267,6 +267,7 @@ export class FillerBot implements Bot {
 		eventSubscriber: EventSubscriber | undefined,
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
+		priorityFeeSubscriber: PriorityFeeSubscriber,
 		jitoSearcherClient?: SearcherClient,
 		jitoAuthKeypair?: Keypair,
 		tipPayerKeypair?: Keypair
@@ -350,13 +351,11 @@ export class FillerBot implements Bot {
 			}`
 		);
 
-		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
-			connection: this.driftClient.connection,
-			frequencyMs: 5000,
-			addresses: [
-				new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC is good indicator of fees
-			],
-		});
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.priorityFeeSubscriber.updateAddresses([
+			new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC
+			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
+		]);
 	}
 
 	protected initializeMetrics() {
@@ -574,8 +573,6 @@ export class FillerBot implements Bot {
 
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
-
-		await this.priorityFeeSubscriber.subscribe();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}

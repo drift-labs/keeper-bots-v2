@@ -91,7 +91,8 @@ export class UncrossArbBot implements Bot {
 		jitProxyClient: JitProxyClient,
 		slotSubscriber: SlotSubscriber,
 		config: BaseBotConfig,
-		driftEnv: DriftEnv
+		driftEnv: DriftEnv,
+		priorityFeeSubscriber: PriorityFeeSubscriber
 	) {
 		this.jitProxyClient = jitProxyClient;
 		this.driftClient = driftClient;
@@ -144,13 +145,10 @@ export class UncrossArbBot implements Bot {
 			driftClient: this.driftClient,
 		});
 
-		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
-			connection: this.driftClient.connection,
-			frequencyMs: 5000,
-			addresses: [
-				new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
-			],
-		});
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.priorityFeeSubscriber.updateAddresses([
+			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
+		]);
 	}
 
 	/**
@@ -161,7 +159,6 @@ export class UncrossArbBot implements Bot {
 
 		await this.orderSubscriber.subscribe();
 		await this.dlobSubscriber.subscribe();
-		await this.priorityFeeSubscriber.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 

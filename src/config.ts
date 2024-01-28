@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import YAML from 'yaml';
-import { loadCommaDelimitToArray } from './utils';
+import { convertToMarketType, loadCommaDelimitToArray } from './utils';
 import { OrderExecutionAlgoType } from './types';
-import { DriftEnv } from '@drift-labs/sdk';
+import { DriftEnv, MarketType } from '@drift-labs/sdk';
 
 export type BaseBotConfig = {
 	botId: string;
@@ -14,6 +14,7 @@ export type BaseBotConfig = {
 export type JitMakerConfig = BaseBotConfig & {
 	perpMarketIndicies?: Array<number>;
 	subaccounts?: Array<number>;
+	marketType: MarketType;
 };
 
 export type MarkTwapCrankConfig = BaseBotConfig & {
@@ -75,6 +76,8 @@ export interface GlobalConfig {
 	driftEnv?: DriftEnv;
 	endpoint?: string;
 	wsEndpoint?: string;
+	heliusEndpoint?: string;
+	priorityFeeMethod?: string;
 	resubTimeoutMs?: number;
 	keeperPrivateKey?: string;
 	initUser?: boolean;
@@ -123,6 +126,8 @@ const defaultConfig: Partial<Config> = {
 
 		endpoint: process.env.ENDPOINT,
 		wsEndpoint: process.env.WS_ENDPOINT,
+		heliusEndpoint: process.env.HELIUS_ENDPOINT,
+		priorityFeeMethod: process.env.PRIORITY_FEE_METHOD ?? 'solana',
 		keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY,
 
 		useJito: false,
@@ -194,6 +199,9 @@ export function loadConfigFromOpts(opts: any): Config {
 			driftEnv: (process.env.ENV ?? 'devnet') as DriftEnv,
 			endpoint: opts.endpoint ?? process.env.ENDPOINT,
 			wsEndpoint: opts.wsEndpoint ?? process.env.WS_ENDPOINT,
+			heliusEndpoint: opts.heliusEndpoint ?? process.env.HELIUS_ENDPOINT,
+			priorityFeeMethod:
+				opts.priorityFeeMethod ?? process.env.PRIORITY_FEE_METHOD,
 			keeperPrivateKey: opts.privateKey ?? process.env.KEEPER_PRIVATE_KEY,
 			eventSubscriberPollingInterval: parseInt(
 				process.env.BULK_ACCOUNT_LOADER_POLLING_INTERVAL ?? '5000'
@@ -304,6 +312,7 @@ export function loadConfigFromOpts(opts: any): Config {
 				0,
 			],
 			subaccounts: loadCommaDelimitToArray(opts.subaccounts) ?? [0],
+			marketType: convertToMarketType(opts.marketType) ?? MarketType.PERP,
 		};
 	}
 	if (opts.ifRevenueSettler) {

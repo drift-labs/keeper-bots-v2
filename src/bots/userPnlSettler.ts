@@ -52,7 +52,6 @@ const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 const SETTLE_USER_CHUNKS = 4;
 const CU_PER_SETTLE_PNL = 500_000; // annecdotal: https://explorer.solana.com/tx/fLoSxBpBkowozkPMem9s3KLGQYt3KDHemTRzZPWFe48sZc1VJsgRTiYJUGXZGYRWQTwF42PjpgFLe6fpH9aCLh1#ix-1
 const SLEEP_MS = 500;
-const PRIORITY_FEE_SUBSCRIBER_FREQ_MS = 1000;
 const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 50000; // cap the computeUnitPrice to pay for settlePnl txs
 
 const errorCodesToSuppress = [
@@ -78,7 +77,11 @@ export class UserPnlSettlerBot implements Bot {
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(driftClientConfigs: DriftClientConfig, config: BaseBotConfig) {
+	constructor(
+		driftClientConfigs: DriftClientConfig,
+		config: BaseBotConfig,
+		priorityFeeSubscriber: PriorityFeeSubscriber
+	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
@@ -113,6 +116,22 @@ export class UserPnlSettlerBot implements Bot {
 			skipInitialLoad: false,
 			includeIdle: false,
 		});
+
+		const spotMarkets = this.driftClient
+			.getSpotMarketAccounts()
+			.map((m) => m.pubkey);
+		const perpMarkets = this.driftClient
+			.getPerpMarketAccounts()
+			.map((m) => m.pubkey);
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.priorityFeeSubscriber.updateAddresses([
+			...spotMarkets,
+			...perpMarkets,
+		]);
+
+		logger.info(
+			`Pnl settler looking at ${spotMarkets.length} spot markets and ${perpMarkets.length} perp markets to determine priority fee`
+		);
 	}
 
 	public async init() {
@@ -126,25 +145,6 @@ export class UserPnlSettlerBot implements Bot {
 		await this.userMap.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
-
-		const spotMarkets = this.driftClient
-			.getSpotMarketAccounts()
-			.map((m) => m.pubkey);
-		const perpMarkets = this.driftClient
-			.getPerpMarketAccounts()
-			.map((m) => m.pubkey);
-
-		logger.info(
-			`Pnl settler looking at ${spotMarkets.length} spot markets and ${perpMarkets.length} perp markets to determine priority fee`
-		);
-
-		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
-			connection: this.driftClient.connection,
-			frequencyMs: PRIORITY_FEE_SUBSCRIBER_FREQ_MS,
-			addresses: [...spotMarkets, ...perpMarkets],
-		});
-		await this.priorityFeeSubscriber.subscribe();
-		await sleepMs(PRIORITY_FEE_SUBSCRIBER_FREQ_MS);
 
 		logger.info(`${this.name} init'd!`);
 	}

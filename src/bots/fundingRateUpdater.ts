@@ -2,7 +2,8 @@ import {
 	DriftClient,
 	ZERO,
 	PerpMarketAccount,
-	isVariant,
+	isOneOfVariant,
+	getVariant,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -129,7 +130,15 @@ export class FundingRateUpdaterBot implements Bot {
 				const maxRetries = 5;
 				for (let retries = 0; retries < maxRetries; retries++) {
 					const perpMarket = perpMarketAndOracleData[i].marketAccount;
-					if (isVariant(perpMarket.status, 'initialized')) {
+					isOneOfVariant;
+					if (
+						isOneOfVariant(perpMarket.status, ['initialized', 'fundingPaused'])
+					) {
+						logger.info(
+							`Skipping perp market ${
+								perpMarket.marketIndex
+							} because market status = ${getVariant(perpMarket.status)}`
+						);
 						break;
 					}
 					if (perpMarket.amm.fundingPeriod.eq(ZERO)) {

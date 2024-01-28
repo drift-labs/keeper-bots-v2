@@ -330,6 +330,7 @@ export class LiquidatorBot implements Bot {
 		runtimeSpec: RuntimeSpec,
 		config: LiquidatorConfig,
 		defaultSubaccountId: number,
+		priorityFeeSubscriber: PriorityFeeSubscriber,
 		SERUM_LOOKUP_TABLE?: PublicKey
 	) {
 		this.liquidatorConfig = config;
@@ -521,14 +522,10 @@ export class LiquidatorBot implements Bot {
 				connection: this.driftClient.connection,
 			});
 		}
-
-		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
-			connection: this.driftClient.connection,
-			frequencyMs: 5000,
-			addresses: [
-				new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC is good indicator of fees
-			],
-		});
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.priorityFeeSubscriber.updateAddresses([
+			new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC
+		]);
 
 		if (!config.maxPositionTakeoverPctOfCollateral) {
 			// spend 50% of collateral by default
@@ -639,8 +636,6 @@ export class LiquidatorBot implements Bot {
 				);
 			}
 		}
-
-		await this.priorityFeeSubscriber.subscribe();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}

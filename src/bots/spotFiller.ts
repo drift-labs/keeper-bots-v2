@@ -252,6 +252,7 @@ export class SpotFillerBot implements Bot {
 		userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
+		priorityFeeSubscriber: PriorityFeeSubscriber,
 		eventSubscriber?: EventSubscriber
 	) {
 		this.name = config.botId;
@@ -275,13 +276,11 @@ export class SpotFillerBot implements Bot {
 			this.initializeMetrics();
 		}
 
-		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
-			connection: this.driftClient.connection,
-			frequencyMs: 5000,
-			addresses: [
-				new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC is good indicator of fees
-			],
-		});
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.priorityFeeSubscriber.updateAddresses([
+			new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC
+		]);
+
 		this.revertOnFailure = config.revertOnFailure ?? true;
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
 		logger.info(
@@ -612,8 +611,6 @@ export class SpotFillerBot implements Bot {
 				this.driftSpotLutAccount = lutAccount;
 			}
 		}
-
-		await this.priorityFeeSubscriber.subscribe();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}
