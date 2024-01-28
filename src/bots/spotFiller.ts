@@ -82,7 +82,6 @@ import {
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_BACKOFF = 10000; // Time to wait before trying a node again
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
-const MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 50_000; // cap the computeUnitPrice to pay per fill tx
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 
 const errorCodesToSuppress = [
@@ -1151,11 +1150,8 @@ export class SpotFillerBot implements Bot {
 				units: 1_400_000,
 			}),
 			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Number(
-					Math.min(
-						Math.floor(this.priorityFeeSubscriber.lastMaxStrategyResult),
-						MAX_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS
-					)
+				microLamports: Math.floor(
+					this.priorityFeeSubscriber.getCustomStrategyResult()
 				),
 			}),
 		];

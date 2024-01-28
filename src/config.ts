@@ -78,6 +78,7 @@ export interface GlobalConfig {
 	wsEndpoint?: string;
 	heliusEndpoint?: string;
 	priorityFeeMethod?: string;
+	maxPriorityFeeMicroLamports?: number;
 	resubTimeoutMs?: number;
 	keeperPrivateKey?: string;
 	initUser?: boolean;
@@ -128,6 +129,9 @@ const defaultConfig: Partial<Config> = {
 		wsEndpoint: process.env.WS_ENDPOINT,
 		heliusEndpoint: process.env.HELIUS_ENDPOINT,
 		priorityFeeMethod: process.env.PRIORITY_FEE_METHOD ?? 'solana',
+		maxPriorityFeeMicroLamports: parseInt(
+			process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ?? '10000'
+		),
 		keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY,
 
 		useJito: false,
@@ -202,6 +206,11 @@ export function loadConfigFromOpts(opts: any): Config {
 			heliusEndpoint: opts.heliusEndpoint ?? process.env.HELIUS_ENDPOINT,
 			priorityFeeMethod:
 				opts.priorityFeeMethod ?? process.env.PRIORITY_FEE_METHOD,
+			maxPriorityFeeMicroLamports: parseInt(
+				opts.maxPriorityFeeMicroLamports ??
+					process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ??
+					'10000'
+			),
 			keeperPrivateKey: opts.privateKey ?? process.env.KEEPER_PRIVATE_KEY,
 			eventSubscriberPollingInterval: parseInt(
 				process.env.BULK_ACCOUNT_LOADER_POLLING_INTERVAL ?? '5000'

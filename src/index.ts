@@ -37,6 +37,9 @@ import {
 	ConfirmationStrategy,
 	PriorityFeeSubscriber,
 	PriorityFeeMethod,
+	HeliusPriorityFeeResponse,
+	HeliusPriorityLevel,
+	AverageOverSlotsStrategy,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -419,21 +422,34 @@ const runBot = async () => {
 		skipInitialLoad: false,
 		includeIdle: false,
 	});
-	let needPriorityFeeSubscriber = false;
 
+	let needPriorityFeeSubscriber = false;
 	const priorityFeeMethod =
 		(config.global.priorityFeeMethod as PriorityFeeMethod) ??
 		PriorityFeeMethod.SOLANA;
-	logger.info(`priorityFeeMethod: ${priorityFeeMethod}`);
+	const maxFeeMicroLamports = config.global.maxPriorityFeeMicroLamports;
+	logger.info(
+		`priorityFeeMethod: ${priorityFeeMethod}, maxFeeMicroLamports: ${maxFeeMicroLamports}`
+	);
 	const priorityFeeSubscriber = new PriorityFeeSubscriber({
 		connection: driftClient.connection,
 		frequencyMs: 5000,
-
+		customStrategy:
+			priorityFeeMethod === PriorityFeeMethod.HELIUS
+				? {
+						calculate: (samples: HeliusPriorityFeeResponse) => {
+							return samples.result.priorityFeeLevels![
+								HeliusPriorityLevel.HIGH
+							];
+						},
+				  }
+				: new AverageOverSlotsStrategy(), // so bots can use customStrategy result regardless of method
 		// the specific bot will update this, if multiple bots are using this,
 		// the last one to update it will determine the addresses to use...
 		addresses: [],
 		heliusRpcUrl: heliusEndpoint,
 		priorityFeeMethod,
+		maxFeeMicroLamports,
 	});
 
 	if (configHasBot(config, 'filler')) {

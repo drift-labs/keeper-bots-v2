@@ -21,6 +21,12 @@ global:
   # helius: uses https://docs.helius.dev/solana-rpc-nodes/alpha-priority-fee-api
   priorityFeeMethod: solana
 
+  # max priority fee to use, in micro lamports
+  # i.e. a fill that uses 500_000 CUs will spend:
+  # 500_000 * 10_000 * 1e-6 * 1e-9 = 0.000005 SOL on priority fees
+  # this is on top of the 0.000005 SOL base fee, so 0.000010 SOL total
+  maxPriorityFeeMicroLamports: 10000
+
   # Private key to use to sign transactions.
   # will load from KEEPER_PRIVATE_KEY env var if null
   keeperPrivateKey:
