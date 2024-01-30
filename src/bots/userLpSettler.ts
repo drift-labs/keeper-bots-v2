@@ -4,7 +4,6 @@ import {
 	ZERO,
 	DriftClientConfig,
 	BulkAccountLoader,
-	RetryTxSender,
 	PriorityFeeSubscriber,
 	BN,
 	timeRemainingUntilUpdate,
