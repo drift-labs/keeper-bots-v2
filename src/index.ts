@@ -692,7 +692,8 @@ const runBot = async () => {
 			new UserPnlSettlerBot(
 				driftClientConfig,
 				config.botConfigs!.userPnlSettler!,
-				priorityFeeSubscriber
+				priorityFeeSubscriber,
+				txSender
 			)
 		);
 	}
@@ -703,7 +704,8 @@ const runBot = async () => {
 			new UserLpSettlerBot(
 				driftClientConfig,
 				config.botConfigs!.userLpSettler!,
-				priorityFeeSubscriber
+				priorityFeeSubscriber,
+				txSender
 			)
 		);
 	}
