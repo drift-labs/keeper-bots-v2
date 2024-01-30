@@ -23,8 +23,8 @@ import {
 	QUOTE_SPOT_MARKET_INDEX,
 	DriftClientConfig,
 	BulkAccountLoader,
-	RetryTxSender,
 	PriorityFeeSubscriber,
+	TxSender,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -78,7 +78,8 @@ export class UserPnlSettlerBot implements Bot {
 	constructor(
 		driftClientConfigs: DriftClientConfig,
 		config: BaseBotConfig,
-		priorityFeeSubscriber: PriorityFeeSubscriber
+		priorityFeeSubscriber: PriorityFeeSubscriber,
+		txSender: TxSender
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
@@ -96,12 +97,7 @@ export class UserPnlSettlerBot implements Bot {
 					type: 'polling',
 					accountLoader: bulkAccountLoader,
 				},
-				txSender: new RetryTxSender({
-					connection: driftClientConfigs.connection,
-					wallet: driftClientConfigs.wallet,
-					opts: driftClientConfigs.opts,
-					timeout: 3000,
-				}),
+				txSender,
 			})
 		);
 		this.userMap = new UserMap({
@@ -210,7 +206,6 @@ export class UserPnlSettlerBot implements Bot {
 
 			const slot = (await this.bulkAccountLoader.mostRecentSlot) ?? 0;
 
-			const validOracleMarketMap = new Map<number, boolean>();
 			for (const market of this.driftClient.getPerpMarketAccounts()) {
 				const oracleValid = isOracleValid(
 					perpMarketAndOracleData[market.marketIndex].marketAccount.amm,
@@ -222,8 +217,6 @@ export class UserPnlSettlerBot implements Bot {
 				if (!oracleValid) {
 					logger.warn(`Oracle for market ${market.marketIndex} is not valid`);
 				}
-
-				validOracleMarketMap.set(market.marketIndex, oracleValid);
 			}
 
 			const usersToSettle: SettlePnlIxParams[] = [];
@@ -260,10 +253,6 @@ export class UserPnlSettlerBot implements Bot {
 					}
 					const spotMarketIdx = 0;
 
-					const oracleValid = validOracleMarketMap.get(perpMarketIdx);
-					if (!oracleValid) {
-						continue;
-					}
 					if (
 						!perpMarketAndOracleData[perpMarketIdx] ||
 						!spotMarketAndOracleData[spotMarketIdx]

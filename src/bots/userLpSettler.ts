@@ -4,10 +4,10 @@ import {
 	ZERO,
 	DriftClientConfig,
 	BulkAccountLoader,
-	RetryTxSender,
 	PriorityFeeSubscriber,
 	BN,
 	timeRemainingUntilUpdate,
+	TxSender,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -52,7 +52,8 @@ export class UserLpSettlerBot implements Bot {
 	constructor(
 		driftClientConfigs: DriftClientConfig,
 		config: BaseBotConfig,
-		priorityFeeSubscriber: PriorityFeeSubscriber
+		priorityFeeSubscriber: PriorityFeeSubscriber,
+		txSender: TxSender
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
@@ -69,12 +70,7 @@ export class UserLpSettlerBot implements Bot {
 					type: 'polling',
 					accountLoader: bulkAccountLoader,
 				},
-				txSender: new RetryTxSender({
-					connection: driftClientConfigs.connection,
-					wallet: driftClientConfigs.wallet,
-					opts: driftClientConfigs.opts,
-					timeout: 3000,
-				}),
+				txSender,
 			})
 		);
 		this.userMap = new UserMap({
