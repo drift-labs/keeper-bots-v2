@@ -44,7 +44,7 @@ export class UserLpSettlerBot implements Bot {
 	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
-	private priorityFeeSubscriber?: PriorityFeeSubscriber;
+	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -85,16 +85,7 @@ export class UserLpSettlerBot implements Bot {
 			disableSyncOnTotalAccountsChange: true,
 		});
 
-		const perpMarkets = this.driftClient
-			.getPerpMarketAccounts()
-			.map((m) => m.pubkey);
-
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
-		this.priorityFeeSubscriber.updateAddresses([...perpMarkets]);
-
-		logger.info(
-			`Lp settler looking at ${perpMarkets.length} perp markets to determine priority fee`
-		);
 	}
 
 	public async init() {
@@ -108,6 +99,16 @@ export class UserLpSettlerBot implements Bot {
 		}
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
+
+		const perpMarkets = this.driftClient
+			.getPerpMarketAccounts()
+			.map((m) => m.pubkey);
+
+		this.priorityFeeSubscriber.updateAddresses([...perpMarkets]);
+
+		logger.info(
+			`Lp settler looking at ${perpMarkets.length} perp markets to determine priority fee`
+		);
 
 		// logger.info(`Initializing UserMap`);
 		// const startUserMapSub = Date.now();
