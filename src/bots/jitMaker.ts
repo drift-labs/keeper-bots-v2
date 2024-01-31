@@ -9,6 +9,7 @@ import {
 	SlotSubscriber,
 	PriorityFeeSubscriber,
 	OrderSubscriber,
+	calculateBidAskPrice,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -264,19 +265,39 @@ export class JitMaker implements Bot {
 			return skip;
 		});
 
-		const l2 = this.dlobSubscriber.getL2({
-			marketIndex: perpMarketAccount.marketIndex,
-			marketType: MarketType.PERP,
-			includeVamm: true,
-			depth: 50,
-		});
+		const slot = this.orderSubscriber.getSlot();
+		const dlob = this.dlobSubscriber.getDLOB();
+		const bestDLOBBid = dlob.getBestBid(
+			perpMarketAccount.marketIndex,
+			slot,
+			MarketType.PERP,
+			oraclePriceData
+		);
+		const bestDLOBAsk = dlob.getBestAsk(
+			perpMarketAccount.marketIndex,
+			slot,
+			MarketType.PERP,
+			oraclePriceData
+		);
 
-		const bestBidPrice = l2.bids[0].price;
-		const bestAskPrice = l2.asks[0].price;
+		const [ammBid, ammAsk] = calculateBidAskPrice(
+			perpMarketAccount.amm,
+			oraclePriceData,
+			true
+		);
 
-		if (!bestBidPrice || !bestAskPrice) {
-			logger.warn('skipping, no best bid/ask');
-			return;
+		let bestBidPrice;
+		if (bestDLOBBid) {
+			bestBidPrice = BN.max(BN.min(bestDLOBBid, ammAsk), ammBid);
+		} else {
+			bestBidPrice = ammBid;
+		}
+
+		let bestAskPrice;
+		if (bestDLOBAsk) {
+			bestAskPrice = BN.min(BN.max(bestDLOBAsk, ammBid), ammAsk);
+		} else {
+			bestAskPrice = ammAsk;
 		}
 
 		const bidOffset = bestBidPrice.muln(1001).divn(1000);
