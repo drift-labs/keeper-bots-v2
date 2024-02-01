@@ -429,7 +429,7 @@ export class UserPnlSettlerBot implements Bot {
 					.slice(0, 100);
 
 				for (let i = 0; i < sortedParams.length; i += SETTLE_USER_CHUNKS) {
-					const usersChunk = params.slice(i, i + SETTLE_USER_CHUNKS);
+					const usersChunk = sortedParams.slice(i, i + SETTLE_USER_CHUNKS);
 					await this.trySendTxForChunk(marketIndex, usersChunk);
 				}
 			}
