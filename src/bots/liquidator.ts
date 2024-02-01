@@ -1361,7 +1361,7 @@ export class LiquidatorBot implements Bot {
 				continue;
 			}
 
-			const slippageBps = this.liquidatorConfig.maxSlippageBps! * BPS_PRECISION;
+			const slippageBps = this.liquidatorConfig.maxSlippageBps!;
 			const jupQuote = await this.determineBestSpotSwapRoute(
 				position.marketIndex,
 				orderParams.direction,
@@ -1911,11 +1911,16 @@ tx: ${tx} `
 		}
 	}
 
-	private async tryLiquidate(): Promise<{
+	private findSortedUsers(): {
+		usersCanBeLiquidated: Array<{
+			user: User;
+			userKey: string;
+			marginRequirement: BN;
+			canBeLiquidated: boolean;
+		}>;
 		checkedUsers: number;
 		liquidatableUsers: number;
-		ran: boolean;
-	}> {
+	} {
 		const usersCanBeLiquidated = new Array<{
 			user: User;
 			userKey: string;
@@ -1951,6 +1956,21 @@ tx: ${tx} `
 		usersCanBeLiquidated.sort((a, b) => {
 			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
 		});
+
+		return {
+			usersCanBeLiquidated,
+			checkedUsers,
+			liquidatableUsers,
+		};
+	}
+
+	private async tryLiquidate(): Promise<{
+		checkedUsers: number;
+		liquidatableUsers: number;
+		ran: boolean;
+	}> {
+		const { usersCanBeLiquidated, checkedUsers, liquidatableUsers } =
+			this.findSortedUsers();
 
 		for (const {
 			user,

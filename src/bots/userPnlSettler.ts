@@ -40,14 +40,6 @@ import {
 	SendTransactionError,
 } from '@solana/web3.js';
 
-type SettlePnlIxParams = {
-	users: {
-		settleeUserAccountPublicKey: PublicKey;
-		settleeUserAccount: UserAccount;
-	}[];
-	marketIndex: number;
-};
-
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 const SETTLE_USER_CHUNKS = 4;
 const SLEEP_MS = 500;
