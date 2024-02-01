@@ -70,7 +70,7 @@ export class UserPnlSettlerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private bulkAccountLoader: BulkAccountLoader;
 	private userMap: UserMap;
-	private priorityFeeSubscriber?: PriorityFeeSubscriber;
+	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -111,21 +111,7 @@ export class UserPnlSettlerBot implements Bot {
 			includeIdle: false,
 		});
 
-		const spotMarkets = this.driftClient
-			.getSpotMarketAccounts()
-			.map((m) => m.pubkey);
-		const perpMarkets = this.driftClient
-			.getPerpMarketAccounts()
-			.map((m) => m.pubkey);
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
-		this.priorityFeeSubscriber.updateAddresses([
-			...spotMarkets,
-			...perpMarkets,
-		]);
-
-		logger.info(
-			`Pnl settler looking at ${spotMarkets.length} spot markets and ${perpMarkets.length} perp markets to determine priority fee`
-		);
 	}
 
 	public async init() {
@@ -139,6 +125,22 @@ export class UserPnlSettlerBot implements Bot {
 		await this.userMap.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
+
+		const spotMarkets = this.driftClient
+			.getSpotMarketAccounts()
+			.map((m) => m.pubkey);
+		const perpMarkets = this.driftClient
+			.getPerpMarketAccounts()
+			.map((m) => m.pubkey);
+
+		this.priorityFeeSubscriber.updateAddresses([
+			...spotMarkets,
+			...perpMarkets,
+		]);
+
+		logger.info(
+			`Pnl settler looking at ${spotMarkets.length} spot markets and ${perpMarkets.length} perp markets to determine priority fee`
+		);
 
 		logger.info(`${this.name} init'd!`);
 	}
@@ -219,7 +221,14 @@ export class UserPnlSettlerBot implements Bot {
 				}
 			}
 
-			const usersToSettle: SettlePnlIxParams[] = [];
+			const usersToSettleMap: Map<
+				number,
+				{
+					settleeUserAccountPublicKey: PublicKey;
+					settleeUserAccount: UserAccount;
+					pnl: number;
+				}[]
+			> = new Map();
 			const nowTs = Date.now() / 1000;
 
 			for (const user of this.userMap!.values()) {
@@ -388,43 +397,40 @@ export class UserPnlSettlerBot implements Bot {
 					const userData = {
 						settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
 						settleeUserAccount: userAccount,
+						pnl: convertToNumber(userUnsettledPnl, QUOTE_PRECISION),
 					};
-					if (
-						usersToSettle
-							.map((item) => item.marketIndex)
-							.includes(perpMarketIdx)
-					) {
-						const foundItem = usersToSettle.find(
-							(item) => item.marketIndex == perpMarketIdx
-						);
-						if (foundItem) {
-							foundItem.users.push(userData);
-						}
+
+					if (usersToSettleMap.has(settleePosition.marketIndex)) {
+						const existingData = usersToSettleMap.get(
+							settleePosition.marketIndex
+						)!;
+						existingData.push(userData);
 					} else {
-						usersToSettle.push({
-							users: [userData],
-							marketIndex: settleePosition.marketIndex,
-						});
+						usersToSettleMap.set(settleePosition.marketIndex, [userData]);
 					}
 				}
 			}
 
-			for (const params of usersToSettle) {
+			for (const [marketIndex, params] of usersToSettleMap) {
 				const marketStr = decodeName(
-					this.driftClient.getPerpMarketAccount(params.marketIndex)!.name
+					this.driftClient.getPerpMarketAccount(marketIndex)!.name
 				);
 
 				logger.info(
-					`Trying to settle PNL for ${params.users.length} users on market ${marketStr}`
+					`Trying to settle PNL for ${params.length} users on market ${marketStr}`
 				);
 
 				if (this.dryRun) {
 					throw new Error('Dry run - not sending settle pnl tx');
 				}
 
-				for (let i = 0; i < params.users.length; i += SETTLE_USER_CHUNKS) {
-					const usersChunk = params.users.slice(i, i + SETTLE_USER_CHUNKS);
-					await this.trySendTxForChunk(params.marketIndex, usersChunk);
+				const sortedParams = params
+					.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))
+					.slice(0, 100);
+
+				for (let i = 0; i < sortedParams.length; i += SETTLE_USER_CHUNKS) {
+					const usersChunk = sortedParams.slice(i, i + SETTLE_USER_CHUNKS);
+					await this.trySendTxForChunk(marketIndex, usersChunk);
 				}
 			}
 		} catch (err) {
