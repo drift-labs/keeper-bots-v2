@@ -65,7 +65,7 @@ import { Bot, TwapExecutionProgress } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { getErrorCode } from '../error';
-import { LiquidatorConfig } from '../config';
+import { GlobalConfig, LiquidatorConfig } from '../config';
 import {
 	getPerpMarketTierNumber,
 	perpTierIsAsSafeAs,
@@ -314,6 +314,7 @@ export class LiquidatorBot implements Bot {
 	private excludedAccounts: Set<string>;
 
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
+	private skipPreflight: boolean;
 
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
@@ -327,6 +328,7 @@ export class LiquidatorBot implements Bot {
 		driftClient: DriftClient,
 		userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
+		globalConfig: GlobalConfig,
 		config: LiquidatorConfig,
 		defaultSubaccountId: number,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
@@ -340,6 +342,7 @@ export class LiquidatorBot implements Bot {
 		if (this.liquidatorConfig.deriskAuctionDurationSlots === undefined) {
 			this.liquidatorConfig.deriskAuctionDurationSlots = 100;
 		}
+		this.skipPreflight = globalConfig.skipPreflight ?? false;
 
 		this.liquidatorConfig.deriskAlgoPerp =
 			config.deriskAlgoPerp ?? config.deriskAlgo;
@@ -866,10 +869,16 @@ export class LiquidatorBot implements Bot {
 					swapIx.ixs,
 					lookupTables,
 					[],
-					this.driftClient.opts
+					{
+						...this.driftClient.opts,
+						skipPreflight: this.skipPreflight,
+					}
 				),
 				[],
-				this.driftClient.opts
+				{
+					...this.driftClient.opts,
+					skipPreflight: this.skipPreflight,
+				}
 			);
 
 			logger.info(

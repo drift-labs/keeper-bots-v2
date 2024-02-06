@@ -75,6 +75,7 @@ export type BotConfigMap = {
 export interface GlobalConfig {
 	driftEnv?: DriftEnv;
 	endpoint?: string;
+	additionalTxSendEndpoints?: string;
 	wsEndpoint?: string;
 	heliusEndpoint?: string;
 	priorityFeeMethod?: string;
@@ -100,6 +101,7 @@ export interface GlobalConfig {
 	jitoAuthPrivateKey?: string;
 	txRetryTimeoutMs?: number;
 	txSenderType?: 'fast' | 'retry';
+	skipPreflight?: boolean;
 }
 
 export interface Config {
@@ -126,6 +128,7 @@ const defaultConfig: Partial<Config> = {
 		bulkAccountLoaderPollingInterval: 5000,
 
 		endpoint: process.env.ENDPOINT,
+		additionalTxSendEndpoints: process.env.ADDITIONAL_TX_ENDPOINTS,
 		wsEndpoint: process.env.WS_ENDPOINT,
 		heliusEndpoint: process.env.HELIUS_ENDPOINT,
 		priorityFeeMethod: process.env.PRIORITY_FEE_METHOD ?? 'solana',
@@ -138,6 +141,8 @@ const defaultConfig: Partial<Config> = {
 		jitoBlockEngineUrl: process.env.JITO_BLOCK_ENGINE_URL,
 		jitoAuthPrivateKey: process.env.JITO_AUTH_PRIVATE_KEY,
 		txRetryTimeoutMs: parseInt(process.env.TX_RETRY_TIMEOUT_MS ?? '30000'),
+		txSenderType: 'fast',
+		skipPreflight: false,
 	},
 	enabledBots: [],
 	botConfigs: {},
@@ -202,6 +207,8 @@ export function loadConfigFromOpts(opts: any): Config {
 		global: {
 			driftEnv: (process.env.ENV ?? 'devnet') as DriftEnv,
 			endpoint: opts.endpoint ?? process.env.ENDPOINT,
+			additionalTxSendEndpoints:
+				opts.endpoint ?? process.env.ADDITIONAL_TX_ENDPOINTS,
 			wsEndpoint: opts.wsEndpoint ?? process.env.WS_ENDPOINT,
 			heliusEndpoint: opts.heliusEndpoint ?? process.env.HELIUS_ENDPOINT,
 			priorityFeeMethod:
@@ -231,6 +238,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			useJito: opts.useJito ?? false,
 			txRetryTimeoutMs: opts.txRetryTimeoutMs ?? 30000,
 			txSenderType: opts.txSenderType ?? 'fast',
+			skipPreflight: opts.skipPreflight ?? false,
 		},
 		enabledBots: [],
 		botConfigs: {},

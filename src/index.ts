@@ -197,11 +197,13 @@ const sdkConfig = initialize({ env: config.global.driftEnv });
 setLogLevel(config.global.debug ? 'debug' : 'info');
 
 const endpoint = config.global.endpoint!;
+const additionalTxEndpoints = config.global.additionalTxSendEndpoints;
 const wsEndpoint = config.global.wsEndpoint;
 const heliusEndpoint = config.global.heliusEndpoint;
 logger.info(`RPC endpoint: ${endpoint}`);
 logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`Helius endpoint:  ${heliusEndpoint}`);
+logger.info(`Additional tx send endpoints:  ${additionalTxEndpoints}`);
 logger.info(`DriftEnv:     ${config.global.driftEnv}`);
 logger.info(`Commit:       ${commitHash}`);
 
@@ -285,6 +287,17 @@ const runBot = async () => {
 		disableRetryOnRateLimit: true,
 	});
 
+	const additionalConnections: Connection[] = [];
+	if (additionalTxEndpoints) {
+		for (const endpoint of additionalTxEndpoints.split(',')) {
+			additionalConnections.push(
+				new Connection(endpoint, {
+					commitment: stateCommitment,
+				})
+			);
+		}
+	}
+
 	const txSenderType = config.global.txSenderType || 'retry';
 	let txSender;
 	if (txSenderType === 'retry') {
@@ -294,6 +307,7 @@ const runBot = async () => {
 			opts,
 			timeout: config.global.txRetryTimeoutMs,
 			confirmationStrategy: ConfirmationStrategy.Polling,
+			additionalConnections,
 		});
 	} else {
 		const skipConfirmation =
@@ -306,6 +320,7 @@ const runBot = async () => {
 			wallet,
 			opts,
 			skipConfirmation,
+			additionalConnections,
 		});
 	}
 
@@ -470,6 +485,7 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				config.global,
 				config.botConfigs!.filler!,
 				priorityFeeSubscriber,
 				jitoSearcherClient,
@@ -495,6 +511,7 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				config.global,
 				config.botConfigs!.fillerLite!,
 				priorityFeeSubscriber,
 				jitoSearcherClient,
@@ -521,6 +538,7 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				config.global,
 				config.botConfigs!.fillerBulk!,
 				priorityFeeSubscriber,
 				jitoSearcherClient,
@@ -547,6 +565,7 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				config.global,
 				config.botConfigs!.spotFiller!,
 				priorityFeeSubscriber,
 				eventSubscriber
@@ -658,6 +677,7 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				config.global,
 				config.botConfigs!.liquidator!,
 				config.global.subaccounts![0],
 				priorityFeeSubscriber,
@@ -752,6 +772,7 @@ const runBot = async () => {
 				driftClient,
 				jitProxyClient,
 				slotSubscriber,
+				config.global,
 				config.botConfigs!.uncrossArb!,
 				config.global.driftEnv!,
 				priorityFeeSubscriber

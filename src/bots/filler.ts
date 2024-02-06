@@ -71,7 +71,7 @@ import {
 
 import { logger } from '../logger';
 import { Bot } from '../types';
-import { FillerConfig } from '../config';
+import { FillerConfig, GlobalConfig } from '../config';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
 import {
@@ -234,6 +234,7 @@ export class FillerBot implements Bot {
 	protected lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 
 	protected priorityFeeSubscriber: PriorityFeeSubscriber;
+	protected skipPreflight: boolean;
 
 	// metrics
 	protected metricsInitialized = false;
@@ -265,6 +266,7 @@ export class FillerBot implements Bot {
 		userMap: UserMap | undefined,
 		eventSubscriber: EventSubscriber | undefined,
 		runtimeSpec: RuntimeSpec,
+		globalConfig: GlobalConfig,
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		jitoSearcherClient?: SearcherClient,
@@ -302,8 +304,9 @@ export class FillerBot implements Bot {
 
 		this.revertOnFailure = config.revertOnFailure ?? true;
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
+		this.skipPreflight = globalConfig.skipPreflight ?? false;
 		logger.info(
-			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
+			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}, skipPreflight: ${this.skipPreflight}`
 		);
 
 		this.jitoSearcherClient = jitoSearcherClient;
@@ -1368,11 +1371,10 @@ export class FillerBot implements Bot {
 				accountMetas.push(meta);
 			}
 
-			txResp = this.driftClient.txSender.sendVersionedTransaction(
-				tx,
-				[],
-				this.driftClient.opts
-			);
+			txResp = this.driftClient.txSender.sendVersionedTransaction(tx, [], {
+				...this.driftClient.opts,
+				skipPreflight: this.skipPreflight,
+			});
 		}
 		if (txResp) {
 			txResp
@@ -1555,7 +1557,10 @@ export class FillerBot implements Bot {
 					this.driftClient.txSender,
 					[this.lookupTableAccount!],
 					[],
-					this.driftClient.opts,
+					{
+						...this.driftClient.opts,
+						skipPreflight: this.skipPreflight,
+					},
 					SIM_CU_ESTIMATE_MULTIPLIER,
 					true,
 					this.simulateTxForCUEstimate
@@ -1820,7 +1825,10 @@ export class FillerBot implements Bot {
 			this.driftClient.txSender,
 			[this.lookupTableAccount!],
 			[],
-			this.driftClient.opts,
+			{
+				...this.driftClient.opts,
+				skipPreflight: this.skipPreflight,
+			},
 			SIM_CU_ESTIMATE_MULTIPLIER,
 			true,
 			this.simulateTxForCUEstimate
@@ -1939,7 +1947,10 @@ export class FillerBot implements Bot {
 				this.driftClient.txSender,
 				[this.lookupTableAccount!],
 				[],
-				this.driftClient.opts,
+				{
+					...this.driftClient.opts,
+					skipPreflight: this.skipPreflight,
+				},
 				SIM_CU_ESTIMATE_MULTIPLIER,
 				true,
 				this.simulateTxForCUEstimate
@@ -2046,7 +2057,10 @@ export class FillerBot implements Bot {
 							this.driftClient.txSender,
 							[this.lookupTableAccount!],
 							[],
-							this.driftClient.opts,
+							{
+								...this.driftClient.opts,
+								skipPreflight: this.skipPreflight,
+							},
 							SIM_CU_ESTIMATE_MULTIPLIER,
 							true,
 							this.simulateTxForCUEstimate
@@ -2062,7 +2076,10 @@ export class FillerBot implements Bot {
 									this.driftClient.txSender.sendVersionedTransaction(
 										simResult.tx,
 										[],
-										this.driftClient.opts
+										{
+											...this.driftClient.opts,
+											skipPreflight: this.skipPreflight,
+										}
 									)
 								);
 							} else {
