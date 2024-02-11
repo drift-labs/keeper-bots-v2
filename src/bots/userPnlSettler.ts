@@ -409,10 +409,15 @@ export class UserPnlSettlerBot implements Bot {
 				const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex)!;
 				const marketStr = decodeName(perpMarket.name);
 
-				const settlePnlPaused = isOperationPaused(
-					perpMarket.pausedOperations,
-					PerpOperation.SETTLE_PNL
-				);
+				const settlePnlPaused =
+					isOperationPaused(
+						perpMarket.pausedOperations,
+						PerpOperation.SETTLE_PNL
+					) ||
+					isOperationPaused(
+						perpMarket.pausedOperations,
+						PerpOperation.SETTLE_PNL_WITH_POSITION
+					);
 				if (settlePnlPaused) {
 					logger.warn(
 						`Settle PNL paused for market ${marketStr}, skipping settle PNL`

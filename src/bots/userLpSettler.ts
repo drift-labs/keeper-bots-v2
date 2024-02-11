@@ -230,10 +230,15 @@ export class UserLpSettlerBot implements Bot {
 				);
 
 				const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex)!;
-				const settlePnlPaused = isOperationPaused(
-					perpMarket.pausedOperations,
-					PerpOperation.SETTLE_PNL
-				);
+				const settlePnlPaused =
+					isOperationPaused(
+						perpMarket.pausedOperations,
+						PerpOperation.SETTLE_PNL
+					) ||
+					isOperationPaused(
+						perpMarket.pausedOperations,
+						PerpOperation.SETTLE_PNL_WITH_POSITION
+					);
 				if (settlePnlPaused) {
 					const marketStr = decodeName(perpMarket.name);
 					logger.warn(
