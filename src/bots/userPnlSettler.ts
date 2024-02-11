@@ -25,6 +25,8 @@ import {
 	BulkAccountLoader,
 	PriorityFeeSubscriber,
 	TxSender,
+	isOperationPaused,
+	PerpOperation,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -404,9 +406,19 @@ export class UserPnlSettlerBot implements Bot {
 			}
 
 			for (const [marketIndex, params] of usersToSettleMap) {
-				const marketStr = decodeName(
-					this.driftClient.getPerpMarketAccount(marketIndex)!.name
+				const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex)!;
+				const marketStr = decodeName(perpMarket.name);
+
+				const settlePnlPaused = isOperationPaused(
+					perpMarket.pausedOperations,
+					PerpOperation.SETTLE_PNL
 				);
+				if (settlePnlPaused) {
+					logger.warn(
+						`Settle PNL paused for market ${marketStr}, skipping settle PNL`
+					);
+					continue;
+				}
 
 				logger.info(
 					`Trying to settle PNL for ${params.length} users on market ${marketStr}`
