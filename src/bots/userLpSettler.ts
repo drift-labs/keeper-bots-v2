@@ -8,6 +8,9 @@ import {
 	BN,
 	timeRemainingUntilUpdate,
 	TxSender,
+	isOperationPaused,
+	PerpOperation,
+	decodeName,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -225,6 +228,25 @@ export class UserLpSettlerBot implements Bot {
 				console.log(
 					`Settling ${settleLpIxs.length} LPs for market ${marketIndex}`
 				);
+
+				const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex)!;
+				const settlePnlPaused =
+					isOperationPaused(
+						perpMarket.pausedOperations,
+						PerpOperation.SETTLE_PNL
+					) ||
+					isOperationPaused(
+						perpMarket.pausedOperations,
+						PerpOperation.SETTLE_PNL_WITH_POSITION
+					);
+				if (settlePnlPaused) {
+					const marketStr = decodeName(perpMarket.name);
+					logger.warn(
+						`Settle PNL paused for market ${marketStr}, skipping settle PNL`
+					);
+					continue;
+				}
+
 				for (let i = 0; i < settleLpIxs.length; i += SETTLE_LP_CHUNKS) {
 					const chunk = settleLpIxs.slice(i, i + SETTLE_LP_CHUNKS);
 					await this.trySendTxForChunk(chunk);

@@ -4,6 +4,9 @@ import {
 	PerpMarketAccount,
 	isOneOfVariant,
 	getVariant,
+	isOperationPaused,
+	PerpOperation,
+	decodeName,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -131,9 +134,7 @@ export class FundingRateUpdaterBot implements Bot {
 				for (let retries = 0; retries < maxRetries; retries++) {
 					const perpMarket = perpMarketAndOracleData[i].marketAccount;
 					isOneOfVariant;
-					if (
-						isOneOfVariant(perpMarket.status, ['initialized', 'fundingPaused'])
-					) {
+					if (isOneOfVariant(perpMarket.status, ['initialized'])) {
 						logger.info(
 							`Skipping perp market ${
 								perpMarket.marketIndex
@@ -141,6 +142,19 @@ export class FundingRateUpdaterBot implements Bot {
 						);
 						break;
 					}
+
+					const fundingPaused = isOperationPaused(
+						perpMarket.pausedOperations,
+						PerpOperation.UPDATE_FUNDING
+					);
+					if (fundingPaused) {
+						const marketStr = decodeName(perpMarket.name);
+						logger.warn(
+							`Update funding paused for market ${marketStr}, skipping`
+						);
+						continue;
+					}
+
 					if (perpMarket.amm.fundingPeriod.eq(ZERO)) {
 						break;
 					}
