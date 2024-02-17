@@ -185,7 +185,11 @@ export class FundingRateUpdaterBot implements Bot {
 						try {
 							const txSig = await this.driftClient.updateFundingRate(
 								i,
-								perpMarket.amm.oracle
+								perpMarket.amm.oracle,
+								{
+									computeUnits: 1_400_00,
+									computeUnitsPrice: 1000,
+								}
 							);
 							logger.info(
 								`funding rate updated successfully on perp marketIndex=${i}. TxSig: ${txSig}`
