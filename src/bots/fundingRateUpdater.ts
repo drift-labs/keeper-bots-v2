@@ -187,7 +187,7 @@ export class FundingRateUpdaterBot implements Bot {
 								i,
 								perpMarket.amm.oracle,
 								{
-									computeUnits: 1_400_00,
+									computeUnits: 1_400_000,
 									computeUnitsPrice: 1000,
 								}
 							);
