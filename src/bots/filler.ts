@@ -91,6 +91,7 @@ import {
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
+	handleSimResultError,
 	simulateAndGetTxWithCUs,
 	sleepMs,
 } from '../utils';
@@ -1592,11 +1593,16 @@ export class FillerBot implements Bot {
 				`tryFillMultiMakerPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
 			);
 
-			if (this.simulateTxForCUEstimate && simResult.simError) {
+			if (simResult.simError) {
 				logger.error(
 					`Error simulating multi maker perp node (fillTxId: ${fillTxId}): ${JSON.stringify(
 						simResult.simError
 					)}`
+				);
+				handleSimResultError(
+					simResult,
+					errorCodesToSuppress,
+					`${this.name}: (fillTxId: ${fillTxId})`
 				);
 				if (simResult.simTxLogs) {
 					await this.handleTransactionLogs([nodeToFill], simResult.simTxLogs);
@@ -1834,6 +1840,11 @@ export class FillerBot implements Bot {
 					simResult.simError
 				)} (fillTxId: ${fillTxId})`
 			);
+			handleSimResultError(
+				simResult,
+				errorCodesToSuppress,
+				`${this.name}: (fillTxId: ${fillTxId})`
+			);
 			if (simResult.simTxLogs) {
 				await this.handleTransactionLogs(nodesToFill, simResult.simTxLogs);
 			}
@@ -1954,6 +1965,11 @@ export class FillerBot implements Bot {
 						simResult.simError
 					)})`
 				);
+				handleSimResultError(
+					simResult,
+					errorCodesToSuppress,
+					`${this.name}: (executeTriggerablePerpNodesForMarket)`
+				);
 			} else {
 				if (!this.dryRun) {
 					this.driftClient
@@ -2055,6 +2071,11 @@ export class FillerBot implements Bot {
 						if (this.simulateTxForCUEstimate && simResult.simError) {
 							logger.info(
 								`settlePnls simError: ${JSON.stringify(simResult.simError)}`
+							);
+							handleSimResultError(
+								simResult,
+								errorCodesToSuppress,
+								`${this.name}: (settlePnls)`
 							);
 						} else {
 							if (!this.dryRun) {

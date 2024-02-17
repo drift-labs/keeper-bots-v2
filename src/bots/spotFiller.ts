@@ -76,6 +76,7 @@ import { FillerConfig } from '../config';
 import {
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
+	handleSimResultError,
 	simulateAndGetTxWithCUs,
 } from '../utils';
 
@@ -1196,6 +1197,11 @@ export class SpotFillerBot implements Bot {
 					simResult.simError
 				)} (fillTxId: ${fillTxId})`
 			);
+			handleSimResultError(
+				simResult,
+				errorCodesToSuppress,
+				`${this.name}: (fillTxId: ${fillTxId})`
+			);
 			if (simResult.simTxLogs) {
 				await this.handleTransactionLogs(nodeToFill, simResult.simTxLogs);
 			}
@@ -1338,11 +1344,12 @@ export class SpotFillerBot implements Bot {
 				`executeTriggerableSpotNodesForMarket estimated CUs: ${simResult.cuEstimate}`
 			);
 
-			if (
-				this.simulateTxForCUEstimate &&
-				this.simulateTxForCUEstimate &&
-				simResult.simError
-			) {
+			if (this.simulateTxForCUEstimate && simResult.simError) {
+				handleSimResultError(
+					simResult,
+					errorCodesToSuppress,
+					`${this.name}: (executeTriggerableSpotNodesForMarket)`
+				);
 				logger.error(
 					`executeTriggerableSpotNodesForMarket simError: (simError: ${JSON.stringify(
 						simResult.simError

@@ -19,7 +19,11 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
-import { simulateAndGetTxWithCUs, sleepMs } from '../utils';
+import {
+	handleSimResultError,
+	simulateAndGetTxWithCUs,
+	sleepMs,
+} from '../utils';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
@@ -345,6 +349,7 @@ export class UserLpSettlerBot implements Bot {
 						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 					}`
 				);
+				handleSimResultError(simResult, errorCodesToSuppress, `(settleLps)`);
 				success = false;
 			} else {
 				const txSig = await this.driftClient.txSender.sendVersionedTransaction(

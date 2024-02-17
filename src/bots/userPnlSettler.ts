@@ -35,7 +35,12 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
-import { decodeName, simulateAndGetTxWithCUs, sleepMs } from '../utils';
+import {
+	decodeName,
+	handleSimResultError,
+	simulateAndGetTxWithCUs,
+	sleepMs,
+} from '../utils';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
@@ -545,6 +550,7 @@ export class UserPnlSettlerBot implements Bot {
 						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 					}`
 				);
+				handleSimResultError(simResult, errorCodesToSuppress, `(settlePnL)`);
 				success = false;
 			} else {
 				const txSig = await this.driftClient.txSender.sendVersionedTransaction(

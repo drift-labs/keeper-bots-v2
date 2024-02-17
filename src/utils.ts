@@ -36,6 +36,7 @@ import {
 	TransactionInstruction,
 	VersionedTransaction,
 } from '@solana/web3.js';
+import { webhookMessage } from './webhook';
 
 // devnet only
 export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
@@ -470,4 +471,58 @@ export async function simulateAndGetTxWithCUs(
 			opts
 		),
 	};
+}
+
+export function handleSimResultError(
+	simResult: SimulateAndGetTxWithCUsResponse,
+	errorCodesToSuppress: number[],
+	msgSuffix: string
+) {
+	if (
+		(simResult.simError as ExtendedTransactionError).InstructionError ===
+		undefined
+	) {
+		return;
+	}
+	const err = (simResult.simError as ExtendedTransactionError).InstructionError;
+	if (!err) {
+		return;
+	}
+	if (err.length < 2) {
+		logger.error(
+			`${msgSuffix} sim error has no error code. ${JSON.stringify(simResult)}`
+		);
+		return;
+	}
+	if (!err[1]) {
+		return;
+	}
+
+	if (typeof err[1] === 'object' && 'Custom' in err[1]) {
+		const customErrorCode = Number((err[1] as CustomError).Custom);
+		if (errorCodesToSuppress.includes(customErrorCode)) {
+			return;
+		} else {
+			logger.error(
+				`${msgSuffix} sim error custom error code: ${customErrorCode}. ${JSON.stringify(
+					simResult
+				)}`
+			);
+		}
+	} else {
+		webhookMessage(
+			`${msgSuffix} sim error has no error code. ${JSON.stringify(simResult)}`
+		);
+		logger.error(
+			`${msgSuffix} sim error has no error code. ${JSON.stringify(simResult)}`
+		);
+	}
+}
+
+export interface ExtendedTransactionError {
+	InstructionError?: [number, string | object];
+}
+
+export interface CustomError {
+	Custom?: number;
 }
