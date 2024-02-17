@@ -517,6 +517,7 @@ export function handleSimResultError(
 			`${msgSuffix} sim error has no error code. ${JSON.stringify(simResult)}`
 		);
 	}
+	return;
 }
 
 export interface ExtendedTransactionError {

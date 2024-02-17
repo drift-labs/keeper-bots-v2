@@ -1025,15 +1025,17 @@ export class FillerBot implements Bot {
 	 *
 	 * @param nodesFilled nodes that we sent a transaction to fill
 	 * @param logs logs from tx.meta.logMessages or this.clearingHouse.program._events._eventParser.parseLogs
-	 *
-	 * @returns number of nodes successfully filled
+	 * @returns number of nodes successfully filled, and whether the tx exceeded CUs
 	 */
 	protected async handleTransactionLogs(
 		nodesFilled: Array<NodeToFill>,
 		logs: string[] | null | undefined
-	): Promise<number> {
+	): Promise<{ filledNodes: number; exceededCUs: boolean }> {
 		if (!logs) {
-			return 0;
+			return {
+				filledNodes: 0,
+				exceededCUs: false,
+			};
 		}
 
 		let inFillIx = false;
@@ -1249,7 +1251,21 @@ export class FillerBot implements Bot {
 			this.fillTxSinceBurstCU += 1;
 		}
 
-		return successCount;
+		if (logs.length > 0) {
+			if (
+				logs[logs.length - 1].includes('exceeded CUs meter at BPF instruction')
+			) {
+				return {
+					filledNodes: successCount,
+					exceededCUs: true,
+				};
+			}
+		}
+
+		return {
+			filledNodes: successCount,
+			exceededCUs: false,
+		};
 	}
 
 	protected async processBulkFillTxLogs(
@@ -1274,7 +1290,11 @@ export class FillerBot implements Bot {
 			return 0;
 		}
 
-		return this.handleTransactionLogs(nodesFilled, tx.meta!.logMessages);
+		const { filledNodes } = await this.handleTransactionLogs(
+			nodesFilled,
+			tx.meta!.logMessages
+		);
+		return filledNodes;
 	}
 
 	protected removeFillingNodes(nodes: Array<NodeToFill>) {
@@ -1488,10 +1508,15 @@ export class FillerBot implements Bot {
 	}
 
 	/**
-	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
-	 * @param nodeToFill node with multiple makers
+	 *
+	 * @param fillTxId id of current fill
+	 * @param nodeToFill taker node to fill with list of makers to use
+	 * @returns true if successful, false if fail, and should retry with fewer makers
 	 */
-	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
+	private async fillMultiMakerPerpNodes(
+		fillTxId: number,
+		nodeToFill: NodeToFill
+	): Promise<boolean> {
 		const ixs = [
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,
@@ -1502,14 +1527,6 @@ export class FillerBot implements Bot {
 				),
 			}),
 		];
-
-		const fillTxId = this.fillTxId++;
-		logger.info(
-			logMessageForNodeToFill(
-				nodeToFill,
-				`Filling multi maker perp node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`
-			)
-		);
 
 		this.logSlots();
 
@@ -1586,7 +1603,7 @@ export class FillerBot implements Bot {
 				logger.error(
 					`No makerInfos left to use for multi maker perp node (fillTxId: ${fillTxId})`
 				);
-				return;
+				return true;
 			}
 
 			logger.info(
@@ -1605,7 +1622,13 @@ export class FillerBot implements Bot {
 					`${this.name}: (fillTxId: ${fillTxId})`
 				);
 				if (simResult.simTxLogs) {
-					await this.handleTransactionLogs([nodeToFill], simResult.simTxLogs);
+					const { exceededCUs } = await this.handleTransactionLogs(
+						[nodeToFill],
+						simResult.simTxLogs
+					);
+					if (exceededCUs) {
+						return false;
+					}
 				}
 			} else {
 				if (!this.dryRun) {
@@ -1622,6 +1645,46 @@ export class FillerBot implements Bot {
 					}`
 				);
 			}
+		}
+		return true;
+	}
+
+	/**
+	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
+	 * @param nodeToFill node with multiple makers
+	 */
+	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
+		const fillTxId = this.fillTxId++;
+		logger.info(
+			logMessageForNodeToFill(
+				nodeToFill,
+				`Filling multi maker perp node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`
+			)
+		);
+
+		let nodeWithMakerSet = nodeToFill;
+		let attempt = 1;
+		while (!(await this.fillMultiMakerPerpNodes(fillTxId, nodeWithMakerSet))) {
+			attempt++;
+			const newMakerSet = nodeWithMakerSet.makerNodes
+				.sort(() => 0.5 - Math.random())
+				.slice(0, Math.ceil(nodeWithMakerSet.makerNodes.length / 2));
+			nodeWithMakerSet = {
+				node: nodeWithMakerSet.node,
+				makerNodes: newMakerSet,
+			};
+			if (newMakerSet.length === 0) {
+				logger.error(
+					`No makers left to use for multi maker perp node (fillTxId: ${fillTxId})`
+				);
+				return;
+			}
+			logger.info(
+				logMessageForNodeToFill(
+					nodeWithMakerSet,
+					`Attempt ${attempt} to fill multi maker perp node with ${nodeWithMakerSet.makerNodes.length} makers (fillTxId: ${fillTxId})`
+				)
+			);
 		}
 	}
 
