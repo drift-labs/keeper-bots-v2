@@ -164,6 +164,11 @@ program
 		'Choose tx sender type, options are: fast, retry'
 	)
 	.option(
+		'--tx-retry-timeout-ms <string>',
+		'Timeout in ms for retry tx sender',
+		'30000'
+	)
+	.option(
 		'--market-type <type>',
 		'Set the market type for the JIT Maker bot',
 		'PERP'

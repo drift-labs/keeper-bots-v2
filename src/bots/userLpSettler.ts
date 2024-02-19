@@ -27,12 +27,13 @@ import {
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
+	PublicKey,
 	SendTransactionError,
-	TransactionInstruction,
 } from '@solana/web3.js';
 
 const SETTLE_LP_CHUNKS = 4;
 const SLEEP_MS = 500;
+const CU_EST_MULTIPLIER = 1.25;
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -162,7 +163,6 @@ export class UserLpSettlerBot implements Bot {
 		}
 		const start = Date.now();
 		try {
-			const lpsPerMarket: { [key: number]: number } = {};
 			this.inProgress = true;
 
 			logger.info(`Loading users that have been LPs...`);
@@ -173,7 +173,7 @@ export class UserLpSettlerBot implements Bot {
 
 			const nowTs = new BN(Date.now() / 1000);
 
-			const marketIxMap = new Map<number, TransactionInstruction[]>();
+			const lpsToSettleInMarketMap = new Map<number, PublicKey[]>();
 			logger.info(`Going through ${this.userMap.size()} users...`);
 			for (const user of this.userMap.values()) {
 				const userAccount = user.getUserAccount();
@@ -185,14 +185,14 @@ export class UserLpSettlerBot implements Bot {
 						continue;
 					}
 
-					let shouldSettle = false;
+					let shouldSettleLp = false;
 					if (freeCollateral.lte(ZERO)) {
 						logger.info(
 							`user ${user.getUserAccountPublicKey()} has ${freeCollateral.toString()} free collateral with a position in market ${
 								pos.marketIndex
 							}`
 						);
-						shouldSettle = true;
+						shouldSettleLp = true;
 					}
 
 					const perpMarketAccount = this.driftClient.getPerpMarketAccount(
@@ -205,44 +205,45 @@ export class UserLpSettlerBot implements Bot {
 						perpMarketAccount!.amm.fundingPeriod
 					);
 
-					// five min away from funding
-					if (timeTillFunding.lte(new BN(300))) {
-						console.log(
+					// 10 min away from funding
+					if (timeTillFunding.lte(new BN(600))) {
+						logger.info(
 							`user ${user.getUserAccountPublicKey()} funding within 5 min`
 						);
-						shouldSettle = true;
+						shouldSettleLp = true;
 					}
 
-					if (!shouldSettle) {
+					// check that the position will change with settle_lp call
+					const posWithLp = user.getPerpPositionWithLPSettle(
+						pos.marketIndex,
+						pos
+					);
+					if (
+						shouldSettleLp &&
+						(posWithLp[0].baseAssetAmount.eq(pos.baseAssetAmount) ||
+							posWithLp[0].quoteAssetAmount.eq(pos.quoteAssetAmount))
+					) {
+						shouldSettleLp = false;
+					}
+
+					if (!shouldSettleLp) {
 						continue;
 					}
 
-					if (lpsPerMarket[pos.marketIndex] === undefined) {
-						lpsPerMarket[pos.marketIndex] = 0;
-					} else {
-						lpsPerMarket[pos.marketIndex] += 1;
+					if (lpsToSettleInMarketMap.get(pos.marketIndex) === undefined) {
+						lpsToSettleInMarketMap.set(pos.marketIndex, []);
 					}
 
-					if (marketIxMap.get(pos.marketIndex) === undefined) {
-						marketIxMap.set(pos.marketIndex, []);
-					}
-
-					const settleIx = await this.driftClient.settleLPIx(
-						user.getUserAccountPublicKey(),
-						pos.marketIndex
-					);
-
-					marketIxMap.get(pos.marketIndex)!.push(settleIx);
+					lpsToSettleInMarketMap
+						.get(pos.marketIndex)!
+						.push(user.getUserAccountPublicKey());
 				}
 			}
 
-			for (const [marketIndex, settleLpIxs] of marketIxMap.entries()) {
-				console.log(
-					`Settling ${settleLpIxs.length} LPs in ${
-						settleLpIxs.length / SETTLE_LP_CHUNKS
-					} chunks for market ${marketIndex}`
-				);
-
+			for (const [
+				marketIndex,
+				usersToSettle,
+			] of lpsToSettleInMarketMap.entries()) {
 				const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex)!;
 				const settlePnlPaused =
 					isOperationPaused(
@@ -261,11 +262,18 @@ export class UserLpSettlerBot implements Bot {
 					continue;
 				}
 
+				logger.info(
+					`Settling ${usersToSettle.length} LPs in ${
+						usersToSettle.length / SETTLE_LP_CHUNKS
+					} chunks for market ${marketIndex}`
+				);
+
 				const allTxPromises = [];
-				for (let i = 0; i < settleLpIxs.length; i += SETTLE_LP_CHUNKS) {
-					const chunk = settleLpIxs.slice(i, i + SETTLE_LP_CHUNKS);
-					allTxPromises.push(this.trySendTxForChunk(chunk));
+				for (let i = 0; i < usersToSettle.length; i += SETTLE_LP_CHUNKS) {
+					const chunk = usersToSettle.slice(i, i + SETTLE_LP_CHUNKS);
+					allTxPromises.push(this.trySendTxForChunk(marketIndex, chunk));
 				}
+
 				logger.info(`Waiting for ${allTxPromises.length} txs to settle...`);
 				const settleStart = Date.now();
 				await Promise.all(allTxPromises);
@@ -307,20 +315,34 @@ export class UserLpSettlerBot implements Bot {
 		}
 	}
 
-	async trySendTxForChunk(ixs: TransactionInstruction[]): Promise<void> {
-		const success = await this.sendTxForChunk([...ixs]);
+	async trySendTxForChunk(
+		marketIndex: number,
+		users: PublicKey[]
+	): Promise<void> {
+		const success = await this.sendTxForChunk(marketIndex, users);
 		if (!success) {
-			const slice = ixs.length / 2;
+			const slice = users.length / 2;
 			if (slice < 1) {
 				await webhookMessage(
 					`[${this.name}]: :x: Failed to settle LPs, reduced until 0 ixs...`
 				);
 				return;
 			}
+
+			const slice0 = users.slice(0, slice);
+			const slice1 = users.slice(slice);
+			logger.info(
+				`Chunk failed: ${users
+					.map((u) => u.toBase58())
+					.join(' ')}, retrying with:\nslice0: ${slice0
+					.map((u) => u.toBase58())
+					.join(' ')}\nslice1: ${slice1.map((u) => u.toBase58()).join(' ')}`
+			);
+
 			await sleepMs(SLEEP_MS);
-			await this.sendTxForChunk(ixs.slice(0, slice));
+			await this.sendTxForChunk(marketIndex, slice0);
 			await sleepMs(SLEEP_MS);
-			await this.sendTxForChunk(ixs.slice(slice));
+			await this.sendTxForChunk(marketIndex, slice1);
 		}
 		await sleepMs(SLEEP_MS);
 	}
@@ -330,25 +352,30 @@ export class UserLpSettlerBot implements Bot {
 	 * @param ixs
 	 * @returns true if the transaction was successful, false if it failed (and to retry with 1/2 of ixs)
 	 */
-	async sendTxForChunk(ixs: TransactionInstruction[]): Promise<boolean> {
-		if (ixs.length == 0) {
+	async sendTxForChunk(
+		marketIndex: number,
+		users: PublicKey[]
+	): Promise<boolean> {
+		if (users.length == 0) {
 			return true;
 		}
 
 		let success = false;
 		try {
-			ixs.unshift(
-				...[
-					ComputeBudgetProgram.setComputeUnitLimit({
-						units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
-					}),
-					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: Math.floor(
-							this.priorityFeeSubscriber!.getCustomStrategyResult()
-						),
-					}),
-				]
-			);
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
+				}),
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber!.getCustomStrategyResult()
+					),
+				}),
+				...(await Promise.all(
+					users.map((u) => this.driftClient.settleLPIx(u, marketIndex))
+				)),
+			];
+
 			const simResult = await simulateAndGetTxWithCUs(
 				ixs,
 				this.driftClient.connection,
@@ -356,7 +383,7 @@ export class UserLpSettlerBot implements Bot {
 				[this.lookupTableAccount!],
 				[],
 				undefined,
-				1.25,
+				CU_EST_MULTIPLIER,
 				true,
 				true
 			);
@@ -376,7 +403,10 @@ export class UserLpSettlerBot implements Bot {
 				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
 					simResult.tx,
 					[],
-					this.driftClient.opts
+					{
+						...this.driftClient.opts,
+						maxRetries: 10,
+					}
 				);
 				logger.info(
 					`Settled LPs for ${ixs.length} users in tx: https://solana.fm/tx/${txSig.txSig}`

@@ -50,6 +50,7 @@ import {
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 const SETTLE_USER_CHUNKS = 4;
 const SLEEP_MS = 500;
+const CU_EST_MULTIPLIER = 1.25;
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -70,6 +71,7 @@ export class UserPnlSettlerBot implements Bot {
 	private bulkAccountLoader: BulkAccountLoader;
 	private userMap: UserMap;
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
+	private inProgress = false;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -158,6 +160,7 @@ export class UserPnlSettlerBot implements Bot {
 		if (this.runOnce) {
 			await this.trySettlePnl();
 		} else {
+			await this.trySettlePnl();
 			const intervalId = setInterval(this.trySettlePnl.bind(this), intervalMs);
 			this.intervalIds.push(intervalId);
 		}
@@ -173,8 +176,14 @@ export class UserPnlSettlerBot implements Bot {
 	}
 
 	private async trySettlePnl() {
+		if (this.inProgress) {
+			logger.info(`Settle PnLs already in progress, skipping...`);
+			return;
+		}
 		const start = Date.now();
 		try {
+			this.inProgress = true;
+
 			const perpMarketAndOracleData: {
 				[marketIndex: number]: {
 					marketAccount: PerpMarketAccount;
@@ -232,18 +241,26 @@ export class UserPnlSettlerBot implements Bot {
 
 			for (const user of this.userMap!.values()) {
 				const userAccount = user.getUserAccount();
+				const userAccKeyStr = user.getUserAccountPublicKey().toBase58();
 				const isUsdcBorrow =
 					userAccount.spotPositions[0] &&
 					isVariant(userAccount.spotPositions[0].balanceType, 'borrow');
 				const usdcAmount = user.getTokenAmount(QUOTE_SPOT_MARKET_INDEX);
 
 				for (const settleePosition of user.getActivePerpPositions()) {
+					logger.debug(
+						`Checking user ${userAccKeyStr} position in market ${settleePosition.marketIndex}`
+					);
+
 					// only settle active positions (base amount) or negative quote
 					if (
 						settleePosition.quoteAssetAmount.gte(ZERO) &&
 						settleePosition.baseAssetAmount.eq(ZERO) &&
 						settleePosition.lpShares.eq(ZERO)
 					) {
+						logger.debug(
+							`Skipping user ${userAccKeyStr}-${settleePosition.marketIndex} because no base amount and has positive quote amount`
+						);
 						continue;
 					}
 
@@ -265,6 +282,9 @@ export class UserPnlSettlerBot implements Bot {
 						!perpMarketAndOracleData[perpMarketIdx] ||
 						!spotMarketAndOracleData[spotMarketIdx]
 					) {
+						logger.debug(
+							`Skipping user ${userAccKeyStr}-${settleePosition.marketIndex} because no spot market or oracle data`
+						);
 						continue;
 					}
 
@@ -291,18 +311,26 @@ export class UserPnlSettlerBot implements Bot {
 							.abs()
 							.gt(fiveHundredNotionalBase);
 
+					const timeToUpdate = timeRemainingUntilUpdate(
+						new BN(nowTs ?? Date.now() / 1000),
+						perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
+							.lastFundingRateTs,
+						perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
+							.fundingPeriod
+					);
+
 					const shouldSettleLp =
 						settleePosition.lpShares.gt(ZERO) &&
-						(timeRemainingUntilUpdate(
-							new BN(nowTs ?? Date.now() / 1000),
-							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
-								.lastFundingRateTs,
-							perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
-								.fundingPeriod
-						).ltn(120) ||
+						(timeToUpdate.ltn(15 * 60) || // settle lp positions within 15 min of funding update
 							largeUnsettledLP);
+					logger.debug(
+						`User ${userAccKeyStr}-${settleePosition.marketIndex} shouldSettleLp: ${shouldSettleLp}, largeUnsettledLp: ${largeUnsettledLP}, timeToUpdate: ${timeToUpdate}`
+					);
 
-					// only settle for $10 or more negative pnl
+					// skip users that have:
+					// (no unsettledPnl AND no lpShares)
+					// OR
+					// (if they have unsettledPnl > min AND baseAmount != 0 AND no usdcBorrow AND no lpShares)
 					if (
 						(userUnsettledPnl.eq(ZERO) &&
 							settleePositionWithLp.lpShares.eq(ZERO)) ||
@@ -311,6 +339,9 @@ export class UserPnlSettlerBot implements Bot {
 							!isUsdcBorrow &&
 							settleePositionWithLp.lpShares.eq(ZERO))
 					) {
+						logger.debug(
+							`Skipping user ${userAccKeyStr}-${settleePosition.marketIndex} with (no unsettledPnl and no lpShares) OR (unsettledPnl > $10 and no usdcBorrow and no lpShares)`
+						);
 						continue;
 					}
 
@@ -320,11 +351,17 @@ export class UserPnlSettlerBot implements Bot {
 						(userUnsettledPnl.abs().lt(MIN_PNL_TO_SETTLE.abs()) ||
 							userUnsettledPnl.abs().lt(usdcAmount.abs().div(new BN(100))))
 					) {
+						logger.debug(
+							`Skipping user ${userAccKeyStr}-${settleePosition.marketIndex} with usdcBorrow AND (unsettledPnl < $10 or unsettledPnl < 1% of borrow)`
+						);
 						continue;
 					}
 
 					if (settleePositionWithLp.lpShares.gt(ZERO) && !shouldSettleLp) {
-						continue;
+						logger.debug(
+							`Skipping user ${userAccKeyStr}-${settleePosition.marketIndex} with lpShares and shouldSettleLp === false`
+						);
+						// continue;
 					}
 
 					const pnlPool =
@@ -442,10 +479,22 @@ export class UserPnlSettlerBot implements Bot {
 					.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))
 					.slice(0, 100);
 
+				logger.info(
+					`Settling ${sortedParams.length} users in ${
+						sortedParams.length / SETTLE_USER_CHUNKS
+					} chunks for market ${marketIndex}`
+				);
+
+				const allTxPromises = [];
 				for (let i = 0; i < sortedParams.length; i += SETTLE_USER_CHUNKS) {
 					const usersChunk = sortedParams.slice(i, i + SETTLE_USER_CHUNKS);
-					await this.trySendTxForChunk(marketIndex, usersChunk);
+					allTxPromises.push(this.trySendTxForChunk(marketIndex, usersChunk));
 				}
+
+				logger.info(`Waiting for ${allTxPromises.length} txs to settle...`);
+				const settleStart = Date.now();
+				await Promise.all(allTxPromises);
+				logger.info(`Settled in ${Date.now() - settleStart}ms`);
 			}
 		} catch (err) {
 			console.error(err);
@@ -475,6 +524,7 @@ export class UserPnlSettlerBot implements Bot {
 				}
 			}
 		} finally {
+			this.inProgress = false;
 			logger.info(`Settle PNLs finished in ${Date.now() - start}ms`);
 			await this.watchdogTimerMutex.runExclusive(async () => {
 				this.watchdogTimerLastPatTime = Date.now();
@@ -495,10 +545,24 @@ export class UserPnlSettlerBot implements Bot {
 			if (slice < 1) {
 				return;
 			}
+
+			const slice0 = users.slice(0, slice);
+			const slice1 = users.slice(slice);
+			logger.info(
+				`Chunk failed: ${users
+					.map((u) => u.settleeUserAccountPublicKey.toBase58())
+					.join(' ')}, retrying with:\nslice0: ${slice0
+					.map((u) => u.settleeUserAccountPublicKey.toBase58())
+					.join(' ')}\nslice1: ${slice1
+					.map((u) => u.settleeUserAccountPublicKey.toBase58())
+					.join(' ')}`
+			);
+
 			await sleepMs(SLEEP_MS);
-			await this.sendTxForChunk(marketIndex, users.slice(0, slice));
+			await this.sendTxForChunk(marketIndex, slice0);
+
 			await sleepMs(SLEEP_MS);
-			await this.sendTxForChunk(marketIndex, users.slice(slice));
+			await this.sendTxForChunk(marketIndex, slice1);
 		}
 		await sleepMs(SLEEP_MS);
 	}
@@ -537,7 +601,7 @@ export class UserPnlSettlerBot implements Bot {
 				[this.lookupTableAccount!],
 				[],
 				undefined,
-				1.15,
+				CU_EST_MULTIPLIER,
 				true,
 				true
 			);
@@ -556,7 +620,10 @@ export class UserPnlSettlerBot implements Bot {
 				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
 					simResult.tx,
 					[],
-					this.driftClient.opts
+					{
+						...this.driftClient.opts,
+						maxRetries: 10,
+					}
 				);
 				success = true;
 

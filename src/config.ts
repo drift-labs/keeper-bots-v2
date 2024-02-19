@@ -229,7 +229,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			debug: opts.debug ?? false,
 			subaccounts: loadCommaDelimitToArray(opts.subaccount),
 			useJito: opts.useJito ?? false,
-			txRetryTimeoutMs: opts.txRetryTimeoutMs ?? 30000,
+			txRetryTimeoutMs: parseInt(opts.txRetryTimeoutMs ?? '30000'),
 			txSenderType: opts.txSenderType ?? 'fast',
 		},
 		enabledBots: [],
