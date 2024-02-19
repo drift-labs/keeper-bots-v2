@@ -311,7 +311,7 @@ export class UserPnlSettlerBot implements Bot {
 							.abs()
 							.gt(fiveHundredNotionalBase);
 
-					const timeToUpdate = timeRemainingUntilUpdate(
+					const timeToFundingUpdate = timeRemainingUntilUpdate(
 						new BN(nowTs ?? Date.now() / 1000),
 						perpMarketAndOracleData[perpMarketIdx].marketAccount.amm
 							.lastFundingRateTs,
@@ -321,10 +321,10 @@ export class UserPnlSettlerBot implements Bot {
 
 					const shouldSettleLp =
 						settleePosition.lpShares.gt(ZERO) &&
-						(timeToUpdate.ltn(15 * 60) || // settle lp positions within 15 min of funding update
+						(timeToFundingUpdate.ltn(15 * 60) || // settle lp positions within 15 min of funding update
 							largeUnsettledLP);
 					logger.debug(
-						`User ${userAccKeyStr}-${settleePosition.marketIndex} shouldSettleLp: ${shouldSettleLp}, largeUnsettledLp: ${largeUnsettledLP}, timeToUpdate: ${timeToUpdate}`
+						`User ${userAccKeyStr}-${settleePosition.marketIndex} shouldSettleLp: ${shouldSettleLp}, largeUnsettledLp: ${largeUnsettledLP}, timeToUpdate: ${timeToFundingUpdate}`
 					);
 
 					// skip users that have:
@@ -359,9 +359,11 @@ export class UserPnlSettlerBot implements Bot {
 
 					if (settleePositionWithLp.lpShares.gt(ZERO) && !shouldSettleLp) {
 						logger.debug(
-							`Skipping user ${userAccKeyStr}-${settleePosition.marketIndex} with lpShares and shouldSettleLp === false`
+							`Skipping user ${userAccKeyStr}-${
+								settleePosition.marketIndex
+							} with lpShares and shouldSettleLp === false, timeToFundingUpdate: ${timeToFundingUpdate.toNumber()}`
 						);
-						// continue;
+						continue;
 					}
 
 					const pnlPool =

@@ -512,12 +512,6 @@ export function handleSimResultError(
 			}`;
 			webhookMessage(msg);
 			logger.error(msg);
-
-			// logger.error(
-			// 	`${msgSuffix} sim error custom error code: ${customErrorCode}. ${JSON.stringify(
-			// 		simResult
-			// 	)}`
-			// );
 		}
 	} else {
 		const msg = `${msgSuffix} sim error with no error code, simError: ${JSON.stringify(
