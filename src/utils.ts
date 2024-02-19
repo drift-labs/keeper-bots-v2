@@ -460,16 +460,18 @@ export async function simulateAndGetTxWithCUs(
 		});
 	}
 
+	const txWithCUs = await txSender.getVersionedTransaction(
+		ixs,
+		lookupTableAccounts,
+		additionalSigners,
+		opts
+	);
+
 	return {
 		cuEstimate,
 		simTxLogs,
 		simError: resp.value.err,
-		tx: await txSender.getVersionedTransaction(
-			ixs,
-			lookupTableAccounts,
-			additionalSigners,
-			opts
-		),
+		tx: txWithCUs,
 	};
 }
 

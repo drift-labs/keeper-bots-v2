@@ -52,6 +52,7 @@ export class UserLpSettlerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
+	private inProgress = false;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -139,6 +140,7 @@ export class UserLpSettlerBot implements Bot {
 		if (this.runOnce) {
 			await this.trySettleLps();
 		} else {
+			await this.trySettleLps();
 			const intervalId = setInterval(this.trySettleLps.bind(this), intervalMs);
 			this.intervalIds.push(intervalId);
 		}
@@ -154,9 +156,14 @@ export class UserLpSettlerBot implements Bot {
 	}
 
 	private async trySettleLps() {
+		if (this.inProgress) {
+			logger.info(`Settle LPs already in progress, skipping...`);
+			return;
+		}
 		const start = Date.now();
 		try {
 			const lpsPerMarket: { [key: number]: number } = {};
+			this.inProgress = true;
 
 			logger.info(`Loading users that have been LPs...`);
 			const fetchLpUsersStart = Date.now();
@@ -173,7 +180,6 @@ export class UserLpSettlerBot implements Bot {
 
 				const freeCollateral = user.getFreeCollateral('Initial');
 
-				// for (const pos of user.getActivePerpPositions()) {
 				for (const pos of userAccount.perpPositions) {
 					if (pos.lpShares.eq(ZERO)) {
 						continue;
@@ -181,8 +187,10 @@ export class UserLpSettlerBot implements Bot {
 
 					let shouldSettle = false;
 					if (freeCollateral.lte(ZERO)) {
-						console.log(
-							`user ${user.getUserAccountPublicKey()} free collateral is ${freeCollateral.toString()}`
+						logger.info(
+							`user ${user.getUserAccountPublicKey()} has ${freeCollateral.toString()} free collateral with a position in market ${
+								pos.marketIndex
+							}`
 						);
 						shouldSettle = true;
 					}
@@ -230,7 +238,9 @@ export class UserLpSettlerBot implements Bot {
 
 			for (const [marketIndex, settleLpIxs] of marketIxMap.entries()) {
 				console.log(
-					`Settling ${settleLpIxs.length} LPs for market ${marketIndex}`
+					`Settling ${settleLpIxs.length} LPs in ${
+						settleLpIxs.length / SETTLE_LP_CHUNKS
+					} chunks for market ${marketIndex}`
 				);
 
 				const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex)!;
@@ -251,10 +261,15 @@ export class UserLpSettlerBot implements Bot {
 					continue;
 				}
 
+				const allTxPromises = [];
 				for (let i = 0; i < settleLpIxs.length; i += SETTLE_LP_CHUNKS) {
 					const chunk = settleLpIxs.slice(i, i + SETTLE_LP_CHUNKS);
-					await this.trySendTxForChunk(chunk);
+					allTxPromises.push(this.trySendTxForChunk(chunk));
 				}
+				logger.info(`Waiting for ${allTxPromises.length} txs to settle...`);
+				const settleStart = Date.now();
+				await Promise.all(allTxPromises);
+				logger.info(`Settled in ${Date.now() - settleStart}ms`);
 			}
 		} catch (err) {
 			console.error(err);
@@ -284,6 +299,7 @@ export class UserLpSettlerBot implements Bot {
 				}
 			}
 		} finally {
+			this.inProgress = false;
 			logger.info(`Settle LPs finished in ${Date.now() - start}ms`);
 			await this.watchdogTimerMutex.runExclusive(async () => {
 				this.watchdogTimerLastPatTime = Date.now();
@@ -292,7 +308,7 @@ export class UserLpSettlerBot implements Bot {
 	}
 
 	async trySendTxForChunk(ixs: TransactionInstruction[]): Promise<void> {
-		const success = await this.sendTxForChunk(ixs);
+		const success = await this.sendTxForChunk([...ixs]);
 		if (!success) {
 			const slice = ixs.length / 2;
 			if (slice < 1) {
@@ -309,6 +325,11 @@ export class UserLpSettlerBot implements Bot {
 		await sleepMs(SLEEP_MS);
 	}
 
+	/**
+	 * Send a transaction for a chunk of ixs
+	 * @param ixs
+	 * @returns true if the transaction was successful, false if it failed (and to retry with 1/2 of ixs)
+	 */
 	async sendTxForChunk(ixs: TransactionInstruction[]): Promise<boolean> {
 		if (ixs.length == 0) {
 			return true;
@@ -335,7 +356,7 @@ export class UserLpSettlerBot implements Bot {
 				[this.lookupTableAccount!],
 				[],
 				undefined,
-				1.15,
+				1.25,
 				true,
 				true
 			);
@@ -364,26 +385,6 @@ export class UserLpSettlerBot implements Bot {
 			}
 		} catch (err) {
 			console.error(err);
-			// const userKeys = users
-			// 	.map(({ settleeUserAccountPublicKey }) =>
-			// 		settleeUserAccountPublicKey.toBase58()
-			// 	)
-			// 	.join(', ');
-			// logger.error(`Failed to settle pnl for users: ${userKeys}`);
-			// logger.error(err);
-
-			// if (err instanceof Error) {
-			// 	const errorCode = getErrorCode(err) ?? 0;
-			// 	if (!errorCodesToSuppress.includes(errorCode) && users.length === 1) {
-			// 		if (err instanceof SendTransactionError) {
-			// 			await webhookMessage(
-			// 				`[${this.name
-			// 				}]: :x: Error code: ${errorCode} while settling pnls for ${marketIndex}:\n${err.logs ? (err.logs as Array<string>).join('\n') : ''
-			// 				}\n${err.stack ? err.stack : err.message}`
-			// 			);
-			// 		}
-			// 	}
-			// }
 		}
 		return success;
 	}
