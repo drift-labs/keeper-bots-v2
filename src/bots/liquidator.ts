@@ -800,6 +800,9 @@ export class LiquidatorBot implements Bot {
 			);
 			console.error(e);
 			if (e instanceof Error) {
+				if (e.message.includes('Transaction was not confirmed in')) {
+					return;
+				}
 				webhookMessage(
 					`[${
 						this.name
@@ -883,6 +886,9 @@ export class LiquidatorBot implements Bot {
 			);
 			console.error(e);
 			if (e instanceof Error) {
+				if (e.message.includes('Transaction was not confirmed in')) {
+					return;
+				}
 				webhookMessage(
 					`[${this.name}]: :x: error trying to ${getVariant(
 						orderDirection
@@ -1046,13 +1052,15 @@ export class LiquidatorBot implements Bot {
 					})
 					.catch((e) => {
 						logger.error(
-							`Error trying to close perp position for market ${position.marketIndex}: ${e.message}\n${e.stack}`
+							`Error error in placePerpOrder in market: ${position.marketIndex}: ${e.message}\n${e.stack}`
 						);
-						webhookMessage(
-							`[${this.name}]: :x: error in placePerpOrder\n:${
-								e.stack ? e.stack : e.message
-							} `
-						);
+						if (!e.message.includes('Transaction was not confirmed in')) {
+							webhookMessage(
+								`[${this.name}]: :x: error in placePerpOrder\n:${
+									e.stack ? e.stack : e.message
+								} `
+							);
+						}
 					})
 					.then(() => {
 						this.recordHistogram(start, 'placePerpOrder');
@@ -1718,11 +1726,10 @@ tx: ${tx} `
 						);
 					})
 					.catch((e) => {
-						logger.error(e);
 						logger.error(
 							`Error settling positive pnl for ${user.userAccountPublicKey.toBase58()} for market ${
 								liquidateePosition.marketIndex
-							}`
+							}\n${e.stack ? e.stack : e.message}`
 						);
 
 						const errorCode = getErrorCode(e);

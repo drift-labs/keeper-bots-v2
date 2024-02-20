@@ -478,7 +478,8 @@ export async function simulateAndGetTxWithCUs(
 export function handleSimResultError(
 	simResult: SimulateAndGetTxWithCUsResponse,
 	errorCodesToSuppress: number[],
-	msgSuffix: string
+	msgSuffix: string,
+	suppressOutOfCUsMessage = true
 ) {
 	if (
 		(simResult.simError as ExtendedTransactionError).InstructionError ===
@@ -519,8 +520,20 @@ export function handleSimResultError(
 		)}, cuEstimate: ${simResult.cuEstimate}, sim logs:\n${
 			simResult.simTxLogs ? simResult.simTxLogs.join('\n') : 'none'
 		}`;
-		webhookMessage(msg);
 		logger.error(msg);
+
+		// early return if out of CU error.
+		if (
+			suppressOutOfCUsMessage &&
+			simResult.simTxLogs &&
+			simResult.simTxLogs[simResult.simTxLogs.length - 1].includes(
+				'exceeded CUs meter at BPF instruction'
+			)
+		) {
+			return;
+		}
+
+		webhookMessage(msg);
 	}
 	return;
 }
