@@ -34,6 +34,7 @@ import {
 	UserAccount,
 	getUserAccountPublicKey,
 	PriorityFeeSubscriber,
+	DataAndSlot,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -117,8 +118,8 @@ const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
-	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
-	6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
+	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
+	// 6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
 	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6003, // 0x1773 Error Number: 6003. Error Message: Insufficient collateral.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
@@ -144,19 +145,32 @@ enum METRIC_TYPES {
 	user_stats_map_authority_keys = 'user_stats_map_authority_keys',
 }
 
-function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
+function logMessageForNodeToFill(
+	node: NodeToFill,
+	takerUser: string,
+	takerUserSlot: number,
+	makerInfos: Array<DataAndSlot<MakerInfo>>,
+	prefix?: string
+): string {
 	const takerNode = node.node;
 	const takerOrder = takerNode.order;
 	if (!takerOrder) {
 		return 'no taker order';
 	}
+
+	if (node.makerNodes.length !== makerInfos.length) {
+		logger.error(`makerNodes and makerInfos length mismatch`);
+	}
+
 	let msg = '';
 	if (prefix) {
 		msg += `${prefix}\n`;
 	}
-	msg += `taker on market ${takerOrder.marketIndex}: ${takerNode.userAccount}-${
+	msg += `taker on market ${takerOrder.marketIndex}: ${takerUser}-${
 		takerOrder.orderId
-	} ${getVariant(takerOrder.direction)} ${convertToNumber(
+	} (takerSlot: ${takerUserSlot}) ${getVariant(
+		takerOrder.direction
+	)} ${convertToNumber(
 		takerOrder.baseAssetAmountFilled,
 		BASE_PRECISION
 	)}/${convertToNumber(
@@ -167,13 +181,16 @@ function logMessageForNodeToFill(node: NodeToFill, prefix?: string): string {
 		PRICE_PRECISION
 	)} (orderType: ${getVariant(takerOrder.orderType)})\n`;
 	msg += `makers:\n`;
-	if (node.makerNodes.length > 0) {
-		for (let i = 0; i < node.makerNodes.length; i++) {
-			const makerNode = node.makerNodes[i];
-			const makerOrder = makerNode.order!;
+	if (makerInfos.length > 0) {
+		for (let i = 0; i < makerInfos.length; i++) {
+			const maker = makerInfos[i].data;
+			const makerSlot = makerInfos[i].slot;
+			const makerOrder = maker.order!;
 			msg += `  [${i}] market ${
 				makerOrder.marketIndex
-			}: ${makerNode.userAccount!}-${makerOrder.orderId} ${getVariant(
+			}: ${maker.maker.toBase58()}-${
+				makerOrder.orderId
+			} (makerSlot: ${makerSlot}) ${getVariant(
 				makerOrder.direction
 			)} ${convertToNumber(
 				makerOrder.baseAssetAmountFilled,
@@ -650,8 +667,17 @@ export class FillerBot implements Bot {
 		return healthy;
 	}
 
-	protected async getUserAccountFromMap(key: string): Promise<UserAccount> {
-		return (await this.userMap!.mustGet(key)).getUserAccount();
+	protected async getUserAccountAndSlotFromMap(
+		key: string
+	): Promise<DataAndSlot<UserAccount>> {
+		const user = await this.userMap!.mustGetWithSlot(
+			key,
+			this.driftClient.userAccountSubscriptionConfig
+		);
+		return {
+			data: user.data.getUserAccount(),
+			slot: user.slot,
+		};
 	}
 
 	protected async getDLOB(): Promise<DLOB> {
@@ -914,12 +940,14 @@ export class FillerBot implements Bot {
 	}
 
 	protected async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
-		makerInfos: Array<MakerInfo>;
+		makerInfos: Array<DataAndSlot<MakerInfo>>;
+		takerUserPubKey: string;
 		takerUser: UserAccount;
+		takerUserSlot: number;
 		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
 	}> {
-		const makerInfos: Array<MakerInfo> = [];
+		const makerInfos: Array<DataAndSlot<MakerInfo>> = [];
 
 		if (nodeToFill.makerNodes.length > 0) {
 			let makerNodesMap: MakerNodeMap = new Map<string, DLOBNode[]>();
@@ -948,30 +976,38 @@ export class FillerBot implements Bot {
 			for (const [makerAccount, makerNodes] of makerNodesMap) {
 				const makerNode = makerNodes[0];
 
-				const makerUserAccount = await this.getUserAccountFromMap(makerAccount);
-				const makerAuthority = makerUserAccount.authority;
+				const makerUserAccount = await this.getUserAccountAndSlotFromMap(
+					makerAccount
+				);
+				const makerAuthority = makerUserAccount.data.authority;
 				const makerUserStats = (
 					await this.userStatsMap!.mustGet(makerAuthority.toString())
 				).userStatsAccountPublicKey;
 				makerInfos.push({
-					maker: new PublicKey(makerAccount),
-					makerUserAccount: makerUserAccount,
-					order: makerNode.order,
-					makerStats: makerUserStats,
+					slot: makerUserAccount.slot,
+					data: {
+						maker: new PublicKey(makerAccount),
+						makerUserAccount: makerUserAccount.data,
+						order: makerNode.order,
+						makerStats: makerUserStats,
+					},
 				});
 			}
 		}
 
-		const takerUserAcct = await this.getUserAccountFromMap(
-			nodeToFill.node.userAccount!.toString()
+		const takerUserPubKey = nodeToFill.node.userAccount!.toString();
+		const takerUserAcct = await this.getUserAccountAndSlotFromMap(
+			takerUserPubKey
 		);
 		const referrerInfo = (
-			await this.userStatsMap!.mustGet(takerUserAcct.authority.toString())
+			await this.userStatsMap!.mustGet(takerUserAcct.data.authority.toString())
 		).getReferrerInfo();
 
 		return Promise.resolve({
 			makerInfos,
-			takerUser: takerUserAcct,
+			takerUserPubKey,
+			takerUser: takerUserAcct.data,
+			takerUserSlot: takerUserAcct.slot,
 			referrerInfo,
 			marketType: nodeToFill.node.order!.marketType,
 		});
@@ -1073,17 +1109,6 @@ export class FillerBot implements Bot {
 					inFillIx = true;
 					errorThisFillIx = false;
 					ixIdx++;
-
-					// can also print this from parsing the log record in upcoming
-					const nodeFilled = nodesFilled[ixIdx];
-					if (nodeFilled) {
-						logger.info(
-							logMessageForNodeToFill(
-								nodeFilled,
-								`Processing tx log for assoc node ${ixIdx}`
-							)
-						);
-					}
 				} else {
 					inFillIx = false;
 				}
@@ -1121,7 +1146,11 @@ export class FillerBot implements Bot {
 				this.driftClient
 					.forceCancelOrders(
 						new PublicKey(makerBreachedMaintenanceMargin),
-						await this.getUserAccountFromMap(makerBreachedMaintenanceMargin)
+						(
+							await this.getUserAccountAndSlotFromMap(
+								makerBreachedMaintenanceMargin
+							)
+						).data
 					)
 					.then((txSig) => {
 						logger.info(
@@ -1176,9 +1205,11 @@ export class FillerBot implements Bot {
 				this.driftClient
 					.forceCancelOrders(
 						new PublicKey(filledNode.node.userAccount!),
-						await this.getUserAccountFromMap(
-							filledNode.node.userAccount!.toString()
-						)
+						(
+							await this.getUserAccountAndSlotFromMap(
+								filledNode.node.userAccount!.toString()
+							)
+						).data
 					)
 					.then((txSig) => {
 						logger.info(
@@ -1447,9 +1478,7 @@ export class FillerBot implements Bot {
 				.catch(async (e) => {
 					const simError = e as SendTransactionError;
 					logger.error(
-						`Failed to send packed tx txAccountKeys: ${txAccounts} (${writeAccs} writeable) (fillTxId: ${fillTxId}):\n${
-							e.message
-						}\n${e.stack}\n${simError.logs ? simError.logs.join('\n') : ''}`
+						`Failed to send packed tx txAccountKeys: ${txAccounts} (${writeAccs} writeable) (fillTxId: ${fillTxId}), error: ${simError.message}`
 					);
 
 					if (e.message.includes('too large:')) {
@@ -1471,28 +1500,30 @@ export class FillerBot implements Bot {
 					}
 
 					if (simError.logs && simError.logs.length > 0) {
-						const start = Date.now();
 						await this.handleTransactionLogs(nodesSent, simError.logs);
-						logger.error(
-							`Failed to send tx, sim error tx logs took: ${
-								Date.now() - start
-							}ms (fillTxId: ${fillTxId}) sim logs:\n${
-								simError.logs ? simError.logs.join('\n') : ''
-							}\n${e.stack || e}`
-						);
 
 						const errorCode = getErrorCode(e);
+						logger.error(
+							`Failed to send tx, sim error (fillTxId: ${fillTxId}) error code: ${errorCode}`
+						);
 
 						if (
 							errorCode &&
 							!errorCodesToSuppress.includes(errorCode) &&
 							!(e as Error).message.includes('Transaction was not confirmed')
 						) {
-							if (errorCode && this.txSimErrorCounter) {
+							if (this.txSimErrorCounter) {
 								this.txSimErrorCounter!.add(1, {
 									errorCode: errorCode.toString(),
 								});
 							}
+
+							logger.error(
+								`Failed to send tx, sim error (fillTxId: ${fillTxId}) sim logs:\n${
+									simError.logs ? simError.logs.join('\n') : ''
+								}\n${e.stack || e}`
+							);
+
 							webhookMessage(
 								`[${this.name}]: :x: error simulating tx:\n${
 									simError.logs ? simError.logs.join('\n') : ''
@@ -1528,11 +1559,25 @@ export class FillerBot implements Bot {
 			}),
 		];
 
-		this.logSlots();
-
 		try {
-			const { makerInfos, takerUser, referrerInfo, marketType } =
-				await this.getNodeFillInfo(nodeToFill);
+			const {
+				makerInfos,
+				takerUser,
+				takerUserPubKey,
+				takerUserSlot,
+				referrerInfo,
+				marketType,
+			} = await this.getNodeFillInfo(nodeToFill);
+
+			logger.info(
+				logMessageForNodeToFill(
+					nodeToFill,
+					takerUserPubKey,
+					takerUserSlot,
+					makerInfos,
+					`Filling multi maker perp node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`
+				)
+			);
 
 			if (!isVariant(marketType, 'perp')) {
 				throw new Error('expected perp market type');
@@ -1540,9 +1585,8 @@ export class FillerBot implements Bot {
 
 			let makerInfosToUse = makerInfos;
 			const buildTxWithMakerInfos = async (
-				makers: MakerInfo[]
+				makers: DataAndSlot<MakerInfo>[]
 			): Promise<SimulateAndGetTxWithCUsResponse> => {
-				const startBuildTx = Date.now();
 				ixs.push(
 					await this.driftClient.getFillPerpOrderIx(
 						await getUserAccountPublicKey(
@@ -1552,7 +1596,7 @@ export class FillerBot implements Bot {
 						),
 						takerUser,
 						nodeToFill.node.order!,
-						makers,
+						makers.map((m) => m.data),
 						referrerInfo
 					)
 				);
@@ -1562,11 +1606,6 @@ export class FillerBot implements Bot {
 				if (this.revertOnFailure) {
 					ixs.push(await this.driftClient.getRevertFillIx());
 				}
-				logger.info(
-					`(fillTxId: ${fillTxId}) buildTxWithMakerInfos took: ${
-						Date.now() - startBuildTx
-					}ms`
-				);
 				const simResult = await simulateAndGetTxWithCUs(
 					ixs,
 					this.driftClient.connection,
@@ -1614,7 +1653,9 @@ export class FillerBot implements Bot {
 				logger.error(
 					`Error simulating multi maker perp node (fillTxId: ${fillTxId}): ${JSON.stringify(
 						simResult.simError
-					)}`
+					)}\nTaker slot: ${takerUserSlot}\nMaker slots: ${makerInfosToUse
+						.map((m) => `  ${m.data.maker.toBase58()}: ${m.slot}`)
+						.join('\n')}`
 				);
 				handleSimResultError(
 					simResult,
@@ -1655,17 +1696,9 @@ export class FillerBot implements Bot {
 	 */
 	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
 		const fillTxId = this.fillTxId++;
-		logger.info(
-			logMessageForNodeToFill(
-				nodeToFill,
-				`Filling multi maker perp node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`
-			)
-		);
 
 		let nodeWithMakerSet = nodeToFill;
-		let attempt = 1;
 		while (!(await this.fillMultiMakerPerpNodes(fillTxId, nodeWithMakerSet))) {
-			attempt++;
 			const newMakerSet = nodeWithMakerSet.makerNodes
 				.sort(() => 0.5 - Math.random())
 				.slice(0, Math.ceil(nodeWithMakerSet.makerNodes.length / 2));
@@ -1679,12 +1712,6 @@ export class FillerBot implements Bot {
 				);
 				return;
 			}
-			logger.info(
-				logMessageForNodeToFill(
-					nodeWithMakerSet,
-					`Attempt ${attempt} to fill multi maker perp node with ${nodeWithMakerSet.makerNodes.length} makers (fillTxId: ${fillTxId})`
-				)
-			);
 		}
 	}
 
@@ -1773,17 +1800,26 @@ export class FillerBot implements Bot {
 				nodesSent.push(nodeToFill);
 				continue;
 			}
+
+			const {
+				makerInfos,
+				takerUser,
+				takerUserPubKey,
+				takerUserSlot,
+				referrerInfo,
+				marketType,
+			} = await this.getNodeFillInfo(nodeToFill);
+
 			logger.info(
 				logMessageForNodeToFill(
 					nodeToFill,
+					takerUserPubKey,
+					takerUserSlot,
+					makerInfos,
 					`Filling perp node ${idx} (fillTxId: ${fillTxId})`
 				)
 			);
-
 			this.logSlots();
-
-			const { makerInfos, takerUser, referrerInfo, marketType } =
-				await this.getNodeFillInfo(nodeToFill);
 
 			if (!isVariant(marketType, 'perp')) {
 				throw new Error('expected perp market type');
@@ -1797,7 +1833,7 @@ export class FillerBot implements Bot {
 				),
 				takerUser,
 				nodeToFill.node.order!,
-				makerInfos,
+				makerInfos.map((m) => m.data),
 				referrerInfo
 			);
 
@@ -1848,7 +1884,9 @@ export class FillerBot implements Bot {
 						takerUser.authority,
 						takerUser.subAccountId
 					)
-				).toString()}-${nodeToFill.node.order!.orderId.toString()} (fillTxId: ${fillTxId})`
+				).toString()}-${nodeToFill.node.order!.orderId.toString()} (slot: ${takerUserSlot}) (fillTxId: ${fillTxId}), maker: ${makerInfos
+					.map((m) => `${m.data.maker.toBase58()}: ${m.slot}`)
+					.join(', ')}`
 			);
 			ixs.push(ix);
 			runningTxSize += newIxCost + additionalAccountsCost;
@@ -1984,11 +2022,13 @@ export class FillerBot implements Bot {
 	) {
 		for (const nodeToTrigger of triggerableNodes) {
 			nodeToTrigger.node.haveTrigger = true;
-			logger.info(
-				`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) order ${nodeToTrigger.node.order.orderId.toString()}`
-			);
-			const user = await this.getUserAccountFromMap(
+			const user = await this.getUserAccountAndSlotFromMap(
 				nodeToTrigger.node.userAccount.toString()
+			);
+			logger.info(
+				`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}, slot: ${
+					user.slot
+				}) order ${nodeToTrigger.node.order.orderId.toString()}`
 			);
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
@@ -1998,7 +2038,7 @@ export class FillerBot implements Bot {
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
-					user,
+					user.data,
 					nodeToTrigger.node.order
 				)
 			);

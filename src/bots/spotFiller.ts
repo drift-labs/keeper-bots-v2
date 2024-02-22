@@ -87,7 +87,7 @@ const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
-	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
+	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
 
@@ -282,12 +282,19 @@ export class SpotFillerBot implements Bot {
 		]);
 
 		this.revertOnFailure = config.revertOnFailure ?? true;
+		if (this.revertOnFailure) {
+			logger.error(
+				`RevertOnFailure disabled for spot filler, this is not currently supported`
+			);
+			this.revertOnFailure = false;
+		}
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
 		logger.info(
 			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
 		);
 
 		this.userMap = userMap;
+
 		if (this.driftClient.userAccountSubscriptionConfig.type === 'websocket') {
 			this.orderSubscriber = new OrderSubscriber({
 				driftClient: this.driftClient,
@@ -770,16 +777,22 @@ export class SpotFillerBot implements Bot {
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
 		makerInfo: MakerInfo | undefined;
-		chUser: User;
+		makerInfoSlot?: number;
+		user: User;
+		userSlot?: number;
 		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
 	}> {
 		let makerInfo: MakerInfo | undefined;
 		const makerNode = getMakerNodeFromNodeToFill(nodeToFill);
+		let makerUserSlot: number | undefined = undefined;
 		if (makerNode) {
-			const makerUserAccount = (
-				await this.userMap!.mustGet(makerNode.userAccount!.toString())
-			).getUserAccount();
+			const makerUser = await this.userMap!.mustGetWithSlot(
+				makerNode.userAccount!.toString(),
+				this.driftClient.userAccountSubscriptionConfig
+			);
+			const makerUserAccount = makerUser.data.getUserAccount();
+			makerUserSlot = makerUser.slot;
 
 			const makerAuthority = makerUserAccount.authority;
 			const makerUserStats = (
@@ -796,16 +809,21 @@ export class SpotFillerBot implements Bot {
 		const node = nodeToFill.node;
 		const order = node.order!;
 
-		const chUser = await this.userMap!.mustGet(node.userAccount!.toString());
+		const user = await this.userMap!.mustGetWithSlot(
+			node.userAccount!.toString(),
+			this.driftClient.userAccountSubscriptionConfig
+		);
 		const referrerInfo = (
 			await this.userStatsMap!.mustGet(
-				chUser.getUserAccount().authority.toString()
+				user.data.getUserAccount().authority.toString()
 			)
 		).getReferrerInfo();
 
 		return Promise.resolve({
 			makerInfo,
-			chUser,
+			makerInfoSlot: makerUserSlot,
+			user: user.data,
+			userSlot: user.slot,
 			referrerInfo,
 			marketType: order.marketType,
 		});
@@ -953,7 +971,10 @@ export class SpotFillerBot implements Bot {
 					.forceCancelOrders(
 						new PublicKey(makerNode.userAccount!),
 						(
-							await this.userMap!.mustGet(makerNode.userAccount!.toString())
+							await this.userMap!.mustGet(
+								makerNode.userAccount!.toString(),
+								this.driftClient.userAccountSubscriptionConfig
+							)
 						).getUserAccount()
 					)
 					.then((txSig) => {
@@ -998,7 +1019,10 @@ export class SpotFillerBot implements Bot {
 					.forceCancelOrders(
 						new PublicKey(node.userAccount!),
 						(
-							await this.userMap!.mustGet(node.userAccount!.toString())
+							await this.userMap!.mustGet(
+								node.userAccount!.toString(),
+								this.driftClient.userAccountSubscriptionConfig
+							)
 						).getUserAccount()
 					)
 					.then((txSig) => {
@@ -1064,18 +1088,18 @@ export class SpotFillerBot implements Bot {
 		const node = nodeToFill.node!;
 		const order = node.order!;
 
-		logger.info(
-			`filling spot node: ${node.userAccount!.toString()}, ${
-				order.orderId
-			} (fillTxId: ${fillTxId})`
-		);
-
 		const fallbackSource = isVariant(order.direction, 'short')
 			? fallbackBidSource
 			: fallbackAskSource;
 
-		const { makerInfo, chUser, referrerInfo, marketType } =
-			await this.getNodeFillInfo(nodeToFill);
+		const {
+			makerInfo,
+			makerInfoSlot,
+			user,
+			userSlot,
+			referrerInfo,
+			marketType,
+		} = await this.getNodeFillInfo(nodeToFill);
 
 		if (!isVariant(marketType, 'spot')) {
 			throw new Error('expected spot market type');
@@ -1088,9 +1112,11 @@ export class SpotFillerBot implements Bot {
 		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
 		if (makerNode) {
 			logger.info(
-				`filling spot node (fillTxId: ${fillTxId}):\ntaker: ${node.userAccount!}-${
+				`filling spot node in market: ${
+					order.marketIndex
+				} (fillTxId: ${fillTxId}):\ntaker: ${node.userAccount!}-${
 					order.orderId
-				} ${convertToNumber(
+				} (takerSlot: ${userSlot}) ${convertToNumber(
 					order.baseAssetAmountFilled,
 					spotMarketPrecision
 				)}/${convertToNumber(
@@ -1101,7 +1127,7 @@ export class SpotFillerBot implements Bot {
 					PRICE_PRECISION
 				)}\nmaker: ${makerNode.userAccount!}-${
 					makerNode.order!.orderId
-				} ${convertToNumber(
+				} (makerSlot: ${makerInfoSlot}) ${convertToNumber(
 					makerNode.order!.baseAssetAmountFilled,
 					spotMarketPrecision
 				)}/${convertToNumber(
@@ -1111,9 +1137,11 @@ export class SpotFillerBot implements Bot {
 			);
 		} else {
 			logger.info(
-				`filling spot node (fillTxId: ${fillTxId})\ntaker: ${node.userAccount!}-${
+				`filling spot node in market: ${
+					order.marketIndex
+				} (fillTxId: ${fillTxId})\ntaker: ${node.userAccount!}-${
 					order.orderId
-				} ${convertToNumber(
+				} (takerSlot: ${userSlot}) ${convertToNumber(
 					order.baseAssetAmountFilled,
 					spotMarketPrecision
 				)}/${convertToNumber(
@@ -1159,8 +1187,8 @@ export class SpotFillerBot implements Bot {
 
 		ixs.push(
 			await this.driftClient.getFillSpotOrderIx(
-				chUser.getUserAccountPublicKey(),
-				chUser.getUserAccount(),
+				user.getUserAccountPublicKey(),
+				user.getUserAccount(),
 				nodeToFill.node.order,
 				fulfillmentConfig,
 				makerInfo,
@@ -1234,7 +1262,7 @@ export class SpotFillerBot implements Bot {
 							console.error(e);
 						} else {
 							logger.error(
-								`Failed to fill spot order for (fillTxId: ${fillTxId}) ${chUser
+								`Failed to fill spot order for (fillTxId: ${fillTxId}) ${user
 									.getUserAccountPublicKey()
 									.toBase58()} order ${
 									nodeToFill.node.order!.orderId
@@ -1312,15 +1340,17 @@ export class SpotFillerBot implements Bot {
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
 			this.triggeringNodes.set(nodeSignature, Date.now());
 
-			const user = await this.userMap!.mustGet(
-				nodeToTrigger.node.userAccount.toString()
+			const user = await this.userMap!.mustGetWithSlot(
+				nodeToTrigger.node.userAccount.toString(),
+				this.driftClient.userAccountSubscriptionConfig
 			);
+			const userAccount = user.data.getUserAccount();
 
 			const ixs = [];
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
-					user.getUserAccount(),
+					userAccount,
 					nodeToTrigger.node.order
 				)
 			);
@@ -1361,7 +1391,9 @@ export class SpotFillerBot implements Bot {
 						.sendTransaction(simResult.tx)
 						.then((txSig) => {
 							logger.info(
-								`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+								`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}, userSlot: ${
+									user.slot
+								}) order: ${nodeToTrigger.node.order.orderId.toString()}`
 							);
 							logger.info(`Tx: ${txSig}`);
 						})
