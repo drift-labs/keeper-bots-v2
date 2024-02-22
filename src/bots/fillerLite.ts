@@ -7,6 +7,7 @@ import {
 	UserAccount,
 	User,
 	PriorityFeeSubscriber,
+	DataAndSlot,
 } from '@drift-labs/sdk';
 
 import { Keypair, PublicKey } from '@solana/web3.js';
@@ -106,7 +107,9 @@ export class FillerLiteBot extends FillerBot {
 		await this.orderSubscriber.unsubscribe();
 	}
 
-	protected async getUserAccountFromMap(key: string): Promise<UserAccount> {
+	protected async getUserAccountAndSlotFromMap(
+		key: string
+	): Promise<DataAndSlot<UserAccount>> {
 		if (!this.orderSubscriber.usersAccounts.has(key)) {
 			const user = new User({
 				driftClient: this.driftClient,
@@ -121,10 +124,13 @@ export class FillerLiteBot extends FillerBot {
 				},
 			});
 			await user.subscribe();
-			const userAccount = user.getUserAccount();
-			return userAccount;
+			return user.getUserAccountAndSlot()!;
 		} else {
-			return this.orderSubscriber.usersAccounts.get(key)!.userAccount;
+			const userAccount = this.orderSubscriber.usersAccounts.get(key)!;
+			return {
+				data: userAccount.userAccount,
+				slot: userAccount.slot,
+			};
 		}
 	}
 
