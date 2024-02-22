@@ -323,7 +323,7 @@ export class UserLpSettlerBot implements Bot {
 		if (!success) {
 			const slice = users.length / 2;
 			if (slice < 1) {
-				await webhookMessage(
+				logger.error(
 					`[${this.name}]: :x: Failed to settle LPs, reduced until 0 ixs...`
 				);
 				return;
@@ -413,8 +413,20 @@ export class UserLpSettlerBot implements Bot {
 				);
 				success = true;
 			}
-		} catch (err) {
-			console.error(err);
+		} catch (e) {
+			const err = e as Error;
+			if (err.message.includes('Transaction was not confirmed')) {
+				logger.error(
+					`Transaction was not confirmed, but we'll assume it's fine`
+				);
+				success = true;
+			} else {
+				logger.error(
+					`Other error while settling LPs: ${err.message}\n${
+						err.stack ? err.stack : 'no stack'
+					}`
+				);
+			}
 		}
 		return success;
 	}

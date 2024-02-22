@@ -117,6 +117,7 @@ const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
+	6010, // 0x177a Error Number: 6010. Error Message: User Has No Position In Market.
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
 	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	// 6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
