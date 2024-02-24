@@ -5,8 +5,8 @@
 	"main": "lib/index.js",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@drift-labs/jit-proxy": "0.10.279",
-		"@drift-labs/sdk": "2.65.0-beta.8",
+		"@drift-labs/jit-proxy": "0.10.280",
+		"@drift-labs/sdk": "2.65.0-beta.9",
 		"@opentelemetry/api": "^1.1.0",
 		"@opentelemetry/auto-instrumentations-node": "^0.31.1",
 		"@opentelemetry/exporter-prometheus": "^0.31.0",
