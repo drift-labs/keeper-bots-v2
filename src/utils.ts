@@ -15,6 +15,7 @@ import {
 	QUOTE_PRECISION,
 	SpotMarketAccount,
 	TxSender,
+	User,
 	Wallet,
 	convertToNumber,
 	getOrderSignature,
@@ -255,26 +256,36 @@ export function getBestLimitAskExcludePubKey(
 	return undefined;
 }
 
+export function calculateAccountValueUsd(user: User): number {
+	const netSpotValue = convertToNumber(
+		user.getNetSpotMarketValue(),
+		QUOTE_PRECISION
+	);
+	const unrealizedPnl = convertToNumber(
+		user.getUnrealizedPNL(true, undefined, undefined),
+		QUOTE_PRECISION
+	);
+	return netSpotValue + unrealizedPnl;
+}
+
 export function calculateBaseAmountToMarketMakePerp(
 	perpMarketAccount: PerpMarketAccount,
-	netSpotMarketValue: BN,
+	user: User,
 	targetLeverage = 1
 ) {
 	const basePriceNormed = convertToNumber(
 		perpMarketAccount.amm.historicalOracleData.lastOraclePriceTwap
 	);
 
-	const tcNormalized = convertToNumber(netSpotMarketValue, QUOTE_PRECISION);
-
-	logger.info(netSpotMarketValue.toString() + '->' + tcNormalized.toString());
+	const accountValueUsd = calculateAccountValueUsd(user);
 
 	targetLeverage *= 0.95;
 
-	const maxBase = (tcNormalized / basePriceNormed) * targetLeverage;
+	const maxBase = (accountValueUsd / basePriceNormed) * targetLeverage;
 	const marketSymbol = decodeName(perpMarketAccount.name);
 
 	logger.info(
-		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${tcNormalized.toString()} / ${basePriceNormed.toString()} * ${targetLeverage.toString()}`
+		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${accountValueUsd.toString()} / ${basePriceNormed.toString()} * ${targetLeverage.toString()}`
 	);
 
 	return maxBase;
@@ -282,24 +293,22 @@ export function calculateBaseAmountToMarketMakePerp(
 
 export function calculateBaseAmountToMarketMakeSpot(
 	spotMarketAccount: SpotMarketAccount,
-	netSpotMarketValue: BN,
+	user: User,
 	targetLeverage = 1
 ) {
 	const basePriceNormalized = convertToNumber(
 		spotMarketAccount.historicalOracleData.lastOraclePriceTwap
 	);
 
-	const tcNormalized = convertToNumber(netSpotMarketValue, QUOTE_PRECISION);
-
-	logger.info(netSpotMarketValue.toString() + '->' + tcNormalized.toString());
+	const accountValueUsd = calculateAccountValueUsd(user);
 
 	targetLeverage *= 0.95;
 
-	const maxBase = (tcNormalized / basePriceNormalized) * targetLeverage;
+	const maxBase = (accountValueUsd / basePriceNormalized) * targetLeverage;
 	const marketSymbol = decodeName(spotMarketAccount.name);
 
 	logger.info(
-		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${tcNormalized.toString()} / ${basePriceNormalized.toString()} * ${targetLeverage.toString()}`
+		`(mkt index: ${marketSymbol}) base to market make (targetLvg=${targetLeverage.toString()}): ${maxBase.toString()} = ${accountValueUsd.toString()} / ${basePriceNormalized.toString()} * ${targetLeverage.toString()}`
 	);
 
 	return maxBase;

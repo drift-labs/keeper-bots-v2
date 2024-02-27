@@ -789,7 +789,9 @@ const runBot = async () => {
 	if (needForceCollateral)
 		await checkAndForceCollateral(config, driftClient, wallet);
 
-	logger.info(`Checking if need eventSubscriber: ${eventSubscriber}`);
+	logger.info(
+		`Checking if need eventSubscriber: ${eventSubscriber !== undefined}`
+	);
 	if (eventSubscriber) await eventSubscriber.subscribe();
 
 	logger.info(`Checking if need usermap: ${needUserMapSubscribe}`);
@@ -800,7 +802,9 @@ const runBot = async () => {
 		logger.info(`userMap.subscribe took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`);
 	}
 
-	logger.info(`Checking if need auctionSubscriber: ${auctionSubscriber}`);
+	logger.info(
+		`Checking if need auctionSubscriber: ${auctionSubscriber !== undefined}`
+	);
 	if (auctionSubscriber) {
 		const hrStart = process.hrtime();
 		await auctionSubscriber.subscribe();
@@ -810,7 +814,7 @@ const runBot = async () => {
 		);
 	}
 
-	logger.info(`Checking if need jitter: ${jitter}`);
+	logger.info(`Checking if need jitter: ${jitter !== undefined}`);
 	if (jitter) {
 		const freeCollateral = driftClient
 			.getUser()

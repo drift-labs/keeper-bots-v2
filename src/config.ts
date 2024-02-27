@@ -12,9 +12,13 @@ export type BaseBotConfig = {
 };
 
 export type JitMakerConfig = BaseBotConfig & {
-	perpMarketIndicies?: Array<number>;
 	subaccounts?: Array<number>;
 	marketType: MarketType;
+	/// @deprecated, use marketIndexes
+	perpMarketIndicies?: Array<number>;
+	marketIndexes?: Array<number>;
+	targetLeverage?: number;
+	aggressivenessBps?: number;
 };
 
 export type MarkTwapCrankConfig = BaseBotConfig & {
@@ -140,7 +144,15 @@ const defaultConfig: Partial<Config> = {
 		txRetryTimeoutMs: parseInt(process.env.TX_RETRY_TIMEOUT_MS ?? '30000'),
 	},
 	enabledBots: [],
-	botConfigs: {},
+	botConfigs: {
+		jitMaker: {
+			botId: 'jit-maker',
+			dryRun: false,
+			marketType: MarketType.PERP,
+			targetLeverage: 1,
+			aggressivenessBps: 0,
+		},
+	},
 };
 
 function mergeDefaults<T>(defaults: T, data: Partial<T>): T {
@@ -322,6 +334,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			],
 			subaccounts: loadCommaDelimitToArray(opts.subaccounts) ?? [0],
 			marketType: convertToMarketType(opts.marketType) ?? MarketType.PERP,
+			targetLeverage: 1,
 		};
 	}
 	if (opts.ifRevenueSettler) {

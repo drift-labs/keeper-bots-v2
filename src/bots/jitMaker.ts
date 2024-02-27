@@ -10,6 +10,8 @@ import {
 	PriorityFeeSubscriber,
 	OrderSubscriber,
 	calculateBidAskPrice,
+	getVariant,
+	isVariant,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -34,8 +36,6 @@ dotenv.config();
 import { PublicKey } from '@solana/web3.js';
 import { JitMakerConfig } from '../config';
 
-const TARGET_LEVERAGE_PER_ACCOUNT = 1;
-
 /**
  * This is an example of a bot that implements the Bot interface.
  */
@@ -49,6 +49,8 @@ export class JitMaker implements Bot {
 
 	private jitter: JitterSniper | JitterShotgun;
 	private driftClient: DriftClient;
+	private config: JitMakerConfig;
+	private targetLeverage: number;
 
 	// private subaccountConfig: SubaccountConfig;
 	private subAccountIds: Array<number>;
@@ -72,9 +74,18 @@ export class JitMaker implements Bot {
 		driftEnv: DriftEnv,
 		priorityFeeSubscriber: PriorityFeeSubscriber
 	) {
-		this.subAccountIds = config.subaccounts ?? [0];
-		this.marketIndexes = config.perpMarketIndicies ?? [0];
-		this.marketType = config.marketType;
+		this.config = config;
+		this.subAccountIds = this.config.subaccounts ?? [0];
+
+		// maintain backwards compatible config key `perpMarketIndicies`
+		if (this.config.perpMarketIndicies && !this.config.marketIndexes) {
+			this.marketIndexes = this.config.perpMarketIndicies;
+		} else {
+			this.marketIndexes = this.config.marketIndexes ?? [0];
+		}
+
+		this.marketType = this.config.marketType;
+		this.targetLeverage = this.config.targetLeverage ?? 1;
 
 		const subAccountLen = this.subAccountIds.length;
 
@@ -86,8 +97,8 @@ export class JitMaker implements Bot {
 
 		this.jitter = jitter;
 		this.driftClient = driftClient;
-		this.name = config.botId;
-		this.dryRun = config.dryRun;
+		this.name = this.config.botId;
+		this.dryRun = this.config.dryRun;
 		this.driftEnv = driftEnv;
 
 		this.slotSubscriber = new SlotSubscriber(this.driftClient.connection);
@@ -113,6 +124,14 @@ export class JitMaker implements Bot {
 		this.priorityFeeSubscriber.updateAddresses([
 			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
 		]);
+
+		logger.info(
+			`${this.name} init with targetLeverage: ${
+				this.targetLeverage
+			}, JIT making ${getVariant(this.marketType)} markets: ${
+				this.marketIndexes
+			}, and using an aggressiveness of ${this.config.aggressivenessBps} bps`
+		);
 	}
 
 	/**
@@ -120,6 +139,13 @@ export class JitMaker implements Bot {
 	 */
 	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
+
+		for (const subAccountId of this.subAccountIds) {
+			if (!this.driftClient.hasUser(subAccountId)) {
+				logger.info(`Adding subaccountId ${subAccountId} to driftClient`);
+				await this.driftClient.addUser(subAccountId);
+			}
+		}
 
 		// do stuff that takes some time
 		await this.slotSubscriber.subscribe();
@@ -175,7 +201,7 @@ export class JitMaker implements Bot {
 					`[${new Date().toISOString()}] Running JIT periodic tasks...`
 				);
 				for (let i = 0; i < this.marketIndexes.length; i++) {
-					if (this.marketType === 'PERP') {
+					if (isVariant(this.marketType, 'perp')) {
 						await this.jitPerp(i);
 					} else {
 						await this.jitSpot(i);
@@ -218,13 +244,12 @@ export class JitMaker implements Bot {
 			(num) => num === subId
 		).length;
 
-		const targetLeverage =
-			TARGET_LEVERAGE_PER_ACCOUNT / numMarketsForSubaccount;
+		const targetLeverage = this.targetLeverage / numMarketsForSubaccount;
 		const actualLeverage = driftUser.getLeverage().div(new BN(10_000));
 
 		const maxBase: number = calculateBaseAmountToMarketMakePerp(
 			perpMarketAccount,
-			driftUser.getNetSpotMarketValue(),
+			driftUser,
 			targetLeverage
 		);
 
@@ -300,9 +325,13 @@ export class JitMaker implements Bot {
 			bestAskPrice = ammAsk;
 		}
 
-		const bidOffset = bestBidPrice.muln(1001).divn(1000);
+		const bidOffset = bestBidPrice
+			.muln(1000 + (this.config.aggressivenessBps ?? 0))
+			.divn(1000);
 
-		const askOffset = bestAskPrice.muln(999).divn(1000);
+		const askOffset = bestAskPrice
+			.muln(1000 - (this.config.aggressivenessBps ?? 0))
+			.divn(1000);
 
 		let perpMinPosition = new BN(-maxBase * BASE_PRECISION.toNumber());
 		let perpMaxPosition = new BN(maxBase * BASE_PRECISION.toNumber());
@@ -342,13 +371,12 @@ export class JitMaker implements Bot {
 			(num) => num === subId
 		).length;
 
-		const targetLeverage =
-			TARGET_LEVERAGE_PER_ACCOUNT / numMarketsForSubaccount;
+		const targetLeverage = this.targetLeverage / numMarketsForSubaccount;
 		const actualLeverage = driftUser.getLeverage().div(new BN(10_000));
 
 		const maxBase: number = calculateBaseAmountToMarketMakeSpot(
 			spotMarketAccount,
-			driftUser.getNetSpotMarketValue(),
+			driftUser,
 			targetLeverage
 		);
 
