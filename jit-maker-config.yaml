@@ -32,8 +32,13 @@ botConfigs:
     botId: "jitMaker"
     dryRun: false # no effect for jit maker
     metricsPort: 9464
+
+    # will jit make on perp market 20 (JTO-PERP) on subaccount 0
+    marketType: "perp"
     marketIndexes:
       - 20
     subaccounts:
       - 0
-    aggressivenessBps: 30 # bot will try to buy 30 bps above the best bid, and sell 30 bps below the best bid.
+
+    # bot will try to buy 30 bps above the best bid, and sell 30 bps below the best bid.
+    aggressivenessBps: 30

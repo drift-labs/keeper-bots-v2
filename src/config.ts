@@ -14,7 +14,7 @@ export type BaseBotConfig = {
 export type JitMakerConfig = BaseBotConfig & {
 	subaccounts?: Array<number>;
 	marketType: MarketType;
-	/// @deprecated, use marketIndexes
+	/// @deprecated, use marketIndexes and marketType
 	perpMarketIndicies?: Array<number>;
 	marketIndexes?: Array<number>;
 	targetLeverage?: number;
