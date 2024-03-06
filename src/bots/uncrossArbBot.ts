@@ -27,7 +27,7 @@ import { JitProxyClient } from '@drift-labs/jit-proxy/lib';
 import dotenv = require('dotenv');
 
 dotenv.config();
-import { BaseBotConfig } from 'src/config';
+import { BaseBotConfig, GlobalConfig } from '../config';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
@@ -73,6 +73,7 @@ export class UncrossArbBot implements Bot {
 	private driftClient: DriftClient;
 	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
+	private skipPreflight: boolean;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -90,6 +91,7 @@ export class UncrossArbBot implements Bot {
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
 		jitProxyClient: JitProxyClient,
 		slotSubscriber: SlotSubscriber,
+		globalConfig: GlobalConfig,
 		config: BaseBotConfig,
 		driftEnv: DriftEnv,
 		priorityFeeSubscriber: PriorityFeeSubscriber
@@ -149,6 +151,7 @@ export class UncrossArbBot implements Bot {
 		this.priorityFeeSubscriber.updateAddresses([
 			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
 		]);
+		this.skipPreflight = globalConfig.skipPreflight ?? false;
 	}
 
 	/**
@@ -518,10 +521,16 @@ export class UncrossArbBot implements Bot {
 										],
 										[this.lookupTableAccount!],
 										[],
-										this.driftClient.opts
+										{
+											...this.driftClient.opts,
+											skipPreflight: this.skipPreflight,
+										}
 									),
 									[],
-									this.driftClient.opts
+									{
+										...this.driftClient.opts,
+										skipPreflight: this.skipPreflight,
+									}
 								);
 							logger.info(
 								`Potential arb with sig: ${txResult.txSig}. Check the blockchain for confirmation.`
@@ -640,10 +649,16 @@ export class UncrossArbBot implements Bot {
 								ixs,
 								[this.lookupTableAccount!],
 								[],
-								this.driftClient.opts
+								{
+									...this.driftClient.opts,
+									skipPreflight: this.skipPreflight,
+								}
 							),
 							[],
-							this.driftClient.opts
+							{
+								...this.driftClient.opts,
+								skipPreflight: this.skipPreflight,
+							}
 						)
 					);
 				} catch (err) {

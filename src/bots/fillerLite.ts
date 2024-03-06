@@ -15,7 +15,7 @@ import { Keypair, PublicKey } from '@solana/web3.js';
 import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
 
 import { logger } from '../logger';
-import { FillerConfig } from '../config';
+import { FillerConfig, GlobalConfig } from '../config';
 import { RuntimeSpec } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { FillerBot, SETTLE_POSITIVE_PNL_COOLDOWN_MS } from './filler';
@@ -29,6 +29,7 @@ export class FillerLiteBot extends FillerBot {
 		slotSubscriber: SlotSubscriber,
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
+		globalConfig: GlobalConfig,
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		jitoSearcherClient?: SearcherClient,
@@ -42,6 +43,7 @@ export class FillerLiteBot extends FillerBot {
 			undefined,
 			undefined,
 			runtimeSpec,
+			globalConfig,
 			config,
 			priorityFeeSubscriber,
 			jitoSearcherClient,

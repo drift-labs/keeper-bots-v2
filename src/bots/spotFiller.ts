@@ -72,7 +72,7 @@ import {
 	isOrderDoesNotExistLog,
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
-import { FillerConfig } from '../config';
+import { FillerConfig, GlobalConfig } from '../config';
 import {
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
@@ -226,6 +226,7 @@ export class SpotFillerBot implements Bot {
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
 	private revertOnFailure: boolean;
 	private simulateTxForCUEstimate?: boolean;
+	private skipPreflight: boolean;
 
 	// metrics
 	private metricsInitialized = false;
@@ -251,6 +252,7 @@ export class SpotFillerBot implements Bot {
 		driftClient: DriftClient,
 		userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
+		globalConfig: GlobalConfig,
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		eventSubscriber?: EventSubscriber
@@ -289,8 +291,9 @@ export class SpotFillerBot implements Bot {
 			this.revertOnFailure = false;
 		}
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
+		this.skipPreflight = globalConfig.skipPreflight ?? false;
 		logger.info(
-			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
+			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}, skipPreflight: ${this.skipPreflight}`
 		);
 
 		this.userMap = userMap;
