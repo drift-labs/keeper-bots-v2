@@ -908,7 +908,7 @@ export class FillerBot implements Bot {
 			const oracleIsValid = isOracleValid(
 				this.driftClient.getPerpMarketAccount(
 					nodeToFill.node.order.marketIndex
-				)!.amm,
+				)!,
 				oraclePriceData,
 				this.driftClient.getStateAccount().oracleGuardRails,
 				this.getMaxSlot()

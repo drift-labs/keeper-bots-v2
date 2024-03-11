@@ -218,7 +218,7 @@ export class UserPnlSettlerBot implements Bot {
 
 			for (const market of this.driftClient.getPerpMarketAccounts()) {
 				const oracleValid = isOracleValid(
-					perpMarketAndOracleData[market.marketIndex].marketAccount.amm,
+					perpMarketAndOracleData[market.marketIndex].marketAccount,
 					perpMarketAndOracleData[market.marketIndex].oraclePriceData,
 					this.driftClient.getStateAccount().oracleGuardRails,
 					slot
