@@ -232,7 +232,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					const askMakers = this.dlob!.getBestMakers({
 						marketIndex: mi,
 						marketType: MarketType.PERP,
-						direction: PositionDirection.LONG,
+						direction: PositionDirection.SHORT,
 						slot: this.latestDlobSlot!,
 						oraclePriceData,
 						numMakers: 5,
