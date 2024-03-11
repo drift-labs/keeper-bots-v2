@@ -278,6 +278,21 @@ export class UserPnlSettlerBot implements Bot {
 					}
 					const spotMarketIdx = 0;
 
+					const settlePnlWithPositionPaused = isOperationPaused(
+						perpMarket.pausedOperations,
+						PerpOperation.SETTLE_PNL_WITH_POSITION
+					);
+
+					if (
+						settlePnlWithPositionPaused &&
+						!settleePositionWithLp.baseAssetAmount.eq(ZERO)
+					) {
+						logger.debug(
+							`Skipping user ${userAccKeyStr}-${settleePosition.marketIndex} because settling pnl with position blocked`
+						);
+						continue;
+					}
+
 					if (
 						!perpMarketAndOracleData[perpMarketIdx] ||
 						!spotMarketAndOracleData[spotMarketIdx]
@@ -453,15 +468,10 @@ export class UserPnlSettlerBot implements Bot {
 				const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex)!;
 				const marketStr = decodeName(perpMarket.name);
 
-				const settlePnlPaused =
-					isOperationPaused(
-						perpMarket.pausedOperations,
-						PerpOperation.SETTLE_PNL
-					) ||
-					isOperationPaused(
-						perpMarket.pausedOperations,
-						PerpOperation.SETTLE_PNL_WITH_POSITION
-					);
+				const settlePnlPaused = isOperationPaused(
+					perpMarket.pausedOperations,
+					PerpOperation.SETTLE_PNL
+				);
 				if (settlePnlPaused) {
 					logger.warn(
 						`Settle PNL paused for market ${marketStr}, skipping settle PNL`
