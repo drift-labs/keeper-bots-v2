@@ -905,16 +905,10 @@ export class FillerBot implements Bot {
 
 		// if making with vAMM, ensure valid oracle
 		if (nodeToFill.makerNodes.length === 0) {
-			const perpMarket = this.driftClient.getPerpMarketAccount(
-				nodeToFill.node.order.marketIndex
-			);
-			if (perpMarket === undefined) {
-				throw new Error(
-					`Perp market is undefined for marketIndex ${nodeToFill.node.order.marketIndex}`
-				);
-			}
 			const oracleIsValid = isOracleValid(
-				perpMarket.amm,
+				this.driftClient.getPerpMarketAccount(
+					nodeToFill.node.order.marketIndex
+				)!,
 				oraclePriceData,
 				this.driftClient.getStateAccount().oracleGuardRails,
 				this.getMaxSlot()
