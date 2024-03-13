@@ -202,12 +202,11 @@ export class JitMaker implements Bot {
 				);
 				for (let i = 0; i < this.marketIndexes.length; i++) {
 					if (isVariant(this.marketType, 'perp')) {
-						await this.jitPerp(i);
+						await this.jitPerp(this.marketIndexes[i]);
 					} else {
-						await this.jitSpot(i);
+						await this.jitSpot(this.marketIndexes[i]);
 					}
 				}
-				await sleepMs(10000); // 10 seconds
 
 				console.log(`done: ${Date.now() - start}ms`);
 				ran = true;
