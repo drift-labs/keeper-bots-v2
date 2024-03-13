@@ -19,6 +19,7 @@ export type JitMakerConfig = BaseBotConfig & {
 	marketIndexes?: Array<number>;
 	targetLeverage?: number;
 	aggressivenessBps?: number;
+	jitCULimit?: number;
 };
 
 export type MarkTwapCrankConfig = BaseBotConfig & {
@@ -151,6 +152,7 @@ const defaultConfig: Partial<Config> = {
 			marketType: 'perp',
 			targetLeverage: 1,
 			aggressivenessBps: 0,
+			jitCULimit: 800000,
 		},
 	},
 };

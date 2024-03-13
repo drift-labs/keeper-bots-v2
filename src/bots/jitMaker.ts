@@ -67,6 +67,7 @@ export class JitMaker implements Bot {
 	private slotSubscriber: SlotSubscriber;
 	private orderSubscriber: OrderSubscriber;
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
+	private jitCULimit: number;
 
 	constructor(
 		driftClient: DriftClient, // driftClient needs to have correct number of subaccounts listed
@@ -87,6 +88,8 @@ export class JitMaker implements Bot {
 
 		this.marketType = convertToMarketType(this.config.marketType);
 		this.targetLeverage = this.config.targetLeverage ?? 1;
+
+		this.jitCULimit = this.config.jitCULimit ?? 800000;
 
 		const subAccountLen = this.subAccountIds.length;
 
@@ -346,6 +349,7 @@ export class JitMaker implements Bot {
 			this.priorityFeeSubscriber.getCustomStrategyResult() * 1.1
 		);
 		this.jitter.setComputeUnitsPrice(priorityFee);
+		this.jitter.setComputeUnits(this.jitCULimit);
 
 		this.jitter.updatePerpParams(perpIdx, {
 			maxPosition: perpMaxPosition,

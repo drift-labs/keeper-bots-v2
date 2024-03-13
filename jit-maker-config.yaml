@@ -44,3 +44,7 @@ botConfigs:
 
     # bot will try to buy 30 bps above the best bid, and sell 30 bps below the best bid.
     aggressivenessBps: 100
+
+    # CU limit to set for jit fill, you might need to increase it
+    # if your account has many positions
+    jitCULimit: 800000
