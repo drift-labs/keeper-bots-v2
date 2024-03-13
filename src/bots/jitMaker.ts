@@ -19,6 +19,7 @@ import { Bot } from '../types';
 import {
 	calculateBaseAmountToMarketMakePerp,
 	calculateBaseAmountToMarketMakeSpot,
+	convertToMarketType,
 	getBestLimitAskExcludePubKey,
 	getBestLimitBidExcludePubKey,
 	isMarketVolatile,
@@ -84,7 +85,7 @@ export class JitMaker implements Bot {
 			this.marketIndexes = this.config.marketIndexes ?? [0];
 		}
 
-		this.marketType = this.config.marketType;
+		this.marketType = convertToMarketType(this.config.marketType);
 		this.targetLeverage = this.config.targetLeverage ?? 1;
 
 		const subAccountLen = this.subAccountIds.length;
@@ -202,9 +203,9 @@ export class JitMaker implements Bot {
 				);
 				for (let i = 0; i < this.marketIndexes.length; i++) {
 					if (isVariant(this.marketType, 'perp')) {
-						await this.jitPerp(this.marketIndexes[i]);
+						await this.jitPerp(i);
 					} else {
-						await this.jitSpot(this.marketIndexes[i]);
+						await this.jitSpot(i);
 					}
 				}
 
@@ -232,7 +233,7 @@ export class JitMaker implements Bot {
 	private async jitPerp(index: number) {
 		const perpIdx = this.marketIndexes[index];
 		const subId = this.subAccountIds[index];
-		this.driftClient.switchActiveUser(subId);
+		await this.driftClient.switchActiveUser(subId);
 
 		const driftUser = this.driftClient.getUser(subId);
 		const perpMarketAccount = this.driftClient.getPerpMarketAccount(perpIdx)!;
@@ -359,7 +360,7 @@ export class JitMaker implements Bot {
 	private async jitSpot(index: number) {
 		const spotIdx = this.marketIndexes[index];
 		const subId = this.subAccountIds[index];
-		this.driftClient.switchActiveUser(subId);
+		await this.driftClient.switchActiveUser(subId);
 
 		const driftUser = this.driftClient.getUser(subId);
 		const spotMarketAccount = this.driftClient.getSpotMarketAccount(spotIdx)!;

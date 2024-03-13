@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import YAML from 'yaml';
-import { convertToMarketType, loadCommaDelimitToArray } from './utils';
+import { loadCommaDelimitToArray } from './utils';
 import { OrderExecutionAlgoType } from './types';
-import { DriftEnv, MarketType } from '@drift-labs/sdk';
+import { DriftEnv } from '@drift-labs/sdk';
 
 export type BaseBotConfig = {
 	botId: string;
@@ -13,7 +13,7 @@ export type BaseBotConfig = {
 
 export type JitMakerConfig = BaseBotConfig & {
 	subaccounts?: Array<number>;
-	marketType: MarketType;
+	marketType: string;
 	/// @deprecated, use marketIndexes and marketType
 	perpMarketIndicies?: Array<number>;
 	marketIndexes?: Array<number>;
@@ -148,7 +148,7 @@ const defaultConfig: Partial<Config> = {
 		jitMaker: {
 			botId: 'jit-maker',
 			dryRun: false,
-			marketType: MarketType.PERP,
+			marketType: 'perp',
 			targetLeverage: 1,
 			aggressivenessBps: 0,
 		},
@@ -333,7 +333,7 @@ export function loadConfigFromOpts(opts: any): Config {
 				0,
 			],
 			subaccounts: loadCommaDelimitToArray(opts.subaccounts) ?? [0],
-			marketType: convertToMarketType(opts.marketType) ?? MarketType.PERP,
+			marketType: opts.marketType ?? 'perp',
 			targetLeverage: 1,
 		};
 	}

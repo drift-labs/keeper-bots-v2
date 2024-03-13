@@ -321,7 +321,7 @@ const runBot = async () => {
 	let perpMarketIndexes: number[] | undefined;
 	let spotMarketIndexes: number[] | undefined;
 	let oracleInfos: OracleInfo[] | undefined;
-	if (configHasBot(config, 'fillerLite')) {
+	if (configHasBot(config, 'fillerLite') || configHasBot(config, 'jitMaker')) {
 		({ perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 			getMarketsAndOraclesForSubscription(config.global.driftEnv!));
 	}

@@ -1,6 +1,6 @@
 global:
   driftEnv: mainnet-beta
-  endpoint: 
+  endpoint:
   wsEndpoint:
 
   # Private key to use to sign transactions.
@@ -20,6 +20,8 @@ global:
   subaccounts:
     - 0
 
+  maxPriorityFeeMicroLamports: 100000
+
 # Which bots to run, be careful with this, running multiple bots in one instance
 # might use more resources than expected.
 # Bot specific configs are below
@@ -36,9 +38,9 @@ botConfigs:
     # will jit make on perp market 20 (JTO-PERP) on subaccount 0
     marketType: "perp"
     marketIndexes:
-      - 20
+      - 1
     subaccounts:
-      - 0
+      - 2
 
     # bot will try to buy 30 bps above the best bid, and sell 30 bps below the best bid.
-    aggressivenessBps: 30
+    aggressivenessBps: 100
