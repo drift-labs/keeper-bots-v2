@@ -23,7 +23,7 @@ import {
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
 
-const CRANK_TX_MARKET_CHUNK_SIZE = 2;
+const CRANK_TX_MARKET_CHUNK_SIZE = 1;
 
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
