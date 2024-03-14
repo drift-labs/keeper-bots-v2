@@ -7,6 +7,7 @@ import {
 	PositionDirection,
 	getUserStatsAccountPublicKey,
 	promiseTimeout,
+	isVariant,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -250,6 +251,17 @@ export class MakerBidAskTwapCrank implements Bot {
 						mi,
 						concatenatedList as [PublicKey, PublicKey][]
 					);
+
+					if (
+						isVariant(
+							this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+							'prelaunch'
+						)
+					) {
+						const updatePrelaunchOracleIx =
+							await this.driftClient.getUpdatePrelaunchOracleIx(mi);
+						ixs.push(updatePrelaunchOracleIx);
+					}
 
 					ixs.push(ix);
 				}
