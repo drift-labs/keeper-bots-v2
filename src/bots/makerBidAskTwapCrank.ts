@@ -34,6 +34,10 @@ function isCriticalError(e: Error): boolean {
 	if (e.message.includes('Blockhash not found')) {
 		return false;
 	}
+
+	if (e.message.includes('Transaction was not confirmed in')) {
+		return false;
+	}
 	return true;
 }
 
