@@ -281,7 +281,7 @@ const runBot = async () => {
 
 	const opts = {
 		commitment: stateCommitment,
-		skipPreflight: false,
+		skipPreflight: config.global.txSkipPreflight,
 		preflightCommitment: stateCommitment,
 	};
 	const sendTxConnection = new Connection(endpoint, {
