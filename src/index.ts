@@ -637,6 +637,7 @@ const runBot = async () => {
 	if (configHasBot(config, 'markTwapCrank')) {
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
+		needPriorityFeeSubscriber = true;
 		bots.push(
 			new MakerBidAskTwapCrank(
 				driftClient,
@@ -644,6 +645,7 @@ const runBot = async () => {
 				userMap,
 				config.botConfigs!.markTwapCrank!,
 				config.global.runOnce ?? false,
+				priorityFeeSubscriber,
 				config.botConfigs!.markTwapCrank!.crankIntervalToMarketIndicies
 			)
 		);
