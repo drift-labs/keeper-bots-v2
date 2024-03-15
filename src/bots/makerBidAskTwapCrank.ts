@@ -8,6 +8,7 @@ import {
 	getUserStatsAccountPublicKey,
 	promiseTimeout,
 	isVariant,
+	PriorityFeeSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -19,11 +20,14 @@ import {
 	VersionedTransaction,
 	AddressLookupTableAccount,
 	PublicKey,
+	ComputeBudgetProgram,
 } from '@solana/web3.js';
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
+import { handleSimResultError, simulateAndGetTxWithCUs } from '../utils';
 
 const CRANK_TX_MARKET_CHUNK_SIZE = 1;
+const CU_EST_MULTIPLIER = 1.25;
 
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
@@ -89,6 +93,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private dlob?: DLOB;
 	private latestDlobSlot?: number;
 	private lookupTableAccount?: AddressLookupTableAccount;
+	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -99,6 +104,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		userMap: UserMap,
 		config: BaseBotConfig,
 		runOnce: boolean,
+		priorityFeeSubscriber: PriorityFeeSubscriber,
 		crankIntervalToMarketIds?: { [key: number]: number[] }
 	) {
 		this.slotSubscriber = slotSubscriber;
@@ -115,12 +121,19 @@ export class MakerBidAskTwapCrank implements Bot {
 			this.maxIntervalGroup = Math.max(...this.allCrankIntervalGroups!);
 			this.watchdogTimerLastPatTime = Date.now() - this.maxIntervalGroup;
 		}
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing, runOnce: ${this.runOnce}`);
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
+
+		const perpMarkets = this.driftClient
+			.getPerpMarketAccounts()
+			.map((m) => m.pubkey);
+
+		this.priorityFeeSubscriber.updateAddresses([...perpMarkets]);
 	}
 
 	public async reset() {
@@ -214,7 +227,16 @@ export class MakerBidAskTwapCrank implements Bot {
 			);
 
 			for (const chunkOfMarketIndicies of allChunks) {
-				const ixs = [];
+				const ixs = [
+					ComputeBudgetProgram.setComputeUnitLimit({
+						units: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
+					}),
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: Math.floor(
+							this.priorityFeeSubscriber!.getCustomStrategyResult()
+						),
+					}),
+				];
 				for (let i = 0; i < chunkOfMarketIndicies.length; i++) {
 					const mi = chunkOfMarketIndicies[i];
 
@@ -266,21 +288,60 @@ export class MakerBidAskTwapCrank implements Bot {
 					ixs.push(ix);
 				}
 
+				let success = false;
 				try {
-					const txSig = await sendVersionedTransaction(
-						this.driftClient,
-						await this.driftClient.txSender.getVersionedTransaction(
-							ixs,
-							[this.lookupTableAccount!],
-							[],
-							this.driftClient.opts
-						),
+					// const txSig = await sendVersionedTransaction(
+					// 	this.driftClient,
+					// 	await this.driftClient.txSender.getVersionedTransaction(
+					// 		ixs,
+					// 		[this.lookupTableAccount!],
+					// 		[],
+					// 		this.driftClient.opts
+					// 	),
+					// 	[],
+					// 	this.driftClient.opts,
+					// 	5000
+					// );
+
+					const simResult = await simulateAndGetTxWithCUs(
+						ixs,
+						this.driftClient.connection,
+						this.driftClient.txSender,
+						[this.lookupTableAccount!],
 						[],
-						this.driftClient.opts,
-						5000
+						undefined,
+						CU_EST_MULTIPLIER,
+						true,
+						true
+					);
+					logger.info(
+						`makerBidAskTwapCrank estimated ${simResult.cuEstimate} CUs for ${ixs.length} ixs, ${chunkOfMarketIndicies.length} chunks.`
 					);
 
-					logger.info(`https://solscan.io/tx/${txSig}`);
+					if (simResult.simError !== null) {
+						logger.error(
+							`Sim error: ${JSON.stringify(simResult.simError)}\n${
+								simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+							}`
+						);
+						handleSimResultError(simResult, [], `(makerBidAskTwapCrank)`);
+						success = false;
+					} else {
+						const txSig =
+							await this.driftClient.txSender.sendVersionedTransaction(
+								simResult.tx,
+								[],
+								{
+									...this.driftClient.opts,
+								}
+							);
+						success = true;
+						logger.info(
+							`Send tx: https://solscan.io/tx/${txSig} for markets: ${JSON.stringify(
+								chunkOfMarketIndicies
+							)}`
+						);
+					}
 				} catch (e: any) {
 					console.error(e);
 					if (isCriticalError(e as Error)) {
@@ -290,6 +351,12 @@ export class MakerBidAskTwapCrank implements Bot {
 							} \n${e.stack ? e.stack : e.message}`
 						);
 					}
+				}
+
+				if (!success && CRANK_TX_MARKET_CHUNK_SIZE > 1) {
+					logger.error(
+						`SIM ERROR, YOU SHOULD IMPLEMENT LOGIC TO RETRY WITH A SMALLER CHUNK SIZE NOW.`
+					);
 				}
 			}
 		} catch (e) {
