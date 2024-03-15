@@ -8,6 +8,7 @@ import {
 	Keypair,
 	PublicKey,
 	TransactionVersion,
+	ConfirmOptions,
 } from '@solana/web3.js';
 import {
 	SearcherClient,
@@ -279,10 +280,11 @@ const runBot = async () => {
 		};
 	}
 
-	const opts = {
+	const opts: ConfirmOptions = {
 		commitment: stateCommitment,
 		skipPreflight: config.global.txSkipPreflight,
 		preflightCommitment: stateCommitment,
+		maxRetries: config.global.txMaxRetries,
 	};
 	const sendTxConnection = new Connection(endpoint, {
 		wsEndpoint: wsEndpoint,
