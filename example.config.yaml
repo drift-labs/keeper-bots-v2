@@ -21,6 +21,11 @@ global:
   # helius: uses https://docs.helius.dev/solana-rpc-nodes/alpha-priority-fee-api
   priorityFeeMethod: solana
 
+  # skips preflight checks on sendTransaciton, default is false.
+  # this will speed up tx sending, but may increase SOL paid due to failed txs landing
+  # on chain
+  #txSkipPreflight: true
+
   # max priority fee to use, in micro lamports
   # i.e. a fill that uses 500_000 CUs will spend:
   # 500_000 * 10_000 * 1e-6 * 1e-9 = 0.000005 SOL on priority fees
