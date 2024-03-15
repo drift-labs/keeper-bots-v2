@@ -907,7 +907,10 @@ export class FillerBot implements Bot {
 			nodeToFill.node.order.marketIndex
 		)!;
 		// if making with vAMM, ensure valid oracle
-		if (nodeToFill.makerNodes.length === 0 && !isVariant(perpMarket.amm.oracleSource, 'prelaunch')) {
+		if (
+			nodeToFill.makerNodes.length === 0 &&
+			!isVariant(perpMarket.amm.oracleSource, 'prelaunch')
+		) {
 			const oracleIsValid = isOracleValid(
 				perpMarket,
 				oraclePriceData,

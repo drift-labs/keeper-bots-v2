@@ -106,6 +106,7 @@ export interface GlobalConfig {
 	txRetryTimeoutMs?: number;
 	txSenderType?: 'fast' | 'retry';
 	txSkipPreflight?: boolean;
+	txMaxRetries?: number;
 }
 
 export interface Config {
@@ -145,6 +146,7 @@ const defaultConfig: Partial<Config> = {
 		jitoAuthPrivateKey: process.env.JITO_AUTH_PRIVATE_KEY,
 		txRetryTimeoutMs: parseInt(process.env.TX_RETRY_TIMEOUT_MS ?? '30000'),
 		txSkipPreflight: false,
+		txMaxRetries: 0,
 	},
 	enabledBots: [],
 	botConfigs: {
@@ -248,6 +250,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			txRetryTimeoutMs: parseInt(opts.txRetryTimeoutMs ?? '30000'),
 			txSenderType: opts.txSenderType ?? 'fast',
 			txSkipPreflight: opts.txSkipPreflight ?? false,
+			txMaxRetries: opts.txMaxRetries ?? 0,
 		},
 		enabledBots: [],
 		botConfigs: {},
