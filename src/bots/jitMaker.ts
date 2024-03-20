@@ -330,11 +330,11 @@ export class JitMaker implements Bot {
 
 		const bidOffset = bestBidPrice
 			.muln(1000 + (this.config.aggressivenessBps ?? 0))
-			.divn(1000);
+			.divn(10000);
 
 		const askOffset = bestAskPrice
 			.muln(1000 - (this.config.aggressivenessBps ?? 0))
-			.divn(1000);
+			.divn(10000);
 
 		let perpMinPosition = new BN(-maxBase * BASE_PRECISION.toNumber());
 		let perpMaxPosition = new BN(maxBase * BASE_PRECISION.toNumber());
