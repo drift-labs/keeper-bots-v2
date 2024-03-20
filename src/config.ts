@@ -101,7 +101,7 @@ export interface GlobalConfig {
 	bulkAccountLoaderPollingInterval: number;
 
 	useJito?: boolean;
-	jitoStrategy?: 'exclusive' | 'hybrid';
+	jitoStrategy?: 'jito-only' | 'non-jito-only' | 'hybrid';
 	jitoBlockEngineUrl?: string;
 	jitoAuthPrivateKey?: string;
 	jitoMinBundleTip?: number;
@@ -148,7 +148,7 @@ const defaultConfig: Partial<Config> = {
 		keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY,
 
 		useJito: false,
-		jitoStrategy: 'exclusive',
+		jitoStrategy: 'jito-only',
 		jitoMinBundleTip: 10_000,
 		jitoMaxBundleTip: 100_000,
 		jitoMaxBundleFailCount: 200,

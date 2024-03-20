@@ -61,9 +61,12 @@ global:
   bulkAccountLoaderPollingInterval: 5000
 
   useJito: false
-  # 'exclusive' or 'hybrid'. 'hybrid' will attempt to send txs through normal means when there is no jito leader.
+  # one of: ['non-jito-only', 'jito-only', 'hybrid'].
+  # * non-jito-only: will only send txs to RPC when there is no active jito leader
+  # * jito-only: will only send txs via bundle when there is an active jito leader
+  # * hybrid: will attempt to send bundles when active jito leader, and use RPC when not
   # hybrid may not work well if using high throughput bots such as a filler depending on infra limitations.
-  jitoStrategy: exclusive
+  jitoStrategy: jito-only
   # the minimum tip to pay
   jitoMinBundleTip: 10000
   # the maximum tip to pay (will pay this once jitoMaxBundleFailCount is hit)

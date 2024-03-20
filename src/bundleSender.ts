@@ -105,7 +105,7 @@ export class BundleSender {
 		private slotSubscriber: SlotSubscriber,
 
 		/// tip algo params
-		public strategy: 'exclusive' | 'hybrid' = 'exclusive',
+		public strategy: 'non-jito-only' | 'jito-only' | 'hybrid' = 'jito-only',
 		private minBundleTip = 10_000, // cant be lower than this
 		private maxBundleTip = 100_000,
 		private maxFailBundleCount = 100, // at 100 failed txs, can expect tip to become maxBundleTip

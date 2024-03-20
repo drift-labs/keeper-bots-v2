@@ -2210,7 +2210,11 @@ export class FillerBot implements Bot {
 	}
 
 	protected canSendOutsideJito(): boolean {
-		return !this.usingJito() || this.bundleSender?.strategy === 'hybrid';
+		return (
+			!this.usingJito() ||
+			this.bundleSender?.strategy === 'non-jito-only' ||
+			this.bundleSender?.strategy === 'hybrid'
+		);
 	}
 
 	protected slotsUntilJitoLeader(): number | undefined {
