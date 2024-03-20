@@ -404,7 +404,8 @@ export async function simulateAndGetTxWithCUs(
 	opts?: ConfirmOptions,
 	cuLimitMultiplier = 1.0,
 	logSimDuration = false,
-	doSimulation = true
+	doSimulation = true,
+	recentBlockhash?: string
 ): Promise<SimulateAndGetTxWithCUsResponse> {
 	if (ixs.length === 0) {
 		throw new Error('cannot simulate empty tx');
@@ -422,7 +423,8 @@ export async function simulateAndGetTxWithCUs(
 		ixs,
 		lookupTableAccounts,
 		additionalSigners,
-		opts
+		opts,
+		recentBlockhash
 	);
 	if (!doSimulation) {
 		return {
@@ -473,7 +475,8 @@ export async function simulateAndGetTxWithCUs(
 		ixs,
 		lookupTableAccounts,
 		additionalSigners,
-		opts
+		opts,
+		recentBlockhash
 	);
 
 	return {

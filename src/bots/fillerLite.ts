@@ -8,11 +8,10 @@ import {
 	User,
 	PriorityFeeSubscriber,
 	DataAndSlot,
+	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 
-import { Keypair, PublicKey } from '@solana/web3.js';
-
-import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
+import { PublicKey } from '@solana/web3.js';
 
 import { logger } from '../logger';
 import { FillerConfig } from '../config';
@@ -21,6 +20,7 @@ import { webhookMessage } from '../webhook';
 import { FillerBot, SETTLE_POSITIVE_PNL_COOLDOWN_MS } from './filler';
 
 import { sleepMs } from '../utils';
+import { BundleSender } from 'src/bundleSender';
 
 export class FillerLiteBot extends FillerBot {
 	protected orderSubscriber: OrderSubscriber;
@@ -31,9 +31,8 @@ export class FillerLiteBot extends FillerBot {
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
-		jitoSearcherClient?: SearcherClient,
-		jitoAuthKeypair?: Keypair,
-		tipPayerKeypair?: Keypair
+		blockhashSubscriber: BlockhashSubscriber,
+		bundleSender?: BundleSender
 	) {
 		super(
 			slotSubscriber,
@@ -44,9 +43,8 @@ export class FillerLiteBot extends FillerBot {
 			runtimeSpec,
 			config,
 			priorityFeeSubscriber,
-			jitoSearcherClient,
-			jitoAuthKeypair,
-			tipPayerKeypair
+			blockhashSubscriber,
+			bundleSender
 		);
 
 		this.userStatsMapSubscriptionConfig = {

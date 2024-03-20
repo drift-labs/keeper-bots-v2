@@ -101,8 +101,14 @@ export interface GlobalConfig {
 	bulkAccountLoaderPollingInterval: number;
 
 	useJito?: boolean;
+	jitoStrategy?: 'jito-only' | 'non-jito-only' | 'hybrid';
 	jitoBlockEngineUrl?: string;
 	jitoAuthPrivateKey?: string;
+	jitoMinBundleTip?: number;
+	jitoMaxBundleTip?: number;
+	jitoMaxBundleFailCount?: number;
+	jitoTipMultiplier?: number;
+
 	txRetryTimeoutMs?: number;
 	txSenderType?: 'fast' | 'retry';
 	txSkipPreflight?: boolean;
@@ -142,6 +148,11 @@ const defaultConfig: Partial<Config> = {
 		keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY,
 
 		useJito: false,
+		jitoStrategy: 'jito-only',
+		jitoMinBundleTip: 10_000,
+		jitoMaxBundleTip: 100_000,
+		jitoMaxBundleFailCount: 200,
+		jitoTipMultiplier: 3,
 		jitoBlockEngineUrl: process.env.JITO_BLOCK_ENGINE_URL,
 		jitoAuthPrivateKey: process.env.JITO_AUTH_PRIVATE_KEY,
 		txRetryTimeoutMs: parseInt(process.env.TX_RETRY_TIMEOUT_MS ?? '30000'),
@@ -247,6 +258,11 @@ export function loadConfigFromOpts(opts: any): Config {
 			debug: opts.debug ?? false,
 			subaccounts: loadCommaDelimitToArray(opts.subaccount),
 			useJito: opts.useJito ?? false,
+			jitoStrategy: opts.jitoStrategy ?? 'exclusive',
+			jitoMinBundleTip: opts.jitoMinBundleTip ?? 10_000,
+			jitoMaxBundleTip: opts.jitoMaxBundleTip ?? 100_000,
+			jitoMaxBundleFailCount: opts.jitoMaxBundleFailCount ?? 200,
+			jitoTipMultiplier: opts.jitoTipMultiplier ?? 3,
 			txRetryTimeoutMs: parseInt(opts.txRetryTimeoutMs ?? '30000'),
 			txSenderType: opts.txSenderType ?? 'fast',
 			txSkipPreflight: opts.txSkipPreflight ?? false,

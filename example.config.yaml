@@ -3,7 +3,7 @@ global:
   driftEnv: mainnet-beta
 
   # RPC endpoint to use
-  endpoint: https://api.mainnet-beta.solana.com
+  endpoint: https://you-need-your-own-rpc.com
 
   # Custom websocket endpoint to use (if null will be determined from `endpoint``)
   # Note: the default wsEndpoint value simply replaces http(s) with ws(s), so if
@@ -61,6 +61,21 @@ global:
   bulkAccountLoaderPollingInterval: 5000
 
   useJito: false
+  # one of: ['non-jito-only', 'jito-only', 'hybrid'].
+  # * non-jito-only: will only send txs to RPC when there is no active jito leader
+  # * jito-only: will only send txs via bundle when there is an active jito leader
+  # * hybrid: will attempt to send bundles when active jito leader, and use RPC when not
+  # hybrid may not work well if using high throughput bots such as a filler depending on infra limitations.
+  jitoStrategy: jito-only
+  # the minimum tip to pay
+  jitoMinBundleTip: 10000
+  # the maximum tip to pay (will pay this once jitoMaxBundleFailCount is hit)
+  jitoMaxBundleTip: 100000
+  # the number of failed bundles (accepted but not landed) before tipping the max tip
+  jitoMaxBundleFailCount: 200
+  # the tip multiplier to use when tipping the max tip
+  # controls superlinearity (1 = linear, 2 = slightly-superlinear, 3 = more-superlinear, ...)
+  jitoTipMultiplier: 3
   jitoBlockEngineUrl: frankfurt.mainnet.block-engine.jito.wtf
   jitoAuthPrivateKey: /path/to/jito/bundle/signing/key/auth.json
 
