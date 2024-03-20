@@ -1079,15 +1079,15 @@ export class SpotFillerBot implements Bot {
 		tx: VersionedTransaction,
 		metadata: number | string
 	) {
+		// @ts-ignore;
+		tx.sign([this.driftClient.wallet.payer]);
 		if (this.bundleSender === undefined) {
 			logger.error(`Called sendTxThroughJito without jito properly enabled`);
 			return;
 		}
 		const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
 		if (slotsUntilNextLeader !== undefined) {
-			if (slotsUntilNextLeader < SLOTS_UNTIL_JITO_LEADER_TO_SEND) {
-				this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`);
-			}
+			this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`);
 		}
 	}
 
@@ -1278,8 +1278,6 @@ export class SpotFillerBot implements Bot {
 		} else {
 			if (!this.dryRun) {
 				if (buildForBundle) {
-					// @ts-ignore;
-					simResult.tx.sign([this.driftClient.wallet.payer]);
 					await this.sendTxThroughJito(simResult.tx, fillTxId);
 					this.unthrottleNode(nodeSignature);
 				} else if (this.canSendOutsideJito()) {
@@ -1441,8 +1439,6 @@ export class SpotFillerBot implements Bot {
 			} else {
 				if (!this.dryRun) {
 					if (buildForBundle) {
-						// @ts-ignore;
-						simResult.tx.sign([this.driftClient.wallet.payer]);
 						await this.sendTxThroughJito(simResult.tx, 'trigger');
 						this.removeTriggeringNodes(nodeToTrigger);
 					} else if (this.canSendOutsideJito()) {
