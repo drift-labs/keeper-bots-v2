@@ -3,7 +3,7 @@ global:
   driftEnv: mainnet-beta
 
   # RPC endpoint to use
-  endpoint: https://api.mainnet-beta.solana.com
+  endpoint: https://you-need-your-own-rpc.com
 
   # Custom websocket endpoint to use (if null will be determined from `endpoint``)
   # Note: the default wsEndpoint value simply replaces http(s) with ws(s), so if

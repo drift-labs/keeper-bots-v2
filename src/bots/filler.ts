@@ -1320,6 +1320,7 @@ export class FillerBot implements Bot {
 			// @ts-ignore;
 			tx.sign([this.driftClient.wallet.payer]);
 			await this.sendTxThroughJito(tx, fillTxId);
+			this.removeFillingNodes(nodesSent);
 		} else if (this.canSendOutsideJito()) {
 			estTxSize = tx.message.serialize().length;
 			const acc = tx.message.getAccountKeys({
@@ -2218,7 +2219,7 @@ export class FillerBot implements Bot {
 	}
 
 	protected slotsUntilJitoLeader(): number | undefined {
-		if (!this.usingJito) {
+		if (!this.usingJito()) {
 			return undefined;
 		}
 		return this.bundleSender?.slotsUntilNextLeader();

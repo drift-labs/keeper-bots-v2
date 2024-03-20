@@ -565,7 +565,8 @@ const runBot = async () => {
 				},
 				config.botConfigs!.spotFiller!,
 				priorityFeeSubscriber,
-				eventSubscriber
+				eventSubscriber,
+				bundleSender
 			)
 		);
 	}

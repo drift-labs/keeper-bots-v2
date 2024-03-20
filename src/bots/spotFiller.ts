@@ -43,6 +43,7 @@ import {
 	GetVersionedTransactionConfig,
 	PublicKey,
 	TransactionResponse,
+	VersionedTransaction,
 } from '@solana/web3.js';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -79,11 +80,13 @@ import {
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
 } from '../utils';
+import { BundleSender } from 'src/bundleSender';
 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_BACKOFF = 10000; // Time to wait before trying a node again
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
+const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
@@ -226,6 +229,7 @@ export class SpotFillerBot implements Bot {
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
 	private revertOnFailure: boolean;
 	private simulateTxForCUEstimate?: boolean;
+	private bundleSender?: BundleSender;
 
 	// metrics
 	private metricsInitialized = false;
@@ -253,7 +257,8 @@ export class SpotFillerBot implements Bot {
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
-		eventSubscriber?: EventSubscriber
+		eventSubscriber?: EventSubscriber,
+		bundleSender?: BundleSender
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
@@ -319,6 +324,8 @@ export class SpotFillerBot implements Bot {
 				},
 			});
 		}
+
+		this.bundleSender = bundleSender;
 	}
 
 	private initializeMetrics() {
@@ -502,109 +509,105 @@ export class SpotFillerBot implements Bot {
 		);
 
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
-		for (const spotMarketConfig of config.SPOT_MARKETS) {
-			let accountSubscription:
-				| {
-						type: 'polling';
-						accountLoader: BulkAccountLoader;
-				  }
-				| {
-						type: 'websocket';
-				  };
-			if (
-				(
-					this.driftClient
-						.accountSubscriber as PollingDriftClientAccountSubscriber
-				).accountLoader
-			) {
-				accountSubscription = {
-					type: 'polling',
-					accountLoader: (
+		const marketSetupPromises = config.SPOT_MARKETS.map(
+			async (spotMarketConfig) => {
+				let accountSubscription:
+					| {
+							type: 'polling';
+							accountLoader: BulkAccountLoader;
+					  }
+					| {
+							type: 'websocket';
+					  };
+				if (
+					(
 						this.driftClient
 							.accountSubscriber as PollingDriftClientAccountSubscriber
-					).accountLoader,
-				};
-			} else {
-				accountSubscription = {
-					type: 'websocket',
-				};
-			}
+					).accountLoader
+				) {
+					accountSubscription = {
+						type: 'polling',
+						accountLoader: (
+							this.driftClient
+								.accountSubscriber as PollingDriftClientAccountSubscriber
+						).accountLoader,
+					};
+				} else {
+					accountSubscription = {
+						type: 'websocket',
+					};
+				}
 
-			if (spotMarketConfig.serumMarket) {
-				// set up fulfillment config
-				await this.serumFulfillmentConfigMap.add(
-					spotMarketConfig.marketIndex,
-					spotMarketConfig.serumMarket
-				);
-
-				// const serumConfigAccount = this.serumFulfillmentConfigMap.get(
-				// 	spotMarketConfig.marketIndex
-				// );
-				const serumConfigAccount =
-					await this.driftClient.getSerumV3FulfillmentConfig(
+				const subscribePromises = [];
+				if (spotMarketConfig.serumMarket) {
+					// set up fulfillment config
+					await this.serumFulfillmentConfigMap.add(
+						spotMarketConfig.marketIndex,
 						spotMarketConfig.serumMarket
 					);
 
-				if (isVariant(serumConfigAccount.status, 'enabled')) {
-					// set up serum price subscriber
-					const serumSubscriber = new SerumSubscriber({
-						connection: this.driftClient.connection,
-						programId: new PublicKey(config.SERUM_V3),
-						marketAddress: spotMarketConfig.serumMarket,
-						accountSubscription,
-					});
-					const initSerumSubscriberStart = Date.now();
-					logger.info(
-						`Initializing SerumSubscriber for ${spotMarketConfig.symbol}...`
-					);
-					await serumSubscriber.subscribe();
-					this.serumSubscribers.set(
-						spotMarketConfig.marketIndex,
-						serumSubscriber
-					);
-					logger.info(
-						`Initialized SerumSubscriber in ${
-							Date.now() - initSerumSubscriberStart
-						}ms`
-					);
-				}
-			}
+					const serumConfigAccount =
+						await this.driftClient.getSerumV3FulfillmentConfig(
+							spotMarketConfig.serumMarket
+						);
 
-			if (spotMarketConfig.phoenixMarket) {
-				// set up fulfillment config
-				await this.phoenixFulfillmentConfigMap.add(
-					spotMarketConfig.marketIndex,
-					spotMarketConfig.phoenixMarket
-				);
-
-				const phoenixConfigAccount = this.phoenixFulfillmentConfigMap.get(
-					spotMarketConfig.marketIndex
-				);
-				if (isVariant(phoenixConfigAccount.status, 'enabled')) {
-					// set up phoenix price subscriber
-					const phoenixSubscriber = new PhoenixSubscriber({
-						connection: this.driftClient.connection,
-						programId: new PublicKey(config.PHOENIX),
-						marketAddress: spotMarketConfig.phoenixMarket,
-						accountSubscription,
-					});
-					const initPhoenixSubscriberStart = Date.now();
-					logger.info(
-						`Initializing PhoenixSubscriber for ${spotMarketConfig.symbol}...`
-					);
-					await phoenixSubscriber.subscribe();
-					this.phoenixSubscribers.set(
-						spotMarketConfig.marketIndex,
-						phoenixSubscriber
-					);
-					logger.info(
-						`Initialized PhoenixSubscriber in ${
-							Date.now() - initPhoenixSubscriberStart
-						}ms`
-					);
+					if (isVariant(serumConfigAccount.status, 'enabled')) {
+						// set up serum price subscriber
+						const serumSubscriber = new SerumSubscriber({
+							connection: this.driftClient.connection,
+							programId: new PublicKey(config.SERUM_V3),
+							marketAddress: spotMarketConfig.serumMarket,
+							accountSubscription,
+						});
+						logger.info(
+							`Initializing SerumSubscriber for ${spotMarketConfig.symbol}...`
+						);
+						subscribePromises.push(
+							serumSubscriber.subscribe().then(() => {
+								this.serumSubscribers.set(
+									spotMarketConfig.marketIndex,
+									serumSubscriber
+								);
+							})
+						);
+					}
 				}
+
+				if (spotMarketConfig.phoenixMarket) {
+					// set up fulfillment config
+					await this.phoenixFulfillmentConfigMap.add(
+						spotMarketConfig.marketIndex,
+						spotMarketConfig.phoenixMarket
+					);
+
+					const phoenixConfigAccount = this.phoenixFulfillmentConfigMap.get(
+						spotMarketConfig.marketIndex
+					);
+					if (isVariant(phoenixConfigAccount.status, 'enabled')) {
+						// set up phoenix price subscriber
+						const phoenixSubscriber = new PhoenixSubscriber({
+							connection: this.driftClient.connection,
+							programId: new PublicKey(config.PHOENIX),
+							marketAddress: spotMarketConfig.phoenixMarket,
+							accountSubscription,
+						});
+						logger.info(
+							`Initializing PhoenixSubscriber for ${spotMarketConfig.symbol}...`
+						);
+						subscribePromises.push(
+							phoenixSubscriber.subscribe().then(() => {
+								this.phoenixSubscribers.set(
+									spotMarketConfig.marketIndex,
+									phoenixSubscriber
+								);
+							})
+						);
+					}
+				}
+				await Promise.all(subscribePromises);
 			}
-		}
+		);
+		await Promise.all(marketSetupPromises);
 
 		this.driftLutAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
@@ -1072,9 +1075,45 @@ export class SpotFillerBot implements Bot {
 		return this.handleTransactionLogs(nodeToFill, tx.meta!.logMessages!);
 	}
 
+	private async sendTxThroughJito(
+		tx: VersionedTransaction,
+		metadata: number | string
+	) {
+		if (this.bundleSender === undefined) {
+			logger.error(`Called sendTxThroughJito without jito properly enabled`);
+			return;
+		}
+		const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
+		if (slotsUntilNextLeader !== undefined) {
+			if (slotsUntilNextLeader < SLOTS_UNTIL_JITO_LEADER_TO_SEND) {
+				this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`);
+			}
+		}
+	}
+
+	private usingJito(): boolean {
+		return this.bundleSender !== undefined;
+	}
+
+	private canSendOutsideJito(): boolean {
+		return (
+			!this.usingJito() ||
+			this.bundleSender?.strategy === 'non-jito-only' ||
+			this.bundleSender?.strategy === 'hybrid'
+		);
+	}
+
+	private slotsUntilJitoLeader(): number | undefined {
+		if (!this.usingJito()) {
+			return undefined;
+		}
+		return this.bundleSender?.slotsUntilNextLeader();
+	}
+
 	private async tryFillSpotNode(
 		nodeToFill: NodeToFill,
 		fillTxId: number,
+		buildForBundle: boolean,
 		fallbackAskSource?: FallbackLiquiditySource,
 		fallbackBidSource?: FallbackLiquiditySource
 	) {
@@ -1083,7 +1122,6 @@ export class SpotFillerBot implements Bot {
 			logger.info(`Throttling ${nodeSignature} (fillTxId: ${fillTxId})`);
 			return Promise.resolve(undefined);
 		}
-		this.throttleNode(nodeSignature);
 
 		const node = nodeToFill.node!;
 		const order = node.order!;
@@ -1178,12 +1216,16 @@ export class SpotFillerBot implements Bot {
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,
 			}),
-			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.floor(
-					this.priorityFeeSubscriber.getCustomStrategyResult()
-				),
-			}),
 		];
+		if (!buildForBundle) {
+			ixs.push(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult()
+					),
+				})
+			);
+		}
 
 		ixs.push(
 			await this.driftClient.getFillSpotOrderIx(
@@ -1235,63 +1277,71 @@ export class SpotFillerBot implements Bot {
 			}
 		} else {
 			if (!this.dryRun) {
-				this.driftClient.txSender
-					.sendVersionedTransaction(simResult.tx, [], this.driftClient.opts)
-					.then(async (txSig) => {
-						logger.info(
-							`Filled spot order ${nodeSignature} (fillTxId: ${fillTxId}): https://solscan.io/tx/${txSig.txSig}`
-						);
-
-						const duration = Date.now() - txStart;
-						const user = this.driftClient.getUser();
-						if (this.sdkCallDurationHistogram) {
-							this.sdkCallDurationHistogram!.record(duration, {
-								...metricAttrFromUserAccount(
-									user.getUserAccountPublicKey(),
-									user.getUserAccount()
-								),
-								method: 'fillSpotOrder',
-							});
-						}
-
-						await this.processBulkFillTxLogs(nodeToFill, txSig.txSig);
-					})
-					.catch(async (e) => {
-						const errorCode = getErrorCode(e);
-						if (!errorCode) {
-							console.error(e);
-						} else {
-							logger.error(
-								`Failed to fill spot order for (fillTxId: ${fillTxId}) ${user
-									.getUserAccountPublicKey()
-									.toBase58()} order ${
-									nodeToFill.node.order!.orderId
-								} on market ${nodeToFill.node.order!.marketIndex} makers: ${
-									nodeToFill.makerNodes.length
-								} (errorCode: ${errorCode}): `
+				if (buildForBundle) {
+					// @ts-ignore;
+					simResult.tx.sign([this.driftClient.wallet.payer]);
+					await this.sendTxThroughJito(simResult.tx, fillTxId);
+					this.unthrottleNode(nodeSignature);
+				} else if (this.canSendOutsideJito()) {
+					this.throttleNode(nodeSignature);
+					this.driftClient.txSender
+						.sendVersionedTransaction(simResult.tx, [], this.driftClient.opts)
+						.then(async (txSig) => {
+							logger.info(
+								`Filled spot order ${nodeSignature} (fillTxId: ${fillTxId}): https://solscan.io/tx/${txSig.txSig}`
 							);
-						}
 
-						if (e.logs) {
-							await this.handleTransactionLogs(nodeToFill, e.logs);
-						}
+							const duration = Date.now() - txStart;
+							const user = this.driftClient.getUser();
+							if (this.sdkCallDurationHistogram) {
+								this.sdkCallDurationHistogram!.record(duration, {
+									...metricAttrFromUserAccount(
+										user.getUserAccountPublicKey(),
+										user.getUserAccount()
+									),
+									method: 'fillSpotOrder',
+								});
+							}
 
-						if (
-							errorCode &&
-							!errorCodesToSuppress.includes(errorCode) &&
-							!(e as Error).message.includes('Transaction was not confirmed')
-						) {
-							const msg = `[${
-								this.name
-							}]: :x: error trying to fill spot orders: \n\nSim logs: \n${
-								e.logs ? (e.logs as Array<string>).join('\n') : ''
-							}\n\n${e.stack ? e.stack : e.message}`;
-							webhookMessage(msg);
-						}
-					})
-					.finally(() => {
-						this.unthrottleNode(nodeSignature);
-					});
+							await this.processBulkFillTxLogs(nodeToFill, txSig.txSig);
+						})
+						.catch(async (e) => {
+							const errorCode = getErrorCode(e);
+							if (!errorCode) {
+								console.error(e);
+							} else {
+								logger.error(
+									`Failed to fill spot order for (fillTxId: ${fillTxId}) ${user
+										.getUserAccountPublicKey()
+										.toBase58()} order ${
+										nodeToFill.node.order!.orderId
+									} on market ${nodeToFill.node.order!.marketIndex} makers: ${
+										nodeToFill.makerNodes.length
+									} (errorCode: ${errorCode}): `
+								);
+							}
+
+							if (e.logs) {
+								await this.handleTransactionLogs(nodeToFill, e.logs);
+							}
+
+							if (
+								errorCode &&
+								!errorCodesToSuppress.includes(errorCode) &&
+								!(e as Error).message.includes('Transaction was not confirmed')
+							) {
+								const msg = `[${
+									this.name
+								}]: :x: error trying to fill spot orders: \n\nSim logs: \n${
+									e.logs ? (e.logs as Array<string>).join('\n') : ''
+								}\n\n${e.stack ? e.stack : e.message}`;
+								webhookMessage(msg);
+							}
+						})
+						.finally(() => {
+							this.unthrottleNode(nodeSignature);
+						});
+				}
 			} else {
 				logger.info(`dry run, not filling spot order (fillTxId: ${fillTxId})`);
 			}
@@ -1317,13 +1367,15 @@ export class SpotFillerBot implements Bot {
 	}
 
 	private async executeFillableSpotNodesForMarket(
-		fillableNodes: Array<NodesToFillWithContext>
+		fillableNodes: Array<NodesToFillWithContext>,
+		buildForBundle: boolean
 	) {
 		for (const nodesToFillWithContext of fillableNodes) {
 			for (const nodeToFill of nodesToFillWithContext.nodesToFill) {
 				await this.tryFillSpotNode(
 					nodeToFill,
 					this.fillTxId++,
+					buildForBundle,
 					nodesToFillWithContext.fallbackAskSource,
 					nodesToFillWithContext.fallbackBidSource
 				);
@@ -1332,7 +1384,8 @@ export class SpotFillerBot implements Bot {
 	}
 
 	private async executeTriggerableSpotNodesForMarket(
-		triggerableNodes: Array<NodeToTrigger>
+		triggerableNodes: Array<NodeToTrigger>,
+		buildForBundle: boolean
 	) {
 		for (const nodeToTrigger of triggerableNodes) {
 			nodeToTrigger.node.haveTrigger = true;
@@ -1387,43 +1440,50 @@ export class SpotFillerBot implements Bot {
 				);
 			} else {
 				if (!this.dryRun) {
-					this.driftClient
-						.sendTransaction(simResult.tx)
-						.then((txSig) => {
-							logger.info(
-								`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}, userSlot: ${
-									user.slot
-								}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-							);
-							logger.info(`Tx: ${txSig}`);
-						})
-						.catch((error) => {
-							nodeToTrigger.node.haveTrigger = false;
+					if (buildForBundle) {
+						// @ts-ignore;
+						simResult.tx.sign([this.driftClient.wallet.payer]);
+						await this.sendTxThroughJito(simResult.tx, 'trigger');
+						this.removeTriggeringNodes(nodeToTrigger);
+					} else if (this.canSendOutsideJito()) {
+						this.driftClient
+							.sendTransaction(simResult.tx)
+							.then((txSig) => {
+								logger.info(
+									`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}, userSlot: ${
+										user.slot
+									}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+								);
+								logger.info(`Tx: ${txSig}`);
+							})
+							.catch((error) => {
+								nodeToTrigger.node.haveTrigger = false;
 
-							const errorCode = getErrorCode(error);
-							if (
-								errorCode &&
-								!errorCodesToSuppress.includes(errorCode) &&
-								!(error as Error).message.includes(
-									'Transaction was not confirmed'
-								)
-							) {
-								logger.error(
-									`Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} `
-								);
-								logger.error(error);
-								webhookMessage(
-									`[${
-										this.name
-									}]: Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} \n${
-										error.stack ? error.stack : error.message
-									} `
-								);
-							}
-						})
-						.finally(() => {
-							this.removeTriggeringNodes(nodeToTrigger);
-						});
+								const errorCode = getErrorCode(error);
+								if (
+									errorCode &&
+									!errorCodesToSuppress.includes(errorCode) &&
+									!(error as Error).message.includes(
+										'Transaction was not confirmed'
+									)
+								) {
+									logger.error(
+										`Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} `
+									);
+									logger.error(error);
+									webhookMessage(
+										`[${
+											this.name
+										}]: Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} \n${
+											error.stack ? error.stack : error.message
+										} `
+									);
+								}
+							})
+							.finally(() => {
+								this.removeTriggeringNodes(nodeToTrigger);
+							});
+					}
 				} else {
 					logger.info(`dry run, not triggering node`);
 				}
@@ -1473,9 +1533,18 @@ export class SpotFillerBot implements Bot {
 					`filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length} `
 				);
 
+				const slotsUntilJito = this.slotsUntilJitoLeader();
+				const buildForBundle =
+					this.usingJito() &&
+					slotsUntilJito !== undefined &&
+					slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+
 				await Promise.all([
-					this.executeFillableSpotNodesForMarket(fillableNodes),
-					this.executeTriggerableSpotNodesForMarket(filteredTriggerableNodes),
+					this.executeFillableSpotNodesForMarket(fillableNodes, buildForBundle),
+					this.executeTriggerableSpotNodesForMarket(
+						filteredTriggerableNodes,
+						buildForBundle
+					),
 				]);
 
 				if (this.attemptedFillsCounter && this.attemptedTriggersCounter) {
