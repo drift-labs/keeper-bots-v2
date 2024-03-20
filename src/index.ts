@@ -10,10 +10,6 @@ import {
 	TransactionVersion,
 	ConfirmOptions,
 } from '@solana/web3.js';
-import {
-	SearcherClient,
-	searcherClient,
-} from 'jito-ts/dist/sdk/block-engine/searcher';
 
 import { getAssociatedTokenAddress } from '@solana/spl-token';
 import {
@@ -41,6 +37,7 @@ import {
 	HeliusPriorityFeeResponse,
 	HeliusPriorityLevel,
 	AverageOverSlotsStrategy,
+	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -76,6 +73,7 @@ import { JitProxyClient, JitterShotgun } from '@drift-labs/jit-proxy/lib';
 import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 import { UncrossArbBot } from './bots/uncrossArbBot';
 import { FillerBulkBot } from './bots/fillerBulk';
+import { BundleSender } from './bundleSender';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -387,7 +385,7 @@ const runBot = async () => {
 	/**
 	 * Jito info here
 	 */
-	let jitoSearcherClient: SearcherClient | undefined;
+	let bundleSender: BundleSender | undefined;
 	let jitoAuthKeypair: Keypair | undefined;
 	if (config.global.useJito) {
 		const jitoBlockEngineUrl = config.global.jitoBlockEngineUrl;
@@ -404,15 +402,20 @@ const runBot = async () => {
 		}
 		logger.info(`Loading jito keypair`);
 		jitoAuthKeypair = loadKeypair(privateKey);
-		jitoSearcherClient = searcherClient(jitoBlockEngineUrl, jitoAuthKeypair);
-		jitoSearcherClient.onBundleResult(
-			(bundle) => {
-				logger.info(`JITO bundle result: ${JSON.stringify(bundle)}`);
-			},
-			(error) => {
-				logger.error(`JITO bundle error: ${error}`);
-			}
+
+		bundleSender = new BundleSender(
+			connection,
+			jitoBlockEngineUrl,
+			jitoAuthKeypair,
+			keypair,
+			slotSubscriber,
+			config.global.jitoStrategy,
+			config.global.jitoMinBundleTip,
+			config.global.jitoMaxBundleTip,
+			config.global.jitoMaxBundleFailCount,
+			config.global.jitoTipMultiplier
 		);
+		await bundleSender.subscribe();
 	}
 
 	/*
@@ -459,10 +462,17 @@ const runBot = async () => {
 		maxFeeMicroLamports,
 	});
 
+	let needBlockhashSubscriber = false;
+	const blockhashSubscriber = new BlockhashSubscriber({
+		connection: driftClient.connection,
+		updateIntervalMs: 2000,
+	});
+
 	if (configHasBot(config, 'filler')) {
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
 		needPriorityFeeSubscriber = true;
+		needBlockhashSubscriber = true;
 		bots.push(
 			new FillerBot(
 				slotSubscriber,
@@ -479,9 +489,8 @@ const runBot = async () => {
 				},
 				config.botConfigs!.filler!,
 				priorityFeeSubscriber,
-				jitoSearcherClient,
-				jitoAuthKeypair,
-				keypair
+				blockhashSubscriber,
+				bundleSender
 			)
 		);
 	}
@@ -489,6 +498,7 @@ const runBot = async () => {
 	if (configHasBot(config, 'fillerLite')) {
 		needCheckDriftUser = true;
 		needPriorityFeeSubscriber = true;
+		needBlockhashSubscriber = true;
 
 		logger.info(`Starting filler lite bot`);
 		bots.push(
@@ -504,9 +514,8 @@ const runBot = async () => {
 				},
 				config.botConfigs!.fillerLite!,
 				priorityFeeSubscriber,
-				jitoSearcherClient,
-				jitoAuthKeypair,
-				keypair
+				blockhashSubscriber,
+				bundleSender
 			)
 		);
 	}
@@ -514,6 +523,7 @@ const runBot = async () => {
 	if (configHasBot(config, 'fillerBulk')) {
 		needCheckDriftUser = true;
 		needPriorityFeeSubscriber = true;
+		needBlockhashSubscriber = true;
 
 		logger.info(`Starting filler bulk bot`);
 
@@ -530,9 +540,8 @@ const runBot = async () => {
 				},
 				config.botConfigs!.fillerBulk!,
 				priorityFeeSubscriber,
-				jitoSearcherClient,
-				jitoAuthKeypair,
-				keypair
+				blockhashSubscriber,
+				bundleSender
 			)
 		);
 	}
@@ -845,6 +854,9 @@ const runBot = async () => {
 		logger.info(
 			`priorityFeeSubscriber.subscribe() took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`
 		);
+	}
+	if (needBlockhashSubscriber) {
+		await blockhashSubscriber.subscribe();
 	}
 
 	if (bots.length === 0) {

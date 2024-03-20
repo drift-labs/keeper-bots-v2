@@ -35,6 +35,7 @@ import {
 	getUserAccountPublicKey,
 	PriorityFeeSubscriber,
 	DataAndSlot,
+	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -47,13 +48,9 @@ import {
 	ComputeBudgetProgram,
 	GetVersionedTransactionConfig,
 	AddressLookupTableAccount,
-	Keypair,
 	Connection,
 	VersionedTransaction,
 } from '@solana/web3.js';
-
-import { SearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher';
-import { Bundle } from 'jito-ts/dist/sdk/block-engine/types';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import {
@@ -97,6 +94,7 @@ import {
 	sleepMs,
 } from '../utils';
 import { selectMakers } from '../makerSelection';
+import { BundleSender } from '../bundleSender';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
@@ -114,6 +112,7 @@ const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
+const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
@@ -225,12 +224,7 @@ export class FillerBot implements Bot {
 	protected revertOnFailure?: boolean;
 	protected simulateTxForCUEstimate?: boolean;
 	protected lookupTableAccount?: AddressLookupTableAccount;
-	protected jitoSearcherClient?: SearcherClient;
-	protected jitoAuthKeypair?: Keypair;
-	protected jitoTipAccount?: PublicKey;
-	protected jitoLeaderNextSlot?: number;
-	protected jitoLeaderNextSlotMutex = new Mutex();
-	protected tipPayerKeypair?: Keypair;
+	protected bundleSender?: BundleSender;
 
 	private dlobSubscriber?: DLOBSubscriber;
 
@@ -253,6 +247,7 @@ export class FillerBot implements Bot {
 	protected lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 
 	protected priorityFeeSubscriber: PriorityFeeSubscriber;
+	protected blockhashSubscriber: BlockhashSubscriber;
 
 	// metrics
 	protected metricsInitialized = false;
@@ -286,9 +281,8 @@ export class FillerBot implements Bot {
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
-		jitoSearcherClient?: SearcherClient,
-		jitoAuthKeypair?: Keypair,
-		tipPayerKeypair?: Keypair
+		blockhashSubscriber: BlockhashSubscriber,
+		bundleSender?: BundleSender
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
@@ -325,48 +319,9 @@ export class FillerBot implements Bot {
 			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
 		);
 
-		this.jitoSearcherClient = jitoSearcherClient;
-		this.jitoAuthKeypair = jitoAuthKeypair;
-		this.tipPayerKeypair = tipPayerKeypair;
-		const jitoEnabled = this.jitoSearcherClient && this.jitoAuthKeypair;
-		if (jitoEnabled && this.jitoSearcherClient) {
-			this.jitoSearcherClient.getTipAccounts().then(async (tipAccounts) => {
-				this.jitoTipAccount = new PublicKey(
-					tipAccounts[Math.floor(Math.random() * tipAccounts.length)]
-				);
-				logger.info(
-					`${this.name}: jito tip account: ${this.jitoTipAccount.toBase58()}`
-				);
-				this.jitoLeaderNextSlot = (
-					await this.jitoSearcherClient!.getNextScheduledLeader()
-				).nextLeaderSlot;
-			});
-
-			this.slotSubscriber.eventEmitter.on('newSlot', async (slot: number) => {
-				if (this.jitoLeaderNextSlot) {
-					if (slot > this.jitoLeaderNextSlot) {
-						try {
-							await tryAcquire(this.jitoLeaderNextSlotMutex).runExclusive(
-								async () => {
-									logger.warn('LEADER REACHED, GETTING NEXT SLOT');
-									this.jitoLeaderNextSlot = (
-										await this.jitoSearcherClient!.getNextScheduledLeader()
-									).nextLeaderSlot;
-								}
-							);
-						} catch (e) {
-							if (e !== E_ALREADY_LOCKED) {
-								throw new Error(e as string);
-							}
-						}
-					}
-				}
-			});
-		}
+		this.bundleSender = bundleSender;
 		logger.info(
-			`${this.name}: jito enabled: ${
-				!!this.jitoSearcherClient && !!this.jitoAuthKeypair
-			}`
+			`${this.name}: jito enabled: ${this.bundleSender !== undefined}`
 		);
 
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
@@ -374,6 +329,7 @@ export class FillerBot implements Bot {
 			new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC
 			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
 		]);
+		this.blockhashSubscriber = blockhashSubscriber;
 	}
 
 	protected initializeMetrics() {
@@ -847,13 +803,6 @@ export class FillerBot implements Bot {
 				// or the user places a new order
 				return false;
 			}
-			logger.warn(
-				`order is expired on market ${
-					nodeToFill.node.order.marketIndex
-				} for user ${nodeToFill.node.userAccount}-${
-					nodeToFill.node.order.orderId
-				} (${getVariant(nodeToFill.node.order.orderType)})`
-			);
 			return true;
 		}
 
@@ -1339,64 +1288,27 @@ export class FillerBot implements Bot {
 		}
 	}
 
-	protected async sendFillTxThroughJito(
-		fillTxId: number,
-		tx: VersionedTransaction
+	protected async sendTxThroughJito(
+		tx: VersionedTransaction,
+		metadata: number | string
 	) {
-		const slotsUntilNextLeader = this.jitoLeaderNextSlot! - this.getMaxSlot();
-		logger.info(
-			`next jito leader is in ${slotsUntilNextLeader} slots (fillTxId: ${fillTxId})`
-		);
-		if (slotsUntilNextLeader > 2) {
-			logger.info(
-				`next jito leader is too far away, skipping... (fillTxId: ${fillTxId})`
-			);
-			return ['', 0];
+		if (this.bundleSender === undefined) {
+			logger.error(`Called sendTxThroughJito without jito properly enabled`);
+			return;
 		}
-
-		// should probably do this in background
-		const blockHash =
-			await this.driftClient.provider.connection.getLatestBlockhash(
-				'confirmed'
-			);
-
-		// @ts-ignore
-		tx.sign([this.driftClient.wallet.payer]);
-		// const signedTx = await this.driftClient.provider.wallet.signTransaction(tx);
-		let b: Bundle | Error = new Bundle(
-			// [new VersionedTransaction(signedTx.compileMessage())],
-			[tx],
-			2
-		);
-		b = b.addTipTx(
-			this.tipPayerKeypair!,
-			100_000, // TODO: make this configurable?
-			this.jitoTipAccount!,
-			blockHash.blockhash
-		);
-		if (b instanceof Error) {
-			logger.error(
-				`failed to attach tip: ${b.message} (fillTxId: ${fillTxId})`
-			);
-			return ['', 0];
+		const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
+		if (slotsUntilNextLeader !== undefined) {
+			if (slotsUntilNextLeader < SLOTS_UNTIL_JITO_LEADER_TO_SEND) {
+				this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`);
+			}
 		}
-		this.jitoSearcherClient!.sendBundle(b)
-			.then((uuid) => {
-				logger.info(
-					`${this.name} sent bundle with uuid ${uuid} (fillTxId: ${fillTxId})`
-				);
-			})
-			.catch((err) => {
-				logger.error(
-					`failed to send bundle: ${err.message} (fillTxId: ${fillTxId})`
-				);
-			});
 	}
 
 	protected async sendFillTxAndParseLogs(
 		fillTxId: number,
 		nodesSent: Array<NodeToFill>,
-		tx: VersionedTransaction
+		tx: VersionedTransaction,
+		buildForBundle: boolean
 	) {
 		let txResp: Promise<TxSigAndSlot> | undefined = undefined;
 		let estTxSize: number | undefined = undefined;
@@ -1404,9 +1316,11 @@ export class FillerBot implements Bot {
 		let writeAccs = 0;
 		const accountMetas: any[] = [];
 		const txStart = Date.now();
-		if (this.jitoSearcherClient && this.jitoAuthKeypair) {
-			await this.sendFillTxThroughJito(fillTxId, tx);
-		} else {
+		if (buildForBundle) {
+			// @ts-ignore;
+			tx.sign([this.driftClient.wallet.payer]);
+			await this.sendTxThroughJito(tx, fillTxId);
+		} else if (this.canSendOutsideJito()) {
 			estTxSize = tx.message.serialize().length;
 			const acc = tx.message.getAccountKeys({
 				addressLookupTableAccounts: [this.lookupTableAccount!],
@@ -1543,6 +1457,20 @@ export class FillerBot implements Bot {
 		}
 	}
 
+	private async getBlockhashForTx(): Promise<string> {
+		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(10);
+		if (cachedBlockhash) {
+			return cachedBlockhash.blockhash as string;
+		}
+
+		const recentBlockhash =
+			await this.driftClient.connection.getLatestBlockhash({
+				commitment: 'confirmed',
+			});
+
+		return recentBlockhash.blockhash;
+	}
+
 	/**
 	 *
 	 * @param fillTxId id of current fill
@@ -1551,18 +1479,23 @@ export class FillerBot implements Bot {
 	 */
 	private async fillMultiMakerPerpNodes(
 		fillTxId: number,
-		nodeToFill: NodeToFill
+		nodeToFill: NodeToFill,
+		buildForBundle: boolean
 	): Promise<boolean> {
-		const ixs = [
+		const ixs: Array<TransactionInstruction> = [
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,
 			}),
-			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.floor(
-					this.priorityFeeSubscriber.getCustomStrategyResult()
-				),
-			}),
 		];
+		if (!buildForBundle) {
+			ixs.push(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult()
+					),
+				})
+			);
+		}
 
 		try {
 			const {
@@ -1620,7 +1553,8 @@ export class FillerBot implements Bot {
 					this.driftClient.opts,
 					SIM_CU_ESTIMATE_MULTIPLIER,
 					true,
-					this.simulateTxForCUEstimate
+					this.simulateTxForCUEstimate,
+					await this.getBlockhashForTx()
 				);
 				return simResult;
 			};
@@ -1678,7 +1612,12 @@ export class FillerBot implements Bot {
 				}
 			} else {
 				if (!this.dryRun) {
-					this.sendFillTxAndParseLogs(fillTxId, [nodeToFill], simResult.tx);
+					this.sendFillTxAndParseLogs(
+						fillTxId,
+						[nodeToFill],
+						simResult.tx,
+						buildForBundle
+					);
 				} else {
 					logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
 				}
@@ -1699,11 +1638,20 @@ export class FillerBot implements Bot {
 	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
 	 * @param nodeToFill node with multiple makers
 	 */
-	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFill) {
+	protected async tryFillMultiMakerPerpNodes(
+		nodeToFill: NodeToFill,
+		buildForBundle: boolean
+	) {
 		const fillTxId = this.fillTxId++;
 
 		let nodeWithMakerSet = nodeToFill;
-		while (!(await this.fillMultiMakerPerpNodes(fillTxId, nodeWithMakerSet))) {
+		while (
+			!(await this.fillMultiMakerPerpNodes(
+				fillTxId,
+				nodeWithMakerSet,
+				buildForBundle
+			))
+		) {
 			const newMakerSet = nodeWithMakerSet.makerNodes
 				.sort(() => 0.5 - Math.random())
 				.slice(0, Math.ceil(nodeWithMakerSet.makerNodes.length / 2));
@@ -1721,7 +1669,8 @@ export class FillerBot implements Bot {
 	}
 
 	protected async tryBulkFillPerpNodes(
-		nodesToFill: Array<NodeToFill>
+		nodesToFill: Array<NodeToFill>,
+		buildForBundle: boolean
 	): Promise<number> {
 		let nodesSent = 0;
 		const marketNodeMap = new Map<number, Array<NodeToFill>>();
@@ -1735,7 +1684,8 @@ export class FillerBot implements Bot {
 
 		for (const nodesToFillForMarket of marketNodeMap.values()) {
 			nodesSent += await this.tryBulkFillPerpNodesForMarket(
-				nodesToFillForMarket
+				nodesToFillForMarket,
+				buildForBundle
 			);
 		}
 
@@ -1743,18 +1693,23 @@ export class FillerBot implements Bot {
 	}
 
 	protected async tryBulkFillPerpNodesForMarket(
-		nodesToFill: Array<NodeToFill>
+		nodesToFill: Array<NodeToFill>,
+		buildForBundle: boolean
 	): Promise<number> {
-		const ixs = [
+		const ixs: Array<TransactionInstruction> = [
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,
 			}),
-			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.floor(
-					this.priorityFeeSubscriber.lastCustomStrategyResult
-				),
-			}),
 		];
+		if (!buildForBundle) {
+			ixs.push(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult()
+					),
+				})
+			);
+		}
 
 		/**
 		 * At all times, the running Tx size is:
@@ -1801,7 +1756,7 @@ export class FillerBot implements Bot {
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			// do multi maker fills in a separate tx since they're larger
 			if (nodeToFill.makerNodes.length > 1) {
-				await this.tryFillMultiMakerPerpNodes(nodeToFill);
+				await this.tryFillMultiMakerPerpNodes(nodeToFill, buildForBundle);
 				nodesSent.push(nodeToFill);
 				continue;
 			}
@@ -1935,7 +1890,8 @@ export class FillerBot implements Bot {
 			this.driftClient.opts,
 			SIM_CU_ESTIMATE_MULTIPLIER,
 			true,
-			this.simulateTxForCUEstimate
+			this.simulateTxForCUEstimate,
+			await this.getBlockhashForTx()
 		);
 		logger.info(
 			`tryBulkFillPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
@@ -1956,7 +1912,12 @@ export class FillerBot implements Bot {
 			}
 		} else {
 			if (!this.dryRun) {
-				this.sendFillTxAndParseLogs(fillTxId, nodesSent, simResult.tx);
+				this.sendFillTxAndParseLogs(
+					fillTxId,
+					nodesSent,
+					simResult.tx,
+					buildForBundle
+				);
 			} else {
 				logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
 			}
@@ -1999,12 +1960,14 @@ export class FillerBot implements Bot {
 	}
 
 	protected async executeFillablePerpNodesForMarket(
-		fillableNodes: Array<NodeToFill>
+		fillableNodes: Array<NodeToFill>,
+		buildForBundle: boolean
 	) {
 		let filledNodeCount = 0;
 		while (filledNodeCount < fillableNodes.length) {
 			const attemptedFills = await this.tryBulkFillPerpNodes(
-				fillableNodes.slice(filledNodeCount)
+				fillableNodes.slice(filledNodeCount),
+				buildForBundle
 			);
 			filledNodeCount += attemptedFills;
 
@@ -2023,7 +1986,8 @@ export class FillerBot implements Bot {
 	}
 
 	protected async executeTriggerablePerpNodesForMarket(
-		triggerableNodes: Array<NodeToTrigger>
+		triggerableNodes: Array<NodeToTrigger>,
+		buildForBundle: boolean
 	) {
 		for (const nodeToTrigger of triggerableNodes) {
 			nodeToTrigger.node.haveTrigger = true;
@@ -2061,7 +2025,8 @@ export class FillerBot implements Bot {
 				this.driftClient.opts,
 				SIM_CU_ESTIMATE_MULTIPLIER,
 				true,
-				this.simulateTxForCUEstimate
+				this.simulateTxForCUEstimate,
+				await this.getBlockhashForTx()
 			);
 			logger.info(
 				`executeTriggerablePerpNodesForMarket estimated CUs: ${simResult.cuEstimate}`
@@ -2080,41 +2045,45 @@ export class FillerBot implements Bot {
 				);
 			} else {
 				if (!this.dryRun) {
-					this.driftClient
-						.sendTransaction(simResult.tx)
-						.then((txSig) => {
-							logger.info(
-								`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-							);
-							logger.info(`Tx: ${txSig}`);
-						})
-						.catch((error) => {
-							nodeToTrigger.node.haveTrigger = false;
+					if (buildForBundle) {
+						this.sendTxThroughJito(simResult.tx, 'triggerOrder');
+					} else if (this.canSendOutsideJito()) {
+						this.driftClient
+							.sendTransaction(simResult.tx)
+							.then((txSig) => {
+								logger.info(
+									`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+								);
+								logger.info(`Tx: ${txSig}`);
+							})
+							.catch((error) => {
+								nodeToTrigger.node.haveTrigger = false;
 
-							const errorCode = getErrorCode(error);
-							if (
-								errorCode &&
-								!errorCodesToSuppress.includes(errorCode) &&
-								!(error as Error).message.includes(
-									'Transaction was not confirmed'
-								)
-							) {
-								logger.error(
-									`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-								);
-								logger.error(error);
-								webhookMessage(
-									`[${
-										this.name
-									}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-										error.stack ? error.stack : error.message
-									}`
-								);
-							}
-						})
-						.finally(() => {
-							this.removeTriggeringNodes(nodeToTrigger);
-						});
+								const errorCode = getErrorCode(error);
+								if (
+									errorCode &&
+									!errorCodesToSuppress.includes(errorCode) &&
+									!(error as Error).message.includes(
+										'Transaction was not confirmed'
+									)
+								) {
+									logger.error(
+										`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+									);
+									logger.error(error);
+									webhookMessage(
+										`[${
+											this.name
+										}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+											error.stack ? error.stack : error.message
+										}`
+									);
+								}
+							})
+							.finally(() => {
+								this.removeTriggeringNodes(nodeToTrigger);
+							});
+					}
 				} else {
 					logger.info(`dry run, not triggering node`);
 				}
@@ -2149,7 +2118,7 @@ export class FillerBot implements Bot {
 					try {
 						const ixs = [
 							ComputeBudgetProgram.setComputeUnitLimit({
-								units: 2_000_000,
+								units: 1_400_000,
 							}),
 						];
 						ixs.push(
@@ -2173,7 +2142,8 @@ export class FillerBot implements Bot {
 							this.driftClient.opts,
 							SIM_CU_ESTIMATE_MULTIPLIER,
 							true,
-							this.simulateTxForCUEstimate
+							this.simulateTxForCUEstimate,
+							await this.getBlockhashForTx()
 						);
 						logger.info(`settlePnls estimatedCUs: ${simResult.cuEstimate}`);
 						if (this.simulateTxForCUEstimate && simResult.simError) {
@@ -2187,13 +2157,22 @@ export class FillerBot implements Bot {
 							);
 						} else {
 							if (!this.dryRun) {
-								settlePnlPromises.push(
-									this.driftClient.txSender.sendVersionedTransaction(
-										simResult.tx,
-										[],
-										this.driftClient.opts
-									)
-								);
+								const slotsUntilJito = this.slotsUntilJitoLeader();
+								const buildForBundle =
+									this.usingJito() &&
+									slotsUntilJito !== undefined &&
+									slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+								if (buildForBundle) {
+									this.sendTxThroughJito(simResult.tx, 'settlePnl');
+								} else if (this.canSendOutsideJito()) {
+									settlePnlPromises.push(
+										this.driftClient.txSender.sendVersionedTransaction(
+											simResult.tx,
+											[],
+											this.driftClient.opts
+										)
+									);
+								}
 							} else {
 								logger.info(`dry run, skipping settlePnls)`);
 							}
@@ -2224,6 +2203,21 @@ export class FillerBot implements Bot {
 				this.lastSettlePnl = now;
 			}
 		}
+	}
+
+	protected usingJito(): boolean {
+		return this.bundleSender !== undefined;
+	}
+
+	protected canSendOutsideJito(): boolean {
+		return !this.usingJito() || this.bundleSender?.strategy === 'hybrid';
+	}
+
+	protected slotsUntilJitoLeader(): number | undefined {
+		if (!this.usingJito) {
+			return undefined;
+		}
+		return this.bundleSender?.slotsUntilNextLeader();
 	}
 
 	protected async tryFill() {
@@ -2266,10 +2260,22 @@ export class FillerBot implements Bot {
 					`filtered fillable nodes from ${fillableNodes.length} to ${filteredFillableNodes.length}, filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length}`
 				);
 
+				const slotsUntilJito = this.slotsUntilJitoLeader();
+				const buildForBundle =
+					this.usingJito() &&
+					slotsUntilJito !== undefined &&
+					slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+
 				// fill the perp nodes
 				await Promise.all([
-					this.executeFillablePerpNodesForMarket(filteredFillableNodes),
-					this.executeTriggerablePerpNodesForMarket(filteredTriggerableNodes),
+					this.executeFillablePerpNodesForMarket(
+						filteredFillableNodes,
+						buildForBundle
+					),
+					this.executeTriggerablePerpNodesForMarket(
+						filteredTriggerableNodes,
+						buildForBundle
+					),
 				]);
 
 				// check if should settle positive pnl
