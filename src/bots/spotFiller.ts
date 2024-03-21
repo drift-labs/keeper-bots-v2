@@ -83,7 +83,7 @@ import {
 import { BundleSender } from '../bundleSender';
 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
-const FILL_ORDER_BACKOFF = 1000; // Time to wait before trying a node again
+const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
@@ -835,7 +835,7 @@ export class SpotFillerBot implements Bot {
 	private nodeIsThrottled(nodeSignature: string): boolean {
 		if (this.throttledNodes.has(nodeSignature)) {
 			const lastFillAttempt = this.throttledNodes.get(nodeSignature) ?? 0;
-			if (lastFillAttempt + FILL_ORDER_BACKOFF > Date.now()) {
+			if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
 				return true;
 			}
 		}
@@ -852,7 +852,7 @@ export class SpotFillerBot implements Bot {
 	private pruneThrottledNode() {
 		if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
 			for (const [key, value] of this.throttledNodes.entries()) {
-				if (value + 2 * FILL_ORDER_BACKOFF > Date.now()) {
+				if (value + 2 * FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
 					this.throttledNodes.delete(key);
 				}
 			}

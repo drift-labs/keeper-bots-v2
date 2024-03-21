@@ -101,8 +101,7 @@ const CU_PER_FILL = 260_000; // CU cost for a successful fill
 const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
 const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
-const FILL_ORDER_THROTTLE_BACKOFF = 10000; // the time to wait before trying to fill a throttled (error filling) node again
-const FILL_ORDER_BACKOFF = 2000; // the time to wait before trying to a node in the filling map again
+const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 export const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
@@ -751,7 +750,7 @@ export class FillerBot implements Bot {
 	protected pruneThrottledNode() {
 		if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
 			for (const [key, value] of this.throttledNodes.entries()) {
-				if (value + 2 * FILL_ORDER_BACKOFF > Date.now()) {
+				if (value + 2 * FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
 					this.throttledNodes.delete(key);
 				}
 			}
@@ -782,7 +781,7 @@ export class FillerBot implements Bot {
 		if (this.fillingNodes.has(nodeToFillSignature)) {
 			const timeStartedToFillNode =
 				this.fillingNodes.get(nodeToFillSignature) || 0;
-			if (timeStartedToFillNode + FILL_ORDER_BACKOFF > now) {
+			if (timeStartedToFillNode + FILL_ORDER_THROTTLE_BACKOFF > now) {
 				// still cooling down on this node, filter it out
 				return false;
 			}
