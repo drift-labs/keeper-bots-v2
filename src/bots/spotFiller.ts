@@ -1052,27 +1052,40 @@ export class SpotFillerBot implements Bot {
 		return successCount;
 	}
 
-	private async processBulkFillTxLogs(nodeToFill: NodeToFill, txSig: string) {
-		let tx: TransactionResponse | null = null;
+	private async processBulkFillTxLogs(
+		nodeToFill: NodeToFill,
+		txSig: string,
+		tx?: VersionedTransaction
+	) {
+		let txResp: TransactionResponse | null = null;
 		let attempts = 0;
-		const config: GetVersionedTransactionConfig = {
+		const cfg: GetVersionedTransactionConfig = {
 			commitment: 'confirmed',
 			maxSupportedTransactionVersion: 0,
 		};
-		while (tx === null && attempts < 10) {
+		while (txResp === null && attempts < 10) {
 			logger.info(`waiting for https://solscan.io/tx/${txSig} to be confirmed`);
-			tx = await this.driftClient.connection.getTransaction(txSig, config);
-			attempts++;
-			// sleep 1s
-			await this.sleep(1000);
+			txResp = await this.driftClient.connection.getTransaction(txSig, cfg);
+
+			if (txResp === null) {
+				if (tx !== undefined) {
+					await this.driftClient.txSender.sendVersionedTransaction(
+						tx,
+						[],
+						this.driftClient.opts
+					);
+				}
+				attempts++;
+				await this.sleep(1000);
+			}
 		}
 
-		if (tx === null) {
+		if (txResp === null) {
 			logger.error(`tx ${txSig} not found`);
 			return 0;
 		}
 
-		return this.handleTransactionLogs(nodeToFill, tx.meta!.logMessages!);
+		return this.handleTransactionLogs(nodeToFill, txResp.meta!.logMessages!);
 	}
 
 	private async sendTxThroughJito(
@@ -1301,7 +1314,11 @@ export class SpotFillerBot implements Bot {
 								});
 							}
 
-							await this.processBulkFillTxLogs(nodeToFill, txSig.txSig);
+							await this.processBulkFillTxLogs(
+								nodeToFill,
+								txSig.txSig,
+								simResult.tx
+							);
 						})
 						.catch(async (e) => {
 							const errorCode = getErrorCode(e);
