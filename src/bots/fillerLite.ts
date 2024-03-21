@@ -20,7 +20,7 @@ import { webhookMessage } from '../webhook';
 import { FillerBot, SETTLE_POSITIVE_PNL_COOLDOWN_MS } from './filler';
 
 import { sleepMs } from '../utils';
-import { BundleSender } from 'src/bundleSender';
+import { BundleSender } from '../bundleSender';
 
 export class FillerLiteBot extends FillerBot {
 	protected orderSubscriber: OrderSubscriber;
