@@ -40,10 +40,9 @@ import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
-	GetVersionedTransactionConfig,
 	PublicKey,
-	TransactionResponse,
 	VersionedTransaction,
+	VersionedTransactionResponse,
 } from '@solana/web3.js';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -87,6 +86,7 @@ const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to f
 const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
+const CONFIRM_TX_ATTEMPTS = 2;
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
@@ -1057,15 +1057,14 @@ export class SpotFillerBot implements Bot {
 		txSig: string,
 		tx?: VersionedTransaction
 	) {
-		let txResp: TransactionResponse | null = null;
+		let txResp: VersionedTransactionResponse | null = null;
 		let attempts = 0;
-		const cfg: GetVersionedTransactionConfig = {
-			commitment: 'confirmed',
-			maxSupportedTransactionVersion: 0,
-		};
-		while (txResp === null && attempts < 10) {
+		while (txResp === null && attempts < CONFIRM_TX_ATTEMPTS) {
 			logger.info(`waiting for https://solscan.io/tx/${txSig} to be confirmed`);
-			txResp = await this.driftClient.connection.getTransaction(txSig, cfg);
+			txResp = await this.driftClient.connection.getTransaction(txSig, {
+				commitment: 'confirmed',
+				maxSupportedTransactionVersion: 0,
+			});
 
 			if (txResp === null) {
 				if (tx !== undefined) {
@@ -1081,7 +1080,7 @@ export class SpotFillerBot implements Bot {
 		}
 
 		if (txResp === null) {
-			logger.error(`tx ${txSig} not found`);
+			logger.error(`tx ${txSig} not found after ${attempts}`);
 			return 0;
 		}
 

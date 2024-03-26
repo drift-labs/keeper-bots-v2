@@ -42,14 +42,13 @@ import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
 	SendTransactionError,
-	TransactionResponse,
 	TransactionSignature,
 	TransactionInstruction,
 	ComputeBudgetProgram,
-	GetVersionedTransactionConfig,
 	AddressLookupTableAccount,
 	Connection,
 	VersionedTransaction,
+	VersionedTransactionResponse,
 } from '@solana/web3.js';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -112,6 +111,7 @@ const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
+const CONFIRM_TX_ATTEMPTS = 2;
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
@@ -1256,15 +1256,14 @@ export class FillerBot implements Bot {
 		nodesFilled: Array<NodeToFill>,
 		txSig: TransactionSignature
 	): Promise<number> {
-		let tx: TransactionResponse | null = null;
+		let tx: VersionedTransactionResponse | null = null;
 		let attempts = 0;
-		const config: GetVersionedTransactionConfig = {
-			commitment: 'confirmed',
-			maxSupportedTransactionVersion: 0,
-		};
-		while (tx === null && attempts < 10) {
+		while (tx === null && attempts < CONFIRM_TX_ATTEMPTS) {
 			logger.info(`waiting for ${txSig} to be confirmed`);
-			tx = await this.driftClient.connection.getTransaction(txSig, config);
+			tx = await this.driftClient.connection.getTransaction(txSig, {
+				commitment: 'confirmed',
+				maxSupportedTransactionVersion: 0,
+			});
 			attempts++;
 			await sleepMs(1000);
 		}
