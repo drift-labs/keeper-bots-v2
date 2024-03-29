@@ -98,6 +98,16 @@ export function loadCommaDelimitToArray(str: string): number[] {
 	}
 }
 
+export function loadCommaDelimitToStringArray(str: string): string[] {
+	try {
+		return str.split(',').filter((element) => {
+			return element.trim() !== '';
+		});
+	} catch (e) {
+		return [];
+	}
+}
+
 export function convertToMarketType(input: string): MarketType {
 	switch (input.toUpperCase()) {
 		case 'PERP':
@@ -441,7 +451,7 @@ export async function simulateAndGetTxWithCUs(
 		resp = await connection.simulateTransaction(tx, {
 			sigVerify: false,
 			replaceRecentBlockhash: true,
-			commitment: connection.commitment,
+			commitment: 'processed',
 		});
 		if (logSimDuration) {
 			console.log(`Simulated tx took: ${Date.now() - start}ms`);

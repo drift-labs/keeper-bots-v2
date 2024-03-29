@@ -1157,6 +1157,8 @@ export class SpotFillerBot implements Bot {
 			throw new Error('expected spot market type');
 		}
 
+		const currSlot = this.dlobSubscriber?.slotSource.getSlot();
+
 		const makerNode = getMakerNodeFromNodeToFill(nodeToFill);
 		const spotMarket = this.driftClient.getSpotMarketAccount(
 			order.marketIndex
@@ -1168,7 +1170,7 @@ export class SpotFillerBot implements Bot {
 					order.marketIndex
 				} (fillTxId: ${fillTxId}):\ntaker: ${node.userAccount!}-${
 					order.orderId
-				} (takerSlot: ${userSlot}) ${convertToNumber(
+				} (takerSlot: ${userSlot}, currSlot: ${currSlot}) ${convertToNumber(
 					order.baseAssetAmountFilled,
 					spotMarketPrecision
 				)}/${convertToNumber(
@@ -1193,7 +1195,7 @@ export class SpotFillerBot implements Bot {
 					order.marketIndex
 				} (fillTxId: ${fillTxId})\ntaker: ${node.userAccount!}-${
 					order.orderId
-				} (takerSlot: ${userSlot}) ${convertToNumber(
+				} (takerSlot: ${userSlot}, currSlot: ${currSlot}) ${convertToNumber(
 					order.baseAssetAmountFilled,
 					spotMarketPrecision
 				)}/${convertToNumber(

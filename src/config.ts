@@ -1,6 +1,9 @@
 import * as fs from 'fs';
 import YAML from 'yaml';
-import { loadCommaDelimitToArray } from './utils';
+import {
+	loadCommaDelimitToArray,
+	loadCommaDelimitToStringArray,
+} from './utils';
 import { OrderExecutionAlgoType } from './types';
 import { DriftEnv } from '@drift-labs/sdk';
 
@@ -82,6 +85,7 @@ export interface GlobalConfig {
 	endpoint?: string;
 	wsEndpoint?: string;
 	heliusEndpoint?: string;
+	additionalSendTxEndpoints?: string[];
 	priorityFeeMethod?: string;
 	maxPriorityFeeMicroLamports?: number;
 	resubTimeoutMs?: number;
@@ -141,6 +145,7 @@ const defaultConfig: Partial<Config> = {
 		endpoint: process.env.ENDPOINT,
 		wsEndpoint: process.env.WS_ENDPOINT,
 		heliusEndpoint: process.env.HELIUS_ENDPOINT,
+		additionalSendTxEndpoints: [],
 		priorityFeeMethod: process.env.PRIORITY_FEE_METHOD ?? 'solana',
 		maxPriorityFeeMicroLamports: parseInt(
 			process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ?? '10000'
@@ -233,6 +238,9 @@ export function loadConfigFromOpts(opts: any): Config {
 			endpoint: opts.endpoint ?? process.env.ENDPOINT,
 			wsEndpoint: opts.wsEndpoint ?? process.env.WS_ENDPOINT,
 			heliusEndpoint: opts.heliusEndpoint ?? process.env.HELIUS_ENDPOINT,
+			additionalSendTxEndpoints: loadCommaDelimitToStringArray(
+				opts.additionalSendTxEndpoints
+			),
 			priorityFeeMethod:
 				opts.priorityFeeMethod ?? process.env.PRIORITY_FEE_METHOD,
 			maxPriorityFeeMicroLamports: parseInt(

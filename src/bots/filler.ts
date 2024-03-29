@@ -149,6 +149,7 @@ function logMessageForNodeToFill(
 	takerUser: string,
 	takerUserSlot: number,
 	makerInfos: Array<DataAndSlot<MakerInfo>>,
+	currSlot: number,
 	prefix?: string
 ): string {
 	const takerNode = node.node;
@@ -165,9 +166,10 @@ function logMessageForNodeToFill(
 	if (prefix) {
 		msg += `${prefix}\n`;
 	}
+
 	msg += `taker on market ${takerOrder.marketIndex}: ${takerUser}-${
 		takerOrder.orderId
-	} (takerSlot: ${takerUserSlot}) ${getVariant(
+	} (takerSlot: ${takerUserSlot}, currSlot: ${currSlot}) ${getVariant(
 		takerOrder.direction
 	)} ${convertToNumber(
 		takerOrder.baseAssetAmountFilled,
@@ -1510,6 +1512,7 @@ export class FillerBot implements Bot {
 					takerUserPubKey,
 					takerUserSlot,
 					makerInfos,
+					this.getMaxSlot(),
 					`Filling multi maker perp node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`
 				)
 			);
@@ -1773,6 +1776,7 @@ export class FillerBot implements Bot {
 					takerUserPubKey,
 					takerUserSlot,
 					makerInfos,
+					this.getMaxSlot(),
 					`Filling perp node ${idx} (fillTxId: ${fillTxId})`
 				)
 			);

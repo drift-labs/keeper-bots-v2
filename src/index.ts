@@ -78,7 +78,8 @@ import { BundleSender } from './bundleSender';
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
 
-const stateCommitment: Commitment = 'processed';
+const preflightCommitment: Commitment = 'processed';
+const stateCommitment: Commitment = 'confirmed';
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
 
 program
@@ -121,6 +122,10 @@ program
 	.option(
 		'--run-once',
 		'Exit after running bot loops once (only for supported bots)'
+	)
+	.option(
+		'--additional-send-tx-endpoints <string>',
+		'Additional RPC endpoints to send transactions to (comma delimited)'
 	)
 	.option(
 		'--websocket',
@@ -281,7 +286,7 @@ const runBot = async () => {
 	const opts: ConfirmOptions = {
 		commitment: stateCommitment,
 		skipPreflight: config.global.txSkipPreflight,
-		preflightCommitment: stateCommitment,
+		preflightCommitment,
 		maxRetries: config.global.txMaxRetries,
 	};
 	const sendTxConnection = new Connection(endpoint, {
@@ -292,6 +297,15 @@ const runBot = async () => {
 
 	const txSenderType = config.global.txSenderType || 'retry';
 	let txSender;
+	let additionalConnections: Connection[] = [];
+	if (
+		config.global.additionalSendTxEndpoints &&
+		config.global.additionalSendTxEndpoints.length > 0
+	) {
+		additionalConnections = config.global.additionalSendTxEndpoints.map(
+			(endpoint) => new Connection(endpoint)
+		);
+	}
 	if (txSenderType === 'retry') {
 		txSender = new RetryTxSender({
 			connection: sendTxConnection,
@@ -299,6 +313,7 @@ const runBot = async () => {
 			opts,
 			timeout: config.global.txRetryTimeoutMs,
 			confirmationStrategy: ConfirmationStrategy.Polling,
+			additionalConnections,
 		});
 	} else {
 		const skipConfirmation =
@@ -311,6 +326,7 @@ const runBot = async () => {
 			wallet,
 			opts,
 			skipConfirmation,
+			additionalConnections,
 		});
 	}
 
