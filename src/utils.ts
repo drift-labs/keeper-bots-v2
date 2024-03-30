@@ -2,9 +2,12 @@ import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import fs from 'fs';
 import { logger } from './logger';
 import {
+	BASE_PRECISION,
 	BN,
 	DLOB,
 	DLOBNode,
+	DataAndSlot,
+	MakerInfo,
 	MarketType,
 	NodeToFill,
 	NodeToTrigger,
@@ -19,6 +22,7 @@ import {
 	Wallet,
 	convertToNumber,
 	getOrderSignature,
+	getVariant,
 } from '@drift-labs/sdk';
 import {
 	createAssociatedTokenAccountInstruction,
@@ -566,4 +570,108 @@ export interface ExtendedTransactionError {
 
 export interface CustomError {
 	Custom?: number;
+}
+
+export function logMessageForNodeToFill(
+	node: NodeToFill,
+	takerUser: string,
+	takerUserSlot: number,
+	makerInfos: Array<DataAndSlot<MakerInfo>>,
+	currSlot: number,
+	prefix?: string,
+	basePrecision: BN = BASE_PRECISION,
+	fallbackSource = 'vAMM'
+): string {
+	const takerNode = node.node;
+	const takerOrder = takerNode.order;
+	if (!takerOrder) {
+		return 'no taker order';
+	}
+
+	if (node.makerNodes.length !== makerInfos.length) {
+		logger.error(`makerNodes and makerInfos length mismatch`);
+	}
+
+	let msg = '';
+	if (prefix) {
+		msg += `${prefix}\n`;
+	}
+
+	msg += `taker on market ${takerOrder.marketIndex}: ${takerUser}-${
+		takerOrder.orderId
+	} (takerSlot: ${takerUserSlot}, currSlot: ${currSlot}) ${getVariant(
+		takerOrder.direction
+	)} ${convertToNumber(
+		takerOrder.baseAssetAmountFilled,
+		basePrecision
+	)}/${convertToNumber(
+		takerOrder.baseAssetAmount,
+		basePrecision
+	)} @ ${convertToNumber(
+		takerOrder.price,
+		basePrecision
+	)} (orderType: ${getVariant(takerOrder.orderType)})\n`;
+	msg += `makers:\n`;
+	if (makerInfos.length > 0) {
+		for (let i = 0; i < makerInfos.length; i++) {
+			const maker = makerInfos[i].data;
+			const makerSlot = makerInfos[i].slot;
+			const makerOrder = maker.order!;
+			msg += `  [${i}] market ${
+				makerOrder.marketIndex
+			}: ${maker.maker.toBase58()}-${
+				makerOrder.orderId
+			} (makerSlot: ${makerSlot}) ${getVariant(
+				makerOrder.direction
+			)} ${convertToNumber(
+				makerOrder.baseAssetAmountFilled,
+				basePrecision
+			)}/${convertToNumber(
+				makerOrder.baseAssetAmount,
+				basePrecision
+			)} @ ${convertToNumber(makerOrder.price, PRICE_PRECISION)} (offset: ${
+				makerOrder.oraclePriceOffset / PRICE_PRECISION.toNumber()
+			}) (orderType: ${getVariant(makerOrder.orderType)})\n`;
+		}
+	} else {
+		msg += `  ${fallbackSource}`;
+	}
+	return msg;
+}
+
+export function getTransactionAccountMetas(
+	tx: VersionedTransaction,
+	lutAccounts: Array<AddressLookupTableAccount>
+): {
+	estTxSize: number;
+	accountMetas: any[];
+	writeAccs: number;
+	txAccounts: number;
+} {
+	let writeAccs = 0;
+	const accountMetas: any[] = [];
+	const estTxSize = tx.message.serialize().length;
+	const acc = tx.message.getAccountKeys({
+		addressLookupTableAccounts: lutAccounts,
+	});
+	const txAccounts = acc.length;
+	for (let i = 0; i < txAccounts; i++) {
+		const meta: any = {};
+		if (tx.message.isAccountWritable(i)) {
+			writeAccs++;
+			meta['writeable'] = true;
+		}
+		if (tx.message.isAccountSigner(i)) {
+			meta['signer'] = true;
+		}
+		meta['address'] = acc.get(i)!.toBase58();
+		accountMetas.push(meta);
+	}
+
+	return {
+		estTxSize,
+		accountMetas,
+		writeAccs,
+		txAccounts,
+	};
 }

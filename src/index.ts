@@ -567,6 +567,7 @@ const runBot = async () => {
 		// to avoid long startup, spotFiller will fetch userAccounts as needed and build the map over time
 		needUserMapSubscribe = false;
 		needPriorityFeeSubscriber = true;
+		needBlockhashSubscriber = true;
 
 		bots.push(
 			new SpotFillerBot(
@@ -581,6 +582,7 @@ const runBot = async () => {
 				},
 				config.botConfigs!.spotFiller!,
 				priorityFeeSubscriber,
+				blockhashSubscriber,
 				eventSubscriber,
 				bundleSender
 			)

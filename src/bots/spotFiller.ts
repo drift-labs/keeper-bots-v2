@@ -1,6 +1,5 @@
 import {
 	DriftEnv,
-	User,
 	ReferrerInfo,
 	DriftClient,
 	SpotMarketAccount,
@@ -17,8 +16,6 @@ import {
 	SerumV3FulfillmentConfigAccount,
 	OrderActionRecord,
 	OrderRecord,
-	convertToNumber,
-	PRICE_PRECISION,
 	WrappedEvent,
 	DLOBNode,
 	DLOBSubscriber,
@@ -34,6 +31,9 @@ import {
 	OrderSubscriber,
 	UserAccount,
 	PriorityFeeSubscriber,
+	DataAndSlot,
+	getUserAccountPublicKey,
+	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -41,6 +41,8 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 	PublicKey,
+	SendTransactionError,
+	TransactionInstruction,
 	VersionedTransaction,
 	VersionedTransactionResponse,
 } from '@solana/web3.js';
@@ -74,12 +76,18 @@ import {
 } from './common/txLogParse';
 import { FillerConfig } from '../config';
 import {
+	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
+	getTransactionAccountMetas,
 	handleSimResultError,
+	logMessageForNodeToFill,
 	simulateAndGetTxWithCUs,
+	SimulateAndGetTxWithCUsResponse,
 } from '../utils';
 import { BundleSender } from '../bundleSender';
+import { MakerNodeMap } from './filler';
+import { selectMakers } from '../makerSelection';
 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
@@ -87,6 +95,8 @@ const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a n
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
 const CONFIRM_TX_ATTEMPTS = 2;
+const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
+const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana-labs/solana/issues/27241
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
@@ -200,6 +210,7 @@ export class SpotFillerBot implements Bot {
 
 	private driftClient: DriftClient;
 	private eventSubscriber?: EventSubscriber;
+	private blockhashSubscriber: BlockhashSubscriber;
 	private pollingIntervalMs: number;
 	private driftLutAccount?: AddressLookupTableAccount;
 	private driftSpotLutAccount?: AddressLookupTableAccount;
@@ -257,6 +268,7 @@ export class SpotFillerBot implements Bot {
 		runtimeSpec: RuntimeSpec,
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
+		blockhashSubscriber: BlockhashSubscriber,
 		eventSubscriber?: EventSubscriber,
 		bundleSender?: BundleSender
 	) {
@@ -328,6 +340,7 @@ export class SpotFillerBot implements Bot {
 		}
 
 		this.bundleSender = bundleSender;
+		this.blockhashSubscriber = blockhashSubscriber;
 	}
 
 	private initializeMetrics() {
@@ -680,6 +693,14 @@ export class SpotFillerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 	}
 
+	protected getMaxSlot(): number {
+		return Math.max(
+			this.dlobSubscriber?.slotSource.getSlot() ?? 0,
+			this.orderSubscriber.getSlot(),
+			this.userMap!.getSlot()
+		);
+	}
+
 	public async healthCheck(): Promise<boolean> {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
@@ -691,6 +712,19 @@ export class SpotFillerBot implements Bot {
 		});
 
 		return healthy;
+	}
+
+	private async getUserAccountAndSlotFromMap(
+		key: string
+	): Promise<DataAndSlot<UserAccount>> {
+		const user = await this.userMap!.mustGetWithSlot(
+			key,
+			this.driftClient.userAccountSubscriptionConfig
+		);
+		return {
+			data: user.data.getUserAccount(),
+			slot: user.slot,
+		};
 	}
 
 	private getSpotNodesForMarket(
@@ -781,34 +815,59 @@ export class SpotFillerBot implements Bot {
 	}
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
-		makerInfo: MakerInfo | undefined;
-		makerInfoSlot?: number;
-		user: User;
-		userSlot?: number;
+		makerInfos: Array<DataAndSlot<MakerInfo>>;
+		takerUserPubKey: string;
+		takerUser: UserAccount;
+		takerUserSlot: number;
 		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
 	}> {
-		let makerInfo: MakerInfo | undefined;
-		const makerNode = getMakerNodeFromNodeToFill(nodeToFill);
-		let makerUserSlot: number | undefined = undefined;
-		if (makerNode) {
-			const makerUser = await this.userMap!.mustGetWithSlot(
-				makerNode.userAccount!.toString(),
-				this.driftClient.userAccountSubscriptionConfig
-			);
-			const makerUserAccount = makerUser.data.getUserAccount();
-			makerUserSlot = makerUser.slot;
+		const makerInfos: Array<DataAndSlot<MakerInfo>> = [];
 
-			const makerAuthority = makerUserAccount.authority;
-			const makerUserStats = (
-				await this.userStatsMap!.mustGet(makerAuthority.toString())
-			).userStatsAccountPublicKey;
-			makerInfo = {
-				maker: new PublicKey(makerNode.userAccount!),
-				makerUserAccount: makerUserAccount,
-				order: makerNode.order,
-				makerStats: makerUserStats,
-			};
+		if (nodeToFill.makerNodes.length > 0) {
+			let makerNodesMap: MakerNodeMap = new Map<string, DLOBNode[]>();
+			for (const makerNode of nodeToFill.makerNodes) {
+				if (this.isDLOBNodeThrottled(makerNode)) {
+					continue;
+				}
+
+				if (!makerNode.userAccount) {
+					continue;
+				}
+
+				if (makerNodesMap.has(makerNode.userAccount!)) {
+					makerNodesMap.get(makerNode.userAccount!)!.push(makerNode);
+				} else {
+					makerNodesMap.set(makerNode.userAccount!, [makerNode]);
+				}
+			}
+
+			if (makerNodesMap.size > MAX_MAKERS_PER_FILL) {
+				logger.info(`selecting from ${makerNodesMap.size} makers`);
+				makerNodesMap = selectMakers(makerNodesMap);
+				logger.info(`selected: ${Array.from(makerNodesMap.keys()).join(',')}`);
+			}
+
+			for (const [makerAccount, makerNodes] of makerNodesMap) {
+				const makerNode = makerNodes[0];
+
+				const makerUserAccount = await this.getUserAccountAndSlotFromMap(
+					makerAccount
+				);
+				const makerAuthority = makerUserAccount.data.authority;
+				const makerUserStats = (
+					await this.userStatsMap!.mustGet(makerAuthority.toString())
+				).userStatsAccountPublicKey;
+				makerInfos.push({
+					slot: makerUserAccount.slot,
+					data: {
+						maker: new PublicKey(makerAccount),
+						makerUserAccount: makerUserAccount.data,
+						order: makerNode.order,
+						makerStats: makerUserStats,
+					},
+				});
+			}
 		}
 
 		const node = nodeToFill.node;
@@ -825,29 +884,66 @@ export class SpotFillerBot implements Bot {
 		).getReferrerInfo();
 
 		return Promise.resolve({
-			makerInfo,
-			makerInfoSlot: makerUserSlot,
-			user: user.data,
-			userSlot: user.slot,
+			makerInfos,
+			takerUser: user.data.getUserAccount(),
+			takerUserSlot: user.slot,
+			takerUserPubKey: node.userAccount!.toString(),
 			referrerInfo,
 			marketType: order.marketType,
 		});
 	}
 
-	private nodeIsThrottled(nodeSignature: string): boolean {
-		if (this.throttledNodes.has(nodeSignature)) {
-			const lastFillAttempt = this.throttledNodes.get(nodeSignature) ?? 0;
-			if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
+	/**
+	 * Checks if the node is still throttled, if not, clears it from the throttledNodes map
+	 * @param throttleKey key in throttleMap
+	 * @returns  true if throttleKey is still throttled, false if throttleKey is no longer throttled
+	 */
+	protected isThrottledNodeStillThrottled(throttleKey: string): boolean {
+		const lastFillAttempt = this.throttledNodes.get(throttleKey) || 0;
+		if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
+			return true;
+		} else {
+			this.clearThrottledNode(throttleKey);
+			return false;
+		}
+	}
+
+	protected isDLOBNodeThrottled(dlobNode: DLOBNode): boolean {
+		if (!dlobNode.userAccount || !dlobNode.order) {
+			return false;
+		}
+
+		// first check if the userAccount itself is throttled
+		const userAccountPubkey = dlobNode.userAccount;
+		if (this.throttledNodes.has(userAccountPubkey)) {
+			if (this.isThrottledNodeStillThrottled(userAccountPubkey)) {
 				return true;
+			} else {
+				return false;
 			}
 		}
+
+		// then check if the specific order is throttled
+		const orderSignature = getFillSignatureFromUserAccountAndOrderId(
+			dlobNode.userAccount,
+			dlobNode.order.orderId.toString()
+		);
+		if (this.throttledNodes.has(orderSignature)) {
+			if (this.isThrottledNodeStillThrottled(orderSignature)) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+
 		return false;
 	}
-	private throttleNode(nodeSignature: string) {
+
+	private setThrottleNode(nodeSignature: string) {
 		this.throttledNodes.set(nodeSignature, Date.now());
 	}
 
-	private unthrottleNode(nodeSignature: string) {
+	private clearThrottledNode(nodeSignature: string) {
 		this.throttledNodes.delete(nodeSignature);
 	}
 
@@ -869,25 +965,25 @@ export class SpotFillerBot implements Bot {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
-	private getFillSignatureFromUserAccountAndOrderId(
-		userAccount: string,
-		orderId: string
-	): string {
-		return `${userAccount}-${orderId}`;
-	}
-
 	/**
 	 * Iterates through a tx's logs and handles it appropriately e.g. throttling users, updating metrics, etc.)
 	 *
 	 * @param nodesFilled nodes that we sent a transaction to fill
 	 * @param logs logs from tx.meta.logMessages or this.driftClient.program._events._eventParser.parseLogs
 	 *
-	 * @returns number of nodes successfully filled
+	 * @returns number of nodes successfully filled, and whether the tx exceeded CUs
 	 */
 	private async handleTransactionLogs(
 		nodeFilled: NodeToFill,
-		logs: string[]
-	): Promise<number> {
+		logs: string[] | null | undefined
+	): Promise<{ filledNodes: number; exceededCUs: boolean }> {
+		if (!logs) {
+			return {
+				filledNodes: 0,
+				exceededCUs: false,
+			};
+		}
+
 		let inFillIx = false;
 		let errorThisFillIx = false;
 		let successCount = 0;
@@ -959,11 +1055,10 @@ export class SpotFillerBot implements Bot {
 					continue;
 				}
 				const order = makerNode.order!;
-				const makerNodeSignature =
-					this.getFillSignatureFromUserAccountAndOrderId(
-						makerNode.userAccount!.toString(),
-						order.orderId.toString()
-					);
+				const makerNodeSignature = getFillSignatureFromUserAccountAndOrderId(
+					makerNode.userAccount!.toString(),
+					order.orderId.toString()
+				);
 				logger.error(
 					`maker breach maint. margin, assoc node: ${makerNode.userAccount!.toString()}, ${
 						order.orderId
@@ -1007,11 +1102,10 @@ export class SpotFillerBot implements Bot {
 			if (takerBreachedMaintenanceMargin) {
 				const node = nodeFilled.node!;
 				const order = node.order!;
-				const takerNodeSignature =
-					this.getFillSignatureFromUserAccountAndOrderId(
-						node.userAccount!.toString(),
-						order.orderId.toString()
-					);
+				const takerNodeSignature = getFillSignatureFromUserAccountAndOrderId(
+					node.userAccount!.toString(),
+					order.orderId.toString()
+				);
 				logger.error(
 					`taker breach maint. margin, assoc node: ${node.userAccount!.toString()}, ${
 						order.orderId
@@ -1051,14 +1145,28 @@ export class SpotFillerBot implements Bot {
 			}
 		}
 
-		return successCount;
+		if (logs.length > 0) {
+			if (
+				logs[logs.length - 1].includes('exceeded CUs meter at BPF instruction')
+			) {
+				return {
+					filledNodes: successCount,
+					exceededCUs: true,
+				};
+			}
+		}
+
+		return {
+			filledNodes: successCount,
+			exceededCUs: false,
+		};
 	}
 
 	private async processBulkFillTxLogs(
 		nodeToFill: NodeToFill,
 		txSig: string,
 		tx?: VersionedTransaction
-	) {
+	): Promise<number> {
 		let txResp: VersionedTransactionResponse | null = null;
 		let attempts = 0;
 		while (txResp === null && attempts < CONFIRM_TX_ATTEMPTS) {
@@ -1086,7 +1194,9 @@ export class SpotFillerBot implements Bot {
 			return 0;
 		}
 
-		return this.handleTransactionLogs(nodeToFill, txResp.meta!.logMessages!);
+		return (
+			await this.handleTransactionLogs(nodeToFill, txResp.meta!.logMessages!)
+		).filledNodes;
 	}
 
 	private async sendTxThroughJito(
@@ -1124,6 +1234,341 @@ export class SpotFillerBot implements Bot {
 		return this.bundleSender?.slotsUntilNextLeader();
 	}
 
+	private async getBlockhashForTx(): Promise<string> {
+		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(10);
+		if (cachedBlockhash) {
+			return cachedBlockhash.blockhash as string;
+		}
+
+		const recentBlockhash =
+			await this.driftClient.connection.getLatestBlockhash({
+				commitment: 'confirmed',
+			});
+
+		return recentBlockhash.blockhash;
+	}
+
+	protected async sendFillTxAndParseLogs(
+		fillTxId: number,
+		nodeSent: NodeToFill,
+		tx: VersionedTransaction,
+		buildForBundle: boolean,
+		lutAccounts: Array<AddressLookupTableAccount>
+	) {
+		const { estTxSize, accountMetas, writeAccs, txAccounts } =
+			getTransactionAccountMetas(tx, lutAccounts);
+
+		const txStart = Date.now();
+		if (buildForBundle) {
+			await this.sendTxThroughJito(tx, fillTxId);
+		} else if (this.canSendOutsideJito()) {
+			this.driftClient.txSender
+				.sendVersionedTransaction(tx, [], this.driftClient.opts)
+				.then(async (txSig) => {
+					logger.info(
+						`Filled spot order (fillTxId: ${fillTxId}): https://solscan.io/tx/${txSig.txSig}`
+					);
+
+					const duration = Date.now() - txStart;
+					const user = this.driftClient.getUser();
+					if (this.sdkCallDurationHistogram) {
+						this.sdkCallDurationHistogram!.record(duration, {
+							...metricAttrFromUserAccount(
+								user.getUserAccountPublicKey(),
+								user.getUserAccount()
+							),
+							method: 'fillSpotOrder',
+						});
+					}
+
+					const parseLogsStart = Date.now();
+					this.processBulkFillTxLogs(nodeSent, txSig.txSig, tx)
+						.then((successfulFills) => {
+							const processBulkFillLogsDuration = Date.now() - parseLogsStart;
+							logger.info(
+								`parse logs took ${processBulkFillLogsDuration}ms, successfulFills ${successfulFills} (fillTxId: ${fillTxId})`
+							);
+						})
+						.catch((err) => {
+							const e = err as Error;
+							logger.error(
+								`Failed to process fill tx logs (fillTxId: ${fillTxId}):\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+							webhookMessage(
+								`[${this.name}]: :x: error processing fill tx logs:\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+						});
+				})
+				.catch(async (e) => {
+					const simError = e as SendTransactionError;
+					logger.error(
+						`Failed to send packed tx txAccountKeys: ${txAccounts} (${writeAccs} writeable) (fillTxId: ${fillTxId}), error: ${simError.message}`
+					);
+
+					if (e.message.includes('too large:')) {
+						logger.error(
+							`[${
+								this.name
+							}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${
+								e.message
+							}\n${JSON.stringify(accountMetas)}`
+						);
+						webhookMessage(
+							`[${
+								this.name
+							}]: :boxing_glove: Tx too large (fillId: ${fillTxId}). ${
+								e.message
+							}\n${JSON.stringify(accountMetas)}`
+						);
+						return;
+					}
+
+					if (simError.logs && simError.logs.length > 0) {
+						await this.handleTransactionLogs(nodeSent, simError.logs);
+
+						const errorCode = getErrorCode(e);
+						logger.error(
+							`Failed to send tx, sim error (fillTxId: ${fillTxId}) error code: ${errorCode}`
+						);
+
+						if (
+							errorCode &&
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(e as Error).message.includes('Transaction was not confirmed')
+						) {
+							logger.error(
+								`Failed to send tx, sim error (fillTxId: ${fillTxId}) sim logs:\n${
+									simError.logs ? simError.logs.join('\n') : ''
+								}\n${e.stack || e}`
+							);
+
+							webhookMessage(
+								`[${this.name}]: :x: error simulating tx:\n${
+									simError.logs ? simError.logs.join('\n') : ''
+								}\n${e.stack || e}`
+							);
+						}
+					}
+				})
+				.finally(() => {
+					this.clearThrottledNode(getNodeToFillSignature(nodeSent));
+				});
+		}
+	}
+
+	/**
+	 *
+	 * @param fillTxId id of current fill
+	 * @param nodeToFill taker node to fill with list of makers to use
+	 * @returns true if successful, false if fail, and should retry with fewer makers
+	 */
+	private async fillMultiMakerSpotNodes(
+		fillTxId: number,
+		nodeToFill: NodeToFill,
+		buildForBundle: boolean,
+		spotPrecision: BN
+	): Promise<boolean> {
+		const ixs: Array<TransactionInstruction> = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000,
+			}),
+		];
+		if (!buildForBundle) {
+			ixs.push(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult()
+					),
+				})
+			);
+		}
+
+		try {
+			const {
+				makerInfos,
+				takerUser,
+				takerUserPubKey,
+				takerUserSlot,
+				referrerInfo,
+				marketType,
+			} = await this.getNodeFillInfo(nodeToFill);
+
+			logger.info(
+				logMessageForNodeToFill(
+					nodeToFill,
+					takerUserPubKey,
+					takerUserSlot,
+					makerInfos,
+					this.getMaxSlot(),
+					`Filling multi maker spot node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`,
+					spotPrecision,
+					'SHOULD_NOT_HAVE_NO_MAKERS'
+				)
+			);
+
+			if (!isVariant(marketType, 'perp')) {
+				throw new Error('expected perp market type');
+			}
+
+			let makerInfosToUse = makerInfos;
+			const buildTxWithMakerInfos = async (
+				makers: DataAndSlot<MakerInfo>[]
+			): Promise<SimulateAndGetTxWithCUsResponse> => {
+				ixs.push(
+					await this.driftClient.getFillPerpOrderIx(
+						await getUserAccountPublicKey(
+							this.driftClient.program.programId,
+							takerUser.authority,
+							takerUser.subAccountId
+						),
+						takerUser,
+						nodeToFill.node.order!,
+						makers.map((m) => m.data),
+						referrerInfo
+					)
+				);
+
+				// this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
+
+				if (this.revertOnFailure) {
+					ixs.push(await this.driftClient.getRevertFillIx());
+				}
+				const simResult = await simulateAndGetTxWithCUs(
+					ixs,
+					this.driftClient.connection,
+					this.driftClient.txSender,
+					[this.driftLutAccount!],
+					[],
+					this.driftClient.opts,
+					SIM_CU_ESTIMATE_MULTIPLIER,
+					true,
+					this.simulateTxForCUEstimate,
+					await this.getBlockhashForTx()
+				);
+				return simResult;
+			};
+
+			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
+			let txAccounts = simResult.tx.message.getAccountKeys({
+				addressLookupTableAccounts: [this.driftLutAccount!],
+			}).length;
+			let attempt = 0;
+			while (txAccounts > MAX_ACCOUNTS_PER_TX && makerInfosToUse.length > 0) {
+				logger.info(
+					`(fillTxId: ${fillTxId} attempt ${attempt++}) Too many accounts, remove 1 and try again (had ${
+						makerInfosToUse.length
+					} maker and ${txAccounts} accounts)`
+				);
+				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
+				simResult = await buildTxWithMakerInfos(makerInfosToUse);
+				txAccounts = simResult.tx.message.getAccountKeys({
+					addressLookupTableAccounts: [this.driftLutAccount!],
+				}).length;
+			}
+
+			if (makerInfosToUse.length === 0) {
+				logger.error(
+					`No makerInfos left to use for multi maker perp node (fillTxId: ${fillTxId})`
+				);
+				return true;
+			}
+
+			logger.info(
+				`tryFillMultiMakerPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
+			);
+
+			if (simResult.simError) {
+				logger.error(
+					`Error simulating multi maker perp node (fillTxId: ${fillTxId}): ${JSON.stringify(
+						simResult.simError
+					)}\nTaker slot: ${takerUserSlot}\nMaker slots: ${makerInfosToUse
+						.map((m) => `  ${m.data.maker.toBase58()}: ${m.slot}`)
+						.join('\n')}`
+				);
+				handleSimResultError(
+					simResult,
+					errorCodesToSuppress,
+					`${this.name}: (fillTxId: ${fillTxId})`
+				);
+				if (simResult.simTxLogs) {
+					const { exceededCUs } = await this.handleTransactionLogs(
+						nodeToFill,
+						simResult.simTxLogs
+					);
+					if (exceededCUs) {
+						return false;
+					}
+				}
+			} else {
+				if (!this.dryRun) {
+					const lutAccounts: Array<AddressLookupTableAccount> = [];
+					this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
+					this.driftSpotLutAccount &&
+						lutAccounts.push(this.driftSpotLutAccount);
+					this.sendFillTxAndParseLogs(
+						fillTxId,
+						nodeToFill,
+						simResult.tx,
+						buildForBundle,
+						lutAccounts
+					);
+				} else {
+					logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
+				}
+			}
+		} catch (e) {
+			if (e instanceof Error) {
+				logger.error(
+					`Error filling multi maker perp node (fillTxId: ${fillTxId}): ${
+						e.stack ? e.stack : e.message
+					}`
+				);
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction.
+	 * This will keep retrying with a smaller set of makers until it succeeds or runs out of makers.
+	 * @param nodeToFill node with multiple makers
+	 */
+	private async tryFillMultiMakerSpotNode(
+		fillTxId: number,
+		nodeToFill: NodeToFill,
+		buildForBundle: boolean,
+		spotPrecision: BN
+	) {
+		let nodeWithMakerSet = nodeToFill;
+		while (
+			!(await this.fillMultiMakerSpotNodes(
+				fillTxId,
+				nodeWithMakerSet,
+				buildForBundle,
+				spotPrecision
+			))
+		) {
+			const newMakerSet = nodeWithMakerSet.makerNodes
+				.sort(() => 0.5 - Math.random())
+				.slice(0, Math.ceil(nodeWithMakerSet.makerNodes.length / 2));
+			nodeWithMakerSet = {
+				node: nodeWithMakerSet.node,
+				makerNodes: newMakerSet,
+			};
+			if (newMakerSet.length === 0) {
+				logger.error(
+					`No makers left to use for multi maker perp node (fillTxId: ${fillTxId})`
+				);
+				return;
+			}
+		}
+	}
+
 	private async tryFillSpotNode(
 		nodeToFill: NodeToFill,
 		fillTxId: number,
@@ -1131,24 +1576,32 @@ export class SpotFillerBot implements Bot {
 		fallbackAskSource?: FallbackLiquiditySource,
 		fallbackBidSource?: FallbackLiquiditySource
 	) {
-		const nodeSignature = getNodeToFillSignature(nodeToFill);
-		if (this.nodeIsThrottled(nodeSignature)) {
-			logger.info(`Throttling ${nodeSignature} (fillTxId: ${fillTxId})`);
-			return Promise.resolve(undefined);
-		}
-
 		const node = nodeToFill.node!;
 		const order = node.order!;
+		const spotMarket = this.driftClient.getSpotMarketAccount(
+			order.marketIndex
+		)!;
+		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
+
+		if (nodeToFill.makerNodes.length > 1) {
+			// do multi maker fills in a separate tx since they're larger
+			return this.tryFillMultiMakerSpotNode(
+				fillTxId,
+				nodeToFill,
+				buildForBundle,
+				spotMarketPrecision
+			);
+		}
 
 		const fallbackSource = isVariant(order.direction, 'short')
 			? fallbackBidSource
 			: fallbackAskSource;
 
 		const {
-			makerInfo,
-			makerInfoSlot,
-			user,
-			userSlot,
+			makerInfos,
+			takerUser,
+			takerUserPubKey,
+			takerUserSlot,
 			referrerInfo,
 			marketType,
 		} = await this.getNodeFillInfo(nodeToFill);
@@ -1157,57 +1610,7 @@ export class SpotFillerBot implements Bot {
 			throw new Error('expected spot market type');
 		}
 
-		const currSlot = this.dlobSubscriber?.slotSource.getSlot();
-
-		const makerNode = getMakerNodeFromNodeToFill(nodeToFill);
-		const spotMarket = this.driftClient.getSpotMarketAccount(
-			order.marketIndex
-		)!;
-		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
-		if (makerNode) {
-			logger.info(
-				`filling spot node in market: ${
-					order.marketIndex
-				} (fillTxId: ${fillTxId}):\ntaker: ${node.userAccount!}-${
-					order.orderId
-				} (takerSlot: ${userSlot}, currSlot: ${currSlot}) ${convertToNumber(
-					order.baseAssetAmountFilled,
-					spotMarketPrecision
-				)}/${convertToNumber(
-					order.baseAssetAmount,
-					spotMarketPrecision
-				)} @ ${convertToNumber(
-					order.price,
-					PRICE_PRECISION
-				)}\nmaker: ${makerNode.userAccount!}-${
-					makerNode.order!.orderId
-				} (makerSlot: ${makerInfoSlot}) ${convertToNumber(
-					makerNode.order!.baseAssetAmountFilled,
-					spotMarketPrecision
-				)}/${convertToNumber(
-					makerNode.order!.baseAssetAmount,
-					spotMarketPrecision
-				)} @ ${convertToNumber(makerNode.order!.price, PRICE_PRECISION)}`
-			);
-		} else {
-			logger.info(
-				`filling spot node in market: ${
-					order.marketIndex
-				} (fillTxId: ${fillTxId})\ntaker: ${node.userAccount!}-${
-					order.orderId
-				} (takerSlot: ${userSlot}, currSlot: ${currSlot}) ${convertToNumber(
-					order.baseAssetAmountFilled,
-					spotMarketPrecision
-				)}/${convertToNumber(
-					order.baseAssetAmount,
-					spotMarketPrecision
-				)} @ ${convertToNumber(
-					order.price,
-					PRICE_PRECISION
-				)}\nmaker: ${fallbackSource}`
-			);
-		}
-
+		const makerInfo = makerInfos.length > 0 ? makerInfos[0].data : undefined;
 		let fulfillmentConfig:
 			| SerumV3FulfillmentConfigAccount
 			| PhoenixV1FulfillmentConfigAccount
@@ -1228,6 +1631,19 @@ export class SpotFillerBot implements Bot {
 			}
 		}
 
+		logger.info(
+			logMessageForNodeToFill(
+				nodeToFill,
+				takerUserPubKey,
+				takerUserSlot,
+				makerInfos,
+				this.getMaxSlot(),
+				`Filling spot node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`,
+				spotMarketPrecision,
+				fallbackSource as string
+			)
+		);
+
 		const ixs = [
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,
@@ -1245,8 +1661,8 @@ export class SpotFillerBot implements Bot {
 
 		ixs.push(
 			await this.driftClient.getFillSpotOrderIx(
-				user.getUserAccountPublicKey(),
-				user.getUserAccount(),
+				new PublicKey(takerUserPubKey),
+				takerUser,
 				nodeToFill.node.order,
 				fulfillmentConfig,
 				makerInfo,
@@ -1258,7 +1674,6 @@ export class SpotFillerBot implements Bot {
 			ixs.push(await this.driftClient.getRevertFillIx());
 		}
 
-		const txStart = Date.now();
 		const lutAccounts: Array<AddressLookupTableAccount> = [];
 		this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
 		this.driftSpotLutAccount && lutAccounts.push(this.driftSpotLutAccount);
@@ -1293,73 +1708,13 @@ export class SpotFillerBot implements Bot {
 			}
 		} else {
 			if (!this.dryRun) {
-				if (buildForBundle) {
-					await this.sendTxThroughJito(simResult.tx, fillTxId);
-					this.unthrottleNode(nodeSignature);
-				} else if (this.canSendOutsideJito()) {
-					this.throttleNode(nodeSignature);
-					this.driftClient.txSender
-						.sendVersionedTransaction(simResult.tx, [], this.driftClient.opts)
-						.then(async (txSig) => {
-							logger.info(
-								`Filled spot order ${nodeSignature} (fillTxId: ${fillTxId}): https://solscan.io/tx/${txSig.txSig}`
-							);
-
-							const duration = Date.now() - txStart;
-							const user = this.driftClient.getUser();
-							if (this.sdkCallDurationHistogram) {
-								this.sdkCallDurationHistogram!.record(duration, {
-									...metricAttrFromUserAccount(
-										user.getUserAccountPublicKey(),
-										user.getUserAccount()
-									),
-									method: 'fillSpotOrder',
-								});
-							}
-
-							await this.processBulkFillTxLogs(
-								nodeToFill,
-								txSig.txSig,
-								simResult.tx
-							);
-						})
-						.catch(async (e) => {
-							const errorCode = getErrorCode(e);
-							if (!errorCode) {
-								console.error(e);
-							} else {
-								logger.error(
-									`Failed to fill spot order for (fillTxId: ${fillTxId}) ${user
-										.getUserAccountPublicKey()
-										.toBase58()} order ${
-										nodeToFill.node.order!.orderId
-									} on market ${nodeToFill.node.order!.marketIndex} makers: ${
-										nodeToFill.makerNodes.length
-									} (errorCode: ${errorCode}): `
-								);
-							}
-
-							if (e.logs) {
-								await this.handleTransactionLogs(nodeToFill, e.logs);
-							}
-
-							if (
-								errorCode &&
-								!errorCodesToSuppress.includes(errorCode) &&
-								!(e as Error).message.includes('Transaction was not confirmed')
-							) {
-								const msg = `[${
-									this.name
-								}]: :x: error trying to fill spot orders: \n\nSim logs: \n${
-									e.logs ? (e.logs as Array<string>).join('\n') : ''
-								}\n\n${e.stack ? e.stack : e.message}`;
-								webhookMessage(msg);
-							}
-						})
-						.finally(() => {
-							this.unthrottleNode(nodeSignature);
-						});
-				}
+				this.sendFillTxAndParseLogs(
+					fillTxId,
+					nodeToFill,
+					simResult.tx,
+					buildForBundle,
+					lutAccounts
+				);
 			} else {
 				logger.info(`dry run, not filling spot order (fillTxId: ${fillTxId})`);
 			}

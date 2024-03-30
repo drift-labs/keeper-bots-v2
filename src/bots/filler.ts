@@ -15,10 +15,7 @@ import {
 	UserStatsMap,
 	MarketType,
 	isOrderExpired,
-	getVariant,
-	PRICE_PRECISION,
 	convertToNumber,
-	BASE_PRECISION,
 	QUOTE_PRECISION,
 	WrappedEvent,
 	BulkAccountLoader,
@@ -88,7 +85,9 @@ import {
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
+	getTransactionAccountMetas,
 	handleSimResultError,
+	logMessageForNodeToFill,
 	simulateAndGetTxWithCUs,
 	sleepMs,
 } from '../utils';
@@ -142,71 +141,6 @@ enum METRIC_TYPES {
 	tx_sim_error_count = 'tx_sim_error_count',
 	user_map_user_account_keys = 'user_map_user_account_keys',
 	user_stats_map_authority_keys = 'user_stats_map_authority_keys',
-}
-
-function logMessageForNodeToFill(
-	node: NodeToFill,
-	takerUser: string,
-	takerUserSlot: number,
-	makerInfos: Array<DataAndSlot<MakerInfo>>,
-	currSlot: number,
-	prefix?: string
-): string {
-	const takerNode = node.node;
-	const takerOrder = takerNode.order;
-	if (!takerOrder) {
-		return 'no taker order';
-	}
-
-	if (node.makerNodes.length !== makerInfos.length) {
-		logger.error(`makerNodes and makerInfos length mismatch`);
-	}
-
-	let msg = '';
-	if (prefix) {
-		msg += `${prefix}\n`;
-	}
-
-	msg += `taker on market ${takerOrder.marketIndex}: ${takerUser}-${
-		takerOrder.orderId
-	} (takerSlot: ${takerUserSlot}, currSlot: ${currSlot}) ${getVariant(
-		takerOrder.direction
-	)} ${convertToNumber(
-		takerOrder.baseAssetAmountFilled,
-		BASE_PRECISION
-	)}/${convertToNumber(
-		takerOrder.baseAssetAmount,
-		BASE_PRECISION
-	)} @ ${convertToNumber(
-		takerOrder.price,
-		PRICE_PRECISION
-	)} (orderType: ${getVariant(takerOrder.orderType)})\n`;
-	msg += `makers:\n`;
-	if (makerInfos.length > 0) {
-		for (let i = 0; i < makerInfos.length; i++) {
-			const maker = makerInfos[i].data;
-			const makerSlot = makerInfos[i].slot;
-			const makerOrder = maker.order!;
-			msg += `  [${i}] market ${
-				makerOrder.marketIndex
-			}: ${maker.maker.toBase58()}-${
-				makerOrder.orderId
-			} (makerSlot: ${makerSlot}) ${getVariant(
-				makerOrder.direction
-			)} ${convertToNumber(
-				makerOrder.baseAssetAmountFilled,
-				BASE_PRECISION
-			)}/${convertToNumber(
-				makerOrder.baseAssetAmount,
-				BASE_PRECISION
-			)} @ ${convertToNumber(makerOrder.price, PRICE_PRECISION)} (offset: ${
-				makerOrder.oraclePriceOffset / PRICE_PRECISION.toNumber()
-			}) (orderType: ${getVariant(makerOrder.orderType)})\n`;
-		}
-	} else {
-		msg += `  vAMM`;
-	}
-	return msg;
 }
 
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -1311,33 +1245,14 @@ export class FillerBot implements Bot {
 		buildForBundle: boolean
 	) {
 		let txResp: Promise<TxSigAndSlot> | undefined = undefined;
-		let estTxSize: number | undefined = undefined;
-		let txAccounts = 0;
-		let writeAccs = 0;
-		const accountMetas: any[] = [];
+		const { estTxSize, accountMetas, writeAccs, txAccounts } =
+			getTransactionAccountMetas(tx, [this.lookupTableAccount!]);
+
 		const txStart = Date.now();
 		if (buildForBundle) {
 			await this.sendTxThroughJito(tx, fillTxId);
 			this.removeFillingNodes(nodesSent);
 		} else if (this.canSendOutsideJito()) {
-			estTxSize = tx.message.serialize().length;
-			const acc = tx.message.getAccountKeys({
-				addressLookupTableAccounts: [this.lookupTableAccount!],
-			});
-			txAccounts = acc.length;
-			for (let i = 0; i < txAccounts; i++) {
-				const meta: any = {};
-				if (tx.message.isAccountWritable(i)) {
-					writeAccs++;
-					meta['writeable'] = true;
-				}
-				if (tx.message.isAccountSigner(i)) {
-					meta['signer'] = true;
-				}
-				meta['address'] = acc.get(i)!.toBase58();
-				accountMetas.push(meta);
-			}
-
 			txResp = this.driftClient.txSender.sendVersionedTransaction(
 				tx,
 				[],
@@ -1368,7 +1283,7 @@ export class FillerBot implements Bot {
 						.then((successfulFills) => {
 							const processBulkFillLogsDuration = Date.now() - parseLogsStart;
 							logger.info(
-								`parse logs took ${processBulkFillLogsDuration}ms, filled ${successfulFills} (fillTxId: ${fillTxId})`
+								`parse logs took ${processBulkFillLogsDuration}ms, successfulFills ${successfulFills} (fillTxId: ${fillTxId})`
 							);
 
 							// record successful fills
@@ -1381,10 +1296,12 @@ export class FillerBot implements Bot {
 								)
 							);
 						})
-						.catch((e) => {
-							console.error(e);
+						.catch((err) => {
+							const e = err as Error;
 							logger.error(
-								`Failed to process fill tx logs (error above) (fillTxId: ${fillTxId}):`
+								`Failed to process fill tx logs (fillTxId: ${fillTxId}):\n${
+									e.stack ? e.stack : e.message
+								}`
 							);
 							webhookMessage(
 								`[${this.name}]: :x: error processing fill tx logs:\n${
@@ -1638,7 +1555,7 @@ export class FillerBot implements Bot {
 	 * It's difficult to estimate CU cost of multi maker ix, so we'll just send it in its own transaction
 	 * @param nodeToFill node with multiple makers
 	 */
-	protected async tryFillMultiMakerPerpNodes(
+	protected async tryFillMultiMakerPerpNode(
 		nodeToFill: NodeToFill,
 		buildForBundle: boolean
 	) {
@@ -1756,7 +1673,7 @@ export class FillerBot implements Bot {
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
 			// do multi maker fills in a separate tx since they're larger
 			if (nodeToFill.makerNodes.length > 1) {
-				await this.tryFillMultiMakerPerpNodes(nodeToFill, buildForBundle);
+				await this.tryFillMultiMakerPerpNode(nodeToFill, buildForBundle);
 				nodesSent.push(nodeToFill);
 				continue;
 			}
