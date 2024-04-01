@@ -177,6 +177,11 @@ program
 		'Set the market type for the JIT Maker bot',
 		'PERP'
 	)
+	.option(
+		'--priority-fee-multiplier <number>',
+		'Multiplier for the priority fee',
+		'1.0'
+	)
 	.parse();
 
 const opts = program.opts();
@@ -469,13 +474,14 @@ const runBot = async () => {
 							];
 						},
 				  }
-				: new AverageOverSlotsStrategy(), // so bots can use customStrategy result regardless of method
+				: new AverageOverSlotsStrategy(),
 		// the specific bot will update this, if multiple bots are using this,
 		// the last one to update it will determine the addresses to use...
 		addresses: [],
 		heliusRpcUrl: heliusEndpoint,
 		priorityFeeMethod,
 		maxFeeMicroLamports,
+		priorityFeeMultiplier: config.global.priorityFeeMultiplier ?? 1.0,
 	});
 
 	let needBlockhashSubscriber = false;

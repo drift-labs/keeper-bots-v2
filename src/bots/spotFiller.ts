@@ -1234,11 +1234,13 @@ export class SpotFillerBot implements Bot {
 			}),
 		];
 		if (!buildForBundle) {
+			const priorityFee = Math.floor(
+				this.priorityFeeSubscriber.getCustomStrategyResult()
+			);
+			logger.info(`(fillTxId: ${fillTxId}) Using priority fee: ${priorityFee}`);
 			ixs.push(
 				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult()
-					),
+					microLamports: priorityFee,
 				})
 			);
 		}
