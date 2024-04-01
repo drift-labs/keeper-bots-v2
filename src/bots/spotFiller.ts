@@ -289,12 +289,12 @@ export class SpotFillerBot implements Bot {
 		]);
 
 		this.revertOnFailure = config.revertOnFailure ?? true;
-		if (this.revertOnFailure) {
-			logger.error(
-				`RevertOnFailure disabled for spot filler, this is not currently supported`
-			);
-			this.revertOnFailure = false;
-		}
+		// if (this.revertOnFailure) {
+		// 	logger.error(
+		// 		`RevertOnFailure disabled for spot filler, this is not currently supported`
+		// 	);
+		// 	this.revertOnFailure = false;
+		// }
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
 		logger.info(
 			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
