@@ -89,6 +89,7 @@ export interface GlobalConfig {
 	priorityFeeMethod?: string;
 	maxPriorityFeeMicroLamports?: number;
 	resubTimeoutMs?: number;
+	priorityFeeMultiplier?: number;
 	keeperPrivateKey?: string;
 	initUser?: boolean;
 	testLiveness?: boolean;
@@ -150,6 +151,7 @@ const defaultConfig: Partial<Config> = {
 		maxPriorityFeeMicroLamports: parseInt(
 			process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ?? '10000'
 		),
+		priorityFeeMultiplier: 1.0,
 		keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY,
 
 		useJito: false,
@@ -248,6 +250,7 @@ export function loadConfigFromOpts(opts: any): Config {
 					process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ??
 					'10000'
 			),
+			priorityFeeMultiplier: parseFloat(opts.priorityFeeMultiplier ?? '1.0'),
 			keeperPrivateKey: opts.privateKey ?? process.env.KEEPER_PRIVATE_KEY,
 			eventSubscriberPollingInterval: parseInt(
 				process.env.BULK_ACCOUNT_LOADER_POLLING_INTERVAL ?? '5000'
