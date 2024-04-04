@@ -1400,8 +1400,8 @@ export class SpotFillerBot implements Bot {
 				)
 			);
 
-			if (!isVariant(marketType, 'perp')) {
-				throw new Error('expected perp market type');
+			if (!isVariant(marketType, 'spot')) {
+				throw new Error('expected spot market type');
 			}
 
 			let makerInfosToUse = makerInfos;
