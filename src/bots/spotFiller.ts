@@ -1,6 +1,5 @@
 import {
 	DriftEnv,
-	ReferrerInfo,
 	DriftClient,
 	SpotMarketAccount,
 	MakerInfo,
@@ -32,7 +31,6 @@ import {
 	UserAccount,
 	PriorityFeeSubscriber,
 	DataAndSlot,
-	getUserAccountPublicKey,
 	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -301,12 +299,6 @@ export class SpotFillerBot implements Bot {
 		]);
 
 		this.revertOnFailure = config.revertOnFailure ?? true;
-		// if (this.revertOnFailure) {
-		// 	logger.error(
-		// 		`RevertOnFailure disabled for spot filler, this is not currently supported`
-		// 	);
-		// 	this.revertOnFailure = false;
-		// }
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
 		logger.info(
 			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
@@ -819,7 +811,6 @@ export class SpotFillerBot implements Bot {
 		takerUserPubKey: string;
 		takerUser: UserAccount;
 		takerUserSlot: number;
-		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
 	}> {
 		const makerInfos: Array<DataAndSlot<MakerInfo>> = [];
@@ -877,18 +868,12 @@ export class SpotFillerBot implements Bot {
 			node.userAccount!.toString(),
 			this.driftClient.userAccountSubscriptionConfig
 		);
-		const referrerInfo = (
-			await this.userStatsMap!.mustGet(
-				user.data.getUserAccount().authority.toString()
-			)
-		).getReferrerInfo();
 
 		return Promise.resolve({
 			makerInfos,
 			takerUser: user.data.getUserAccount(),
 			takerUserSlot: user.slot,
 			takerUserPubKey: node.userAccount!.toString(),
-			referrerInfo,
 			marketType: order.marketType,
 		});
 	}
@@ -1163,6 +1148,7 @@ export class SpotFillerBot implements Bot {
 	}
 
 	private async processBulkFillTxLogs(
+		fillTxId: number,
 		nodeToFill: NodeToFill,
 		txSig: string,
 		tx?: VersionedTransaction
@@ -1170,7 +1156,9 @@ export class SpotFillerBot implements Bot {
 		let txResp: VersionedTransactionResponse | null = null;
 		let attempts = 0;
 		while (txResp === null && attempts < CONFIRM_TX_ATTEMPTS) {
-			logger.info(`waiting for https://solscan.io/tx/${txSig} to be confirmed`);
+			logger.info(
+				`(fillTxId: ${fillTxId}) waiting for https://solscan.io/tx/${txSig} to be confirmed`
+			);
 			txResp = await this.driftClient.connection.getTransaction(txSig, {
 				commitment: 'confirmed',
 				maxSupportedTransactionVersion: 0,
@@ -1190,7 +1178,9 @@ export class SpotFillerBot implements Bot {
 		}
 
 		if (txResp === null) {
-			logger.error(`tx ${txSig} not found after ${attempts}`);
+			logger.error(
+				`(fillTxId: ${fillTxId})tx ${txSig} not found after ${attempts}`
+			);
 			return 0;
 		}
 
@@ -1203,8 +1193,6 @@ export class SpotFillerBot implements Bot {
 		tx: VersionedTransaction,
 		metadata: number | string
 	) {
-		// @ts-ignore;
-		tx.sign([this.driftClient.wallet.payer]);
 		if (this.bundleSender === undefined) {
 			logger.error(`Called sendTxThroughJito without jito properly enabled`);
 			return;
@@ -1255,6 +1243,9 @@ export class SpotFillerBot implements Bot {
 		buildForBundle: boolean,
 		lutAccounts: Array<AddressLookupTableAccount>
 	) {
+		// @ts-ignore;
+		tx.sign([this.driftClient.wallet.payer]);
+
 		const { estTxSize, accountMetas, writeAccs, txAccounts } =
 			getTransactionAccountMetas(tx, lutAccounts);
 
@@ -1263,7 +1254,7 @@ export class SpotFillerBot implements Bot {
 			await this.sendTxThroughJito(tx, fillTxId);
 		} else if (this.canSendOutsideJito()) {
 			this.driftClient.txSender
-				.sendVersionedTransaction(tx, [], this.driftClient.opts)
+				.sendVersionedTransaction(tx, [], this.driftClient.opts, true)
 				.then(async (txSig) => {
 					logger.info(
 						`Filled spot order (fillTxId: ${fillTxId}): https://solscan.io/tx/${txSig.txSig}`
@@ -1282,7 +1273,7 @@ export class SpotFillerBot implements Bot {
 					}
 
 					const parseLogsStart = Date.now();
-					this.processBulkFillTxLogs(nodeSent, txSig.txSig, tx)
+					this.processBulkFillTxLogs(fillTxId, nodeSent, txSig.txSig, tx)
 						.then((successfulFills) => {
 							const processBulkFillLogsDuration = Date.now() - parseLogsStart;
 							logger.info(
@@ -1393,7 +1384,6 @@ export class SpotFillerBot implements Bot {
 				takerUser,
 				takerUserPubKey,
 				takerUserSlot,
-				referrerInfo,
 				marketType,
 			} = await this.getNodeFillInfo(nodeToFill);
 
@@ -1419,20 +1409,14 @@ export class SpotFillerBot implements Bot {
 				makers: DataAndSlot<MakerInfo>[]
 			): Promise<SimulateAndGetTxWithCUsResponse> => {
 				ixs.push(
-					await this.driftClient.getFillPerpOrderIx(
-						await getUserAccountPublicKey(
-							this.driftClient.program.programId,
-							takerUser.authority,
-							takerUser.subAccountId
-						),
+					await this.driftClient.getFillSpotOrderIx(
+						new PublicKey(takerUserPubKey),
 						takerUser,
 						nodeToFill.node.order!,
-						makers.map((m) => m.data),
-						referrerInfo
+						undefined,
+						makers.map((m) => m.data)
 					)
 				);
-
-				// this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
 
 				if (this.revertOnFailure) {
 					ixs.push(await this.driftClient.getRevertFillIx());
@@ -1447,7 +1431,8 @@ export class SpotFillerBot implements Bot {
 					SIM_CU_ESTIMATE_MULTIPLIER,
 					true,
 					this.simulateTxForCUEstimate,
-					await this.getBlockhashForTx()
+					await this.getBlockhashForTx(),
+					false
 				);
 				return simResult;
 			};
@@ -1472,18 +1457,18 @@ export class SpotFillerBot implements Bot {
 
 			if (makerInfosToUse.length === 0) {
 				logger.error(
-					`No makerInfos left to use for multi maker perp node (fillTxId: ${fillTxId})`
+					`No makerInfos left to use for multi maker spot node (fillTxId: ${fillTxId})`
 				);
 				return true;
 			}
 
 			logger.info(
-				`tryFillMultiMakerPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
+				`tryFillMultiMakerSpotNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
 			);
 
 			if (simResult.simError) {
 				logger.error(
-					`Error simulating multi maker perp node (fillTxId: ${fillTxId}): ${JSON.stringify(
+					`Error simulating multi maker spot node (fillTxId: ${fillTxId}): ${JSON.stringify(
 						simResult.simError
 					)}\nTaker slot: ${takerUserSlot}\nMaker slots: ${makerInfosToUse
 						.map((m) => `  ${m.data.maker.toBase58()}: ${m.slot}`)
@@ -1523,7 +1508,7 @@ export class SpotFillerBot implements Bot {
 		} catch (e) {
 			if (e instanceof Error) {
 				logger.error(
-					`Error filling multi maker perp node (fillTxId: ${fillTxId}): ${
+					`Error filling multi maker spot node (fillTxId: ${fillTxId}): ${
 						e.stack ? e.stack : e.message
 					}`
 				);
@@ -1562,7 +1547,7 @@ export class SpotFillerBot implements Bot {
 			};
 			if (newMakerSet.length === 0) {
 				logger.error(
-					`No makers left to use for multi maker perp node (fillTxId: ${fillTxId})`
+					`No makers left to use for multi maker spot node (fillTxId: ${fillTxId})`
 				);
 				return;
 			}
@@ -1602,7 +1587,6 @@ export class SpotFillerBot implements Bot {
 			takerUser,
 			takerUserPubKey,
 			takerUserSlot,
-			referrerInfo,
 			marketType,
 		} = await this.getNodeFillInfo(nodeToFill);
 
@@ -1667,8 +1651,7 @@ export class SpotFillerBot implements Bot {
 				takerUser,
 				nodeToFill.node.order,
 				fulfillmentConfig,
-				makerInfo,
-				referrerInfo
+				makerInfo
 			)
 		);
 
@@ -1688,7 +1671,9 @@ export class SpotFillerBot implements Bot {
 			this.driftClient.opts,
 			SIM_CU_ESTIMATE_MULTIPLIER,
 			true,
-			this.simulateTxForCUEstimate
+			this.simulateTxForCUEstimate,
+			undefined,
+			false
 		);
 		logger.info(
 			`tryFillSpotNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`

@@ -1,4 +1,4 @@
-import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import { base64, bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import fs from 'fs';
 import { logger } from './logger';
 import {
@@ -419,7 +419,8 @@ export async function simulateAndGetTxWithCUs(
 	cuLimitMultiplier = 1.0,
 	logSimDuration = false,
 	doSimulation = true,
-	recentBlockhash?: string
+	recentBlockhash?: string,
+	dumpTx = false
 ): Promise<SimulateAndGetTxWithCUsResponse> {
 	if (ixs.length === 0) {
 		throw new Error('cannot simulate empty tx');
@@ -447,6 +448,12 @@ export async function simulateAndGetTxWithCUs(
 			simError: null,
 			tx,
 		};
+	}
+	if (dumpTx) {
+		console.log(`===== Simulating The following transaction =====`);
+		const serializedTx = base64.encode(Buffer.from(tx.serialize()));
+		console.log(serializedTx);
+		console.log(`================================================`);
 	}
 
 	let resp;
@@ -609,7 +616,7 @@ export function logMessageForNodeToFill(
 		basePrecision
 	)} @ ${convertToNumber(
 		takerOrder.price,
-		basePrecision
+		PRICE_PRECISION
 	)} (orderType: ${getVariant(takerOrder.orderType)})\n`;
 	msg += `makers:\n`;
 	if (makerInfos.length > 0) {
