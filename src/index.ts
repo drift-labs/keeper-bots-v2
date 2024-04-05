@@ -182,6 +182,8 @@ program
 		'Multiplier for the priority fee',
 		'1.0'
 	)
+	.option('--metrics-port <number>', 'Port for the Prometheus exporter', '9464')
+	.option('--disable-metrics', 'Set to disable Prometheus metrics')
 	.parse();
 
 const opts = program.opts();
@@ -351,6 +353,7 @@ const runBot = async () => {
 		connection,
 		wallet,
 		programID: driftPublicKey,
+
 		opts,
 		accountSubscription,
 		env: config.global.driftEnv,
@@ -502,7 +505,6 @@ const runBot = async () => {
 				bulkAccountLoader,
 				driftClient,
 				userMap,
-				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -510,6 +512,7 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				config.global,
 				config.botConfigs!.filler!,
 				priorityFeeSubscriber,
 				blockhashSubscriber,
@@ -535,6 +538,7 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				config.global,
 				config.botConfigs!.fillerLite!,
 				priorityFeeSubscriber,
 				blockhashSubscriber,
@@ -561,6 +565,7 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				config.global,
 				config.botConfigs!.fillerBulk!,
 				priorityFeeSubscriber,
 				blockhashSubscriber,
@@ -587,10 +592,10 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				config.global,
 				config.botConfigs!.spotFiller!,
 				priorityFeeSubscriber,
 				blockhashSubscriber,
-				eventSubscriber,
 				bundleSender
 			)
 		);

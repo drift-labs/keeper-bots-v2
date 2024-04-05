@@ -15,9 +15,6 @@ import {
 	UserStatsMap,
 	MarketType,
 	isOrderExpired,
-	convertToNumber,
-	QUOTE_PRECISION,
-	WrappedEvent,
 	BulkAccountLoader,
 	SlotSubscriber,
 	PublicKey,
@@ -25,8 +22,6 @@ import {
 	UserSubscriptionConfig,
 	isOneOfVariant,
 	DLOBSubscriber,
-	EventSubscriber,
-	OrderActionRecord,
 	NodeToTrigger,
 	UserAccount,
 	getUserAccountPublicKey,
@@ -45,28 +40,24 @@ import {
 	AddressLookupTableAccount,
 	Connection,
 	VersionedTransaction,
-	VersionedTransactionResponse,
 } from '@solana/web3.js';
 
-import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import {
 	ExplicitBucketHistogramAggregation,
 	InstrumentType,
-	MeterProvider,
 	View,
 } from '@opentelemetry/sdk-metrics-base';
-import {
-	Meter,
-	ObservableGauge,
-	Counter,
-	BatchObservableResult,
-	Histogram,
-} from '@opentelemetry/api-metrics';
 
 import { logger } from '../logger';
 import { Bot } from '../types';
-import { FillerConfig } from '../config';
-import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
+import { FillerConfig, GlobalConfig } from '../config';
+import {
+	CounterValue,
+	GaugeValue,
+	HistogramValue,
+	RuntimeSpec,
+	metricAttrFromUserAccount,
+} from '../metrics';
 import { webhookMessage } from '../webhook';
 import {
 	isEndIxLog,
@@ -81,7 +72,6 @@ import {
 import { getErrorCode } from '../error';
 import {
 	SimulateAndGetTxWithCUsResponse,
-	decodeName,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
@@ -93,6 +83,9 @@ import {
 } from '../utils';
 import { selectMakers } from '../makerSelection';
 import { BundleSender } from '../bundleSender';
+import { Metrics } from '../metrics';
+import { LRUCache } from 'lru-cache';
+import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
@@ -108,9 +101,13 @@ const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana
 const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
+export const CONFIRM_TX_INTERVAL_MS = 5_000;
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
-const CONFIRM_TX_ATTEMPTS = 2;
+export const TX_CONFIRMATION_BATCH_SIZE = 100;
+export const TX_TIMEOUT_THRESHOLD_MS = 60_000; // tx considered stale after this time and give up confirming
+export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until trying to confirm tx again if rate limited
+export const CACHED_BLOCKHASH_OFFSET = 5;
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
@@ -127,23 +124,29 @@ const errorCodesToSuppress = [
 ];
 
 enum METRIC_TYPES {
-	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
 	try_fill_duration_histogram = 'try_fill_duration_histogram',
 	runtime_specs = 'runtime_specs',
-	total_collateral = 'total_collateral',
 	last_try_fill_time = 'last_try_fill_time',
-	unrealized_pnl = 'unrealized_pnl',
 	mutex_busy = 'mutex_busy',
-	attempted_fills = 'attempted_fills',
-	attempted_triggers = 'attempted_triggers',
-	successful_fills = 'successful_fills',
-	observed_fills_count = 'observed_fills_count',
+	sent_transactions = 'sent_transactions',
+	landed_transactions = 'landed_transactions',
 	tx_sim_error_count = 'tx_sim_error_count',
-	user_map_user_account_keys = 'user_map_user_account_keys',
-	user_stats_map_authority_keys = 'user_stats_map_authority_keys',
+	pending_tx_sigs_to_confirm = 'pending_tx_sigs_to_confirm',
+	pending_tx_sigs_loop_rate_limited = 'pending_tx_sigs_loop_rate_limited',
+	evicted_pending_tx_sigs_to_confirm = 'evicted_pending_tx_sigs_to_confirm',
+	estimated_tx_cu_histogram = 'estimated_tx_cu_histogram',
+	simulate_tx_duration_histogram = 'simulate_tx_duration_histogram',
+	expired_nodes_set_size = 'expired_nodes_set_size',
+
+	jito_bundles_accepted = 'jito_bundles_accepted',
+	jito_bundles_simulation_failure = 'jito_simulation_failure',
+	jito_dropped_bundle = 'jito_dropped_bundle',
+	jito_landed_tips = 'jito_landed_tips',
+	jito_bundle_count = 'jito_bundle_count',
 }
 
 export type MakerNodeMap = Map<string, DLOBNode[]>;
+export type TxType = 'fill' | 'trigger' | 'settlePnl';
 
 export class FillerBot implements Bot {
 	public readonly name: string;
@@ -151,16 +154,18 @@ export class FillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 6000;
 
 	protected slotSubscriber: SlotSubscriber;
-	private bulkAccountLoader?: BulkAccountLoader;
+	protected bulkAccountLoader?: BulkAccountLoader;
 	protected userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	protected driftClient: DriftClient;
-	protected eventSubscriber?: EventSubscriber;
+	/// Connection to use specifically for confirming transactions
+	protected txConfirmationConnection: Connection;
 	protected pollingIntervalMs: number;
 	protected revertOnFailure?: boolean;
 	protected simulateTxForCUEstimate?: boolean;
 	protected lookupTableAccount?: AddressLookupTableAccount;
 	protected bundleSender?: BundleSender;
 
+	private globalConfig: GlobalConfig;
 	private dlobSubscriber?: DLOBSubscriber;
 
 	private userMap?: UserMap;
@@ -183,47 +188,72 @@ export class FillerBot implements Bot {
 
 	protected priorityFeeSubscriber: PriorityFeeSubscriber;
 	protected blockhashSubscriber: BlockhashSubscriber;
+	/// stores txSigs that need to been confirmed in a slower loop, and the time they were confirmed
+	protected pendingTxSigsToconfirm: LRUCache<
+		string,
+		{
+			ts: number;
+			nodeFilled: Array<NodeToFill>;
+			fillTxId: number;
+			txType: TxType;
+		}
+	>;
+	protected expiredNodesSet: LRUCache<string, boolean>;
+	protected confirmLoopRunning = false;
+	protected confirmLoopRateLimitTs =
+		Date.now() - CONFIRM_TX_RATE_LIMIT_BACKOFF_MS;
 
 	// metrics
 	protected metricsInitialized = false;
 	protected metricsPort?: number;
-	protected meter?: Meter;
-	protected exporter?: PrometheusExporter;
+	protected metrics?: Metrics;
 	protected bootTimeMs?: number;
 
-	protected runtimeSpecsGauge?: ObservableGauge;
 	protected runtimeSpec: RuntimeSpec;
-	protected sdkCallDurationHistogram?: Histogram;
-	protected tryFillDurationHistogram?: Histogram;
-	protected lastTryFillTimeGauge?: ObservableGauge;
-	protected totalCollateralGauge?: ObservableGauge;
-	protected unrealizedPnLGauge?: ObservableGauge;
-	protected mutexBusyCounter?: Counter;
-	protected attemptedFillsCounter?: Counter;
-	protected attemptedTriggersCounter?: Counter;
-	protected successfulFillsCounter?: Counter;
-	protected observedFillsCountCounter?: Counter;
-	protected txSimErrorCounter?: Counter;
-	protected userMapUserAccountKeysGauge?: ObservableGauge;
-	protected userStatsMapAuthorityKeysGauge?: ObservableGauge;
+	protected runtimeSpecsGauge?: GaugeValue;
+	protected tryFillDurationHistogram?: HistogramValue;
+	protected estTxCuHistogram?: HistogramValue;
+	protected simulateTxHistogram?: HistogramValue;
+	protected lastTryFillTimeGauge?: GaugeValue;
+	protected mutexBusyCounter?: CounterValue;
+	protected sentTxsCounter?: CounterValue;
+	protected attemptedTriggersCounter?: CounterValue;
+	protected landedTxsCounter?: CounterValue;
+	protected txSimErrorCounter?: CounterValue;
+	protected pendingTxSigsToConfirmGauge?: GaugeValue;
+	protected pendingTxSigsLoopRateLimitedCounter?: CounterValue;
+	protected evictedPendingTxSigsToConfirmCounter?: CounterValue;
+	protected expiredNodesSetSize?: GaugeValue;
+	protected jitoBundlesAcceptedGauge?: GaugeValue;
+	protected jitoBundlesSimulationFailureGauge?: GaugeValue;
+	protected jitoDroppedBundleGauge?: GaugeValue;
+	protected jitoLandedTipsGauge?: GaugeValue;
+	protected jitoBundleCount?: GaugeValue;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		userMap: UserMap | undefined,
-		eventSubscriber: EventSubscriber | undefined,
 		runtimeSpec: RuntimeSpec,
+		globalConfig: GlobalConfig,
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
 		bundleSender?: BundleSender
 	) {
+		this.globalConfig = globalConfig;
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
-		this.eventSubscriber = eventSubscriber;
+		if (globalConfig.txConfirmationEndpoint) {
+			this.txConfirmationConnection = new Connection(
+				globalConfig.txConfirmationEndpoint
+			);
+		} else {
+			this.txConfirmationConnection = this.driftClient.connection;
+		}
 		this.bulkAccountLoader = bulkAccountLoader;
 		if (this.bulkAccountLoader) {
 			this.userStatsMapSubscriptionConfig = {
@@ -242,10 +272,7 @@ export class FillerBot implements Bot {
 		this.pollingIntervalMs =
 			config.fillerPollingInterval ?? this.defaultIntervalMs;
 
-		this.metricsPort = config.metricsPort;
-		if (this.metricsPort) {
-			this.initializeMetrics();
-		}
+		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 		this.userMap = userMap;
 
 		this.revertOnFailure = config.revertOnFailure ?? true;
@@ -265,194 +292,184 @@ export class FillerBot implements Bot {
 			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
 		]);
 		this.blockhashSubscriber = blockhashSubscriber;
+
+		this.pendingTxSigsToconfirm = new LRUCache<
+			string,
+			{
+				ts: number;
+				nodeFilled: Array<NodeToFill>;
+				fillTxId: number;
+				txType: TxType;
+			}
+		>({
+			max: 10_000,
+			ttl: TX_TIMEOUT_THRESHOLD_MS,
+			ttlResolution: 1000,
+			disposeAfter: this.recordEvictedTxSig.bind(this),
+		});
+
+		this.expiredNodesSet = new LRUCache<string, boolean>({
+			max: 10_000,
+			ttl: TX_TIMEOUT_THRESHOLD_MS,
+			ttlResolution: 1000,
+		});
 	}
 
-	protected initializeMetrics() {
+	protected recordEvictedTxSig(
+		_tsTxSigAdded: { ts: number; nodeFilled: Array<NodeToFill> },
+		txSig: string,
+		reason: 'evict' | 'set' | 'delete'
+	) {
+		if (reason === 'evict') {
+			logger.info(
+				`${this.name}: Evicted tx sig ${txSig} from this.txSigsToConfirm`
+			);
+			const user = this.driftClient.getUser();
+			this.evictedPendingTxSigsToConfirmCounter?.add(1, {
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+		}
+	}
+
+	protected initializeMetrics(metricsPort?: number) {
+		if (this.globalConfig.disableMetrics) {
+			logger.info(
+				`${this.name}: globalConfig.disableMetrics is true, not initializing metrics`
+			);
+			return;
+		}
+
+		if (!metricsPort) {
+			logger.info(
+				`${this.name}: bot.metricsPort and global.metricsPort not set, not initializing metrics`
+			);
+			return;
+		}
+
 		if (this.metricsInitialized) {
 			logger.error('Tried to initilaize metrics multiple times');
 			return;
 		}
-		this.metricsInitialized = true;
 
-		const { endpoint: defaultEndpoint } = PrometheusExporter.DEFAULT_OPTIONS;
-		this.exporter = new PrometheusExporter(
-			{
-				port: this.metricsPort,
-				endpoint: defaultEndpoint,
-			},
-			() => {
-				logger.info(
-					`prometheus scrape endpoint started: http://localhost:${this.metricsPort}${defaultEndpoint}`
-				);
-			}
-		);
-		const meterName = this.name;
-		const meterProvider = new MeterProvider({
-			views: [
-				new View({
-					instrumentName: METRIC_TYPES.sdk_call_duration_histogram,
-					instrumentType: InstrumentType.HISTOGRAM,
-					meterName: meterName,
-					aggregation: new ExplicitBucketHistogramAggregation(
-						Array.from(new Array(20), (_, i) => i + 2000),
-						true
-					),
-				}),
+		this.metrics = new Metrics(
+			this.name,
+			[
 				new View({
 					instrumentName: METRIC_TYPES.try_fill_duration_histogram,
 					instrumentType: InstrumentType.HISTOGRAM,
-					meterName: meterName,
+					meterName: this.name,
 					aggregation: new ExplicitBucketHistogramAggregation(
 						Array.from(new Array(20), (_, i) => 0 + i * 5),
 						true
 					),
 				}),
+				new View({
+					instrumentName: METRIC_TYPES.estimated_tx_cu_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: this.name,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(15), (_, i) => 0 + i * 100_000),
+						true
+					),
+				}),
+				new View({
+					instrumentName: METRIC_TYPES.simulate_tx_duration_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: this.name,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(20), (_, i) => 50 + i * 50),
+						true
+					),
+				}),
 			],
-		});
-
-		meterProvider.addMetricReader(this.exporter);
-		this.meter = meterProvider.getMeter(meterName);
-
+			metricsPort!
+		);
 		this.bootTimeMs = Date.now();
-
-		this.runtimeSpecsGauge = this.meter.createObservableGauge(
+		this.runtimeSpecsGauge = this.metrics.addGauge(
 			METRIC_TYPES.runtime_specs,
-			{
-				description: 'Runtime sepcification of this program',
-			}
+			'Runtime sepcification of this program'
 		);
-		this.runtimeSpecsGauge.addCallback((obs) => {
-			obs.observe(this.bootTimeMs!, this.runtimeSpec);
-		});
-		this.totalCollateralGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.total_collateral,
-			{
-				description: 'Total collateral of the account',
-			}
-		);
-		this.lastTryFillTimeGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.last_try_fill_time,
-			{
-				description: 'Last time that fill was attempted',
-			}
-		);
-		this.unrealizedPnLGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.unrealized_pnl,
-			{
-				description: 'The account unrealized PnL',
-			}
-		);
-
-		this.mutexBusyCounter = this.meter.createCounter(METRIC_TYPES.mutex_busy, {
-			description: 'Count of times the mutex was busy',
-		});
-		this.successfulFillsCounter = this.meter.createCounter(
-			METRIC_TYPES.successful_fills,
-			{
-				description: 'Count of fills that we successfully landed',
-			}
-		);
-		this.attemptedFillsCounter = this.meter.createCounter(
-			METRIC_TYPES.attempted_fills,
-			{
-				description: 'Count of fills we attempted',
-			}
-		);
-		this.attemptedTriggersCounter = this.meter.createCounter(
-			METRIC_TYPES.attempted_triggers,
-			{
-				description: 'Count of triggers we attempted',
-			}
-		);
-		this.observedFillsCountCounter = this.meter.createCounter(
-			METRIC_TYPES.observed_fills_count,
-			{
-				description: 'Count of fills observed in the market',
-			}
-		);
-		this.txSimErrorCounter = this.meter.createCounter(
-			METRIC_TYPES.tx_sim_error_count,
-			{
-				description: 'Count of errors from simulating transactions',
-			}
-		);
-		this.userMapUserAccountKeysGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.user_map_user_account_keys,
-			{
-				description: 'number of user account keys in UserMap',
-			}
-		);
-		this.userMapUserAccountKeysGauge.addCallback(async (obs) => {
-			obs.observe(this.userMap!.size());
-		});
-
-		this.userStatsMapAuthorityKeysGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.user_stats_map_authority_keys,
-			{
-				description: 'number of authority keys in UserStatsMap',
-			}
-		);
-		this.userStatsMapAuthorityKeysGauge.addCallback(async (obs) => {
-			obs.observe(this.userStatsMap!.size());
-		});
-
-		this.sdkCallDurationHistogram = this.meter.createHistogram(
-			METRIC_TYPES.sdk_call_duration_histogram,
-			{
-				description: 'Distribution of sdk method calls',
-				unit: 'ms',
-			}
-		);
-		this.tryFillDurationHistogram = this.meter.createHistogram(
+		this.tryFillDurationHistogram = this.metrics.addHistogram(
 			METRIC_TYPES.try_fill_duration_histogram,
-			{
-				description: 'Distribution of tryFills',
-				unit: 'ms',
-			}
+			'Histogram of the duration of the try fill process'
+		);
+		this.estTxCuHistogram = this.metrics.addHistogram(
+			METRIC_TYPES.estimated_tx_cu_histogram,
+			'Histogram of the estimated fill cu used'
+		);
+		this.simulateTxHistogram = this.metrics.addHistogram(
+			METRIC_TYPES.simulate_tx_duration_histogram,
+			'Histogram of the duration of simulateTransaction RPC calls'
+		);
+		this.lastTryFillTimeGauge = this.metrics.addGauge(
+			METRIC_TYPES.last_try_fill_time,
+			'Last time that fill was attempted'
+		);
+		this.mutexBusyCounter = this.metrics.addCounter(
+			METRIC_TYPES.mutex_busy,
+			'Count of times the mutex was busy'
+		);
+		this.landedTxsCounter = this.metrics.addCounter(
+			METRIC_TYPES.landed_transactions,
+			'Count of fills that we successfully landed'
+		);
+		this.sentTxsCounter = this.metrics.addCounter(
+			METRIC_TYPES.sent_transactions,
+			'Count of transactions we sent out'
+		);
+		this.txSimErrorCounter = this.metrics.addCounter(
+			METRIC_TYPES.tx_sim_error_count,
+			'Count of errors from simulating transactions'
+		);
+		this.pendingTxSigsToConfirmGauge = this.metrics.addGauge(
+			METRIC_TYPES.pending_tx_sigs_to_confirm,
+			'Count of tx sigs that are pending confirmation'
+		);
+		this.pendingTxSigsLoopRateLimitedCounter = this.metrics.addCounter(
+			METRIC_TYPES.pending_tx_sigs_loop_rate_limited,
+			'Count of times the pending tx sigs loop was rate limited'
+		);
+		this.evictedPendingTxSigsToConfirmCounter = this.metrics.addCounter(
+			METRIC_TYPES.evicted_pending_tx_sigs_to_confirm,
+			'Count of tx sigs that were evicted from the pending tx sigs to confirm cache'
+		);
+		this.expiredNodesSetSize = this.metrics.addGauge(
+			METRIC_TYPES.expired_nodes_set_size,
+			'Count of nodes that are expired'
+		);
+		this.jitoBundlesAcceptedGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_bundles_accepted,
+			'Count of jito bundles that were accepted'
+		);
+		this.jitoBundlesSimulationFailureGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_bundles_simulation_failure,
+			'Count of jito bundles that failed simulation'
+		);
+		this.jitoDroppedBundleGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_dropped_bundle,
+			'Count of jito bundles that were dropped'
+		);
+		this.jitoLandedTipsGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_landed_tips,
+			'Gauge of historic bundle tips that landed'
+		);
+		this.jitoBundleCount = this.metrics.addGauge(
+			METRIC_TYPES.jito_bundle_count,
+			'Count of jito bundles that were sent, and their status'
 		);
 
-		this.lastTryFillTimeGauge.addCallback(async (obs) => {
-			await this.watchdogTimerMutex.runExclusive(async () => {
-				const user = this.driftClient.getUser();
-				obs.observe(
-					this.watchdogTimerLastPatTime,
-					metricAttrFromUserAccount(
-						user.userAccountPublicKey,
-						user.getUserAccount()
-					)
-				);
-			});
-		});
+		this.metrics?.finalizeObservables();
 
-		this.meter.addBatchObservableCallback(
-			async (batchObservableResult: BatchObservableResult) => {
-				for (const user of this.driftClient.getUsers()) {
-					const userAccount = user.getUserAccount();
-
-					batchObservableResult.observe(
-						this.totalCollateralGauge!,
-						convertToNumber(user.getTotalCollateral(), QUOTE_PRECISION),
-						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
-					);
-
-					batchObservableResult.observe(
-						this.unrealizedPnLGauge!,
-						convertToNumber(user.getUnrealizedPNL(), QUOTE_PRECISION),
-						metricAttrFromUserAccount(user.userAccountPublicKey, userAccount)
-					);
-				}
-			},
-			[this.totalCollateralGauge, this.unrealizedPnLGauge]
-		);
+		this.runtimeSpecsGauge.setLatestValue(this.bootTimeMs, this.runtimeSpec);
+		this.metricsInitialized = true;
 	}
 
-	public async init() {
+	protected async baseInit() {
 		const startInitUserStatsMap = Date.now();
-		logger.info(
-			`Initializing userStatsMap ${
-				this.userMap!.getUniqueAuthorities().length
-			} auths`
-		);
+		logger.info(`Initializing userStatsMap`);
 
 		// sync userstats once
 		const userStatsLoader = new BulkAccountLoader(
@@ -462,15 +479,18 @@ export class FillerBot implements Bot {
 		);
 		this.userStatsMap = new UserStatsMap(this.driftClient, userStatsLoader);
 
-		// disable the initial sync since there are way too many authorties now
-		// userStats will be lazily loaded (this.userStatsMap.mustGet) as fills occur.
-		// await this.userStatsMap.sync(this.userMap!.getUniqueAuthorities());
-
 		logger.info(
-			`Initialized userMap: ${this.userMap!.size()}, userStatsMap: ${this.userStatsMap.size()}, took: ${
+			`Initialized userStatsMap: ${this.userStatsMap.size()}, took: ${
 				Date.now() - startInitUserStatsMap
 			} ms`
 		);
+
+		this.lookupTableAccount =
+			await this.driftClient.fetchMarketLookupTableAccount();
+	}
+
+	public async init() {
+		await this.baseInit();
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap!,
@@ -480,9 +500,6 @@ export class FillerBot implements Bot {
 		});
 		await this.dlobSubscriber.subscribe();
 
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
-
 		await webhookMessage(`[${this.name}]: started`);
 	}
 
@@ -491,8 +508,6 @@ export class FillerBot implements Bot {
 			clearInterval(intervalId as NodeJS.Timeout);
 		}
 		this.intervalIds = [];
-
-		this.eventSubscriber?.eventEmitter.removeAllListeners('newEvent');
 
 		await this.dlobSubscriber!.unsubscribe();
 		await this.userMap!.unsubscribe();
@@ -508,32 +523,12 @@ export class FillerBot implements Bot {
 				SETTLE_POSITIVE_PNL_COOLDOWN_MS / 2
 			)
 		);
-
-		// Metrics should have been initialized by now, if at all
-		if (this.observedFillsCountCounter) {
-			this.eventSubscriber?.eventEmitter.on(
-				'newEvent',
-				async (record: WrappedEvent<any>) => {
-					await this.userMap!.updateWithEventRecord(record);
-					await this.userStatsMap!.updateWithEventRecord(record, this.userMap);
-
-					if (record.eventType === 'OrderActionRecord') {
-						const actionRecord = record as OrderActionRecord;
-
-						if (isVariant(actionRecord.action, 'fill')) {
-							if (isVariant(actionRecord.marketType, 'perp')) {
-								const perpMarket = this.driftClient.getPerpMarketAccount(
-									actionRecord.marketIndex
-								);
-								if (perpMarket) {
-									this.observedFillsCountCounter!.add(1, {
-										market: decodeName(perpMarket.name),
-									});
-								}
-							}
-						}
-					}
-				}
+		this.intervalIds.push(
+			setInterval(this.confirmPendingTxSigs.bind(this), CONFIRM_TX_INTERVAL_MS)
+		);
+		if (this.bundleSender) {
+			this.intervalIds.push(
+				setInterval(this.recordJitoBundleStats.bind(this), 10_000)
 			);
 		}
 
@@ -542,6 +537,247 @@ export class FillerBot implements Bot {
 				this.bulkAccountLoader === undefined
 			})`
 		);
+	}
+
+	protected recordJitoBundleStats() {
+		const user = this.driftClient.getUser();
+		const bundleStats = this.bundleSender?.getBundleStats();
+		if (bundleStats) {
+			this.jitoBundlesAcceptedGauge?.setLatestValue(bundleStats.accepted, {
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+			this.jitoBundlesSimulationFailureGauge?.setLatestValue(
+				bundleStats.simulationFailure,
+				{
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoDroppedBundleGauge?.setLatestValue(bundleStats.droppedPruned, {
+				type: 'pruned',
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+			this.jitoDroppedBundleGauge?.setLatestValue(
+				bundleStats.droppedBlockhashExpired,
+				{
+					type: 'blockhash_expired',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoDroppedBundleGauge?.setLatestValue(
+				bundleStats.droppedBlockhashNotFound,
+				{
+					type: 'blockhash_not_found',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+		}
+
+		const tipStream = this.bundleSender?.getTipStream();
+		if (tipStream) {
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_25th_percentile,
+				{
+					percentile: 'p25',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_50th_percentile,
+				{
+					percentile: 'p50',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_75th_percentile,
+				{
+					percentile: 'p75',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_95th_percentile,
+				{
+					percentile: 'p95',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_99th_percentile,
+				{
+					percentile: 'p99',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.ema_landed_tips_50th_percentile,
+				{
+					percentile: 'ema_p50',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+
+			const bundleFailCount = this.bundleSender?.getBundleFailCount();
+			const bundleLandedCount = this.bundleSender?.getLandedCount();
+			const bundleDroppedCount = this.bundleSender?.getDroppedCount();
+			this.jitoBundleCount?.setLatestValue(bundleFailCount ?? 0, {
+				type: 'fail_count',
+			});
+			this.jitoBundleCount?.setLatestValue(bundleLandedCount ?? 0, {
+				type: 'landed',
+			});
+			this.jitoBundleCount?.setLatestValue(bundleDroppedCount ?? 0, {
+				type: 'dropped',
+			});
+		}
+	}
+
+	protected async confirmPendingTxSigs() {
+		const user = this.driftClient.getUser();
+		this.pendingTxSigsToConfirmGauge?.setLatestValue(
+			this.pendingTxSigsToconfirm.size,
+			{
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			}
+		);
+		this.expiredNodesSetSize?.setLatestValue(this.expiredNodesSet.size, {
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+		const nextTimeCanRun =
+			this.confirmLoopRateLimitTs + CONFIRM_TX_RATE_LIMIT_BACKOFF_MS;
+		if (Date.now() < nextTimeCanRun) {
+			logger.warn(
+				`Skipping confirm loop due to rate limit, next run in ${
+					nextTimeCanRun - Date.now()
+				} ms`
+			);
+			return;
+		}
+		if (this.confirmLoopRunning) {
+			return;
+		}
+		this.confirmLoopRunning = true;
+		try {
+			logger.info(`Confirming tx sigs: ${this.pendingTxSigsToconfirm.size}`);
+			const start = Date.now();
+			const txEntries = Array.from(this.pendingTxSigsToconfirm.entries());
+			for (let i = 0; i < txEntries.length; i += TX_CONFIRMATION_BATCH_SIZE) {
+				const txSigsBatch = txEntries.slice(i, i + TX_CONFIRMATION_BATCH_SIZE);
+				const txs = await this.txConfirmationConnection?.getTransactions(
+					txSigsBatch.map((tx) => tx[0]),
+					{
+						commitment: 'confirmed',
+						maxSupportedTransactionVersion: 0,
+					}
+				);
+				for (let j = 0; j < txs.length; j++) {
+					const txResp = txs[j];
+					const txConfirmationInfo = txSigsBatch[j];
+					const txSig = txConfirmationInfo[0];
+					const txAge = txConfirmationInfo[1].ts - Date.now();
+					const nodeFilled = txConfirmationInfo[1].nodeFilled;
+					const txType = txConfirmationInfo[1].txType;
+					const fillTxId = txConfirmationInfo[1].fillTxId;
+					if (txResp === null) {
+						logger.info(
+							`Tx not found, (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
+								txAge / 1000
+							} s`
+						);
+						if (Math.abs(txAge) > TX_TIMEOUT_THRESHOLD_MS) {
+							this.pendingTxSigsToconfirm.delete(txSig);
+						}
+					} else {
+						logger.info(
+							`Tx landed (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
+								txAge / 1000
+							} s`
+						);
+						this.pendingTxSigsToconfirm.delete(txSig);
+						if (txType === 'fill') {
+							const result = await this.handleTransactionLogs(
+								nodeFilled,
+								txResp.meta?.logMessages
+							);
+							if (result) {
+								this.landedTxsCounter?.add(result.filledNodes, {
+									type: txType,
+									...metricAttrFromUserAccount(
+										user.userAccountPublicKey,
+										user.getUserAccount()
+									),
+								});
+							}
+						} else {
+							this.landedTxsCounter?.add(1, {
+								type: txType,
+								...metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
+								),
+							});
+						}
+					}
+					await sleepMs(500);
+				}
+			}
+			logger.info(`Confirming tx sigs took: ${Date.now() - start} ms`);
+		} catch (e) {
+			const err = e as Error;
+			if (err.message.includes('429')) {
+				logger.info(`Confirming tx loop rate limited: ${err.message}`);
+				this.confirmLoopRateLimitTs = Date.now();
+				this.pendingTxSigsLoopRateLimitedCounter?.add(1, {
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+			} else {
+				logger.error(`Other error confirming tx sigs: ${err.message}`);
+			}
+		} finally {
+			this.confirmLoopRunning = false;
+		}
 	}
 
 	public async healthCheck(): Promise<boolean> {
@@ -723,6 +959,11 @@ export class FillerBot implements Bot {
 			}
 		}
 
+		// expired orders that we previously tried to fill
+		if (this.expiredNodesSet.has(nodeToFillSignature)) {
+			return false;
+		}
+
 		// check if taker node is throttled
 		if (this.isDLOBNodeThrottled(nodeToFill.node)) {
 			return false;
@@ -802,7 +1043,9 @@ export class FillerBot implements Bot {
 				this.getMaxSlot()
 			);
 			if (!oracleIsValid) {
-				logger.error(`Oracle is not valid for market ${marketIndex}`);
+				logger.error(
+					`Oracle is not valid for market ${marketIndex}, skipping fill with vAMM`
+				);
 				return false;
 			}
 		}
@@ -1014,12 +1257,19 @@ export class FillerBot implements Bot {
 			if (orderIdDoesNotExist) {
 				const filledNode = nodesFilled[ixIdx];
 				if (filledNode) {
+					const isExpired = isOrderExpired(
+						filledNode.node.order!,
+						Date.now() / 1000
+					);
 					logger.error(
 						`assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${
 							filledNode.node.order!.orderId
-						}; does not exist (filled by someone else); ${log}`
+						}; does not exist (filled by someone else); ${log}, expired: ${isExpired}`
 					);
-					this.setThrottledNode(getNodeToFillSignature(filledNode));
+					if (isExpired) {
+						const sig = getNodeToFillSignature(filledNode);
+						this.expiredNodesSet.set(sig, true);
+					}
 				}
 				errorThisFillIx = true;
 				continue;
@@ -1059,9 +1309,14 @@ export class FillerBot implements Bot {
 							!errorCodesToSuppress.includes(errorCode) &&
 							!(e as Error).message.includes('Transaction was not confirmed')
 						) {
-							if (errorCode && this.txSimErrorCounter) {
-								this.txSimErrorCounter!.add(1, {
+							if (errorCode) {
+								const user = this.driftClient.getUser();
+								this.txSimErrorCounter?.add(1, {
 									errorCode: errorCode.toString(),
+									...metricAttrFromUserAccount(
+										user.userAccountPublicKey,
+										user.getUserAccount()
+									),
 								});
 							}
 							webhookMessage(
@@ -1120,9 +1375,14 @@ export class FillerBot implements Bot {
 							!errorCodesToSuppress.includes(errorCode) &&
 							!(e as Error).message.includes('Transaction was not confirmed')
 						) {
-							if (errorCode && this.txSimErrorCounter) {
-								this.txSimErrorCounter!.add(1, {
+							if (errorCode) {
+								const user = this.driftClient.getUser();
+								this.txSimErrorCounter?.add(1, {
 									errorCode: errorCode.toString(),
+									...metricAttrFromUserAccount(
+										user.userAccountPublicKey,
+										user.getUserAccount()
+									),
 								});
 							}
 							webhookMessage(
@@ -1188,32 +1448,31 @@ export class FillerBot implements Bot {
 		};
 	}
 
-	protected async processBulkFillTxLogs(
-		nodesFilled: Array<NodeToFill>,
-		txSig: TransactionSignature
-	): Promise<number> {
-		let tx: VersionedTransactionResponse | null = null;
-		let attempts = 0;
-		while (tx === null && attempts < CONFIRM_TX_ATTEMPTS) {
-			logger.info(`waiting for ${txSig} to be confirmed`);
-			tx = await this.driftClient.connection.getTransaction(txSig, {
-				commitment: 'confirmed',
-				maxSupportedTransactionVersion: 0,
-			});
-			attempts++;
-			await sleepMs(1000);
-		}
-
-		if (tx === null) {
-			logger.error(`tx ${txSig} not found`);
-			return 0;
-		}
-
-		const { filledNodes } = await this.handleTransactionLogs(
-			nodesFilled,
-			tx.meta!.logMessages
-		);
-		return filledNodes;
+	/**
+	 * Queues up the txSig to be confirmed in a slower loop, and have tx logs handled
+	 * @param txSig
+	 */
+	protected async registerTxSigToConfirm(
+		txSig: TransactionSignature,
+		now: number,
+		nodeFilled: Array<NodeToFill>,
+		fillTxId: number,
+		txType: TxType
+	) {
+		this.pendingTxSigsToconfirm.set(txSig, {
+			ts: now,
+			nodeFilled,
+			fillTxId,
+			txType,
+		});
+		const user = this.driftClient.getUser();
+		this.sentTxsCounter?.add(1, {
+			txType,
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
 	}
 
 	protected removeFillingNodes(nodes: Array<NodeToFill>) {
@@ -1224,17 +1483,16 @@ export class FillerBot implements Bot {
 
 	protected async sendTxThroughJito(
 		tx: VersionedTransaction,
-		metadata: number | string
+		metadata: number | string,
+		txSig?: string
 	) {
-		// @ts-ignore;
-		tx.sign([this.driftClient.wallet.payer]);
 		if (this.bundleSender === undefined) {
 			logger.error(`Called sendTxThroughJito without jito properly enabled`);
 			return;
 		}
 		const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
 		if (slotsUntilNextLeader !== undefined) {
-			this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`);
+			this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`, txSig);
 		}
 	}
 
@@ -1249,16 +1507,24 @@ export class FillerBot implements Bot {
 			getTransactionAccountMetas(tx, [this.lookupTableAccount!]);
 
 		const txStart = Date.now();
+		// @ts-ignore;
+		tx.sign([this.driftClient.wallet.payer]);
+		const txSig = bs58.encode(tx.signatures[0]);
+
 		if (buildForBundle) {
-			await this.sendTxThroughJito(tx, fillTxId);
+			await this.sendTxThroughJito(tx, fillTxId, txSig);
 			this.removeFillingNodes(nodesSent);
 		} else if (this.canSendOutsideJito()) {
 			txResp = this.driftClient.txSender.sendVersionedTransaction(
 				tx,
 				[],
-				this.driftClient.opts
+				this.driftClient.opts,
+				true
 			);
 		}
+
+		this.registerTxSigToConfirm(txSig, Date.now(), nodesSent, fillTxId, 'fill');
+
 		if (txResp) {
 			txResp
 				.then((resp: TxSigAndSlot) => {
@@ -1266,49 +1532,6 @@ export class FillerBot implements Bot {
 					logger.info(
 						`sent tx: ${resp.txSig}, took: ${duration}ms (fillTxId: ${fillTxId})`
 					);
-
-					const user = this.driftClient.getUser();
-					if (this.sdkCallDurationHistogram) {
-						this.sdkCallDurationHistogram!.record(duration, {
-							...metricAttrFromUserAccount(
-								user.getUserAccountPublicKey(),
-								user.getUserAccount()
-							),
-							method: 'sendTx',
-						});
-					}
-
-					const parseLogsStart = Date.now();
-					this.processBulkFillTxLogs(nodesSent, resp.txSig)
-						.then((successfulFills) => {
-							const processBulkFillLogsDuration = Date.now() - parseLogsStart;
-							logger.info(
-								`parse logs took ${processBulkFillLogsDuration}ms, successfulFills ${successfulFills} (fillTxId: ${fillTxId})`
-							);
-
-							// record successful fills
-							const user = this.driftClient.getUser();
-							this.successfulFillsCounter!.add(
-								successfulFills,
-								metricAttrFromUserAccount(
-									user.userAccountPublicKey,
-									user.getUserAccount()
-								)
-							);
-						})
-						.catch((err) => {
-							const e = err as Error;
-							logger.error(
-								`Failed to process fill tx logs (fillTxId: ${fillTxId}):\n${
-									e.stack ? e.stack : e.message
-								}`
-							);
-							webhookMessage(
-								`[${this.name}]: :x: error processing fill tx logs:\n${
-									e.stack ? e.stack : e.message
-								}`
-							);
-						});
 				})
 				.catch(async (e) => {
 					const simError = e as SendTransactionError;
@@ -1320,14 +1543,14 @@ export class FillerBot implements Bot {
 						logger.error(
 							`[${
 								this.name
-							}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${
+							}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillTxId: ${fillTxId}). ${
 								e.message
 							}\n${JSON.stringify(accountMetas)}`
 						);
 						webhookMessage(
 							`[${
 								this.name
-							}]: :boxing_glove: Tx too large (fillId: ${fillTxId}). ${
+							}]: :boxing_glove: Tx too large (fillTxId: ${fillTxId}). ${
 								e.message
 							}\n${JSON.stringify(accountMetas)}`
 						);
@@ -1347,11 +1570,14 @@ export class FillerBot implements Bot {
 							!errorCodesToSuppress.includes(errorCode) &&
 							!(e as Error).message.includes('Transaction was not confirmed')
 						) {
-							if (this.txSimErrorCounter) {
-								this.txSimErrorCounter!.add(1, {
-									errorCode: errorCode.toString(),
-								});
-							}
+							const user = this.driftClient.getUser();
+							this.txSimErrorCounter?.add(1, {
+								errorCode: errorCode.toString(),
+								...metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
+								),
+							});
 
 							logger.error(
 								`Failed to send tx, sim error (fillTxId: ${fillTxId}) sim logs:\n${
@@ -1374,7 +1600,9 @@ export class FillerBot implements Bot {
 	}
 
 	private async getBlockhashForTx(): Promise<string> {
-		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(10);
+		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(
+			CACHED_BLOCKHASH_OFFSET
+		);
 		if (cachedBlockhash) {
 			return cachedBlockhash.blockhash as string;
 		}
@@ -1438,6 +1666,7 @@ export class FillerBot implements Bot {
 				throw new Error('expected perp market type');
 			}
 
+			const user = this.driftClient.getUser();
 			let makerInfosToUse = makerInfos;
 			const buildTxWithMakerInfos = async (
 				makers: DataAndSlot<MakerInfo>[]
@@ -1469,10 +1698,26 @@ export class FillerBot implements Bot {
 					[],
 					this.driftClient.opts,
 					SIM_CU_ESTIMATE_MULTIPLIER,
-					true,
 					this.simulateTxForCUEstimate,
 					await this.getBlockhashForTx()
 				);
+				this.simulateTxHistogram?.record(simResult.simTxDuration, {
+					type: 'multiMakerFill',
+					simError: simResult.simError !== null,
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+				this.estTxCuHistogram?.record(simResult.cuEstimate, {
+					type: 'multiMakerFill',
+					simError: simResult.simError !== null,
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+
 				return simResult;
 			};
 
@@ -1500,10 +1745,6 @@ export class FillerBot implements Bot {
 				);
 				return true;
 			}
-
-			logger.info(
-				`tryFillMultiMakerPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
-			);
 
 			if (simResult.simError) {
 				logger.error(
@@ -1665,7 +1906,6 @@ export class FillerBot implements Bot {
 		runningTxSize += 32;
 		runningTxSize += this.calcIxEncodedSize(computeBudgetIx);
 
-		const txPackerStart = Date.now();
 		const nodesSent: Array<NodeToFill> = [];
 		let idxUsed = 0;
 		const startingIxsSize = ixs.length;
@@ -1678,6 +1918,7 @@ export class FillerBot implements Bot {
 				continue;
 			}
 
+			// otherwise pack fill ixs until est. tx size or CU limit is hit
 			const {
 				makerInfos,
 				takerUser,
@@ -1779,26 +2020,15 @@ export class FillerBot implements Bot {
 			return nodesSent.length;
 		}
 
-		logger.debug(
-			`txPacker took ${Date.now() - txPackerStart}ms (fillTxId: ${fillTxId})`
-		);
-
 		if (nodesSent.length === 0) {
 			return 0;
 		}
-
-		logger.info(
-			`sending tx, ${
-				uniqueAccounts.size
-			} unique accounts, total ix: ${idxUsed}, calcd tx size: ${runningTxSize}, took ${
-				Date.now() - txPackerStart
-			}ms (fillTxId: ${fillTxId})`
-		);
 
 		if (this.revertOnFailure) {
 			ixs.push(await this.driftClient.getRevertFillIx());
 		}
 
+		const user = this.driftClient.getUser();
 		const simResult = await simulateAndGetTxWithCUs(
 			ixs,
 			this.driftClient.connection,
@@ -1807,13 +2037,26 @@ export class FillerBot implements Bot {
 			[],
 			this.driftClient.opts,
 			SIM_CU_ESTIMATE_MULTIPLIER,
-			true,
 			this.simulateTxForCUEstimate,
 			await this.getBlockhashForTx()
 		);
-		logger.info(
-			`tryBulkFillPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
-		);
+		this.simulateTxHistogram?.record(simResult.simTxDuration, {
+			type: 'bulkFill',
+			simError: simResult.simError !== null,
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+		this.estTxCuHistogram?.record(simResult.cuEstimate, {
+			type: 'bulkFill',
+			simError: simResult.simError !== null,
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+
 		if (this.simulateTxForCUEstimate && simResult.simError) {
 			logger.error(
 				`simError: ${JSON.stringify(
@@ -1881,26 +2124,7 @@ export class FillerBot implements Bot {
 		fillableNodes: Array<NodeToFill>,
 		buildForBundle: boolean
 	) {
-		let filledNodeCount = 0;
-		while (filledNodeCount < fillableNodes.length) {
-			const attemptedFills = await this.tryBulkFillPerpNodes(
-				fillableNodes.slice(filledNodeCount),
-				buildForBundle
-			);
-			filledNodeCount += attemptedFills;
-
-			// record fill attempts
-			const user = this.driftClient.getUser();
-			if (this.attemptedFillsCounter) {
-				this.attemptedFillsCounter!.add(
-					attemptedFills,
-					metricAttrFromUserAccount(
-						user.userAccountPublicKey,
-						user.getUserAccount()
-					)
-				);
-			}
-		}
+		await this.tryBulkFillPerpNodes(fillableNodes, buildForBundle);
 	}
 
 	protected async executeTriggerablePerpNodesForMarket(
@@ -1934,6 +2158,7 @@ export class FillerBot implements Bot {
 				ixs.push(await this.driftClient.getRevertFillIx());
 			}
 
+			const driftUser = this.driftClient.getUser();
 			const simResult = await simulateAndGetTxWithCUs(
 				ixs,
 				this.driftClient.connection,
@@ -1942,13 +2167,25 @@ export class FillerBot implements Bot {
 				[],
 				this.driftClient.opts,
 				SIM_CU_ESTIMATE_MULTIPLIER,
-				true,
 				this.simulateTxForCUEstimate,
 				await this.getBlockhashForTx()
 			);
-			logger.info(
-				`executeTriggerablePerpNodesForMarket estimated CUs: ${simResult.cuEstimate}`
-			);
+			this.simulateTxHistogram?.record(simResult.simTxDuration, {
+				type: 'trigger',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					driftUser.userAccountPublicKey,
+					driftUser.getUserAccount()
+				),
+			});
+			this.estTxCuHistogram?.record(simResult.cuEstimate, {
+				type: 'trigger',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					driftUser.userAccountPublicKey,
+					driftUser.getUserAccount()
+				),
+			});
 
 			if (this.simulateTxForCUEstimate && simResult.simError) {
 				logger.error(
@@ -1963,17 +2200,16 @@ export class FillerBot implements Bot {
 				);
 			} else {
 				if (!this.dryRun) {
+					// @ts-ignore;
+					simResult.tx.sign([this.driftClient.wallet.payer]);
+					const txSig = bs58.encode(simResult.tx.signatures[0]);
+					this.registerTxSigToConfirm(txSig, Date.now(), [], -1, 'trigger');
+
 					if (buildForBundle) {
-						this.sendTxThroughJito(simResult.tx, 'triggerOrder');
+						this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
 					} else if (this.canSendOutsideJito()) {
 						this.driftClient
 							.sendTransaction(simResult.tx)
-							.then((txSig) => {
-								logger.info(
-									`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-								);
-								logger.info(`Tx: ${txSig}`);
-							})
 							.catch((error) => {
 								nodeToTrigger.node.haveTrigger = false;
 
@@ -2009,15 +2245,13 @@ export class FillerBot implements Bot {
 		}
 
 		const user = this.driftClient.getUser();
-		if (this.attemptedFillsCounter) {
-			this.attemptedTriggersCounter!.add(
-				triggerableNodes.length,
-				metricAttrFromUserAccount(
-					user.userAccountPublicKey,
-					user.getUserAccount()
-				)
-			);
-		}
+		this.attemptedTriggersCounter?.add(
+			triggerableNodes.length,
+			metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			)
+		);
 	}
 
 	protected async settlePnls() {
@@ -2036,7 +2270,12 @@ export class FillerBot implements Bot {
 					try {
 						const ixs = [
 							ComputeBudgetProgram.setComputeUnitLimit({
-								units: 1_400_000,
+								units: 1_400_000, // will be overridden by simulateTx
+							}),
+							ComputeBudgetProgram.setComputeUnitPrice({
+								microLamports: Math.floor(
+									this.priorityFeeSubscriber.getCustomStrategyResult()
+								),
 							}),
 						];
 						ixs.push(
@@ -2059,11 +2298,26 @@ export class FillerBot implements Bot {
 							[],
 							this.driftClient.opts,
 							SIM_CU_ESTIMATE_MULTIPLIER,
-							true,
 							this.simulateTxForCUEstimate,
 							await this.getBlockhashForTx()
 						);
-						logger.info(`settlePnls estimatedCUs: ${simResult.cuEstimate}`);
+						this.simulateTxHistogram?.record(simResult.simTxDuration, {
+							type: 'settlePnl',
+							simError: simResult.simError !== null,
+							...metricAttrFromUserAccount(
+								user.userAccountPublicKey,
+								user.getUserAccount()
+							),
+						});
+						this.estTxCuHistogram?.record(simResult.cuEstimate, {
+							type: 'settlePnl',
+							simError: simResult.simError !== null,
+							...metricAttrFromUserAccount(
+								user.userAccountPublicKey,
+								user.getUserAccount()
+							),
+						});
+
 						if (this.simulateTxForCUEstimate && simResult.simError) {
 							logger.info(
 								`settlePnls simError: ${JSON.stringify(simResult.simError)}`
@@ -2080,14 +2334,27 @@ export class FillerBot implements Bot {
 									this.usingJito() &&
 									slotsUntilJito !== undefined &&
 									slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+
+								// @ts-ignore;
+								simResult.tx.sign([this.driftClient.wallet.payer]);
+								const txSig = bs58.encode(simResult.tx.signatures[0]);
+								this.registerTxSigToConfirm(
+									txSig,
+									Date.now(),
+									[],
+									-2,
+									'settlePnl'
+								);
+
 								if (buildForBundle) {
-									this.sendTxThroughJito(simResult.tx, 'settlePnl');
+									this.sendTxThroughJito(simResult.tx, 'settlePnl', txSig);
 								} else if (this.canSendOutsideJito()) {
 									settlePnlPromises.push(
 										this.driftClient.txSender.sendVersionedTransaction(
 											simResult.tx,
 											[],
-											this.driftClient.opts
+											this.driftClient.opts,
+											true
 										)
 									);
 								}
@@ -2147,6 +2414,14 @@ export class FillerBot implements Bot {
 		let ran = false;
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
+				const user = this.driftClient.getUser();
+				this.lastTryFillTimeGauge?.setLatestValue(
+					Date.now(),
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
 				const dlob = await this.getDLOB();
 
 				this.pruneThrottledNode();
@@ -2228,15 +2503,13 @@ export class FillerBot implements Bot {
 			if (ran) {
 				const duration = Date.now() - startTime;
 				const user = this.driftClient.getUser();
-				if (this.tryFillDurationHistogram) {
-					this.tryFillDurationHistogram!.record(
-						duration,
-						metricAttrFromUserAccount(
-							user.getUserAccountPublicKey(),
-							user.getUserAccount()
-						)
-					);
-				}
+				this.tryFillDurationHistogram?.record(
+					duration,
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
 				logger.debug(`tryFill done, took ${duration}ms`);
 
 				await this.watchdogTimerMutex.runExclusive(async () => {
