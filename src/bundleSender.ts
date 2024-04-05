@@ -35,7 +35,9 @@ export type TipStream = {
 	ema_landed_tips_50th_percentile: number; // in SOL
 };
 
-type BundleStats = {
+export type DropReason = 'pruned' | 'blockhash_expired' | 'blockhash_not_found';
+
+export type BundleStats = {
 	accepted: number;
 	stateAuctionBidRejected: number;
 	winningBatchBidRejected: number;
@@ -79,8 +81,8 @@ export class BundleSender {
 
 	/// -1 for each accepted bundle, +1 for each rejected (due to bid, don't count sim errors).
 	private failBundleCount = 0;
-	private countLandedFills = 0;
-	private countDroppedFills = 0;
+	private countLandedBundles = 0;
+	private countDroppedbundles = 0;
 
 	private lastTipStream: TipStream | undefined;
 	private bundleStats: BundleStats = {
@@ -125,6 +127,26 @@ export class BundleSender {
 			return undefined;
 		}
 		return this.nextJitoLeader.nextLeaderSlot - this.slotSubscriber.getSlot();
+	}
+
+	getBundleStats(): BundleStats {
+		return this.bundleStats;
+	}
+
+	getTipStream(): TipStream | undefined {
+		return this.lastTipStream;
+	}
+
+	getBundleFailCount(): number {
+		return this.failBundleCount;
+	}
+
+	getLandedCount(): number {
+		return this.countLandedBundles;
+	}
+
+	getDroppedCount(): number {
+		return this.countDroppedbundles;
 	}
 
 	private incRunningBundleScore(amount = 1) {
@@ -327,8 +349,8 @@ export class BundleSender {
 				const droppedTxs = resps.filter((tx) => tx === null);
 				const landedTxs = resps.filter((tx) => tx !== null);
 
-				this.countDroppedFills += droppedTxs.length;
-				this.countLandedFills += landedTxs.length;
+				this.countDroppedbundles += droppedTxs.length;
+				this.countLandedBundles += landedTxs.length;
 				const countBefore = this.failBundleCount;
 				this.incRunningBundleScore(droppedTxs.length);
 				this.decRunningBundleScore(landedTxs.length);
@@ -347,8 +369,8 @@ export class BundleSender {
 			logger.info(
 				`${logPrefix}: running fail count: ${
 					this.failBundleCount
-				}, totalLandedTxs: ${this.countLandedFills}, totalDroppedTxs: ${
-					this.countDroppedFills
+				}, totalLandedTxs: ${this.countLandedBundles}, totalDroppedTxs: ${
+					this.countDroppedbundles
 				}, currentTipAmount: ${this.calculateCurrentTipAmount()}, lastJitoTipStream: ${JSON.stringify(
 					this.lastTipStream
 				)} bundle stats: ${JSON.stringify(this.bundleStats)}`

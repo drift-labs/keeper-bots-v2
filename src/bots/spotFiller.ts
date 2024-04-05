@@ -83,6 +83,7 @@ import {
 } from '../utils';
 import { BundleSender } from '../bundleSender';
 import {
+	CACHED_BLOCKHASH_OFFSET,
 	CONFIRM_TX_INTERVAL_MS,
 	CONFIRM_TX_RATE_LIMIT_BACKOFF_MS,
 	MakerNodeMap,
@@ -127,6 +128,12 @@ enum METRIC_TYPES {
 	estimated_tx_cu_histogram = 'estimated_tx_cu_histogram',
 	simulate_tx_duration_histogram = 'simulate_tx_duration_histogram',
 	expired_nodes_set_size = 'expired_nodes_set_size',
+
+	jito_bundles_accepted = 'jito_bundles_accepted',
+	jito_bundles_simulation_failure = 'jito_simulation_failure',
+	jito_dropped_bundle = 'jito_dropped_bundle',
+	jito_landed_tips = 'jito_landed_tips',
+	jito_bundle_count = 'jito_bundle_count',
 }
 
 function getMakerNodeFromNodeToFill(
@@ -285,6 +292,11 @@ export class SpotFillerBot implements Bot {
 	protected pendingTxSigsLoopRateLimitedCounter?: CounterValue;
 	protected evictedPendingTxSigsToConfirmCounter?: CounterValue;
 	protected expiredNodesSetSize?: GaugeValue;
+	protected jitoBundlesAcceptedGauge?: GaugeValue;
+	protected jitoBundlesSimulationFailureGauge?: GaugeValue;
+	protected jitoDroppedBundleGauge?: GaugeValue;
+	protected jitoLandedTipsGauge?: GaugeValue;
+	protected jitoBundleCount?: GaugeValue;
 
 	constructor(
 		driftClient: DriftClient,
@@ -492,6 +504,26 @@ export class SpotFillerBot implements Bot {
 			METRIC_TYPES.expired_nodes_set_size,
 			'Count of nodes that are expired'
 		);
+		this.jitoBundlesAcceptedGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_bundles_accepted,
+			'Count of jito bundles that were accepted'
+		);
+		this.jitoBundlesSimulationFailureGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_bundles_simulation_failure,
+			'Count of jito bundles that failed simulation'
+		);
+		this.jitoDroppedBundleGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_dropped_bundle,
+			'Count of jito bundles that were dropped'
+		);
+		this.jitoLandedTipsGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_landed_tips,
+			'Gauge of historic bundle tips that landed'
+		);
+		this.jitoBundleCount = this.metrics.addGauge(
+			METRIC_TYPES.jito_bundle_count,
+			'Count of jito bundles that were sent, and their status'
+		);
 
 		this.metrics?.finalizeObservables();
 
@@ -698,8 +730,139 @@ export class SpotFillerBot implements Bot {
 		this.intervalIds.push(
 			setInterval(this.confirmPendingTxSigs.bind(this), CONFIRM_TX_INTERVAL_MS)
 		);
+		if (this.bundleSender) {
+			this.intervalIds.push(
+				setInterval(this.recordJitoBundleStats.bind(this), 10_000)
+			);
+		}
 
 		logger.info(`${this.name} Bot started!`);
+	}
+
+	protected recordJitoBundleStats() {
+		const user = this.driftClient.getUser();
+		const bundleStats = this.bundleSender?.getBundleStats();
+		if (bundleStats) {
+			this.jitoBundlesAcceptedGauge?.setLatestValue(bundleStats.accepted, {
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+			this.jitoBundlesSimulationFailureGauge?.setLatestValue(
+				bundleStats.simulationFailure,
+				{
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoDroppedBundleGauge?.setLatestValue(bundleStats.droppedPruned, {
+				type: 'pruned',
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+			this.jitoDroppedBundleGauge?.setLatestValue(
+				bundleStats.droppedBlockhashExpired,
+				{
+					type: 'blockhash_expired',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoDroppedBundleGauge?.setLatestValue(
+				bundleStats.droppedBlockhashNotFound,
+				{
+					type: 'blockhash_not_found',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+		}
+
+		const tipStream = this.bundleSender?.getTipStream();
+		if (tipStream) {
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_25th_percentile,
+				{
+					percentile: 'p25',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_50th_percentile,
+				{
+					percentile: 'p50',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_75th_percentile,
+				{
+					percentile: 'p75',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_95th_percentile,
+				{
+					percentile: 'p95',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_99th_percentile,
+				{
+					percentile: 'p99',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.ema_landed_tips_50th_percentile,
+				{
+					percentile: 'ema_p50',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+		}
+
+		const bundleFailCount = this.bundleSender?.getBundleFailCount();
+		const bundleLandedCount = this.bundleSender?.getLandedCount();
+		const bundleDroppedCount = this.bundleSender?.getDroppedCount();
+		this.jitoBundleCount?.setLatestValue(bundleFailCount ?? 0, {
+			type: 'fail_count',
+		});
+		this.jitoBundleCount?.setLatestValue(bundleLandedCount ?? 0, {
+			type: 'landed',
+		});
+		this.jitoBundleCount?.setLatestValue(bundleDroppedCount ?? 0, {
+			type: 'dropped',
+		});
 	}
 
 	protected async confirmPendingTxSigs() {
@@ -1379,7 +1542,9 @@ export class SpotFillerBot implements Bot {
 	}
 
 	private async getBlockhashForTx(): Promise<string> {
-		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(10);
+		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(
+			CACHED_BLOCKHASH_OFFSET
+		);
 		if (cachedBlockhash) {
 			return cachedBlockhash.blockhash as string;
 		}
