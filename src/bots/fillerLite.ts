@@ -39,7 +39,6 @@ export class FillerLiteBot extends FillerBot {
 			undefined,
 			driftClient,
 			undefined,
-			undefined,
 			runtimeSpec,
 			globalConfig,
 			config,

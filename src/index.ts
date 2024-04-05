@@ -504,7 +504,6 @@ const runBot = async () => {
 				bulkAccountLoader,
 				driftClient,
 				userMap,
-				eventSubscriber,
 				{
 					rpcEndpoint: endpoint,
 					commit: commitHash,
@@ -592,10 +591,10 @@ const runBot = async () => {
 					driftPid: driftPublicKey.toBase58(),
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
+				config.global,
 				config.botConfigs!.spotFiller!,
 				priorityFeeSubscriber,
 				blockhashSubscriber,
-				eventSubscriber,
 				bundleSender
 			)
 		);

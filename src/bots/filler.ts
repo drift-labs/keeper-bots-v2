@@ -22,7 +22,6 @@ import {
 	UserSubscriptionConfig,
 	isOneOfVariant,
 	DLOBSubscriber,
-	EventSubscriber,
 	NodeToTrigger,
 	UserAccount,
 	getUserAccountPublicKey,
@@ -102,12 +101,12 @@ const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana
 const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
-const CONFIRM_TX_INTERVAL_MS = 10_000;
+export const CONFIRM_TX_INTERVAL_MS = 5_000;
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
-const TX_CONFIRMATION_BATCH_SIZE = 50;
-const TX_TIMEOUT_THRESHOLD_MS = 60_000; // tx considered stale after this time and give up confirming
-const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until trying to confirm tx again if rate limited
+export const TX_CONFIRMATION_BATCH_SIZE = 100;
+export const TX_TIMEOUT_THRESHOLD_MS = 60_000; // tx considered stale after this time and give up confirming
+export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until trying to confirm tx again if rate limited
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
@@ -126,7 +125,6 @@ const errorCodesToSuppress = [
 enum METRIC_TYPES {
 	try_fill_duration_histogram = 'try_fill_duration_histogram',
 	runtime_specs = 'runtime_specs',
-	total_collateral = 'total_collateral',
 	last_try_fill_time = 'last_try_fill_time',
 	mutex_busy = 'mutex_busy',
 	sent_transactions = 'sent_transactions',
@@ -141,8 +139,7 @@ enum METRIC_TYPES {
 }
 
 export type MakerNodeMap = Map<string, DLOBNode[]>;
-
-type TxType = 'fill' | 'trigger' | 'settlePnl';
+export type TxType = 'fill' | 'trigger' | 'settlePnl';
 
 export class FillerBot implements Bot {
 	public readonly name: string;
@@ -155,7 +152,6 @@ export class FillerBot implements Bot {
 	protected driftClient: DriftClient;
 	/// Connection to use specifically for confirming transactions
 	protected txConfirmationConnection: Connection;
-	protected eventSubscriber?: EventSubscriber;
 	protected pollingIntervalMs: number;
 	protected revertOnFailure?: boolean;
 	protected simulateTxForCUEstimate?: boolean;
@@ -191,7 +187,7 @@ export class FillerBot implements Bot {
 		{
 			ts: number;
 			nodeFilled: Array<NodeToFill>;
-			fillId: number;
+			fillTxId: number;
 			txType: TxType;
 		}
 	>;
@@ -215,7 +211,6 @@ export class FillerBot implements Bot {
 	protected mutexBusyCounter?: CounterValue;
 	protected sentTxsCounter?: CounterValue;
 	protected attemptedTriggersCounter?: CounterValue;
-	/// TODO: set this
 	protected landedTxsCounter?: CounterValue;
 	protected txSimErrorCounter?: CounterValue;
 	protected pendingTxSigsToConfirmGauge?: GaugeValue;
@@ -228,7 +223,6 @@ export class FillerBot implements Bot {
 		bulkAccountLoader: BulkAccountLoader | undefined,
 		driftClient: DriftClient,
 		userMap: UserMap | undefined,
-		eventSubscriber: EventSubscriber | undefined,
 		runtimeSpec: RuntimeSpec,
 		globalConfig: GlobalConfig,
 		config: FillerConfig,
@@ -248,7 +242,6 @@ export class FillerBot implements Bot {
 		} else {
 			this.txConfirmationConnection = this.driftClient.connection;
 		}
-		this.eventSubscriber = eventSubscriber;
 		this.bulkAccountLoader = bulkAccountLoader;
 		if (this.bulkAccountLoader) {
 			this.userStatsMapSubscriptionConfig = {
@@ -293,7 +286,7 @@ export class FillerBot implements Bot {
 			{
 				ts: number;
 				nodeFilled: Array<NodeToFill>;
-				fillId: number;
+				fillTxId: number;
 				txType: TxType;
 			}
 		>({
@@ -484,8 +477,6 @@ export class FillerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		this.eventSubscriber?.eventEmitter.removeAllListeners('newEvent');
-
 		await this.dlobSubscriber!.unsubscribe();
 		await this.userMap!.unsubscribe();
 	}
@@ -562,10 +553,10 @@ export class FillerBot implements Bot {
 					const txAge = txConfirmationInfo[1].ts - Date.now();
 					const nodeFilled = txConfirmationInfo[1].nodeFilled;
 					const txType = txConfirmationInfo[1].txType;
-					const fillId = txConfirmationInfo[1].fillId;
+					const fillTxId = txConfirmationInfo[1].fillTxId;
 					if (txResp === null) {
 						logger.info(
-							`Tx not found, (fillId: ${fillId}) (txType: ${txType}): ${txSig}, tx age: ${
+							`Tx not found, (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
 								txAge / 1000
 							} s`
 						);
@@ -574,7 +565,7 @@ export class FillerBot implements Bot {
 						}
 					} else {
 						logger.info(
-							`Tx landed (fillId: ${fillId}) (txType: ${txType}): ${txSig}, tx age: ${
+							`Tx landed (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
 								txAge / 1000
 							} s`
 						);
@@ -1302,13 +1293,13 @@ export class FillerBot implements Bot {
 		txSig: TransactionSignature,
 		now: number,
 		nodeFilled: Array<NodeToFill>,
-		fillId: number,
+		fillTxId: number,
 		txType: TxType
 	) {
 		this.pendingTxSigsToconfirm.set(txSig, {
 			ts: now,
 			nodeFilled,
-			fillId,
+			fillTxId,
 			txType,
 		});
 		const user = this.driftClient.getUser();
@@ -1389,14 +1380,14 @@ export class FillerBot implements Bot {
 						logger.error(
 							`[${
 								this.name
-							}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${
+							}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillTxId: ${fillTxId}). ${
 								e.message
 							}\n${JSON.stringify(accountMetas)}`
 						);
 						webhookMessage(
 							`[${
 								this.name
-							}]: :boxing_glove: Tx too large (fillId: ${fillTxId}). ${
+							}]: :boxing_glove: Tx too large (fillTxId: ${fillTxId}). ${
 								e.message
 							}\n${JSON.stringify(accountMetas)}`
 						);
@@ -1553,6 +1544,15 @@ export class FillerBot implements Bot {
 						user.getUserAccount()
 					),
 				});
+				this.estTxCuHistogram?.record(simResult.cuEstimate, {
+					type: 'multiMakerFill',
+					simError: simResult.simError !== null,
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+
 				return simResult;
 			};
 
@@ -1580,15 +1580,6 @@ export class FillerBot implements Bot {
 				);
 				return true;
 			}
-
-			this.estTxCuHistogram?.record(simResult.cuEstimate, {
-				type: 'multiMakerFill',
-				simError: simResult.simError !== null,
-				...metricAttrFromUserAccount(
-					user.userAccountPublicKey,
-					user.getUserAccount()
-				),
-			});
 
 			if (simResult.simError) {
 				logger.error(
@@ -1900,6 +1891,7 @@ export class FillerBot implements Bot {
 				user.getUserAccount()
 			),
 		});
+
 		if (this.simulateTxForCUEstimate && simResult.simError) {
 			logger.error(
 				`simError: ${JSON.stringify(
@@ -2152,7 +2144,6 @@ export class FillerBot implements Bot {
 								user.getUserAccount()
 							),
 						});
-
 						this.estTxCuHistogram?.record(simResult.cuEstimate, {
 							type: 'settlePnl',
 							simError: simResult.simError !== null,

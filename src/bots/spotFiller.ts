@@ -13,16 +13,12 @@ import {
 	SerumSubscriber,
 	SerumFulfillmentConfigMap,
 	SerumV3FulfillmentConfigAccount,
-	OrderActionRecord,
-	OrderRecord,
-	WrappedEvent,
 	DLOBNode,
 	DLOBSubscriber,
 	PhoenixFulfillmentConfigMap,
 	PhoenixSubscriber,
 	BN,
 	PhoenixV1FulfillmentConfigAccount,
-	EventSubscriber,
 	TEN,
 	NodeToTrigger,
 	BulkAccountLoader,
@@ -38,30 +34,31 @@ import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
+	Connection,
 	PublicKey,
 	SendTransactionError,
 	TransactionInstruction,
+	TransactionSignature,
 	VersionedTransaction,
 	VersionedTransactionResponse,
 } from '@solana/web3.js';
 
-import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import {
 	ExplicitBucketHistogramAggregation,
 	InstrumentType,
-	MeterProvider,
 	View,
 } from '@opentelemetry/sdk-metrics-base';
-import {
-	Meter,
-	ObservableGauge,
-	Counter,
-	Histogram,
-} from '@opentelemetry/api-metrics';
 
 import { logger } from '../logger';
 import { Bot } from '../types';
-import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
+import {
+	CounterValue,
+	GaugeValue,
+	HistogramValue,
+	Metrics,
+	RuntimeSpec,
+	metricAttrFromUserAccount,
+} from '../metrics';
 import { webhookMessage } from '../webhook';
 import { getErrorCode } from '../error';
 import {
@@ -72,7 +69,7 @@ import {
 	isOrderDoesNotExistLog,
 	isTakerBreachedMaintenanceMarginLog,
 } from './common/txLogParse';
-import { FillerConfig } from '../config';
+import { FillerConfig, GlobalConfig } from '../config';
 import {
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
@@ -82,10 +79,20 @@ import {
 	logMessageForNodeToFill,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
+	sleepMs,
 } from '../utils';
 import { BundleSender } from '../bundleSender';
-import { MakerNodeMap } from './filler';
+import {
+	CONFIRM_TX_INTERVAL_MS,
+	CONFIRM_TX_RATE_LIMIT_BACKOFF_MS,
+	MakerNodeMap,
+	TX_CONFIRMATION_BATCH_SIZE,
+	TX_TIMEOUT_THRESHOLD_MS,
+	TxType,
+} from './filler';
 import { selectMakers } from '../makerSelection';
+import { LRUCache } from 'lru-cache';
+import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
@@ -107,19 +114,19 @@ const errorCodesToSuppress = [
 ];
 
 enum METRIC_TYPES {
-	sdk_call_duration_histogram = 'sdk_call_duration_histogram',
 	try_fill_duration_histogram = 'try_fill_duration_histogram',
 	runtime_specs = 'runtime_specs',
-	total_collateral = 'total_collateral',
 	last_try_fill_time = 'last_try_fill_time',
-	unrealized_pnl = 'unrealized_pnl',
 	mutex_busy = 'mutex_busy',
-	attempted_fills = 'attempted_fills',
-	attempted_triggers = 'attempted_triggers',
-	successful_fills = 'successful_fills',
-	observed_fills_count = 'observed_fills_count',
-	user_map_user_account_keys = 'user_map_user_account_keys',
-	user_stats_map_authority_keys = 'user_stats_map_authority_keys',
+	sent_transactions = 'sent_transactions',
+	landed_transactions = 'landed_transactions',
+	tx_sim_error_count = 'tx_sim_error_count',
+	pending_tx_sigs_to_confirm = 'pending_tx_sigs_to_confirm',
+	pending_tx_sigs_loop_rate_limited = 'pending_tx_sigs_loop_rate_limited',
+	evicted_pending_tx_sigs_to_confirm = 'evicted_pending_tx_sigs_to_confirm',
+	estimated_tx_cu_histogram = 'estimated_tx_cu_histogram',
+	simulate_tx_duration_histogram = 'simulate_tx_duration_histogram',
+	expired_nodes_set_size = 'expired_nodes_set_size',
 }
 
 function getMakerNodeFromNodeToFill(
@@ -207,7 +214,9 @@ export class SpotFillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 2000;
 
 	private driftClient: DriftClient;
-	private eventSubscriber?: EventSubscriber;
+	/// Connection to use specifically for confirming transactions
+	private txConfirmationConnection: Connection;
+	private globalConfig: GlobalConfig;
 	private blockhashSubscriber: BlockhashSubscriber;
 	private pollingIntervalMs: number;
 	private driftLutAccount?: AddressLookupTableAccount;
@@ -240,40 +249,64 @@ export class SpotFillerBot implements Bot {
 	private simulateTxForCUEstimate?: boolean;
 	private bundleSender?: BundleSender;
 
+	/// stores txSigs that need to been confirmed in a slower loop, and the time they were confirmed
+	protected pendingTxSigsToconfirm: LRUCache<
+		string,
+		{
+			ts: number;
+			nodeFilled?: NodeToFill;
+			fillTxId: number;
+			txType: TxType;
+		}
+	>;
+	protected expiredNodesSet: LRUCache<string, boolean>;
+	protected confirmLoopRunning = false;
+	protected confirmLoopRateLimitTs =
+		Date.now() - CONFIRM_TX_RATE_LIMIT_BACKOFF_MS;
+
 	// metrics
 	private metricsInitialized = false;
 	private metricsPort?: number;
-	private meter?: Meter;
-	private exporter?: PrometheusExporter;
+	protected metrics?: Metrics;
 	private bootTimeMs?: number;
 
-	private runtimeSpecsGauge?: ObservableGauge;
-	private runtimeSpec: RuntimeSpec;
-	private mutexBusyCounter?: Counter;
-	private attemptedFillsCounter?: Counter;
-	private attemptedTriggersCounter?: Counter;
-	private observedFillsCountCounter?: Counter;
-	private successfulFillsCounter?: Counter;
-	private sdkCallDurationHistogram?: Histogram;
-	private tryFillDurationHistogram?: Histogram;
-	private lastTryFillTimeGauge?: ObservableGauge;
-	private userMapUserAccountKeysGauge?: ObservableGauge;
-	private userStatsMapAuthorityKeysGauge?: ObservableGauge;
+	protected runtimeSpec: RuntimeSpec;
+	protected runtimeSpecsGauge?: GaugeValue;
+	protected tryFillDurationHistogram?: HistogramValue;
+	protected estTxCuHistogram?: HistogramValue;
+	protected simulateTxHistogram?: HistogramValue;
+	protected lastTryFillTimeGauge?: GaugeValue;
+	protected mutexBusyCounter?: CounterValue;
+	protected sentTxsCounter?: CounterValue;
+	protected attemptedTriggersCounter?: CounterValue;
+	protected landedTxsCounter?: CounterValue;
+	protected txSimErrorCounter?: CounterValue;
+	protected pendingTxSigsToConfirmGauge?: GaugeValue;
+	protected pendingTxSigsLoopRateLimitedCounter?: CounterValue;
+	protected evictedPendingTxSigsToConfirmCounter?: CounterValue;
+	protected expiredNodesSetSize?: GaugeValue;
 
 	constructor(
 		driftClient: DriftClient,
 		userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
+		globalConfig: GlobalConfig,
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
-		eventSubscriber?: EventSubscriber,
 		bundleSender?: BundleSender
 	) {
+		this.globalConfig = globalConfig;
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
-		this.eventSubscriber = eventSubscriber;
+		if (globalConfig.txConfirmationEndpoint) {
+			this.txConfirmationConnection = new Connection(
+				globalConfig.txConfirmationEndpoint
+			);
+		} else {
+			this.txConfirmationConnection = this.driftClient.connection;
+		}
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
 			config.fillerPollingInterval ?? this.defaultIntervalMs;
@@ -286,10 +319,7 @@ export class SpotFillerBot implements Bot {
 		);
 		this.phoenixSubscribers = new Map<number, PhoenixSubscriber>();
 
-		this.metricsPort = config.metricsPort;
-		if (this.metricsPort) {
-			this.initializeMetrics();
-		}
+		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
 		this.priorityFeeSubscriber.updateAddresses([
@@ -333,145 +363,159 @@ export class SpotFillerBot implements Bot {
 
 		this.bundleSender = bundleSender;
 		this.blockhashSubscriber = blockhashSubscriber;
+
+		this.pendingTxSigsToconfirm = new LRUCache<
+			string,
+			{
+				ts: number;
+				nodeFilled?: NodeToFill;
+				fillTxId: number;
+				txType: TxType;
+			}
+		>({
+			max: 5_000,
+			ttl: TX_TIMEOUT_THRESHOLD_MS,
+			ttlResolution: 1000,
+			disposeAfter: this.recordEvictedTxSig.bind(this),
+		});
+
+		this.expiredNodesSet = new LRUCache<string, boolean>({
+			max: 10_000,
+			ttl: TX_TIMEOUT_THRESHOLD_MS,
+			ttlResolution: 1000,
+		});
 	}
 
-	private initializeMetrics() {
+	protected initializeMetrics(metricsPort?: number) {
+		if (this.globalConfig.disableMetrics) {
+			logger.info(
+				`${this.name}: globalConfig.disableMetrics is true, not initializing metrics`
+			);
+			return;
+		}
+
+		if (!metricsPort) {
+			logger.info(
+				`${this.name}: bot.metricsPort and global.metricsPort not set, not initializing metrics`
+			);
+			return;
+		}
+
 		if (this.metricsInitialized) {
 			logger.error('Tried to initilaize metrics multiple times');
 			return;
 		}
-		this.metricsInitialized = true;
 
-		const { endpoint: defaultEndpoint } = PrometheusExporter.DEFAULT_OPTIONS;
-		this.exporter = new PrometheusExporter(
-			{
-				port: this.metricsPort,
-				endpoint: defaultEndpoint,
-			},
-			() => {
-				logger.info(
-					`prometheus scrape endpoint started: http://localhost:${this.metricsPort}${defaultEndpoint}`
-				);
-			}
-		);
-		const meterName = this.name;
-		const meterProvider = new MeterProvider({
-			views: [
-				new View({
-					instrumentName: METRIC_TYPES.sdk_call_duration_histogram,
-					instrumentType: InstrumentType.HISTOGRAM,
-					meterName: meterName,
-					aggregation: new ExplicitBucketHistogramAggregation(
-						Array.from(new Array(20), (_, i) => 0 + i * 100),
-						true
-					),
-				}),
+		this.metrics = new Metrics(
+			this.name,
+			[
 				new View({
 					instrumentName: METRIC_TYPES.try_fill_duration_histogram,
 					instrumentType: InstrumentType.HISTOGRAM,
-					meterName: meterName,
+					meterName: this.name,
 					aggregation: new ExplicitBucketHistogramAggregation(
 						Array.from(new Array(20), (_, i) => 0 + i * 5),
 						true
 					),
 				}),
+				new View({
+					instrumentName: METRIC_TYPES.estimated_tx_cu_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: this.name,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(15), (_, i) => 0 + i * 100_000),
+						true
+					),
+				}),
+				new View({
+					instrumentName: METRIC_TYPES.simulate_tx_duration_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: this.name,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(20), (_, i) => 50 + i * 50),
+						true
+					),
+				}),
 			],
-		});
-
-		meterProvider.addMetricReader(this.exporter);
-		this.meter = meterProvider.getMeter(meterName);
-
+			metricsPort!
+		);
 		this.bootTimeMs = Date.now();
-
-		this.runtimeSpecsGauge = this.meter.createObservableGauge(
+		this.runtimeSpecsGauge = this.metrics.addGauge(
 			METRIC_TYPES.runtime_specs,
-			{
-				description: 'Runtime sepcification of this program',
-			}
+			'Runtime sepcification of this program'
 		);
-		this.runtimeSpecsGauge.addCallback((obs) => {
-			obs.observe(this.bootTimeMs!, this.runtimeSpec);
-		});
-		this.lastTryFillTimeGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.last_try_fill_time,
-			{
-				description: 'Last time that fill was attempted',
-			}
-		);
-
-		this.mutexBusyCounter = this.meter.createCounter(METRIC_TYPES.mutex_busy, {
-			description: 'Count of times the mutex was busy',
-		});
-		this.successfulFillsCounter = this.meter.createCounter(
-			METRIC_TYPES.successful_fills,
-			{
-				description: 'Count of fills that we successfully landed',
-			}
-		);
-		this.attemptedFillsCounter = this.meter.createCounter(
-			METRIC_TYPES.attempted_fills,
-			{
-				description: 'Count of fills we attempted',
-			}
-		);
-		this.attemptedTriggersCounter = this.meter.createCounter(
-			METRIC_TYPES.attempted_triggers,
-			{
-				description: 'Count of triggers we attempted',
-			}
-		);
-		this.observedFillsCountCounter = this.meter.createCounter(
-			METRIC_TYPES.observed_fills_count,
-			{
-				description: 'Count of fills observed in the market',
-			}
-		);
-		this.userMapUserAccountKeysGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.user_map_user_account_keys,
-			{
-				description: 'number of user account keys in UserMap',
-			}
-		);
-		this.userMapUserAccountKeysGauge.addCallback(async (obs) => {
-			obs.observe(this.userMap!.size());
-		});
-
-		this.userStatsMapAuthorityKeysGauge = this.meter.createObservableGauge(
-			METRIC_TYPES.user_stats_map_authority_keys,
-			{
-				description: 'number of authority keys in UserStatsMap',
-			}
-		);
-		this.userStatsMapAuthorityKeysGauge.addCallback(async (obs) => {
-			obs.observe(this.userStatsMap!.size());
-		});
-		this.sdkCallDurationHistogram = this.meter.createHistogram(
-			METRIC_TYPES.sdk_call_duration_histogram,
-			{
-				description: 'Distribution of sdk method calls',
-				unit: 'ms',
-			}
-		);
-		this.tryFillDurationHistogram = this.meter.createHistogram(
+		this.tryFillDurationHistogram = this.metrics.addHistogram(
 			METRIC_TYPES.try_fill_duration_histogram,
-			{
-				description: 'Distribution of tryFills',
-				unit: 'ms',
-			}
+			'Histogram of the duration of the try fill process'
+		);
+		this.estTxCuHistogram = this.metrics.addHistogram(
+			METRIC_TYPES.estimated_tx_cu_histogram,
+			'Histogram of the estimated fill cu used'
+		);
+		this.simulateTxHistogram = this.metrics.addHistogram(
+			METRIC_TYPES.simulate_tx_duration_histogram,
+			'Histogram of the duration of simulateTransaction RPC calls'
+		);
+		this.lastTryFillTimeGauge = this.metrics.addGauge(
+			METRIC_TYPES.last_try_fill_time,
+			'Last time that fill was attempted'
+		);
+		this.mutexBusyCounter = this.metrics.addCounter(
+			METRIC_TYPES.mutex_busy,
+			'Count of times the mutex was busy'
+		);
+		this.landedTxsCounter = this.metrics.addCounter(
+			METRIC_TYPES.landed_transactions,
+			'Count of fills that we successfully landed'
+		);
+		this.sentTxsCounter = this.metrics.addCounter(
+			METRIC_TYPES.sent_transactions,
+			'Count of transactions we sent out'
+		);
+		this.txSimErrorCounter = this.metrics.addCounter(
+			METRIC_TYPES.tx_sim_error_count,
+			'Count of errors from simulating transactions'
+		);
+		this.pendingTxSigsToConfirmGauge = this.metrics.addGauge(
+			METRIC_TYPES.pending_tx_sigs_to_confirm,
+			'Count of tx sigs that are pending confirmation'
+		);
+		this.pendingTxSigsLoopRateLimitedCounter = this.metrics.addCounter(
+			METRIC_TYPES.pending_tx_sigs_loop_rate_limited,
+			'Count of times the pending tx sigs loop was rate limited'
+		);
+		this.evictedPendingTxSigsToConfirmCounter = this.metrics.addCounter(
+			METRIC_TYPES.evicted_pending_tx_sigs_to_confirm,
+			'Count of tx sigs that were evicted from the pending tx sigs to confirm cache'
+		);
+		this.expiredNodesSetSize = this.metrics.addGauge(
+			METRIC_TYPES.expired_nodes_set_size,
+			'Count of nodes that are expired'
 		);
 
-		this.lastTryFillTimeGauge.addCallback(async (obs) => {
-			await this.watchdogTimerMutex.runExclusive(async () => {
-				const user = this.driftClient.getUser();
-				obs.observe(
-					this.watchdogTimerLastPatTime,
-					metricAttrFromUserAccount(
-						user.userAccountPublicKey,
-						user.getUserAccount()
-					)
-				);
+		this.metrics?.finalizeObservables();
+
+		this.runtimeSpecsGauge.setLatestValue(this.bootTimeMs, this.runtimeSpec);
+		this.metricsInitialized = true;
+	}
+
+	protected recordEvictedTxSig(
+		_tsTxSigAdded: { ts: number; nodeFilled?: NodeToFill },
+		txSig: string,
+		reason: 'evict' | 'set' | 'delete'
+	) {
+		if (reason === 'evict') {
+			logger.info(
+				`${this.name}: Evicted tx sig ${txSig} from this.txSigsToConfirm`
+			);
+			const user = this.driftClient.getUser();
+			this.evictedPendingTxSigsToConfirmCounter?.add(1, {
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
 			});
-		});
+		}
 	}
 
 	public async init() {
@@ -493,10 +537,6 @@ export class SpotFillerBot implements Bot {
 		const userStatsMapStart = Date.now();
 		logger.info(`Initializing UserStatsMap...`);
 		this.userStatsMap = new UserStatsMap(this.driftClient);
-
-		// disable the initial sync since there are way too many authorties now
-		// userStats will be lazily loaded (this.userStatsMap.mustGet) as fills occur.
-		// await this.userStatsMap.sync(dlobProvider.getUniqueAuthorities());
 
 		logger.info(
 			`Initialized UserStatsMap in ${Date.now() - userStatsMapStart}ms`
@@ -638,8 +678,6 @@ export class SpotFillerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		this.eventSubscriber?.eventEmitter.removeAllListeners('newEvent');
-
 		await this.dlobSubscriber!.unsubscribe();
 		await this.userStatsMap!.unsubscribe();
 		await this.orderSubscriber.unsubscribe();
@@ -654,35 +692,131 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public async startIntervalLoop(_intervalMs?: number) {
-		const intervalId = setInterval(
-			this.trySpotFill.bind(this),
-			this.pollingIntervalMs
+		this.intervalIds.push(
+			setInterval(this.trySpotFill.bind(this), this.pollingIntervalMs)
 		);
-		this.intervalIds.push(intervalId);
-
-		this.eventSubscriber?.eventEmitter.on(
-			'newEvent',
-			async (record: WrappedEvent<any>) => {
-				if (record.eventType === 'OrderActionRecord') {
-					const actionRecord = record as OrderActionRecord;
-
-					if (isVariant(actionRecord.action, 'fill')) {
-						if (isVariant(actionRecord.marketType, 'spot')) {
-							const spotMarket = this.driftClient.getSpotMarketAccount(
-								actionRecord.marketIndex
-							);
-							if (spotMarket) {
-								this.observedFillsCountCounter!.add(1, {
-									market: spotMarket.name,
-								});
-							}
-						}
-					}
-				}
-			}
+		this.intervalIds.push(
+			setInterval(this.confirmPendingTxSigs.bind(this), CONFIRM_TX_INTERVAL_MS)
 		);
 
 		logger.info(`${this.name} Bot started!`);
+	}
+
+	protected async confirmPendingTxSigs() {
+		const user = this.driftClient.getUser();
+		this.pendingTxSigsToConfirmGauge?.setLatestValue(
+			this.pendingTxSigsToconfirm.size,
+			{
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			}
+		);
+		this.expiredNodesSetSize?.setLatestValue(this.expiredNodesSet.size, {
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+		const nextTimeCanRun =
+			this.confirmLoopRateLimitTs + CONFIRM_TX_RATE_LIMIT_BACKOFF_MS;
+		if (Date.now() < nextTimeCanRun) {
+			logger.warn(
+				`Skipping confirm loop due to rate limit, next run in ${
+					nextTimeCanRun - Date.now()
+				} ms`
+			);
+			return;
+		}
+		if (this.confirmLoopRunning) {
+			return;
+		}
+		this.confirmLoopRunning = true;
+		try {
+			logger.info(`Confirming tx sigs: ${this.pendingTxSigsToconfirm.size}`);
+			const start = Date.now();
+			const txEntries = Array.from(this.pendingTxSigsToconfirm.entries());
+			for (let i = 0; i < txEntries.length; i += TX_CONFIRMATION_BATCH_SIZE) {
+				const txSigsBatch = txEntries.slice(i, i + TX_CONFIRMATION_BATCH_SIZE);
+				const txs = await this.txConfirmationConnection?.getTransactions(
+					txSigsBatch.map((tx) => tx[0]),
+					{
+						commitment: 'confirmed',
+						maxSupportedTransactionVersion: 0,
+					}
+				);
+				for (let j = 0; j < txs.length; j++) {
+					const txResp = txs[j];
+					const txConfirmationInfo = txSigsBatch[j];
+					const txSig = txConfirmationInfo[0];
+					const txAge = txConfirmationInfo[1].ts - Date.now();
+					const nodeFilled = txConfirmationInfo[1].nodeFilled;
+					const txType = txConfirmationInfo[1].txType;
+					const fillTxId = txConfirmationInfo[1].fillTxId;
+					if (txResp === null) {
+						logger.info(
+							`Tx not found, (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
+								txAge / 1000
+							} s`
+						);
+						if (Math.abs(txAge) > TX_TIMEOUT_THRESHOLD_MS) {
+							this.pendingTxSigsToconfirm.delete(txSig);
+						}
+					} else {
+						logger.info(
+							`Tx landed (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
+								txAge / 1000
+							} s`
+						);
+						this.pendingTxSigsToconfirm.delete(txSig);
+						if (txType === 'fill') {
+							if (nodeFilled) {
+								const result = await this.handleTransactionLogs(
+									nodeFilled,
+									txResp.meta?.logMessages
+								);
+								if (result) {
+									this.landedTxsCounter?.add(result.filledNodes, {
+										type: txType,
+										...metricAttrFromUserAccount(
+											user.userAccountPublicKey,
+											user.getUserAccount()
+										),
+									});
+								}
+							}
+						} else {
+							this.landedTxsCounter?.add(1, {
+								type: txType,
+								...metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
+								),
+							});
+						}
+					}
+					await sleepMs(500);
+				}
+			}
+			logger.info(`Confirming tx sigs took: ${Date.now() - start} ms`);
+		} catch (e) {
+			const err = e as Error;
+			if (err.message.includes('429')) {
+				logger.info(`Confirming tx loop rate limited: ${err.message}`);
+				this.confirmLoopRateLimitTs = Date.now();
+				this.pendingTxSigsLoopRateLimitedCounter?.add(1, {
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+			} else {
+				logger.error(`Other error confirming tx sigs: ${err.message}`);
+			}
+		} finally {
+			this.confirmLoopRunning = false;
+		}
 	}
 
 	protected getMaxSlot(): number {
@@ -983,12 +1117,6 @@ export class SpotFillerBot implements Bot {
 
 			if (isEndIxLog(this.driftClient.program.programId.toBase58(), log)) {
 				if (!errorThisFillIx) {
-					if (this.successfulFillsCounter) {
-						this.successfulFillsCounter!.add(1, {
-							market: this.driftClient.getSpotMarketAccount(order.marketIndex)!
-								.name,
-						});
-					}
 					successCount++;
 				}
 
@@ -1189,9 +1317,37 @@ export class SpotFillerBot implements Bot {
 		).filledNodes;
 	}
 
+	/**
+	 * Queues up the txSig to be confirmed in a slower loop, and have tx logs handled
+	 * @param txSig
+	 */
+	protected async registerTxSigToConfirm(
+		txSig: TransactionSignature,
+		now: number,
+		nodeFilled: NodeToFill | undefined,
+		fillTxId: number,
+		txType: TxType
+	) {
+		this.pendingTxSigsToconfirm.set(txSig, {
+			ts: now,
+			nodeFilled,
+			fillTxId,
+			txType,
+		});
+		const user = this.driftClient.getUser();
+		this.sentTxsCounter?.add(1, {
+			txType,
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+	}
+
 	private async sendTxThroughJito(
 		tx: VersionedTransaction,
-		metadata: number | string
+		metadata: number | string,
+		txSig?: string
 	) {
 		if (this.bundleSender === undefined) {
 			logger.error(`Called sendTxThroughJito without jito properly enabled`);
@@ -1199,7 +1355,7 @@ export class SpotFillerBot implements Bot {
 		}
 		const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
 		if (slotsUntilNextLeader !== undefined) {
-			this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`);
+			this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`, txSig);
 		}
 	}
 
@@ -1245,13 +1401,14 @@ export class SpotFillerBot implements Bot {
 	) {
 		// @ts-ignore;
 		tx.sign([this.driftClient.wallet.payer]);
+		const txSig = bs58.encode(tx.signatures[0]);
+		this.registerTxSigToConfirm(txSig, Date.now(), nodeSent, fillTxId, 'fill');
 
 		const { estTxSize, accountMetas, writeAccs, txAccounts } =
 			getTransactionAccountMetas(tx, lutAccounts);
 
-		const txStart = Date.now();
 		if (buildForBundle) {
-			await this.sendTxThroughJito(tx, fillTxId);
+			await this.sendTxThroughJito(tx, fillTxId, txSig);
 		} else if (this.canSendOutsideJito()) {
 			this.driftClient.txSender
 				.sendVersionedTransaction(tx, [], this.driftClient.opts, true)
@@ -1259,18 +1416,6 @@ export class SpotFillerBot implements Bot {
 					logger.info(
 						`Filled spot order (fillTxId: ${fillTxId}): https://solscan.io/tx/${txSig.txSig}`
 					);
-
-					const duration = Date.now() - txStart;
-					const user = this.driftClient.getUser();
-					if (this.sdkCallDurationHistogram) {
-						this.sdkCallDurationHistogram!.record(duration, {
-							...metricAttrFromUserAccount(
-								user.getUserAccountPublicKey(),
-								user.getUserAccount()
-							),
-							method: 'fillSpotOrder',
-						});
-					}
 
 					const parseLogsStart = Date.now();
 					this.processBulkFillTxLogs(fillTxId, nodeSent, txSig.txSig, tx)
@@ -1304,14 +1449,14 @@ export class SpotFillerBot implements Bot {
 						logger.error(
 							`[${
 								this.name
-							}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${
+							}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillTxId: ${fillTxId}). ${
 								e.message
 							}\n${JSON.stringify(accountMetas)}`
 						);
 						webhookMessage(
 							`[${
 								this.name
-							}]: :boxing_glove: Tx too large (fillId: ${fillTxId}). ${
+							}]: :boxing_glove: Tx too large (fillTxId: ${fillTxId}). ${
 								e.message
 							}\n${JSON.stringify(accountMetas)}`
 						);
@@ -1331,6 +1476,15 @@ export class SpotFillerBot implements Bot {
 							!errorCodesToSuppress.includes(errorCode) &&
 							!(e as Error).message.includes('Transaction was not confirmed')
 						) {
+							const user = this.driftClient.getUser();
+							this.txSimErrorCounter?.add(1, {
+								errorCode: errorCode.toString(),
+								...metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
+								),
+							});
+
 							logger.error(
 								`Failed to send tx, sim error (fillTxId: ${fillTxId}) sim logs:\n${
 									simError.logs ? simError.logs.join('\n') : ''
@@ -1433,6 +1587,24 @@ export class SpotFillerBot implements Bot {
 					await this.getBlockhashForTx(),
 					false
 				);
+				const user = this.driftClient.getUser();
+				this.simulateTxHistogram?.record(simResult.simTxDuration, {
+					type: 'multiMakerFill',
+					simError: simResult.simError !== null,
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+				this.estTxCuHistogram?.record(simResult.cuEstimate, {
+					type: 'multiMakerFill',
+					simError: simResult.simError !== null,
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+
 				return simResult;
 			};
 
@@ -1673,9 +1845,23 @@ export class SpotFillerBot implements Bot {
 			undefined,
 			false
 		);
-		logger.info(
-			`tryFillSpotNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
-		);
+		const user = this.driftClient.getUser();
+		this.simulateTxHistogram?.record(simResult.simTxDuration, {
+			type: 'spotFill',
+			simError: simResult.simError !== null,
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+		this.estTxCuHistogram?.record(simResult.cuEstimate, {
+			type: 'spotFill',
+			simError: simResult.simError !== null,
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
 
 		if (this.simulateTxForCUEstimate && simResult.simError) {
 			logger.error(
@@ -1780,9 +1966,23 @@ export class SpotFillerBot implements Bot {
 				SIM_CU_ESTIMATE_MULTIPLIER,
 				this.simulateTxForCUEstimate
 			);
-			logger.info(
-				`executeTriggerableSpotNodesForMarket estimated CUs: ${simResult.cuEstimate}`
-			);
+			const driftUser = this.driftClient.getUser();
+			this.simulateTxHistogram?.record(simResult.simTxDuration, {
+				type: 'trigger',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					driftUser.userAccountPublicKey,
+					driftUser.getUserAccount()
+				),
+			});
+			this.estTxCuHistogram?.record(simResult.cuEstimate, {
+				type: 'trigger',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					driftUser.userAccountPublicKey,
+					driftUser.getUserAccount()
+				),
+			});
 
 			if (this.simulateTxForCUEstimate && simResult.simError) {
 				handleSimResultError(
@@ -1797,8 +1997,19 @@ export class SpotFillerBot implements Bot {
 				);
 			} else {
 				if (!this.dryRun) {
+					// @ts-ignore;
+					simResult.tx.sign([this.driftClient.wallet.payer]);
+					const txSig = bs58.encode(simResult.tx.signatures[0]);
+					this.registerTxSigToConfirm(
+						txSig,
+						Date.now(),
+						undefined,
+						-1,
+						'trigger'
+					);
+
 					if (buildForBundle) {
-						await this.sendTxThroughJito(simResult.tx, 'trigger');
+						await this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
 						this.removeTriggeringNodes(nodeToTrigger);
 					} else if (this.canSendOutsideJito()) {
 						this.driftClient
@@ -1822,6 +2033,14 @@ export class SpotFillerBot implements Bot {
 										'Transaction was not confirmed'
 									)
 								) {
+									const user = this.driftClient.getUser();
+									this.txSimErrorCounter?.add(1, {
+										errorCode: errorCode.toString(),
+										...metricAttrFromUserAccount(
+											user.userAccountPublicKey,
+											user.getUserAccount()
+										),
+									});
 									logger.error(
 										`Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} `
 									);
@@ -1844,22 +2063,32 @@ export class SpotFillerBot implements Bot {
 				}
 			}
 		}
+
+		const user = this.driftClient.getUser();
+		this.attemptedTriggersCounter?.add(
+			triggerableNodes.length,
+			metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			)
+		);
 	}
 
-	private async trySpotFill(orderRecord?: OrderRecord) {
+	private async trySpotFill() {
 		const startTime = Date.now();
 		let ran = false;
 
 		try {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
+				const user = this.driftClient.getUser();
+				this.lastTryFillTimeGauge?.setLatestValue(
+					Date.now(),
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
 				const dlob = this.dlobSubscriber!.getDLOB();
-				if (orderRecord && dlob) {
-					dlob.insertOrder(
-						orderRecord.order,
-						orderRecord.user.toBase58(),
-						orderRecord.order.slot.toNumber()
-					);
-				}
 
 				this.pruneThrottledNode();
 
@@ -1901,27 +2130,6 @@ export class SpotFillerBot implements Bot {
 						buildForBundle
 					),
 				]);
-
-				if (this.attemptedFillsCounter && this.attemptedTriggersCounter) {
-					const user = this.driftClient.getUser();
-					this.attemptedFillsCounter!.add(
-						fillableNodes.reduce(
-							(acc, curr) => acc + curr.nodesToFill.length,
-							0
-						),
-						metricAttrFromUserAccount(
-							user.userAccountPublicKey,
-							user.getUserAccount()
-						)
-					);
-					this.attemptedTriggersCounter!.add(
-						filteredTriggerableNodes.length,
-						metricAttrFromUserAccount(
-							user.userAccountPublicKey,
-							user.getUserAccount()
-						)
-					);
-				}
 
 				ran = true;
 			});
