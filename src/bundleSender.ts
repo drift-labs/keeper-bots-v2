@@ -35,7 +35,9 @@ export type TipStream = {
 	ema_landed_tips_50th_percentile: number; // in SOL
 };
 
-type BundleStats = {
+export type DropReason = 'pruned' | 'blockhash_expired' | 'blockhash_not_found';
+
+export type BundleStats = {
 	accepted: number;
 	stateAuctionBidRejected: number;
 	winningBatchBidRejected: number;
@@ -79,8 +81,8 @@ export class BundleSender {
 
 	/// -1 for each accepted bundle, +1 for each rejected (due to bid, don't count sim errors).
 	private failBundleCount = 0;
-	private countLandedFills = 0;
-	private countDroppedFills = 0;
+	private countLandedBundles = 0;
+	private countDroppedbundles = 0;
 
 	private lastTipStream: TipStream | undefined;
 	private bundleStats: BundleStats = {
@@ -125,6 +127,26 @@ export class BundleSender {
 			return undefined;
 		}
 		return this.nextJitoLeader.nextLeaderSlot - this.slotSubscriber.getSlot();
+	}
+
+	getBundleStats(): BundleStats {
+		return this.bundleStats;
+	}
+
+	getTipStream(): TipStream | undefined {
+		return this.lastTipStream;
+	}
+
+	getBundleFailCount(): number {
+		return this.failBundleCount;
+	}
+
+	getLandedCount(): number {
+		return this.countLandedBundles;
+	}
+
+	getDroppedCount(): number {
+		return this.countDroppedbundles;
 	}
 
 	private incRunningBundleScore(amount = 1) {
@@ -327,8 +349,8 @@ export class BundleSender {
 				const droppedTxs = resps.filter((tx) => tx === null);
 				const landedTxs = resps.filter((tx) => tx !== null);
 
-				this.countDroppedFills += droppedTxs.length;
-				this.countLandedFills += landedTxs.length;
+				this.countDroppedbundles += droppedTxs.length;
+				this.countLandedBundles += landedTxs.length;
 				const countBefore = this.failBundleCount;
 				this.incRunningBundleScore(droppedTxs.length);
 				this.decRunningBundleScore(landedTxs.length);
@@ -347,8 +369,8 @@ export class BundleSender {
 			logger.info(
 				`${logPrefix}: running fail count: ${
 					this.failBundleCount
-				}, totalLandedTxs: ${this.countLandedFills}, totalDroppedTxs: ${
-					this.countDroppedFills
+				}, totalLandedTxs: ${this.countLandedBundles}, totalDroppedTxs: ${
+					this.countDroppedbundles
 				}, currentTipAmount: ${this.calculateCurrentTipAmount()}, lastJitoTipStream: ${JSON.stringify(
 					this.lastTipStream
 				)} bundle stats: ${JSON.stringify(this.bundleStats)}`
@@ -395,7 +417,11 @@ export class BundleSender {
 
 	// Alternatively, don't create the bundle now, but batch them and send them together with 1 tip.
 	// not really confident in doing that in nodejs land, maybe rust filler.
-	async sendTransaction(signedTx: VersionedTransaction, metadata?: string) {
+	async sendTransaction(
+		signedTx: VersionedTransaction,
+		metadata?: string,
+		txSig?: string
+	) {
 		if (!this.isSubscribed) {
 			logger.warn(
 				`${logPrefix} You should call bundleSender.subscribe() before sendTransaction()`
@@ -432,12 +458,14 @@ export class BundleSender {
 		}
 
 		try {
-			const tx = bs58.encode(signedTx.signatures[0]);
+			if (!txSig) {
+				txSig = bs58.encode(signedTx.signatures[0]);
+			}
 			const bundleId = await this.searcherClient.sendBundle(b);
 			const ts = Date.now();
-			this.bundleIdToTx.set(bundleId, { tx, ts });
+			this.bundleIdToTx.set(bundleId, { tx: txSig, ts });
 			logger.info(
-				`${logPrefix} sent bundle with uuid ${bundleId} (${tx}: ${ts}) ${metadata}`
+				`${logPrefix} sent bundle with uuid ${bundleId} (${txSig}: ${ts}) ${metadata}`
 			);
 		} catch (e) {
 			const err = e as Error;

@@ -384,7 +384,6 @@ export class UserLpSettlerBot implements Bot {
 				[],
 				undefined,
 				CU_EST_MULTIPLIER,
-				true,
 				true
 			);
 			logger.info(
