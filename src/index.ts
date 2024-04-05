@@ -316,6 +316,7 @@ const runBot = async () => {
 			connection: sendTxConnection,
 			wallet,
 			opts,
+			retrySleep: 8000,
 			timeout: config.global.txRetryTimeoutMs,
 			confirmationStrategy: ConfirmationStrategy.Polling,
 			additionalConnections,
