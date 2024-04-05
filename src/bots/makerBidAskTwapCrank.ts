@@ -315,7 +315,6 @@ export class MakerBidAskTwapCrank implements Bot {
 						[],
 						undefined,
 						CU_EST_MULTIPLIER,
-						true,
 						true
 					);
 					logger.info(

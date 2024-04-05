@@ -395,7 +395,11 @@ export class BundleSender {
 
 	// Alternatively, don't create the bundle now, but batch them and send them together with 1 tip.
 	// not really confident in doing that in nodejs land, maybe rust filler.
-	async sendTransaction(signedTx: VersionedTransaction, metadata?: string) {
+	async sendTransaction(
+		signedTx: VersionedTransaction,
+		metadata?: string,
+		txSig?: string
+	) {
 		if (!this.isSubscribed) {
 			logger.warn(
 				`${logPrefix} You should call bundleSender.subscribe() before sendTransaction()`
@@ -432,12 +436,14 @@ export class BundleSender {
 		}
 
 		try {
-			const tx = bs58.encode(signedTx.signatures[0]);
+			if (!txSig) {
+				txSig = bs58.encode(signedTx.signatures[0]);
+			}
 			const bundleId = await this.searcherClient.sendBundle(b);
 			const ts = Date.now();
-			this.bundleIdToTx.set(bundleId, { tx, ts });
+			this.bundleIdToTx.set(bundleId, { tx: txSig, ts });
 			logger.info(
-				`${logPrefix} sent bundle with uuid ${bundleId} (${tx}: ${ts}) ${metadata}`
+				`${logPrefix} sent bundle with uuid ${bundleId} (${txSig}: ${ts}) ${metadata}`
 			);
 		} catch (e) {
 			const err = e as Error;

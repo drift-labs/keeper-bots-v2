@@ -1429,7 +1429,6 @@ export class SpotFillerBot implements Bot {
 					[],
 					this.driftClient.opts,
 					SIM_CU_ESTIMATE_MULTIPLIER,
-					true,
 					this.simulateTxForCUEstimate,
 					await this.getBlockhashForTx(),
 					false
@@ -1670,7 +1669,6 @@ export class SpotFillerBot implements Bot {
 			[],
 			this.driftClient.opts,
 			SIM_CU_ESTIMATE_MULTIPLIER,
-			true,
 			this.simulateTxForCUEstimate,
 			undefined,
 			false
@@ -1780,7 +1778,6 @@ export class SpotFillerBot implements Bot {
 				[],
 				this.driftClient.opts,
 				SIM_CU_ESTIMATE_MULTIPLIER,
-				true,
 				this.simulateTxForCUEstimate
 			);
 			logger.info(

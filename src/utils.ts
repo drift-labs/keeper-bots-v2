@@ -406,6 +406,7 @@ export type SimulateAndGetTxWithCUsResponse = {
 	cuEstimate: number;
 	simTxLogs: Array<string> | null;
 	simError: TransactionError | string | null;
+	simTxDuration: number;
 	tx: VersionedTransaction;
 };
 
@@ -417,7 +418,6 @@ export async function simulateAndGetTxWithCUs(
 	additionalSigners: Array<Signer>,
 	opts?: ConfirmOptions,
 	cuLimitMultiplier = 1.0,
-	logSimDuration = false,
 	doSimulation = true,
 	recentBlockhash?: string,
 	dumpTx = false
@@ -434,6 +434,7 @@ export async function simulateAndGetTxWithCUs(
 		}
 	}
 
+	let simTxDuration = 0;
 	const tx = await txSender.getVersionedTransaction(
 		ixs,
 		lookupTableAccounts,
@@ -446,6 +447,7 @@ export async function simulateAndGetTxWithCUs(
 			cuEstimate: -1,
 			simTxLogs: null,
 			simError: null,
+			simTxDuration,
 			tx,
 		};
 	}
@@ -464,9 +466,7 @@ export async function simulateAndGetTxWithCUs(
 			replaceRecentBlockhash: true,
 			commitment: 'processed',
 		});
-		if (logSimDuration) {
-			console.log(`Simulated tx took: ${Date.now() - start}ms`);
-		}
+		simTxDuration = Date.now() - start;
 	} catch (e) {
 		console.error(e);
 	}
@@ -503,6 +503,7 @@ export async function simulateAndGetTxWithCUs(
 	return {
 		cuEstimate,
 		simTxLogs,
+		simTxDuration,
 		simError: resp.value.err,
 		tx: txWithCUs,
 	};

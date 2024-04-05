@@ -10,6 +10,7 @@ import { DriftEnv } from '@drift-labs/sdk';
 export type BaseBotConfig = {
 	botId: string;
 	dryRun: boolean;
+	/// will override {@link GlobalConfig.metricsPort}
 	metricsPort?: number;
 	runOnce?: boolean;
 };
@@ -17,7 +18,7 @@ export type BaseBotConfig = {
 export type JitMakerConfig = BaseBotConfig & {
 	subaccounts?: Array<number>;
 	marketType: string;
-	/// @deprecated, use marketIndexes and marketType
+	/// @deprecated, use {@link JitMakerConfig.marketIndexes} and {@link JitMakerConfig.marketType}
 	perpMarketIndicies?: Array<number>;
 	marketIndexes?: Array<number>;
 	targetLeverage?: number;
@@ -47,7 +48,7 @@ export type LiquidatorConfig = BaseBotConfig & {
 	perpSubAccountConfig?: SubaccountConfig;
 	spotSubAccountConfig?: SubaccountConfig;
 
-	// deprecated: use maxSlippageBps (misnamed)
+	// deprecated: use {@link LiquidatorConfig.maxSlippageBps} (misnamed)
 	maxSlippagePct?: number;
 	maxSlippageBps?: number;
 
@@ -84,8 +85,17 @@ export interface GlobalConfig {
 	driftEnv?: DriftEnv;
 	endpoint?: string;
 	wsEndpoint?: string;
+	/// helius endpoint to use helius priority fee strategy
 	heliusEndpoint?: string;
+	/// additional rpc endpoints to send transactions to
 	additionalSendTxEndpoints?: string[];
+	/// endpoint to confirm txs on
+	txConfirmationEndpoint?: string;
+	/// default metrics port to use, will be overridden by {@link BaseBotConfig.metricsPort} if provided
+	metricsPort?: number;
+	/// disable all metrics
+	disableMetrics?: boolean;
+
 	priorityFeeMethod?: string;
 	maxPriorityFeeMicroLamports?: number;
 	resubTimeoutMs?: number;
@@ -147,6 +157,7 @@ const defaultConfig: Partial<Config> = {
 		wsEndpoint: process.env.WS_ENDPOINT,
 		heliusEndpoint: process.env.HELIUS_ENDPOINT,
 		additionalSendTxEndpoints: [],
+		txConfirmationEndpoint: process.env.TX_CONFIRMATION_ENDPOINT,
 		priorityFeeMethod: process.env.PRIORITY_FEE_METHOD ?? 'solana',
 		maxPriorityFeeMicroLamports: parseInt(
 			process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ?? '10000'
@@ -165,6 +176,9 @@ const defaultConfig: Partial<Config> = {
 		txRetryTimeoutMs: parseInt(process.env.TX_RETRY_TIMEOUT_MS ?? '30000'),
 		txSkipPreflight: false,
 		txMaxRetries: 0,
+
+		metricsPort: 9464,
+		disableMetrics: false,
 	},
 	enabledBots: [],
 	botConfigs: {
@@ -243,6 +257,8 @@ export function loadConfigFromOpts(opts: any): Config {
 			additionalSendTxEndpoints: loadCommaDelimitToStringArray(
 				opts.additionalSendTxEndpoints
 			),
+			txConfirmationEndpoint:
+				opts.txConfirmationEndpoint ?? process.env.TX_CONFIRMATION_ENDPOINT,
 			priorityFeeMethod:
 				opts.priorityFeeMethod ?? process.env.PRIORITY_FEE_METHOD,
 			maxPriorityFeeMicroLamports: parseInt(
@@ -278,6 +294,9 @@ export function loadConfigFromOpts(opts: any): Config {
 			txSenderType: opts.txSenderType ?? 'fast',
 			txSkipPreflight: opts.txSkipPreflight ?? false,
 			txMaxRetries: opts.txMaxRetries ?? 0,
+
+			metricsPort: opts.metricsPort ?? 9464,
+			disableMetrics: opts.disableMetrics ?? false,
 		},
 		enabledBots: [],
 		botConfigs: {},
@@ -339,7 +358,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
 			spotMarketIndicies: loadCommaDelimitToArray(opts.spotMarketIndicies),
 			runOnce: opts.runOnce ?? false,
-			// deprecated: use maxSlippageBps
+			// deprecated: use {@link LiquidatorConfig.maxSlippageBps}
 			maxSlippagePct: opts.maxSlippagePct ?? 50,
 			maxSlippageBps: opts.maxSlippageBps ?? 50,
 			deriskAuctionDurationSlots: opts.deriskAuctionDurationSlots ?? 100,

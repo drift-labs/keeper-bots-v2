@@ -1,6 +1,5 @@
 import {
 	DriftClient,
-	UserStatsMap,
 	BulkAccountLoader,
 	SlotSubscriber,
 	OrderSubscriber,
@@ -14,10 +13,10 @@ import {
 import { PublicKey } from '@solana/web3.js';
 
 import { logger } from '../logger';
-import { FillerConfig } from '../config';
+import { FillerConfig, GlobalConfig } from '../config';
 import { RuntimeSpec } from '../metrics';
 import { webhookMessage } from '../webhook';
-import { FillerBot, SETTLE_POSITIVE_PNL_COOLDOWN_MS } from './filler';
+import { FillerBot } from './filler';
 
 import { sleepMs } from '../utils';
 import { BundleSender } from '../bundleSender';
@@ -29,6 +28,7 @@ export class FillerLiteBot extends FillerBot {
 		slotSubscriber: SlotSubscriber,
 		driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
+		globalConfig: GlobalConfig,
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
@@ -41,6 +41,7 @@ export class FillerLiteBot extends FillerBot {
 			undefined,
 			undefined,
 			runtimeSpec,
+			globalConfig,
 			config,
 			priorityFeeSubscriber,
 			blockhashSubscriber,
@@ -68,32 +69,16 @@ export class FillerLiteBot extends FillerBot {
 
 	public async init() {
 		logger.info(`${this.name} initing`);
-
-		// Initializing so we can use mustGet for RPC fall back, but don't subscribe
-		// so we don't call getProgramAccounts
-		this.userStatsMap = new UserStatsMap(this.driftClient);
+		await super.baseInit();
 
 		await this.orderSubscriber.subscribe();
 		await sleepMs(1200); // Wait a few slots to build up order book
-
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}
 
 	public async startIntervalLoop(_intervalMs?: number) {
-		this.intervalIds.push(
-			setInterval(this.tryFill.bind(this), this.pollingIntervalMs)
-		);
-		this.intervalIds.push(
-			setInterval(
-				this.settlePnls.bind(this),
-				SETTLE_POSITIVE_PNL_COOLDOWN_MS / 2
-			)
-		);
-
-		logger.info(`${this.name} Bot started! (websocket: true)`);
+		super.startIntervalLoop(_intervalMs);
 	}
 
 	public async reset() {

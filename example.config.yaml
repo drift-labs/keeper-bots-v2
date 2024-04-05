@@ -15,6 +15,10 @@ global:
   # already a helius url.
   heliusEndpoint:
 
+  # optional endpoint to use for just confirming txs to check if they landed.
+  # loop purposefully runs slow so should work with public RPC
+  txConfirmationEndpoint: https://api.mainnet-beta.solana.com
+
   # `solana` or `helius`. If `helius` `endpoint` must be a helius RPC, or `heliusEndpoint`
   #   must be set
   # solana: uses https://solana.com/docs/rpc/http/getrecentprioritizationfees
