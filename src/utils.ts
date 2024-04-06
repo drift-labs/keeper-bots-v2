@@ -597,7 +597,9 @@ export function logMessageForNodeToFill(
 	}
 
 	if (node.makerNodes.length !== makerInfos.length) {
-		logger.error(`makerNodes and makerInfos length mismatch`);
+		logger.error(
+			`makerNodes and makerInfos length mismatch, makerNodes: ${node.makerNodes.length}, makerInfos: ${makerInfos.length}`
+		);
 	}
 
 	let msg = '';
