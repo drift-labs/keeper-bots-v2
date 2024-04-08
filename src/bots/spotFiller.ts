@@ -1516,9 +1516,14 @@ export class SpotFillerBot implements Bot {
 			logger.error(`Called sendTxThroughJito without jito properly enabled`);
 			return;
 		}
-		const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
-		if (slotsUntilNextLeader !== undefined) {
-			this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`, txSig);
+		if (
+			this.bundleSender?.strategy === 'jito-only' ||
+			this.bundleSender?.strategy === 'hybrid'
+		) {
+			const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
+			if (slotsUntilNextLeader !== undefined) {
+				this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`, txSig);
+			}
 		}
 	}
 
