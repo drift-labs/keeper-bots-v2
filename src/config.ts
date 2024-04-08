@@ -34,6 +34,7 @@ export type FillerConfig = BaseBotConfig & {
 	fillerPollingInterval?: number;
 	revertOnFailure?: boolean;
 	simulateTxForCUEstimate?: boolean;
+	rebalanceFiller?: boolean;
 };
 
 export type SubaccountConfig = {
@@ -128,6 +129,8 @@ export interface GlobalConfig {
 	txSenderType?: 'fast' | 'retry';
 	txSkipPreflight?: boolean;
 	txMaxRetries?: number;
+
+	rebalanceFiller?: boolean;
 }
 
 export interface Config {
@@ -179,6 +182,8 @@ const defaultConfig: Partial<Config> = {
 
 		metricsPort: 9464,
 		disableMetrics: false,
+
+		rebalanceFiller: false,
 	},
 	enabledBots: [],
 	botConfigs: {
@@ -297,6 +302,8 @@ export function loadConfigFromOpts(opts: any): Config {
 
 			metricsPort: opts.metricsPort ?? 9464,
 			disableMetrics: opts.disableMetrics ?? false,
+
+			rebalanceFiller: opts.rebalanceFiller ?? false,
 		},
 		enabledBots: [],
 		botConfigs: {},
@@ -311,6 +318,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
 			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
+			rebalanceFiller: opts.rebalanceFiller ?? false,
 		};
 	}
 	if (opts.fillerLite) {
@@ -322,6 +330,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
 			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
+			rebalanceFiller: opts.rebalanceFiller ?? false,
 		};
 	}
 	if (opts.fillerBulk) {
@@ -333,6 +342,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
 			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
+			rebalanceFiller: opts.rebalanceFiller ?? false,
 		};
 	}
 	if (opts.spotFiller) {
@@ -344,6 +354,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
 			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
+			rebalanceFiller: opts.rebalanceFiller ?? false,
 		};
 	}
 	if (opts.liquidator) {
