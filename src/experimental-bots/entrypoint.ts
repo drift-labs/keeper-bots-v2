@@ -104,13 +104,16 @@ logger.info(
 const sdkConfig = initialize({ env: config.global.driftEnv });
 setLogLevel(config.global.debug ? 'debug' : 'info');
 
-const endpoint = config.global.endpoint!;
+const endpoint = config.global.endpoint;
 const wsEndpoint = config.global.wsEndpoint;
 const heliusEndpoint = config.global.heliusEndpoint;
 logger.info(`RPC endpoint: ${endpoint}`);
 logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`Helius endpoint:  ${heliusEndpoint}`);
 logger.info(`DriftEnv:     ${config.global.driftEnv}`);
+if (!endpoint) {
+  throw new Error('Must set environment variable ENDPOINT');
+}
 
 const bots: any = [];
 const runBot = async () => {
@@ -178,7 +181,7 @@ const runBot = async () => {
 	};
 
 	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
-		getMarketsAndOraclesForSubscription(config.global.driftEnv!);
+		getMarketsAndOraclesForSubscription(config.global.driftEnv ||'mainnet-beta');
 
 	const driftClientConfig = {
 		connection,
@@ -190,8 +193,6 @@ const runBot = async () => {
 		perpMarketIndexes,
 		spotMarketIndexes,
 		oracleInfos,
-		activeSubAccountId: config.global.subaccounts![0],
-		subAccountIds: config.global.subaccounts ?? [0],
 		txVersion: 0 as TransactionVersion,
 		txSender,
 	};
@@ -243,9 +244,12 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'fillerMultithreaded')) {
+    if (!config.botConfigs?.fillerMultithreaded) {
+      throw new Error('fillerMultithreaded bot config not found');
+    }
 		const fillerMultithreaded = new FillerMultithreaded(
-			// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-			config.botConfigs?.fillerMultithreaded!,
+      config.global,
+			config.botConfigs?.fillerMultithreaded,
 			driftClient,
 			slotSubscriber,
 			bundleSender

@@ -75,8 +75,7 @@ class DLOBBuilder {
 
 	// Private to avoid race conditions
 	private build(): DLOB {
-		// console.time("buildDLOB");
-		logger.info(
+		logger.debug(
 			`${logPrefix} Building DLOB with ${this.userAccountData.size} users`
 		);
 		this.dlob = new DLOB();
@@ -93,8 +92,7 @@ class DLOBBuilder {
 				counter++;
 			});
 		});
-		logger.info(`${logPrefix} Built DLOB with ${counter} orders`);
-		// console.timeEnd("buildDLOB");
+		logger.debug(`${logPrefix} Built DLOB with ${counter} orders`);
 		return this.dlob;
 	}
 

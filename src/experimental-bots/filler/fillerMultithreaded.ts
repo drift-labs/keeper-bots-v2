@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
 	BlockhashSubscriber,
 	BulkAccountLoader,
@@ -86,6 +87,7 @@ export class FillerMultithreaded {
 	private bundleSender?: BundleSender;
 	private driftClient: DriftClient;
 	private dryRun: boolean;
+  private globalConfig: GlobalConfig;
 	private config: FillerMultiThreadedConfig;
 
 	private fillTxId: number = 0;
@@ -101,11 +103,13 @@ export class FillerMultithreaded {
 	private blockhashSubscriber: BlockhashSubscriber;
 
 	constructor(
+    globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		bundleSender?: BundleSender
 	) {
+    this.globalConfig = globalConfig;
 		this.config = config;
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
@@ -167,11 +171,9 @@ export class FillerMultithreaded {
 							this.fillNodes(msg.data);
 						}
 						break;
-					// case "livenessCheck":
-					//   dlobBuilderLastLivenessCheckTime = Date.now();
-					//   break;
-				}
-			}
+        }
+			},
+      '[FillerMultithreaded]',
 		);
 
 		const orderSubscriberProcess = spawnChildWithRetry(
@@ -179,13 +181,11 @@ export class FillerMultithreaded {
 			childArgs,
 			'orderSubscriber',
 			(msg: any) => {
-				// if (msg.type === "livenessCheck") {
-				//   orderSubscriberLastLivenessCheckTime = Date.now();
-				// }
 				if (dlobBuilderReady) {
 					dlobBuilderProcess.send(msg);
 				}
-			}
+			},
+      '[FillerMultithreaded]',
 		);
 
 		process.on('SIGINT', () => {
