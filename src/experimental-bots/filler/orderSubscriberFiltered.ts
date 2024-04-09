@@ -184,10 +184,13 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 		}
 	}
 
-	sendLivenessCheck() {
+	sendLivenessCheck(health: boolean) {
 		if (typeof process.send === 'function') {
 			process.send({
-				type: 'livenessCheck',
+				type: 'health',
+				data: {
+					healthy: health,
+				},
 			});
 		}
 	}
@@ -258,9 +261,10 @@ const main = async () => {
 
 	await orderSubscriberFiltered.subscribe();
 
+	orderSubscriberFiltered.sendLivenessCheck(true);
 	setInterval(() => {
-		orderSubscriberFiltered.sendLivenessCheck();
-	}, 30_000);
+		orderSubscriberFiltered.sendLivenessCheck(true);
+	}, 10_000);
 
 	logger.info(`${logPrefix} OrderSubscriberFiltered started`);
 };

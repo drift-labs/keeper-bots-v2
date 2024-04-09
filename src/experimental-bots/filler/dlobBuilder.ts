@@ -22,8 +22,8 @@ import {
 	getDriftClientFromArgs,
 	serializeNodeToFill,
 	serializeNodeToTrigger,
-	sleepMs,
 } from './utils';
+import { sleepMs } from '../../utils';
 
 const logPrefix = '[DLOBBuilder]';
 class DLOBBuilder {
@@ -205,10 +205,13 @@ class DLOBBuilder {
 		}
 	}
 
-	sendLivenessCheck() {
+	sendLivenessCheck(health: boolean) {
 		if (typeof process.send === 'function') {
 			process.send({
-				type: 'livenessCheck',
+				type: 'health',
+				data: {
+					healthy: health,
+				},
 			});
 		}
 	}
@@ -299,24 +302,22 @@ const main = async () => {
 	setInterval(() => {
 		const [nodesToFill, nodesToTrigger] =
 			dlobBuilder.getNodesToTriggerAndNodesToFill();
-
 		const serializedNodesToFill = dlobBuilder.serializeNodesToFill(nodesToFill);
-		logger.info(
+		logger.debug(
 			`${logPrefix} Serialized ${serializedNodesToFill.length} fillable nodes`
 		);
-
 		const serializedNodesToTrigger =
 			dlobBuilder.serializeNodesToTrigger(nodesToTrigger);
-		logger.info(
+		logger.debug(
 			`${logPrefix} Serialized ${serializedNodesToTrigger.length} triggerable nodes`
 		);
-
 		dlobBuilder.trySendNodes(serializedNodesToTrigger, serializedNodesToFill);
 	}, 200);
 
+	dlobBuilder.sendLivenessCheck(true);
 	setInterval(() => {
-		dlobBuilder.sendLivenessCheck();
-	}, 30_000);
+		dlobBuilder.sendLivenessCheck(true);
+	}, 10_000);
 };
 
 main();

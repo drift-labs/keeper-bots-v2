@@ -32,12 +32,14 @@ import {
 } from '@solana/web3.js';
 import { BundleSender } from '../bundleSender';
 import { FillerMultithreaded } from './filler/fillerMultithreaded';
+import http from 'http';
+import { promiseTimeout } from '@drift-labs/sdk';
 
 require('dotenv').config();
 
 const preflightCommitment: Commitment = 'processed';
 const stateCommitment: Commitment = 'confirmed';
-// const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
+const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
 
 program
 	.option('-d, --dry-run', 'Dry run, do not send transactions on chain')
@@ -280,6 +282,49 @@ const runBot = async () => {
 	await Promise.all(bots.map((bot: any) => bot.init()));
 
 	logger.info(`starting bots`);
+
+	// start http server listening to /health endpoint using http package
+	const startupTime = Date.now();
+	http
+		.createServer(async (req, res) => {
+			if (req.url === '/health') {
+				if (config.global.testLiveness) {
+					if (Date.now() > startupTime + 60 * 1000) {
+						res.writeHead(500);
+						res.end('Testing liveness test fail');
+						return;
+					}
+				}
+
+				/* @ts-ignore */
+				if (!driftClient.connection._rpcWebSocketConnected) {
+					logger.error(`Connection rpc websocket disconnected`);
+					res.writeHead(500);
+					res.end(`Connection rpc websocket disconnected`);
+					return;
+				}
+
+				// check all bots if they're live
+				for (const bot of bots) {
+					const healthCheck = await promiseTimeout(bot.healthCheck(), 1000);
+					if (!healthCheck) {
+						logger.error(`Health check failed for bot`);
+						res.writeHead(503);
+						res.end(`Bot is not healthy`);
+						return;
+					}
+				}
+
+				// liveness check passed
+				res.writeHead(200);
+				res.end('OK');
+			} else {
+				res.writeHead(404);
+				res.end('Not found');
+			}
+		})
+		.listen(healthCheckPort);
+	logger.info(`Health check server listening on port ${healthCheckPort}`);
 };
 
 recursiveTryCatch(() => runBot());

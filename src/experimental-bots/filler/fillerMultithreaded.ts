@@ -6,6 +6,7 @@ import {
 	decodeUser,
 	DLOBNode,
 	DriftClient,
+	getOrderSignature,
 	getUserAccountPublicKey,
 	isFillableByVAMM,
 	isOneOfVariant,
@@ -42,15 +43,16 @@ import {
 } from './types';
 import { assert } from 'console';
 import {
-	deserializeNodeToFill,
-	deserializeOrder,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
-	getNodeToTriggerSignature,
 	logMessageForNodeToFill,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
+} from '../../utils';
+import {
 	spawnChildWithRetry,
+	deserializeNodeToFill,
+	deserializeOrder,
 } from './utils';
 
 const logPrefix = '[Filler]';
@@ -83,6 +85,10 @@ const errorCodesToSuppress = [
 	6112, // Error Message: OrderDidNotSatisfyTriggerCondition.
 ];
 
+const getNodeToTriggerSignature = (node: SerializedNodeToTrigger): string => {
+	return getOrderSignature(node.node.order.orderId, node.node.userAccount);
+};
+
 export class FillerMultithreaded {
 	private slotSubscriber: SlotSubscriber;
 	private bundleSender?: BundleSender;
@@ -104,6 +110,10 @@ export class FillerMultithreaded {
 	private blockhashSubscriber: BlockhashSubscriber;
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
+	private dlobHealthy = true;
+	private orderSubscriberHealthy = true;
+	private simulateTxForCUEstimate?: boolean;
+
 	constructor(
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
@@ -118,6 +128,7 @@ export class FillerMultithreaded {
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		this.bundleSender = bundleSender;
+		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
 
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
@@ -180,6 +191,9 @@ export class FillerMultithreaded {
 							this.fillNodes(msg.data);
 						}
 						break;
+					case 'health':
+						this.dlobHealthy = msg.data.healthy;
+						break;
 				}
 			},
 			'[FillerMultithreaded]'
@@ -190,8 +204,15 @@ export class FillerMultithreaded {
 			childArgs,
 			'orderSubscriber',
 			(msg: any) => {
-				if (dlobBuilderReady) {
-					dlobBuilderProcess.send(msg);
+				switch (msg.type) {
+					case 'userAccountUpdate':
+						if (dlobBuilderReady) {
+							dlobBuilderProcess.send(msg);
+						}
+						break;
+					case 'health':
+						this.orderSubscriberHealthy = msg.data.healthy;
+						break;
 				}
 			},
 			'[FillerMultithreaded]'
@@ -208,6 +229,16 @@ export class FillerMultithreaded {
 		logger.info(
 			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
 		);
+	}
+
+	public healthCheck(): boolean {
+		if (!this.dlobHealthy) {
+			logger.error(`${logPrefix} DLOB not healthy`);
+		}
+		if (!this.orderSubscriberHealthy) {
+			logger.error(`${logPrefix} Order subscriber not healthy`);
+		}
+		return this.dlobHealthy && this.orderSubscriberHealthy;
 	}
 
 	private async getBlockhashForTx(): Promise<string> {
@@ -424,8 +455,7 @@ export class FillerMultithreaded {
 				[],
 				this.driftClient.opts,
 				SIM_CU_ESTIMATE_MULTIPLIER,
-				true,
-				true,
+				this.simulateTxForCUEstimate,
 				await this.getBlockhashForTx()
 			);
 
@@ -736,8 +766,8 @@ export class FillerMultithreaded {
 					[],
 					this.driftClient.opts,
 					SIM_CU_ESTIMATE_MULTIPLIER,
-					true,
-					true
+					this.simulateTxForCUEstimate,
+					await this.getBlockhashForTx()
 				);
 				return simResult;
 			};
@@ -869,8 +899,7 @@ export class FillerMultithreaded {
 			[],
 			this.driftClient.opts,
 			SIM_CU_ESTIMATE_MULTIPLIER,
-			true,
-			true
+			this.simulateTxForCUEstimate
 		);
 		logger.info(
 			`tryFillPerpNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
@@ -904,7 +933,7 @@ export class FillerMultithreaded {
 		let writeAccs = 0;
 		const accountMetas: any[] = [];
 		const txStart = Date.now();
-		tx.message.recentBlockhash = await this.getBlockhashForTx();
+		// tx.message.recentBlockhash = await this.getBlockhashForTx();
 		if (buildForBundle) {
 			await this.sendTxThroughJito(tx, fillTxId);
 			this.removeFillingNodes(nodesSent);
@@ -1010,8 +1039,7 @@ export class FillerMultithreaded {
 							[],
 							this.driftClient.opts,
 							SIM_CU_ESTIMATE_MULTIPLIER,
-							true,
-							true,
+							this.simulateTxForCUEstimate,
 							await this.getBlockhashForTx()
 						);
 						logger.info(
