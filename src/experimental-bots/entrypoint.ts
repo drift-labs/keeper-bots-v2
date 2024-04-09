@@ -221,6 +221,7 @@ const runBot = async () => {
 				return samples.result.priorityFeeLevels![HeliusPriorityLevel.HIGH];
 			},
 		},
+		priorityFeeMultiplier: config.global.priorityFeeMultiplier,
 	});
 	await priorityFeeSubscriber.subscribe();
 

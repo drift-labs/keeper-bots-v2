@@ -9,9 +9,9 @@ import {
 	getUserFilter,
 	getUserWithOrderFilter,
 	Wallet,
+	BN,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey, RpcResponseAndContext } from '@solana/web3.js';
-import { BN } from '@coral-xyz/anchor';
 import dotenv from 'dotenv';
 import { logger } from '../../logger';
 import parseArgs from 'minimist';

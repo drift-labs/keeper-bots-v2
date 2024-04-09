@@ -421,13 +421,17 @@ export class FillerMultithreaded {
 			const userAccount = decodeUser(buffer);
 
 			logger.info(
-				`${logPrefix} trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}, order ${nodeToTrigger.node.order.orderId.toString()}`
+				`${logPrefix} trying to trigger (account: ${
+					nodeToTrigger.node.userAccount
+				}, order ${nodeToTrigger.node.order.orderId.toString()}`
 			);
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
 			if (this.seenTriggerableOrders.has(nodeSignature)) {
-				logger.info(
-					`${logPrefix} already triggered order (account: ${nodeToTrigger.node.userAccount.toString()}, order ${nodeToTrigger.node.order.orderId.toString()}`
+				logger.debug(
+					`${logPrefix} already triggered order (account: ${
+						nodeToTrigger.node.userAccount
+					}, order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
 				return;
 			}
@@ -509,7 +513,7 @@ export class FillerMultithreaded {
 	}
 
 	public async fillNodes(serializedNodesToFill: SerializedNodeToFill[]) {
-		logger.info(
+		logger.debug(
 			`${logPrefix} Filling ${serializedNodesToFill.length} nodes...`
 		);
 		const deserializedNodesToFill = serializedNodesToFill.map(
@@ -524,7 +528,7 @@ export class FillerMultithreaded {
 			seenFillableNodes.add(sig);
 			return this.filterFillableNodes(node);
 		});
-		logger.info(
+		logger.debug(
 			`${logPrefix} Filtered down to ${filteredFillableNodes.length} fillable nodes...`
 		);
 
@@ -643,9 +647,11 @@ export class FillerMultithreaded {
 	) {
 		for (const node of nodesToFill) {
 			if (this.seenFillableOrders.has(getNodeToFillSignature(node))) {
-				logger.info(
+				logger.debug(
 					// @ts-ignore
-					`${logPrefix} already filled order (account: ${node.userAccountData.toString()}, order ${node.node.order.orderId.toString()}`
+					`${logPrefix} already filled order (account: ${
+						node.node.userAccount
+					}, order ${node.node.order?.orderId.toString()}`
 				);
 				return;
 			}

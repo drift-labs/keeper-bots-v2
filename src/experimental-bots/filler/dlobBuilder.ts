@@ -178,7 +178,7 @@ class DLOBBuilder {
 		if (typeof process.send === 'function') {
 			if (serializedNodesToTrigger.length > 0) {
 				try {
-					logger.info('Sending triggerable nodes');
+					logger.debug('Sending triggerable nodes');
 					process.send({
 						type: 'triggerableNodes',
 						data: serializedNodesToTrigger,
@@ -191,7 +191,7 @@ class DLOBBuilder {
 			}
 			if (serializedNodesToFill.length > 0) {
 				try {
-					logger.info('Sending fillable nodes');
+					logger.debug('Sending fillable nodes');
 					process.send({
 						type: 'fillableNodes',
 						data: serializedNodesToFill,
