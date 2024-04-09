@@ -14,6 +14,7 @@ import {
 	isVariant,
 	MakerInfo,
 	MarketType,
+	PriorityFeeSubscriber,
 	ReferrerInfo,
 	SlotSubscriber,
 	TxSigAndSlot,
@@ -101,12 +102,14 @@ export class FillerMultithreaded {
 	private seenFillableOrders = new Set<string>();
 	private seenTriggerableOrders = new Set<string>();
 	private blockhashSubscriber: BlockhashSubscriber;
+	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	constructor(
     globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
+		priorityFeeSubscriber: PriorityFeeSubscriber,
 		bundleSender?: BundleSender
 	) {
     this.globalConfig = globalConfig;
@@ -127,6 +130,9 @@ export class FillerMultithreaded {
 		this.blockhashSubscriber = new BlockhashSubscriber({
 			connection: driftClient.connection,
 		});
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		const marketType = this.config.marketType === 'perp' ? MarketType.PERP : MarketType.SPOT;
+		this.priorityFeeSubscriber.updateMarketTypeAndIndex(marketType, this.config.marketIndex);
 	}
 
 	async init() {
@@ -149,7 +155,6 @@ export class FillerMultithreaded {
 			childArgs,
 			'dlobBuilder',
 			(msg: any) => {
-				logger.info(`${logPrefix} dlobBuilderProcess message received`);
 				switch (msg.type) {
 					case 'initialized':
 						dlobBuilderReady = true;
@@ -662,13 +667,13 @@ export class FillerMultithreaded {
 			}),
 		];
 		if (!buildForBundle) {
-			// ixs.push(
-			//   ComputeBudgetProgram.setComputeUnitPrice({
-			//     microLamports: Math.floor(
-			//       this.priorityFeeSubscriber.getCustomStrategyResult(),
-			//     ),
-			//   }),
-			// );
+			ixs.push(
+			  ComputeBudgetProgram.setComputeUnitPrice({
+			    microLamports: Math.floor(
+			      this.priorityFeeSubscriber.getCustomStrategyResult(),
+			    ),
+			  }),
+			);
 		}
 
 		try {
@@ -801,13 +806,13 @@ export class FillerMultithreaded {
 		];
 
 		if (!buildForBundle) {
-			// ixs.push(
-			//   ComputeBudgetProgram.setComputeUnitPrice({
-			//     microLamports: Math.floor(
-			//       this.priorityFeeSubscriber.getCustomStrategyResult(),
-			//     ),
-			//   }),
-			// );
+			ixs.push(
+			  ComputeBudgetProgram.setComputeUnitPrice({
+			    microLamports: Math.floor(
+			      this.priorityFeeSubscriber.getCustomStrategyResult(),
+			    ),
+			  }),
+			);
 		}
 		const fillTxId = this.fillTxId++;
 

@@ -22,6 +22,7 @@ import {
 	getDriftClientFromArgs,
 	serializeNodeToFill,
 	serializeNodeToTrigger,
+	sleepMs,
 } from './utils';
 
 const logPrefix = '[DLOBBuilder]';
@@ -267,6 +268,7 @@ const main = async () => {
 	);
 
 	await dlobBuilder.subscribe();
+	await sleepMs(5000); // Give the dlob some time to get built
 	if (typeof process.send === 'function') {
 		logger.info('DLOBBuilder started');
 		process.send({ type: 'initialized' });

@@ -18,6 +18,10 @@ import {
 	RetryTxSender,
 	SlotSubscriber,
 	initialize,
+	PriorityFeeMethod,
+	PriorityFeeSubscriber,
+	HeliusPriorityFeeResponse,
+	HeliusPriorityLevel,
 } from '@drift-labs/sdk';
 import {
 	Commitment,
@@ -204,6 +208,20 @@ const runBot = async () => {
 	});
 	await slotSubscriber.subscribe();
 
+	const priorityFeeSubscriber = new PriorityFeeSubscriber({
+		frequencyMs: 1000,
+		priorityFeeMethod: PriorityFeeMethod.DRIFT,
+		driftPriorityFeeEndpoint: 'https://dlob.drift.trade/priorityFees',
+		customStrategy: {
+			calculate: (samples: HeliusPriorityFeeResponse) => {
+				return samples.result.priorityFeeLevels![
+					HeliusPriorityLevel.HIGH
+				];
+			},
+		}
+	});
+	await priorityFeeSubscriber.subscribe();
+
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	logger.info(
 		`DriftClient ProgramId: ${driftClient.program.programId.toBase58()}`
@@ -252,6 +270,7 @@ const runBot = async () => {
 			config.botConfigs?.fillerMultithreaded,
 			driftClient,
 			slotSubscriber,
+			priorityFeeSubscriber,
 			bundleSender
 		);
 		bots.push(fillerMultithreaded);
