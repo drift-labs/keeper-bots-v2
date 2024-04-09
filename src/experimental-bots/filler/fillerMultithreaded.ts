@@ -88,7 +88,7 @@ export class FillerMultithreaded {
 	private bundleSender?: BundleSender;
 	private driftClient: DriftClient;
 	private dryRun: boolean;
-  private globalConfig: GlobalConfig;
+	private globalConfig: GlobalConfig;
 	private config: FillerMultiThreadedConfig;
 
 	private fillTxId: number = 0;
@@ -105,14 +105,14 @@ export class FillerMultithreaded {
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	constructor(
-    globalConfig: GlobalConfig,
+		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		bundleSender?: BundleSender
 	) {
-    this.globalConfig = globalConfig;
+		this.globalConfig = globalConfig;
 		this.config = config;
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
@@ -131,8 +131,12 @@ export class FillerMultithreaded {
 			connection: driftClient.connection,
 		});
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
-		const marketType = this.config.marketType === 'perp' ? MarketType.PERP : MarketType.SPOT;
-		this.priorityFeeSubscriber.updateMarketTypeAndIndex(marketType, this.config.marketIndex);
+		const marketType =
+			this.config.marketType === 'perp' ? MarketType.PERP : MarketType.SPOT;
+		this.priorityFeeSubscriber.updateMarketTypeAndIndex(
+			marketType,
+			this.config.marketIndex
+		);
 	}
 
 	async init() {
@@ -176,9 +180,9 @@ export class FillerMultithreaded {
 							this.fillNodes(msg.data);
 						}
 						break;
-        }
+				}
 			},
-      '[FillerMultithreaded]',
+			'[FillerMultithreaded]'
 		);
 
 		const orderSubscriberProcess = spawnChildWithRetry(
@@ -190,7 +194,7 @@ export class FillerMultithreaded {
 					dlobBuilderProcess.send(msg);
 				}
 			},
-      '[FillerMultithreaded]',
+			'[FillerMultithreaded]'
 		);
 
 		process.on('SIGINT', () => {
@@ -668,11 +672,11 @@ export class FillerMultithreaded {
 		];
 		if (!buildForBundle) {
 			ixs.push(
-			  ComputeBudgetProgram.setComputeUnitPrice({
-			    microLamports: Math.floor(
-			      this.priorityFeeSubscriber.getCustomStrategyResult(),
-			    ),
-			  }),
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult()
+					),
+				})
 			);
 		}
 
@@ -807,11 +811,11 @@ export class FillerMultithreaded {
 
 		if (!buildForBundle) {
 			ixs.push(
-			  ComputeBudgetProgram.setComputeUnitPrice({
-			    microLamports: Math.floor(
-			      this.priorityFeeSubscriber.getCustomStrategyResult(),
-			    ),
-			  }),
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult()
+					),
+				})
 			);
 		}
 		const fillTxId = this.fillTxId++;

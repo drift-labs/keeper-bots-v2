@@ -116,7 +116,7 @@ logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`Helius endpoint:  ${heliusEndpoint}`);
 logger.info(`DriftEnv:     ${config.global.driftEnv}`);
 if (!endpoint) {
-  throw new Error('Must set environment variable ENDPOINT');
+	throw new Error('Must set environment variable ENDPOINT');
 }
 
 const bots: any = [];
@@ -185,7 +185,9 @@ const runBot = async () => {
 	};
 
 	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
-		getMarketsAndOraclesForSubscription(config.global.driftEnv ||'mainnet-beta');
+		getMarketsAndOraclesForSubscription(
+			config.global.driftEnv || 'mainnet-beta'
+		);
 
 	const driftClientConfig = {
 		connection,
@@ -214,11 +216,9 @@ const runBot = async () => {
 		driftPriorityFeeEndpoint: 'https://dlob.drift.trade/priorityFees',
 		customStrategy: {
 			calculate: (samples: HeliusPriorityFeeResponse) => {
-				return samples.result.priorityFeeLevels![
-					HeliusPriorityLevel.HIGH
-				];
+				return samples.result.priorityFeeLevels![HeliusPriorityLevel.HIGH];
 			},
-		}
+		},
 	});
 	await priorityFeeSubscriber.subscribe();
 
@@ -262,11 +262,11 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'fillerMultithreaded')) {
-    if (!config.botConfigs?.fillerMultithreaded) {
-      throw new Error('fillerMultithreaded bot config not found');
-    }
+		if (!config.botConfigs?.fillerMultithreaded) {
+			throw new Error('fillerMultithreaded bot config not found');
+		}
 		const fillerMultithreaded = new FillerMultithreaded(
-      config.global,
+			config.global,
 			config.botConfigs?.fillerMultithreaded,
 			driftClient,
 			slotSubscriber,
