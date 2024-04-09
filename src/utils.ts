@@ -830,12 +830,23 @@ export async function swapFillerHardEarnedUSDCForSOL(
 			true
 		);
 
+		const withdrawerWrappedSolAta = getAssociatedTokenAddressSync(
+			NATIVE_MINT,
+			driftClient.authority
+		);
 
-		const withdrawerWrappedSolAta = getAssociatedTokenAddressSync(NATIVE_MINT, driftClient.authority);
+		const closeAccountInstruction = createCloseAccountInstruction(
+			withdrawerWrappedSolAta,
+			driftClient.authority,
+			driftClient.authority
+		);
 
-		const closeAccountInstruction = createCloseAccountInstruction(withdrawerWrappedSolAta, driftClient.authority, driftClient.authority);
-
-		const ixs = [...preInstructions, withdrawIx, ...jupiterInstructions, closeAccountInstruction];
+		const ixs = [
+			...preInstructions,
+			withdrawIx,
+			...jupiterInstructions,
+			closeAccountInstruction,
+		];
 
 		const buildTx = async (cu: number): Promise<VersionedTransaction> => {
 			return await driftClient.txSender.getVersionedTransaction(

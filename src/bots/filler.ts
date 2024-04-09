@@ -2328,7 +2328,6 @@ export class FillerBot implements Bot {
 			.map((pos) => pos.marketIndex);
 		const now = Date.now();
 		if (marketIds.length === MAX_POSITIONS_PER_USER) {
-			// REMEMBER TO CHANGE THIS BACK TO MAX_POSITIONS_PER_USER
 			logger.info(
 				`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
 			);
@@ -2480,7 +2479,8 @@ export class FillerBot implements Bot {
 					);
 					const fillerSolBalanceAfterSwap =
 						await this.driftClient.connection.getBalance(
-							this.driftClient.authority, "processed",
+							this.driftClient.authority,
+							'processed'
 						);
 					this.hasEnoughSolToFill =
 						fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;

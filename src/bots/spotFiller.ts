@@ -2452,7 +2452,8 @@ export class SpotFillerBot implements Bot {
 				);
 				const fillerSolBalanceAfterSwap =
 					await this.driftClient.connection.getBalance(
-						this.driftClient.authority, "processed"
+						this.driftClient.authority,
+						'processed'
 					);
 				this.hasEnoughSolToFill =
 					fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;
