@@ -86,7 +86,7 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 				isVariant(order.marketType, this.marketTypeStr)
 		);
 		if (!hasFilteredOpenOrders) {
-			if (this.userStatus.get(key) === true) {
+			if (this.userStatus.get(key)) {
 				this.sendUserAccountUpdateMessage(buffer, key, 'delete');
 			}
 			this.userStatus.set(key, false);
