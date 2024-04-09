@@ -724,9 +724,6 @@ export async function swapFillerHardEarnedUSDCForSOL(
 		const inPrecision = new BN(10).pow(new BN(usdcMarket.decimals));
 		const outPrecision = new BN(10).pow(new BN(solMarket.decimals));
 
-		// const usdcAssociatedTokenAccount = await driftClient.getAssociatedTokenAccount(1)
-		// const solAssociatedTokenAccount = await getAssociatedTokenAddress(usdcMarket.mint, driftClient.authority);
-
 		if (usdc.lt(new BN(1).mul(QUOTE_PRECISION))) {
 			console.log(
 				`${driftClient.authority.toBase58()} not enough USDC to swap (${convertToNumber(
@@ -745,8 +742,6 @@ export async function swapFillerHardEarnedUSDCForSOL(
 			maxAccounts: 10,
 			slippageBps: JUPITER_SLIPPAGE_BPS,
 			swapMode: 'ExactIn',
-			// onlyDirectRoutes?: boolean;
-			// excludeDexes?: string[];
 		});
 
 		const quoteInNum = convertToNumber(new BN(quote.inAmount), inPrecision);
