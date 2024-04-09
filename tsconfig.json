@@ -1,8 +1,6 @@
 {
 	"compilerOptions": {
-		"types": [
-			"mocha"
-		],
+		"types": ["mocha"],
 		"module": "commonjs",
 		"target": "es2019",
 		"esModuleInterop": true,
@@ -13,17 +11,10 @@
 		"experimentalDecorators": true,
 		"emitDecoratorMetadata": true,
 		"baseUrl": ".",
-		"rootDirs": [
-			"src"
-		],
+		"rootDirs": ["src"],
 		"outDir": "./lib",
 		"strict": true
 	},
-	"include": [
-		"src/**/*"
-	],
-	"exclude": [
-		"node_modules",
-		"src/**/*.test.ts"
-	]
+	"include": ["src/**/*"],
+	"exclude": ["node_modules", "src/**/*.test.ts"]
 }

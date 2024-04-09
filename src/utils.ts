@@ -30,8 +30,11 @@ import {
 	getVariant,
 } from '@drift-labs/sdk';
 import {
+	NATIVE_MINT,
 	createAssociatedTokenAccountInstruction,
+	createCloseAccountInstruction,
 	getAssociatedTokenAddress,
+	getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
 import {
 	AddressLookupTableAccount,
@@ -697,7 +700,7 @@ export async function swapFillerHardEarnedUSDCForSOL(
 	priorityFeeSubscriber: PriorityFeeSubscriber,
 	driftClient: DriftClient,
 	jupiterClient: JupiterClient,
-	blockhash: string,
+	blockhash: string
 ) {
 	try {
 		const usdc = driftClient.getUser().getTokenAmount(0);
@@ -724,7 +727,7 @@ export async function swapFillerHardEarnedUSDCForSOL(
 		// const usdcAssociatedTokenAccount = await driftClient.getAssociatedTokenAccount(1)
 		// const solAssociatedTokenAccount = await getAssociatedTokenAddress(usdcMarket.mint, driftClient.authority);
 
-		if (usdc.lt((new BN(1)).mul(QUOTE_PRECISION))) {
+		if (usdc.lt(new BN(1).mul(QUOTE_PRECISION))) {
 			console.log(
 				`${driftClient.authority.toBase58()} not enough USDC to swap (${convertToNumber(
 					usdc,
@@ -771,9 +774,10 @@ export async function swapFillerHardEarnedUSDCForSOL(
 			slippageBps: JUPITER_SLIPPAGE_BPS,
 		});
 
-		const { transactionMessage, lookupTables } = await jupiterClient.getTransactionMessageAndLookupTables({
-			transaction,
-		});
+		const { transactionMessage, lookupTables } =
+			await jupiterClient.getTransactionMessageAndLookupTables({
+				transaction,
+			});
 
 		const jupiterInstructions = jupiterClient.getJupiterInstructions({
 			transactionMessage,
@@ -783,9 +787,12 @@ export async function swapFillerHardEarnedUSDCForSOL(
 
 		const preInstructions = [];
 
-		const outAssociatedTokenAccount = await driftClient.getAssociatedTokenAccount(1);
+		const outAssociatedTokenAccount =
+			await driftClient.getAssociatedTokenAccount(1);
 
-		const solAccountInfo = await driftClient.connection.getAccountInfo(outAssociatedTokenAccount);
+		const solAccountInfo = await driftClient.connection.getAccountInfo(
+			outAssociatedTokenAccount
+		);
 
 		if (!solAccountInfo) {
 			preInstructions.push(
@@ -798,9 +805,12 @@ export async function swapFillerHardEarnedUSDCForSOL(
 			);
 		}
 
-		const inAssociatedTokenAccount = await driftClient.getAssociatedTokenAccount(0);
+		const inAssociatedTokenAccount =
+			await driftClient.getAssociatedTokenAccount(0);
 
-		const usdcAccountInfo = await driftClient.connection.getAccountInfo(inAssociatedTokenAccount);
+		const usdcAccountInfo = await driftClient.connection.getAccountInfo(
+			inAssociatedTokenAccount
+		);
 
 		if (!usdcAccountInfo) {
 			preInstructions.push(
@@ -813,7 +823,6 @@ export async function swapFillerHardEarnedUSDCForSOL(
 			);
 		}
 
-
 		const withdrawIx = await driftClient.getWithdrawIx(
 			usdc.muln(10), // gross overestimate just to get everything out of the account
 			0,
@@ -822,7 +831,11 @@ export async function swapFillerHardEarnedUSDCForSOL(
 		);
 
 
-		const ixs = [...preInstructions, withdrawIx, ...jupiterInstructions];
+		const withdrawerWrappedSolAta = getAssociatedTokenAddressSync(NATIVE_MINT, driftClient.authority);
+
+		const closeAccountInstruction = createCloseAccountInstruction(withdrawerWrappedSolAta, driftClient.authority, driftClient.authority);
+
+		const ixs = [...preInstructions, withdrawIx, ...jupiterInstructions, closeAccountInstruction];
 
 		const buildTx = async (cu: number): Promise<VersionedTransaction> => {
 			return await driftClient.txSender.getVersionedTransaction(
@@ -866,7 +879,9 @@ export async function swapFillerHardEarnedUSDCForSOL(
 		}
 
 		console.log(
-			`${driftClient.authority.toBase58()} sending swap tx... ${performance.now() - start}`
+			`${driftClient.authority.toBase58()} sending swap tx... ${
+				performance.now() - start
+			}`
 		);
 
 		const txSigAndSlot = await driftClient.txSender.sendVersionedTransaction(

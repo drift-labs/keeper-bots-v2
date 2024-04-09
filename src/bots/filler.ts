@@ -251,7 +251,7 @@ export class FillerBot implements Bot {
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
-		bundleSender?: BundleSender,
+		bundleSender?: BundleSender
 	) {
 		this.globalConfig = globalConfig;
 		this.name = config.botId;
@@ -297,7 +297,10 @@ export class FillerBot implements Bot {
 			`${this.name}: jito enabled: ${this.bundleSender !== undefined}`
 		);
 
-		if (config.rebalanceFiller && this.runtimeSpec.driftEnv === 'mainnet-beta') {
+		if (
+			config.rebalanceFiller &&
+			this.runtimeSpec.driftEnv === 'mainnet-beta'
+		) {
 			this.jupiterClient = new JupiterClient({
 				connection: this.driftClient.connection,
 			});
@@ -691,13 +694,13 @@ export class FillerBot implements Bot {
 		const release = await this.hasEnoughSolToFillMutex.acquire();
 		try {
 			if (!this.hasEnoughSolToFill) {
-			logger.info(`Not enough SOL to fill, skipping confirm pending tx sigs`);
-			return;
+				logger.info(`Not enough SOL to fill, skipping confirm pending tx sigs`);
+				return;
 			}
 		} finally {
 			release();
 		}
-		
+
 		const user = this.driftClient.getUser();
 		this.pendingTxSigsToConfirmGauge?.setLatestValue(
 			this.pendingTxSigsToconfirm.size,
@@ -1803,25 +1806,25 @@ export class FillerBot implements Bot {
 			} else {
 				if (this.dryRun) {
 					logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
-				  } else {
+				} else {
 					const release = await this.hasEnoughSolToFillMutex.acquire();
 					try {
-					  if (this.hasEnoughSolToFill) {
-						this.sendFillTxAndParseLogs(
-						  fillTxId,
-						  [nodeToFill],
-						  simResult.tx,
-						  buildForBundle
-						);
-					  } else {
-						logger.info(
-						  `not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
-						);
-					  }
+						if (this.hasEnoughSolToFill) {
+							this.sendFillTxAndParseLogs(
+								fillTxId,
+								[nodeToFill],
+								simResult.tx,
+								buildForBundle
+							);
+						} else {
+							logger.info(
+								`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
+							);
+						}
 					} finally {
-					  release();
+						release();
 					}
-				  }
+				}
 			}
 		} catch (e) {
 			if (e instanceof Error) {
@@ -2117,25 +2120,25 @@ export class FillerBot implements Bot {
 		} else {
 			if (this.dryRun) {
 				logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
-			  } else {
+			} else {
 				const release = await this.hasEnoughSolToFillMutex.acquire();
 				try {
-				  if (this.hasEnoughSolToFill) {
-					this.sendFillTxAndParseLogs(
-					  fillTxId,
-					  nodesSent,
-					  simResult.tx,
-					  buildForBundle
-					);
-				  } else {
-					logger.info(
-					  `not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
-					);
-				  }
+					if (this.hasEnoughSolToFill) {
+						this.sendFillTxAndParseLogs(
+							fillTxId,
+							nodesSent,
+							simResult.tx,
+							buildForBundle
+						);
+					} else {
+						logger.info(
+							`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
+						);
+					}
 				} finally {
-				  release();
+					release();
 				}
-			  }
+			}
 		}
 
 		return nodesSent.length;
@@ -2256,56 +2259,55 @@ export class FillerBot implements Bot {
 				if (!this.dryRun) {
 					const release = await this.hasEnoughSolToFillMutex.acquire();
 					try {
-					  if (this.hasEnoughSolToFill) {
-						// Assuming the SOL check is now within the mutex's scope
-						// @ts-ignore;
-						simResult.tx.sign([this.driftClient.wallet.payer]);
-						const txSig = bs58.encode(simResult.tx.signatures[0]);
-						this.registerTxSigToConfirm(txSig, Date.now(), [], -1, 'trigger');
-				  
-						if (buildForBundle) {
-						  this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
-						} else if (this.canSendOutsideJito()) {
-						  this.driftClient
-							.sendTransaction(simResult.tx)
-							.catch((error) => {
-							  nodeToTrigger.node.haveTrigger = false;
-				  
-							  const errorCode = getErrorCode(error);
-							  if (
-								errorCode &&
-								!errorCodesToSuppress.includes(errorCode) &&
-								!(error as Error).message.includes(
-								  'Transaction was not confirmed'
-								)
-							  ) {
-								logger.error(
-								  `Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-								);
-								logger.error(error);
-								webhookMessage(
-								  `[${
-									this.name
-								  }]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-									error.stack ? error.stack : error.message
-								  }`
-								);
-							  }
-							})
-							.finally(() => {
-							  this.removeTriggeringNodes(nodeToTrigger);
-							});
+						if (this.hasEnoughSolToFill) {
+							// Assuming the SOL check is now within the mutex's scope
+							// @ts-ignore;
+							simResult.tx.sign([this.driftClient.wallet.payer]);
+							const txSig = bs58.encode(simResult.tx.signatures[0]);
+							this.registerTxSigToConfirm(txSig, Date.now(), [], -1, 'trigger');
+
+							if (buildForBundle) {
+								this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
+							} else if (this.canSendOutsideJito()) {
+								this.driftClient
+									.sendTransaction(simResult.tx)
+									.catch((error) => {
+										nodeToTrigger.node.haveTrigger = false;
+
+										const errorCode = getErrorCode(error);
+										if (
+											errorCode &&
+											!errorCodesToSuppress.includes(errorCode) &&
+											!(error as Error).message.includes(
+												'Transaction was not confirmed'
+											)
+										) {
+											logger.error(
+												`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+											);
+											logger.error(error);
+											webhookMessage(
+												`[${
+													this.name
+												}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+													error.stack ? error.stack : error.message
+												}`
+											);
+										}
+									})
+									.finally(() => {
+										this.removeTriggeringNodes(nodeToTrigger);
+									});
+							}
+						} else {
+							logger.info(`Not enough SOL to fill, not triggering node`);
 						}
-					  } else {
-						logger.info(`Not enough SOL to fill, not triggering node`);
-					  }
 					} finally {
-					  release();
+						release();
 					}
-				  } else {
+				} else {
 					logger.info(`dry run, not triggering node`);
-				  }
-				  
+				}
 			}
 		}
 
@@ -2325,8 +2327,11 @@ export class FillerBot implements Bot {
 			.getActivePerpPositions()
 			.map((pos) => pos.marketIndex);
 		const now = Date.now();
-		if (marketIds.length === MAX_POSITIONS_PER_USER) { // REMEMBER TO CHANGE THIS BACK TO MAX_POSITIONS_PER_USER
-			logger.info(`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`);
+		if (marketIds.length === MAX_POSITIONS_PER_USER) {
+			// REMEMBER TO CHANGE THIS BACK TO MAX_POSITIONS_PER_USER
+			logger.info(
+				`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
+			);
 			if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
 				logger.info(`Want to settle positive pnl, but in cooldown...`);
 			} else {
@@ -2456,29 +2461,36 @@ export class FillerBot implements Bot {
 		}
 		if (this.rebalanceFiller) {
 			logger.info(`Rebalancing filler`);
-			const fillerSolBalance = await this.driftClient.connection.getBalance(this.driftClient.authority);
-		  
+			const fillerSolBalance = await this.driftClient.connection.getBalance(
+				this.driftClient.authority
+			);
+
 			const release = await this.hasEnoughSolToFillMutex.acquire();
 			try {
-			  this.hasEnoughSolToFill = fillerSolBalance >= MINIMUM_SOL_TO_CONTINUE_FILLING;
-		  
-			  if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
-				logger.info(`Swapping USDC for SOL to rebalance filler`);
-				await swapFillerHardEarnedUSDCForSOL(
-				  this.priorityFeeSubscriber,
-				  this.driftClient,
-				  this.jupiterClient,
-				  await this.getBlockhashForTx(),
-				);
-				const fillerSolBalanceAfterSwap = await this.driftClient.connection.getBalance(this.driftClient.authority);
-				this.hasEnoughSolToFill = fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;
-			  } else {
-				this.hasEnoughSolToFill = true;
-			  }
+				this.hasEnoughSolToFill =
+					fillerSolBalance >= MINIMUM_SOL_TO_CONTINUE_FILLING;
+
+				if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
+					logger.info(`Swapping USDC for SOL to rebalance filler`);
+					await swapFillerHardEarnedUSDCForSOL(
+						this.priorityFeeSubscriber,
+						this.driftClient,
+						this.jupiterClient,
+						await this.getBlockhashForTx()
+					);
+					const fillerSolBalanceAfterSwap =
+						await this.driftClient.connection.getBalance(
+							this.driftClient.authority, "processed",
+						);
+					this.hasEnoughSolToFill =
+						fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;
+				} else {
+					this.hasEnoughSolToFill = true;
+				}
 			} finally {
-			  release();
+				release();
 			}
-		  }
+		}
 	}
 
 	protected usingJito(): boolean {
@@ -2503,123 +2515,123 @@ export class FillerBot implements Bot {
 	protected async tryFill() {
 		const startTime = Date.now();
 		let ran = false;
-	  
+
 		try {
-		  // Check hasEnoughSolToFill before trying to fill, we do not want to fill if we don't have enough SOL
-		  const release = await this.hasEnoughSolToFillMutex.acquire();
-		  try {
-			if (!this.hasEnoughSolToFill) {
-			  logger.info(`Not enough SOL to fill, skipping fill`);
-			  await this.watchdogTimerMutex.runExclusive(async () => {
-				this.watchdogTimerLastPatTime = Date.now();
-			  });
-			  return;
-			}
-		  } finally {
-			release();
-		  }
-	  
-		  await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
-			const user = this.driftClient.getUser();
-			this.lastTryFillTimeGauge?.setLatestValue(
-			  Date.now(),
-			  metricAttrFromUserAccount(
-				user.getUserAccountPublicKey(),
-				user.getUserAccount()
-			  )
-			);
-	  
-			const dlob = await this.getDLOB();
-			this.pruneThrottledNode();
-	  
-			// 1) get all fillable nodes
-			let fillableNodes: Array<NodeToFill> = [];
-			let triggerableNodes: Array<NodeToTrigger> = [];
-			for (const market of this.driftClient.getPerpMarketAccounts()) {
-			  try {
-				const { nodesToFill, nodesToTrigger } = this.getPerpNodesForMarket(
-				  market,
-				  dlob
-				);
-				fillableNodes = fillableNodes.concat(nodesToFill);
-				triggerableNodes = triggerableNodes.concat(nodesToTrigger);
-			  } catch (e) {
-				if (e instanceof Error) {
-				  console.error(e);
-				  webhookMessage(
-					`[${this.name}]: :x: Failed to get fillable nodes for market ${
-					  market.marketIndex
-					}:\n${e.stack ? e.stack : e.message}`
-				  );
+			// Check hasEnoughSolToFill before trying to fill, we do not want to fill if we don't have enough SOL
+			const release = await this.hasEnoughSolToFillMutex.acquire();
+			try {
+				if (!this.hasEnoughSolToFill) {
+					logger.info(`Not enough SOL to fill, skipping fill`);
+					await this.watchdogTimerMutex.runExclusive(async () => {
+						this.watchdogTimerLastPatTime = Date.now();
+					});
+					return;
 				}
-				continue;
-			  }
+			} finally {
+				release();
 			}
-	  
-			// filter out nodes that we know cannot be filled
-			const { filteredFillableNodes, filteredTriggerableNodes } =
-			  this.filterPerpNodesForMarket(fillableNodes, triggerableNodes);
-			logger.debug(
-			  `filtered fillable nodes from ${fillableNodes.length} to ${filteredFillableNodes.length}, filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length}`
-			);
-	  
-			const slotsUntilJito = this.slotsUntilJitoLeader();
-			const buildForBundle =
-			  this.usingJito() &&
-			  slotsUntilJito !== undefined &&
-			  slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
-	  
-			// fill the perp nodes
-			await Promise.all([
-			  this.executeFillablePerpNodesForMarket(
-				filteredFillableNodes,
-				buildForBundle
-			  ),
-			  this.executeTriggerablePerpNodesForMarket(
-				filteredTriggerableNodes,
-				buildForBundle
-			  ),
-			]);
-	  
-			// check if should settle positive pnl
-			ran = true;
-		  });
-		} catch (e) {
-		  if (e === E_ALREADY_LOCKED) {
-			const user = this.driftClient.getUser();
-			this.mutexBusyCounter!.add(
-			  1,
-			  metricAttrFromUserAccount(
-				user.getUserAccountPublicKey(),
-				user.getUserAccount()
-			  )
-			);
-		  } else {
-			if (e instanceof Error) {
-			  webhookMessage(
-				`[${this.name}]: :x: uncaught error:\n${
-				  e.stack ? e.stack : e.message
-				}`
-			  );
-			}
-			throw e;
-		  }
-		} finally {
-		  if (ran) {
-			const duration = Date.now() - startTime;
-			const user = this.driftClient.getUser();
-			this.tryFillDurationHistogram?.record(
-			  duration,
-			  metricAttrFromUserAccount(
-				user.getUserAccountPublicKey(),
-				user.getUserAccount()
-			  )
-			);
-			logger.debug(`tryFill done, took ${duration}ms`);
-			await this.watchdogTimerMutex.runExclusive(async () => {
-			  this.watchdogTimerLastPatTime = Date.now();
+
+			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
+				const user = this.driftClient.getUser();
+				this.lastTryFillTimeGauge?.setLatestValue(
+					Date.now(),
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
+
+				const dlob = await this.getDLOB();
+				this.pruneThrottledNode();
+
+				// 1) get all fillable nodes
+				let fillableNodes: Array<NodeToFill> = [];
+				let triggerableNodes: Array<NodeToTrigger> = [];
+				for (const market of this.driftClient.getPerpMarketAccounts()) {
+					try {
+						const { nodesToFill, nodesToTrigger } = this.getPerpNodesForMarket(
+							market,
+							dlob
+						);
+						fillableNodes = fillableNodes.concat(nodesToFill);
+						triggerableNodes = triggerableNodes.concat(nodesToTrigger);
+					} catch (e) {
+						if (e instanceof Error) {
+							console.error(e);
+							webhookMessage(
+								`[${this.name}]: :x: Failed to get fillable nodes for market ${
+									market.marketIndex
+								}:\n${e.stack ? e.stack : e.message}`
+							);
+						}
+						continue;
+					}
+				}
+
+				// filter out nodes that we know cannot be filled
+				const { filteredFillableNodes, filteredTriggerableNodes } =
+					this.filterPerpNodesForMarket(fillableNodes, triggerableNodes);
+				logger.debug(
+					`filtered fillable nodes from ${fillableNodes.length} to ${filteredFillableNodes.length}, filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length}`
+				);
+
+				const slotsUntilJito = this.slotsUntilJitoLeader();
+				const buildForBundle =
+					this.usingJito() &&
+					slotsUntilJito !== undefined &&
+					slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+
+				// fill the perp nodes
+				await Promise.all([
+					this.executeFillablePerpNodesForMarket(
+						filteredFillableNodes,
+						buildForBundle
+					),
+					this.executeTriggerablePerpNodesForMarket(
+						filteredTriggerableNodes,
+						buildForBundle
+					),
+				]);
+
+				// check if should settle positive pnl
+				ran = true;
 			});
-		  }
+		} catch (e) {
+			if (e === E_ALREADY_LOCKED) {
+				const user = this.driftClient.getUser();
+				this.mutexBusyCounter!.add(
+					1,
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
+			} else {
+				if (e instanceof Error) {
+					webhookMessage(
+						`[${this.name}]: :x: uncaught error:\n${
+							e.stack ? e.stack : e.message
+						}`
+					);
+				}
+				throw e;
+			}
+		} finally {
+			if (ran) {
+				const duration = Date.now() - startTime;
+				const user = this.driftClient.getUser();
+				this.tryFillDurationHistogram?.record(
+					duration,
+					metricAttrFromUserAccount(
+						user.getUserAccountPublicKey(),
+						user.getUserAccount()
+					)
+				);
+				logger.debug(`tryFill done, took ${duration}ms`);
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
+			}
 		}
-	  }
+	}
 }

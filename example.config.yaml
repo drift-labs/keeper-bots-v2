@@ -119,7 +119,7 @@ enabledBots:
 # below are bot configs
 botConfigs:
   filler:
-    botId: "filler"
+    botId: 'filler'
     dryRun: false
     fillerPollingInterval: 6000
     metricsPort: 9464
@@ -134,7 +134,7 @@ botConfigs:
     simulateTxForCUEstimate: true
 
   spotFiller:
-    botId: "spot-filler"
+    botId: 'spot-filler'
     dryRun: false
     fillerPollingInterval: 6000
     metricsPort: 9464
@@ -142,7 +142,7 @@ botConfigs:
     simulateTxForCUEstimate: true
 
   liquidator:
-    botId: "liquidator"
+    botId: 'liquidator'
     dryRun: false
     metricsPort: 9465
     # if true will NOT attempt to sell off any inherited positions
@@ -176,7 +176,7 @@ botConfigs:
     deriskAuctionDurationSlots: 100
 
     # what algo to use for derisking. Options are "market" or "twap"
-    deriskAlgo: "market"
+    deriskAlgo: 'market'
 
     # if deriskAlgo == "twap", must supply these as well
     # twapDurationSec: 300 # overall duration of to run the twap algo. Aims to derisk the entire position over this duration
@@ -200,12 +200,12 @@ botConfigs:
     notifyOnLiquidation: true
 
   trigger:
-    botId: "trigger"
+    botId: 'trigger'
     dryRun: false
     metricsPort: 9465
 
   markTwapCrank:
-    botId: "mark-twap-cranker"
+    botId: 'mark-twap-cranker'
     dryRun: false
     metricsPort: 9465
     crankIntervalToMarketIndicies:
