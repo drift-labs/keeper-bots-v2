@@ -1,5 +1,5 @@
 FROM public.ecr.aws/bitnami/node:18
-RUN yum install -y git
+RUN apt-get install git
 ENV NODE_ENV=production
 RUN npm install -g yarn
 RUN npm install -g typescript
