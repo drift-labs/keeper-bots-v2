@@ -140,7 +140,6 @@ src/**.js.map
 
 .env
 lib
-yarn.lock
 
 scratch
 

@@ -8,10 +8,10 @@ WORKDIR /app
 
 COPY package.json ./
 
-RUN yarn install --frozen-lockfile
+RUN yarn install
 COPY . .
 RUN yarn build
-RUN yarn install --production --frozen-lockfile
+RUN yarn install --production
 
 EXPOSE 9464
 
