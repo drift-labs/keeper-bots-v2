@@ -6,12 +6,10 @@ RUN npm install -g typescript
 
 WORKDIR /app
 
-COPY package.json ./
-
-RUN yarn install --frozen-lockfile
 COPY . .
+RUN yarn install
 RUN yarn build
-RUN yarn install --production --frozen-lockfile
+RUN yarn install --production
 
 EXPOSE 9464
 

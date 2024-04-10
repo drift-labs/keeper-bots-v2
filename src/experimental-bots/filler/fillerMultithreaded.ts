@@ -142,12 +142,11 @@ export class FillerMultithreaded {
 			connection: driftClient.connection,
 		});
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
-		const marketType =
-			this.config.marketType === 'perp' ? MarketType.PERP : MarketType.SPOT;
-		this.priorityFeeSubscriber.updateMarketTypeAndIndex(
-			marketType,
-			this.config.marketIndex
-		);
+		this.priorityFeeSubscriber.updateMarketTypeAndIndex([
+			{
+				marketType: this.config.marketType,
+				marketIndex: this.config.marketIndex,
+			}]);
 	}
 
 	async init() {
