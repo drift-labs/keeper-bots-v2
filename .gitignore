@@ -143,3 +143,5 @@ lib
 yarn.lock
 
 scratch
+
+test.config.yaml
