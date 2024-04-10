@@ -34,6 +34,7 @@ import { BundleSender } from '../bundleSender';
 import { FillerMultithreaded } from './filler/fillerMultithreaded';
 import http from 'http';
 import { promiseTimeout } from '@drift-labs/sdk';
+import { DriftPriorityFeeResponse } from '@drift-labs/sdk/lib/priorityFee/driftPriorityFeeMethod';
 
 require('dotenv').config();
 
@@ -215,10 +216,10 @@ const runBot = async () => {
 	const priorityFeeSubscriber = new PriorityFeeSubscriber({
 		frequencyMs: 1000,
 		priorityFeeMethod: PriorityFeeMethod.DRIFT,
-		driftPriorityFeeEndpoint: 'https://dlob.drift.trade/priorityFees',
+		driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
 		customStrategy: {
-			calculate: (samples: HeliusPriorityFeeResponse) => {
-				return samples.result.priorityFeeLevels![HeliusPriorityLevel.HIGH];
+			calculate: (samples: DriftPriorityFeeResponse) => {
+				return Math.max(...samples.map((p) => p[HeliusPriorityLevel.HIGH]));
 			},
 		},
 		priorityFeeMultiplier: config.global.priorityFeeMultiplier,
