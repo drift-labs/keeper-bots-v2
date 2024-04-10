@@ -225,13 +225,6 @@ export class FillerMultithreaded {
 			process.exit(0);
 		});
 
-		process.on('SIGKILL', () => {
-			logger.info(`${logPrefix} Received SIGINT, killing children`);
-			dlobBuilderProcess.kill();
-			orderSubscriberProcess.kill();
-			process.exit(0);
-		});
-
 		logger.info(`dlobBuilder spawned with pid: ${dlobBuilderProcess.pid}`);
 		logger.info(
 			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
