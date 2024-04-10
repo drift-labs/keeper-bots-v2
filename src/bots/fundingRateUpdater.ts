@@ -30,6 +30,9 @@ const errorCodesToSuppress = [
 	6251, // FundingWasNotUpdated
 	6096, // AMMNotUpdatedInSameSlot
 ];
+const errorCodesCanRetry = [
+	6096, // AMMNotUpdatedInSameSlot
+];
 const CU_EST_MULTIPLIER = 1.1;
 
 function onTheHourUpdate(
@@ -263,18 +266,22 @@ export class FundingRateUpdaterBot implements Bot {
 			const errorCode = getErrorCodeFromSimError(simResult.simError);
 			if (errorCode && errorCodesToSuppress.includes(errorCode)) {
 				logger.error(
-					`Sim error (suppressed, no retry): ${JSON.stringify(
+					`Sim error (suppressed), code: ${errorCode} ${JSON.stringify(
 						simResult.simError
-					)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
+					)}`
 				);
-				return { success: false, canRetry: false };
 			} else {
 				logger.error(
-					`Sim error (not suppressed, retrying): ${JSON.stringify(
+					`Sim error (not suppressed), code: ${errorCode}: ${JSON.stringify(
 						simResult.simError
 					)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 				);
+			}
+
+			if (errorCode && errorCodesCanRetry.includes(errorCode)) {
 				return { success: false, canRetry: true };
+			} else {
+				return { success: false, canRetry: false };
 			}
 		}
 
