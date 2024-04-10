@@ -21,13 +21,20 @@ import {
 	AddressLookupTableAccount,
 	PublicKey,
 	ComputeBudgetProgram,
+	TransactionInstruction,
+	TransactionExpiredBlockheightExceededError,
+	SendTransactionError,
 } from '@solana/web3.js';
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
-import { handleSimResultError, simulateAndGetTxWithCUs } from '../utils';
+import {
+	getMarketId,
+	handleSimResultError,
+	simulateAndGetTxWithCUs,
+} from '../utils';
 
-const CRANK_TX_MARKET_CHUNK_SIZE = 1;
-const CU_EST_MULTIPLIER = 1.25;
+const CU_EST_MULTIPLIER = 1.1;
+const DEFAULT_INTERVAL_GROUP = -1;
 
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
@@ -70,15 +77,6 @@ export async function sendVersionedTransaction(
 	return txid;
 }
 
-/// split the list into chunks
-function chunkArray<T>(arr: T[], chunkSize: number): T[][] {
-	const chunks: T[][] = [];
-	for (let i = 0; i < arr.length; i += chunkSize) {
-		chunks.push(arr.slice(i, i + chunkSize));
-	}
-	return chunks;
-}
-
 export class MakerBidAskTwapCrank implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
@@ -86,6 +84,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	public readonly defaultIntervalMs?: number = undefined;
 
 	private crankIntervalToMarketIds?: { [key: number]: number[] }; // Object from number to array of numbers
+	private crankIntervalInProgress: { [key: number]: boolean };
 	private allCrankIntervalGroups?: number[];
 	private maxIntervalGroup?: number; // tracks the max interval group for health checking
 
@@ -97,7 +96,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private dlob?: DLOB;
 	private latestDlobSlot?: number;
 	private lookupTableAccount?: AddressLookupTableAccount;
-	private priorityFeeSubscriber: PriorityFeeSubscriber;
+	private priorityFeeSubscribers: Map<string, PriorityFeeSubscriber>;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -108,7 +107,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		userMap: UserMap,
 		config: BaseBotConfig,
 		runOnce: boolean,
-		priorityFeeSubscriber: PriorityFeeSubscriber,
+		priorityFeeSubscriberMap: Map<string, PriorityFeeSubscriber>,
 		crankIntervalToMarketIds?: { [key: number]: number[] }
 	) {
 		this.slotSubscriber = slotSubscriber;
@@ -118,26 +117,28 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.driftClient = driftClient;
 		this.userMap = userMap;
 		this.crankIntervalToMarketIds = crankIntervalToMarketIds;
+		this.crankIntervalInProgress = {};
 		if (this.crankIntervalToMarketIds) {
 			this.allCrankIntervalGroups = Object.keys(
 				this.crankIntervalToMarketIds
 			).map((x) => parseInt(x));
 			this.maxIntervalGroup = Math.max(...this.allCrankIntervalGroups!);
 			this.watchdogTimerLastPatTime = Date.now() - this.maxIntervalGroup;
+
+			for (const intervalGroup of this.allCrankIntervalGroups!) {
+				this.crankIntervalInProgress[intervalGroup] = false;
+			}
+		} else {
+			this.crankIntervalInProgress[DEFAULT_INTERVAL_GROUP] = false;
 		}
-		this.priorityFeeSubscriber = priorityFeeSubscriber;
+
+		this.priorityFeeSubscribers = priorityFeeSubscriberMap;
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing, runOnce: ${this.runOnce}`);
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
-
-		const perpMarkets = this.driftClient
-			.getPerpMarketAccounts()
-			.map((m) => m.pubkey);
-
-		this.priorityFeeSubscriber.updateAddresses([...perpMarkets]);
 	}
 
 	public async reset() {
@@ -208,158 +209,167 @@ export class MakerBidAskTwapCrank implements Bot {
 		return combinedList;
 	}
 
-	private async tryTwapCrank(intervalGroup: number | null) {
+	private async sendTx(
+		marketIndex: number,
+		ixs: TransactionInstruction[]
+	): Promise<{ success: boolean; canRetry: boolean }> {
 		try {
-			await this.initDlob();
-
-			const state = this.driftClient.getStateAccount();
-
-			let crankMarkets: number[] = [];
-			if (intervalGroup === null) {
-				crankMarkets = Array.from(
-					{ length: state.numberOfMarkets },
-					(_, index) => index
-				);
-			} else {
-				crankMarkets = this.crankIntervalToMarketIds![intervalGroup]!;
-			}
-			logger.info(`Cranking interval group ${intervalGroup}: ${crankMarkets}`);
-
-			const allChunks: number[][] = chunkArray(
-				crankMarkets,
-				CRANK_TX_MARKET_CHUNK_SIZE
+			const simResult = await simulateAndGetTxWithCUs(
+				ixs,
+				this.driftClient.connection,
+				this.driftClient.txSender,
+				[this.lookupTableAccount!],
+				[],
+				undefined,
+				CU_EST_MULTIPLIER,
+				true
+			);
+			logger.info(
+				`makerBidAskTwapCrank estimated ${simResult.cuEstimate} CUs for market ${marketIndex}`
 			);
 
-			for (const chunkOfMarketIndicies of allChunks) {
+			if (simResult.simError !== null) {
+				logger.error(
+					`Sim error: ${JSON.stringify(simResult.simError)}\n${
+						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+					}`
+				);
+				handleSimResultError(simResult, [], `(makerBidAskTwapCrank)`);
+				return { success: false, canRetry: false };
+			} else {
+				const sendTxStart = Date.now();
+				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
+					simResult.tx,
+					[],
+					{
+						...this.driftClient.opts,
+					}
+				);
+				logger.info(
+					`makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
+						Date.now() - sendTxStart
+					}ms tx: https://solana.fm/tx/${txSig}`
+				);
+			}
+		} catch (err: any) {
+			console.error(err);
+			if (err instanceof TransactionExpiredBlockheightExceededError) {
+				logger.info(
+					`Blockheight exceeded error, retrying with market ${marketIndex})`
+				);
+			} else if (err instanceof Error) {
+				if (isCriticalError(err)) {
+					const e = err as SendTransactionError;
+					await webhookMessage(
+						`[${this.name}] failed to crank funding rate:\n${
+							e.logs ? (e.logs as Array<string>).join('\n') : ''
+						} \n${e.stack ? e.stack : e.message}`
+					);
+					return { success: false, canRetry: false };
+				} else {
+					return { success: false, canRetry: true };
+				}
+			}
+		}
+		return { success: true, canRetry: false };
+	}
+
+	private async tryTwapCrank(intervalGroup: number | null) {
+		const state = this.driftClient.getStateAccount();
+		let crankMarkets: number[] = [];
+		if (intervalGroup === null) {
+			crankMarkets = Array.from(
+				{ length: state.numberOfMarkets },
+				(_, index) => index
+			);
+			intervalGroup = DEFAULT_INTERVAL_GROUP;
+		} else {
+			crankMarkets = this.crankIntervalToMarketIds![intervalGroup]!;
+		}
+
+		const intervalInProgress = this.crankIntervalInProgress[intervalGroup]!;
+		if (intervalInProgress) {
+			logger.info(`Interval ${intervalGroup} already in progress, skipping`);
+			return;
+		}
+
+		const start = Date.now();
+		try {
+			this.crankIntervalInProgress[intervalGroup] = true;
+			await this.initDlob();
+
+			logger.info(`Cranking interval group ${intervalGroup}: ${crankMarkets}`);
+			for (const mi of crankMarkets) {
+				const pfs = this.priorityFeeSubscribers.get(
+					getMarketId(MarketType.PERP, mi)
+				);
+				if (pfs === undefined) {
+					logger.warn(`No pfs for market ${mi}`);
+					continue;
+				}
+
 				const ixs = [
 					ComputeBudgetProgram.setComputeUnitLimit({
 						units: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
 					}),
 					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: Math.floor(
-							this.priorityFeeSubscriber!.getCustomStrategyResult()
-						),
+						microLamports: Math.floor(pfs.getCustomStrategyResult()),
 					}),
 				];
-				for (let i = 0; i < chunkOfMarketIndicies.length; i++) {
-					const mi = chunkOfMarketIndicies[i];
 
-					const oraclePriceData =
-						this.driftClient.getOracleDataForPerpMarket(mi);
+				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
 
-					const bidMakers = this.dlob!.getBestMakers({
-						marketIndex: mi,
-						marketType: MarketType.PERP,
-						direction: PositionDirection.LONG,
-						slot: this.latestDlobSlot!,
-						oraclePriceData,
-						numMakers: 5,
-					});
+				const bidMakers = this.dlob!.getBestMakers({
+					marketIndex: mi,
+					marketType: MarketType.PERP,
+					direction: PositionDirection.LONG,
+					slot: this.latestDlobSlot!,
+					oraclePriceData,
+					numMakers: 5,
+				});
 
-					const askMakers = this.dlob!.getBestMakers({
-						marketIndex: mi,
-						marketType: MarketType.PERP,
-						direction: PositionDirection.SHORT,
-						slot: this.latestDlobSlot!,
-						oraclePriceData,
-						numMakers: 5,
-					});
-					logger.info(
-						`loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
-					);
+				const askMakers = this.dlob!.getBestMakers({
+					marketIndex: mi,
+					marketType: MarketType.PERP,
+					direction: PositionDirection.SHORT,
+					slot: this.latestDlobSlot!,
+					oraclePriceData,
+					numMakers: 5,
+				});
+				logger.info(
+					`loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
+				);
 
-					const concatenatedList = [
-						...this.getCombinedList(bidMakers),
-						...this.getCombinedList(askMakers),
-					];
+				const concatenatedList = [
+					...this.getCombinedList(bidMakers),
+					...this.getCombinedList(askMakers),
+				];
 
-					const ix = await this.driftClient.getUpdatePerpBidAskTwapIx(
-						mi,
-						concatenatedList as [PublicKey, PublicKey][]
-					);
+				const ix = await this.driftClient.getUpdatePerpBidAskTwapIx(
+					mi,
+					concatenatedList as [PublicKey, PublicKey][]
+				);
 
-					if (
-						isVariant(
-							this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-							'prelaunch'
-						)
-					) {
-						const updatePrelaunchOracleIx =
-							await this.driftClient.getUpdatePrelaunchOracleIx(mi);
-						ixs.push(updatePrelaunchOracleIx);
-					}
-
-					ixs.push(ix);
+				if (
+					isVariant(
+						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+						'prelaunch'
+					)
+				) {
+					const updatePrelaunchOracleIx =
+						await this.driftClient.getUpdatePrelaunchOracleIx(mi);
+					ixs.push(updatePrelaunchOracleIx);
 				}
 
-				let success = false;
-				try {
-					// const txSig = await sendVersionedTransaction(
-					// 	this.driftClient,
-					// 	await this.driftClient.txSender.getVersionedTransaction(
-					// 		ixs,
-					// 		[this.lookupTableAccount!],
-					// 		[],
-					// 		this.driftClient.opts
-					// 	),
-					// 	[],
-					// 	this.driftClient.opts,
-					// 	5000
-					// );
+				ixs.push(ix);
 
-					const simResult = await simulateAndGetTxWithCUs(
-						ixs,
-						this.driftClient.connection,
-						this.driftClient.txSender,
-						[this.lookupTableAccount!],
-						[],
-						undefined,
-						CU_EST_MULTIPLIER,
-						true
-					);
-					logger.info(
-						`makerBidAskTwapCrank estimated ${simResult.cuEstimate} CUs for ${ixs.length} ixs, ${chunkOfMarketIndicies.length} chunks.`
-					);
-
-					if (simResult.simError !== null) {
-						logger.error(
-							`Sim error: ${JSON.stringify(simResult.simError)}\n${
-								simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
-							}`
-						);
-						handleSimResultError(simResult, [], `(makerBidAskTwapCrank)`);
-						success = false;
-					} else {
-						const txSig =
-							await this.driftClient.txSender.sendVersionedTransaction(
-								simResult.tx,
-								[],
-								{
-									...this.driftClient.opts,
-								}
-							);
-						success = true;
-						logger.info(
-							`Send tx: https://solscan.io/tx/${txSig} for markets: ${JSON.stringify(
-								chunkOfMarketIndicies
-							)}`
-						);
-					}
-				} catch (e: any) {
-					console.error(e);
-					if (isCriticalError(e as Error)) {
-						await webhookMessage(
-							`[${this.name}] failed to crank funding rate:\n${
-								e.logs ? (e.logs as Array<string>).join('\n') : ''
-							} \n${e.stack ? e.stack : e.message}`
-						);
-					}
-				}
-
-				if (!success && CRANK_TX_MARKET_CHUNK_SIZE > 1) {
-					logger.error(
-						`SIM ERROR, YOU SHOULD IMPLEMENT LOGIC TO RETRY WITH A SMALLER CHUNK SIZE NOW.`
-					);
+				const resp = await this.sendTx(mi, ixs);
+				if (resp.success) {
+					break;
+				} else if (resp.canRetry) {
+					continue;
+				} else {
+					break;
 				}
 			}
 		} catch (e) {
@@ -372,7 +382,12 @@ export class MakerBidAskTwapCrank implements Bot {
 				);
 			}
 		} finally {
-			logger.info('tryTwapCrank finished');
+			this.crankIntervalInProgress[intervalGroup] = false;
+			logger.info(
+				`tryTwapCrank finished for interval group ${intervalGroup}, took ${
+					Date.now() - start
+				}ms`
+			);
 			await this.watchdogTimerMutex.runExclusive(async () => {
 				this.watchdogTimerLastPatTime = Date.now();
 			});

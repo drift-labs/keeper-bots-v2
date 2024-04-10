@@ -8,6 +8,7 @@ import {
 	DLOBNode,
 	DataAndSlot,
 	DriftEnv,
+	HeliusPriorityLevel,
 	MakerInfo,
 	MarketType,
 	NodeToFill,
@@ -16,6 +17,9 @@ import {
 	PERCENTAGE_PRECISION,
 	PRICE_PRECISION,
 	PerpMarketAccount,
+	PerpMarketConfig,
+	PriorityFeeMethod,
+	PriorityFeeSubscriber,
 	QUOTE_PRECISION,
 	SpotMarketAccount,
 	TxSender,
@@ -44,11 +48,14 @@ import {
 	VersionedTransaction,
 } from '@solana/web3.js';
 import { webhookMessage } from './webhook';
+import { DriftPriorityFeeResponse } from '@drift-labs/sdk/lib/priorityFee/driftPriorityFeeMethod';
 
 // devnet only
 export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
 	'V4v1mQiAdLz4qwckEb45WqHYceYizoib39cDBHSWfaB'
 );
+
+export const PRIORITY_FEE_SERVER_RATE_LIMIT_PER_MIN = 300;
 
 export async function getOrCreateAssociatedTokenAccount(
 	connection: Connection,
@@ -531,7 +538,7 @@ export function handleSimResultError(
 	errorCodesToSuppress: number[],
 	msgSuffix: string,
 	suppressOutOfCUsMessage = true
-) {
+): undefined | number {
 	if (
 		(simResult.simError as ExtendedTransactionError).InstructionError ===
 		undefined
@@ -552,10 +559,13 @@ export function handleSimResultError(
 		return;
 	}
 
+	let errorCode: number | undefined;
+
 	if (typeof err[1] === 'object' && 'Custom' in err[1]) {
 		const customErrorCode = Number((err[1] as CustomError).Custom);
+		errorCode = customErrorCode;
 		if (errorCodesToSuppress.includes(customErrorCode)) {
-			return;
+			return errorCode;
 		} else {
 			const msg = `${msgSuffix} sim error with custom error code, simError: ${JSON.stringify(
 				simResult.simError
@@ -581,12 +591,13 @@ export function handleSimResultError(
 				'exceeded CUs meter at BPF instruction'
 			)
 		) {
-			return;
+			return errorCode;
 		}
 
 		webhookMessage(msg);
 	}
-	return;
+
+	return errorCode;
 }
 
 export interface ExtendedTransactionError {
@@ -717,4 +728,76 @@ export function getMarketId(
 	marketIndex: number
 ): string {
 	return `${getVariant(marketType)}-${marketIndex}`;
+}
+
+export async function initializePriorityFeeSubscriberMap({
+	pfsMap,
+	connection,
+	driftPriorityFeeEndpoint,
+	perpMarkets,
+	includeQuoteMarket,
+	maxFeeMicroLamports,
+	priorityFeeMultiplier,
+}: {
+	pfsMap: Map<string, PriorityFeeSubscriber>;
+	connection: Connection;
+	driftPriorityFeeEndpoint: string;
+	perpMarkets: PerpMarketConfig[];
+	includeQuoteMarket: boolean;
+	maxFeeMicroLamports?: number;
+	priorityFeeMultiplier?: number;
+}): Promise<Map<string, PriorityFeeSubscriber>> {
+	const frequencyMs =
+		((perpMarkets.length + 1) * 60_000) /
+		PRIORITY_FEE_SERVER_RATE_LIMIT_PER_MIN;
+
+	logger.info(
+		`Initializing ${perpMarkets.length} PFS subscribers in a staggered fashion to stay below rate limits`
+	);
+
+	for (let i = 0; i < perpMarkets.length; i++) {
+		const market = perpMarkets[i];
+		const marketId = getMarketId(MarketType.PERP, market.marketIndex);
+		if (pfsMap.has(marketId)) {
+			continue;
+		}
+		const driftMarkets = [
+			{
+				marketType: 'perp',
+				marketIndex: market.marketIndex,
+			},
+		];
+		if (includeQuoteMarket) {
+			driftMarkets.push({
+				marketType: 'spot',
+				marketIndex: 0,
+			});
+		}
+		const pfs = new PriorityFeeSubscriber({
+			connection: connection,
+			frequencyMs,
+			priorityFeeMethod: PriorityFeeMethod.DRIFT,
+			driftPriorityFeeEndpoint,
+			driftMarkets,
+			customStrategy: {
+				calculate: (samples: DriftPriorityFeeResponse) => {
+					return Math.max(...samples.map((p) => p[HeliusPriorityLevel.HIGH]));
+				},
+			},
+			maxFeeMicroLamports,
+			priorityFeeMultiplier,
+		});
+		await pfs.subscribe();
+		pfsMap.set(marketId, pfs);
+
+		// stagger pfs subscriptions to avoid rate limit issues, not sure what good method is
+		await sleepMs(10000 / perpMarkets.length);
+		logger.info(
+			`Initialized PFS for market ${market.marketIndex}, ${i + 1}/${
+				perpMarkets.length
+			}`
+		);
+	}
+
+	return pfsMap;
 }

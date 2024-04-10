@@ -1,4 +1,5 @@
-import { SendTransactionError } from '@solana/web3.js';
+import { SendTransactionError, TransactionError } from '@solana/web3.js';
+import { ExtendedTransactionError } from './utils';
 
 export function getErrorCode(error: Error): number | undefined {
 	// @ts-ignore
@@ -46,4 +47,34 @@ export function getErrorMessage(error: SendTransactionError): string {
 	});
 
 	return errorString;
+}
+
+type CustomError = {
+	Custom: number;
+};
+
+export function getErrorCodeFromSimError(
+	error: TransactionError | string | null
+): number | null {
+	if ((error as ExtendedTransactionError).InstructionError === undefined) {
+		return null;
+	}
+	const err = (error as ExtendedTransactionError).InstructionError;
+	if (!err) {
+		return null;
+	}
+
+	if (err.length < 2) {
+		console.error(`sim error has no error code. ${JSON.stringify(error)}`);
+		return null;
+	}
+	if (!err[1]) {
+		return null;
+	}
+
+	if (typeof err[1] === 'object' && 'Custom' in err[1]) {
+		return Number((err[1] as CustomError).Custom);
+	}
+
+	return null;
 }

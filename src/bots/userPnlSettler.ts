@@ -28,8 +28,7 @@ import {
 	isOperationPaused,
 	PerpOperation,
 	MarketType,
-	PriorityFeeMethod,
-	HeliusPriorityLevel,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -43,6 +42,7 @@ import {
 	getDriftPriorityFeeEndpoint,
 	getMarketId,
 	handleSimResultError,
+	initializePriorityFeeSubscriberMap,
 	simulateAndGetTxWithCUs,
 	sleepMs,
 } from '../utils';
@@ -52,13 +52,11 @@ import {
 	SendTransactionError,
 	TransactionExpiredBlockheightExceededError,
 } from '@solana/web3.js';
-import { DriftPriorityFeeResponse } from '@drift-labs/sdk/lib/priorityFee/driftPriorityFeeMethod';
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 const SETTLE_USER_CHUNKS = 4;
 const SLEEP_MS = 500;
 const CU_EST_MULTIPLIER = 1.25;
-const PRIORITY_FEE_SERVER_RATE_LIMIT_PER_MIN = 300; // 300 per min
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -133,53 +131,15 @@ export class UserPnlSettlerBot implements Bot {
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 
-		const perpMarkets = this.driftClient.getPerpMarketAccounts();
-		const frequencyMs =
-			((perpMarkets.length + 1) * 60_000) /
-			PRIORITY_FEE_SERVER_RATE_LIMIT_PER_MIN;
-
-		logger.info(
-			`Initializing ${perpMarkets.length} PFS subscribers in a staggered fashion to stay below rate limits`
-		);
-		for (let i = 0; i < perpMarkets.length; i++) {
-			const market = perpMarkets[i];
-			const pfs = new PriorityFeeSubscriber({
-				connection: this.driftClient.connection,
-				frequencyMs,
-				priorityFeeMethod: PriorityFeeMethod.DRIFT,
-				driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
-					this.globalConfig.driftEnv!
-				),
-				driftMarkets: [
-					{
-						marketType: 'spot',
-						marketIndex: 0,
-					},
-					{
-						marketType: 'perp',
-						marketIndex: market.marketIndex,
-					},
-				],
-				customStrategy: {
-					calculate: (samples: DriftPriorityFeeResponse) => {
-						return Math.max(...samples.map((p) => p[HeliusPriorityLevel.HIGH]));
-					},
-				},
-			});
-			await pfs.subscribe();
-			this.priorityFeeSubscribers.set(
-				getMarketId(MarketType.PERP, market.marketIndex),
-				pfs
-			);
-
-			// stagger pfs subscriptions to avoid rate limit issues
-			await sleepMs(2000);
-			logger.info(
-				`Initialized PFS for market ${market.marketIndex}, ${i + 1}/${
-					perpMarkets.length
-				}`
-			);
-		}
+		this.priorityFeeSubscribers = await initializePriorityFeeSubscriberMap({
+			pfsMap: this.priorityFeeSubscribers,
+			connection: this.driftClient.connection,
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
+				this.globalConfig.driftEnv!
+			),
+			perpMarkets: PerpMarkets[this.globalConfig.driftEnv!],
+			includeQuoteMarket: true,
+		});
 
 		logger.info(`${this.name} init'd!`);
 	}
