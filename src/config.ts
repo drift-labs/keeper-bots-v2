@@ -132,7 +132,7 @@ export interface GlobalConfig {
 	jitoTipMultiplier?: number;
 
 	txRetryTimeoutMs?: number;
-	txSenderType?: 'fast' | 'retry';
+	txSenderType?: 'fast' | 'retry' | 'while-valid';
 	txSkipPreflight?: boolean;
 	txMaxRetries?: number;
 }
@@ -299,8 +299,10 @@ export function loadConfigFromOpts(opts: any): Config {
 			jitoTipMultiplier: opts.jitoTipMultiplier ?? 3,
 			txRetryTimeoutMs: parseInt(opts.txRetryTimeoutMs ?? '30000'),
 			txSenderType: opts.txSenderType ?? 'fast',
-			txSkipPreflight: opts.txSkipPreflight ?? false,
-			txMaxRetries: opts.txMaxRetries ?? 0,
+			txSkipPreflight: opts.txSkipPreflight
+				? opts.txSkipPreflight.toLowerCase() === 'true'
+				: false,
+			txMaxRetries: parseInt(opts.txMaxRetries ?? '0'),
 
 			metricsPort: opts.metricsPort ?? 9464,
 			disableMetrics: opts.disableMetrics ?? false,

@@ -28,6 +28,8 @@ import {
 	PriorityFeeSubscriber,
 	DataAndSlot,
 	BlockhashSubscriber,
+	getVariant,
+	isOneOfVariant,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -590,6 +592,26 @@ export class SpotFillerBot implements Bot {
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
 		const marketSetupPromises = config.SPOT_MARKETS.map(
 			async (spotMarketConfig) => {
+				const spotMarket = this.driftClient.getSpotMarketAccount(
+					spotMarketConfig.marketIndex
+				);
+				if (
+					isOneOfVariant(spotMarket?.status, [
+						'initialized',
+						'fillPaused',
+						'delisted',
+					])
+				) {
+					logger.info(
+						`Skipping market ${
+							spotMarketConfig.symbol
+						} because its SpotMarket.status is ${getVariant(
+							spotMarket?.status
+						)}`
+					);
+					return;
+				}
+
 				let accountSubscription:
 					| {
 							type: 'polling';
@@ -1516,9 +1538,14 @@ export class SpotFillerBot implements Bot {
 			logger.error(`Called sendTxThroughJito without jito properly enabled`);
 			return;
 		}
-		const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
-		if (slotsUntilNextLeader !== undefined) {
-			this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`, txSig);
+		if (
+			this.bundleSender?.strategy === 'jito-only' ||
+			this.bundleSender?.strategy === 'hybrid'
+		) {
+			const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
+			if (slotsUntilNextLeader !== undefined) {
+				this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`, txSig);
+			}
 		}
 	}
 
