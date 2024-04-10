@@ -15,6 +15,7 @@
 		"@project-serum/serum": "^0.13.65",
 		"@solana/web3.js": "1.87.6",
 		"@types/bn.js": "^5.1.0",
+		"@types/minimist": "^1.2.5",
 		"@types/mocha": "^10.0.1",
 		"async": "^3.2.2",
 		"async-mutex": "0.3.2",
@@ -31,7 +32,6 @@
 	},
 	"devDependencies": {
 		"@types/chai": "^4.3.5",
-		"@types/minimist": "^1.2.5",
 		"@types/mocha": "^10.0.1",
 		"@typescript-eslint/eslint-plugin": "^5.59.11",
 		"@typescript-eslint/parser": "^4.28.0",
