@@ -38,6 +38,7 @@ import {
 	HeliusPriorityLevel,
 	AverageOverSlotsStrategy,
 	BlockhashSubscriber,
+	WhileValidTxSender,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -165,7 +166,15 @@ program
 	)
 	.option(
 		'--tx-sender-type <string>',
-		'Choose tx sender type, options are: fast, retry'
+		'Transaction sender type. Valid options: fast, retry, while-valid'
+	)
+	.option(
+		'--tx-max-retries <number>',
+		'Override maxRetries param when sending transactions'
+	)
+	.option(
+		'--tx-skip-preflight <string>',
+		'Value to set for skipPreflight when sending transactions. Valid options: true, false'
 	)
 	.option(
 		'--tx-retry-timeout-ms <string>',
@@ -321,6 +330,14 @@ const runBot = async () => {
 			retrySleep: 8000,
 			timeout: config.global.txRetryTimeoutMs,
 			confirmationStrategy: ConfirmationStrategy.Polling,
+			additionalConnections,
+		});
+	} else if (txSenderType === 'while-valid') {
+		txSender = new WhileValidTxSender({
+			connection: sendTxConnection,
+			wallet,
+			opts,
+			retrySleep: 2000,
 			additionalConnections,
 		});
 	} else {
@@ -736,12 +753,11 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userPnlSettler')) {
-		needPriorityFeeSubscriber = true;
 		bots.push(
 			new UserPnlSettlerBot(
 				driftClientConfig,
 				config.botConfigs!.userPnlSettler!,
-				priorityFeeSubscriber,
+				config.global,
 				txSender
 			)
 		);

@@ -7,6 +7,7 @@ import {
 	DLOB,
 	DLOBNode,
 	DataAndSlot,
+	DriftEnv,
 	MakerInfo,
 	MarketType,
 	NodeToFill,
@@ -39,6 +40,7 @@ import {
 	Transaction,
 	TransactionError,
 	TransactionInstruction,
+	TransactionMessage,
 	VersionedTransaction,
 } from '@solana/web3.js';
 import { webhookMessage } from './webhook';
@@ -410,6 +412,22 @@ export type SimulateAndGetTxWithCUsResponse = {
 	tx: VersionedTransaction;
 };
 
+const PLACEHOLDER_BLOCKHASH = 'Fdum64WVeej6DeL85REV9NvfSxEJNPZ74DBk7A8kTrKP';
+function getVersionedTransaction(
+	payerKey: PublicKey,
+	ixs: Array<TransactionInstruction>,
+	lookupTableAccounts: AddressLookupTableAccount[],
+	recentBlockhash: string
+): VersionedTransaction {
+	const message = new TransactionMessage({
+		payerKey,
+		recentBlockhash,
+		instructions: ixs,
+	}).compileToV0Message(lookupTableAccounts);
+
+	return new VersionedTransaction(message);
+}
+
 export async function simulateAndGetTxWithCUs(
 	ixs: Array<TransactionInstruction>,
 	connection: Connection,
@@ -435,12 +453,11 @@ export async function simulateAndGetTxWithCUs(
 	}
 
 	let simTxDuration = 0;
-	const tx = await txSender.getVersionedTransaction(
+	const tx = getVersionedTransaction(
+		txSender.wallet.publicKey,
 		ixs,
 		lookupTableAccounts,
-		additionalSigners,
-		opts,
-		recentBlockhash
+		recentBlockhash ?? PLACEHOLDER_BLOCKHASH
 	);
 	if (!doSimulation) {
 		return {
@@ -684,4 +701,20 @@ export function getTransactionAccountMetas(
 		writeAccs,
 		txAccounts,
 	};
+}
+
+export function getDriftPriorityFeeEndpoint(driftEnv: DriftEnv): string {
+	switch (driftEnv) {
+		case 'devnet':
+			return 'https://dlob.drift.trade';
+		case 'mainnet-beta':
+			return 'https://dlob.drift.trade';
+	}
+}
+
+export function getMarketId(
+	marketType: MarketType,
+	marketIndex: number
+): string {
+	return `${getVariant(marketType)}-${marketIndex}`;
 }
