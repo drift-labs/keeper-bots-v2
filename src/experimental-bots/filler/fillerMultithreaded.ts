@@ -146,7 +146,8 @@ export class FillerMultithreaded {
 			{
 				marketType: this.config.marketType,
 				marketIndex: this.config.marketIndex,
-			}]);
+			},
+		]);
 	}
 
 	async init() {
