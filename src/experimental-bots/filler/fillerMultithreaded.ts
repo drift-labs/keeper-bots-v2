@@ -225,6 +225,13 @@ export class FillerMultithreaded {
 			process.exit(0);
 		});
 
+		process.on('SIGKILL', () => {
+			logger.info(`${logPrefix} Received SIGINT, killing children`);
+			dlobBuilderProcess.kill();
+			orderSubscriberProcess.kill();
+			process.exit(0);
+		});
+
 		logger.info(`dlobBuilder spawned with pid: ${dlobBuilderProcess.pid}`);
 		logger.info(
 			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
@@ -371,12 +378,14 @@ export class FillerMultithreaded {
 
 		const slotsUntilJito = this.slotsUntilJitoLeader();
 		const buildForBundle =
+			this.globalConfig.useJito &&
 			slotsUntilJito !== undefined &&
 			slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+
 		try {
 			await this.executeTriggerablePerpNodes(
 				filteredTriggerableNodes,
-				buildForBundle
+				!!buildForBundle
 			);
 		} catch (e) {
 			if (e instanceof Error) {
@@ -534,13 +543,14 @@ export class FillerMultithreaded {
 
 		const slotsUntilJito = this.slotsUntilJitoLeader();
 		const buildForBundle =
+			this.globalConfig.useJito &&
 			slotsUntilJito !== undefined &&
 			slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
 
 		try {
 			await this.executeFillablePerpNodesForMarket(
 				filteredFillableNodes,
-				buildForBundle
+				!!buildForBundle
 			);
 		} catch (e) {
 			if (e instanceof Error) {

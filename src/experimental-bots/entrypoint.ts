@@ -20,7 +20,6 @@ import {
 	initialize,
 	PriorityFeeMethod,
 	PriorityFeeSubscriber,
-	HeliusPriorityFeeResponse,
 	HeliusPriorityLevel,
 } from '@drift-labs/sdk';
 import {
