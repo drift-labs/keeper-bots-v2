@@ -12,10 +12,11 @@
 
 # Setting up
 
+
 This repo has two main branches:
 
-- `master`: bleeding edge, may be unstable, currently running on the `devnet` cluster
-- `mainnet-beta`: stable, currently running on the `mainnet-beta` cluster
+* `master`: bleeding edge, may be unstable, currently running on the `devnet` cluster
+* `mainnet-beta`: stable, currently running on the `mainnet-beta` cluster
 
 ## Setup Environment
 
@@ -24,35 +25,35 @@ This repo has two main branches:
 A `.yaml` file can be used to configure the bot setup now. See `example.config.yaml` for a commented example.
 
 Then you can run the bot by loading the config file:
-
 ```shell
 yarn run dev --config-file=example.config.yaml
 ```
 
 Here is a table defining the various fields and their usage/defaults:
 
-| Field                   | Type   | Description                                                             | Default                                   |
-| ----------------------- | ------ | ----------------------------------------------------------------------- | ----------------------------------------- |
-| global                  | object | global configs to apply to all running bots                             | -                                         |
-| global.endpoint         | string | RPC endpoint to use                                                     | -                                         |
-| global.wsEndpoint       | string | (optional) Websocket endpoint to use                                    | derived from `global.endpoint`            |
-| global.keeperPrivateKey | string | (optional) The private key to use to pay/sign transactions              | `KEEPER_PRIVATE_KEY` environment variable |
-| global.initUser         | bool   | Set `true` to init a fresh userAccount                                  | `false`                                   |
-| global.websocket        | bool   | Set `true` to run the selected bots in websocket mode if compatible     | `false`                                   |
-| global.runOnce          | bool   | Set `true` to run only one iteration of the selected bots               | `false`                                   |
-| global.debug            | bool   | Set `true` to enable debug logging                                      | `false`                                   |
-| global.subaccounts      | list   | (optional) Which subaccount IDs to load                                 | `0`                                       |
-| enabledBots             | list   | list of bots to enable, matching key must be present under `botConfigs` | -                                         |
-| botConfigs              | object | configs for associated bots                                             | -                                         |
-| botConfigs.<bot_type>   | object | config for a specific <bot_type>                                        | -                                         |
+| Field             | Type   | Description | Default |
+| ----------------- | ------ | --- | --- |
+| global            | object | global configs to apply to all running bots | - |
+| global.endpoint   | string | RPC endpoint to use | - |
+| global.wsEndpoint | string | (optional) Websocket endpoint to use | derived from `global.endpoint` |
+| global.keeperPrivateKey  | string | (optional) The private key to use to pay/sign transactions | `KEEPER_PRIVATE_KEY` environment variable |
+| global.initUser   | bool   | Set `true` to init a fresh userAccount | `false` |
+| global.websocket  | bool   | Set `true` to run the selected bots in websocket mode if compatible| `false` |
+| global.runOnce    | bool   | Set `true` to run only one iteration of the selected bots | `false` |
+| global.debug      | bool   | Set `true` to enable debug logging | `false` |
+| global.subaccounts | list  | (optional) Which subaccount IDs to load | `0` |
+| enabledBots       | list   | list of bots to enable, matching key must be present under `botConfigs` | - |
+| botConfigs        | object | configs for associated bots | - |
+| botConfigs.<bot_type> | object | config for a specific <bot_type> | - |
+
 
 ### Install dependencies
 
 Run from repo root to install npm dependencies:
-
 ```shell
 yarn
 ```
+
 
 ## Initialize User
 
@@ -78,10 +79,11 @@ Alternatively, you can put the private key into a browser wallet and use the UI 
 
 Free collateral is what is determines the size of borrows and perp positions that an account can have. Free collateral = total collateral - initial margin requirement. Total collateral is the value of the spot assets in your account + unrealized perp pnl. The initial margin requirement is the total weighted value of the perp positions and spot liabilities in your account. The initial margin requirement weights are determined [here](https://docs.drift.trade/cross-collateral-deposits). In simple terms, free collateral is essentially the amount of total collateral that is not being used up by borrows and existing perp positions and open orders.
 
+
 # Run Bots
 
 After creating your `config.yaml` file as above, run with:
-
+  
 ```shell
 yarn run dev --config-file=config.yaml
 ```
@@ -93,13 +95,13 @@ By default, some [Prometheus](https://prometheus.io/) metrics are exposed on `lo
 ## Filler Bot
 
 Include `filler` and/or `spotFiller` under `.enabledBots` in `config.yaml`. For a lightweight version
-of a filler bot for perp markets, include `fillerLite` rather than `filler` in `config.yaml`. The lighter
+of a filler bot for perp markets, include `fillerLite` rather than `filler` in `config.yaml`. The lighter 
 version of the filler can be run on public RPCs for testing, but is not as stable.
 
 Read the docs: https://docs.drift.trade/keepers-and-decentralised-orderbook
 
 Fills (matches) crossing orders on the exchange for a small cut of the taker fees. Fillers maintain a copy of the DLOB to look
-for orders that cross. Fillers will also attempt to execute triggerable orders.
+for orders that cross. Fillers will also attempt to execute triggerable orders. 
 
 ### Common errors
 
@@ -107,17 +109,19 @@ When running the filler bots, you might see the following error codes in the tra
 
 #### For perps
 
-| Error               | Description                                              |
-| ------------------- | -------------------------------------------------------- |
-| OrderDoesNotExist   | Outcompeted: Order was already filled by someone else    |
+| Error             | Description |   
+| ----------------- | ------ |
+| OrderDoesNotExist | Outcompeted: Order was already filled by someone else|
 | OrderNotTriggerable | Outcompeted: order was already triggered by someone else |
-| RevertFill          | Outcompeted: order was already filled by someone else    |
+| RevertFill |  Outcompeted: order was already filled by someone else|
+
 
 #### Other messages
 
-| Message                                 | Description                                                                                                                                                                                                                |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| filler last active slot != current slot | You might see this when outcompeted on a fill. The _filler last active slot_ was the last slot that the filler had a successful fill in, so it may diverge _current slot_ if the filler has not placed a successful order. |
+| Message | Description |
+| --------|--------------|
+| filler last active slot != current slot | You might see this when outcompeted on a fill. The *filler last active slot* was the last slot that the filler had a successful fill in, so it may diverge *current slot* if the filler has not placed a successful order.
+
 
 ## Liquidator Bot
 
@@ -146,7 +150,6 @@ from subaccount to list of market indicies. The value of these 2 fields
 are json strings:
 
 ### An example `config.yaml`
-
 ```
 botConfigs:
   ...
@@ -175,7 +178,6 @@ botConfigs:
         - 1
         - 2
 ```
-
 Means the liquidator will liquidate perp markets 0-2 using subaccount 0, perp markets 3-12 using subaccount 1, and spot markets 0-2 using subaccount 0. It will also use jupiter to derisk spot assets into USDC. Make sure that for all subaccounts specified in the botConfigs, that they are also listed in the global configs. So for the above example config:
 
 ```
@@ -188,11 +190,11 @@ global:
 
 When running the liquidator, you might see the following error codes in the transaction logs on a failed in pre-flight simulation:
 
-| Error                | Description                                                                              |
-| -------------------- | ---------------------------------------------------------------------------------------- |
+| Error             | Description |   
+| ----------------- | ------ |
 | SufficientCollateral | The account you're trying to liquidate has sufficient collateral and can't be liquidated |
-| InvalidSpotPosition  | Outcompeted: the liqudated account's spot position was already liquidated.               |
-| InvalidPerpPosition  | Outcompeted: the liqudated account's perp position was already liquidated.               |
+| InvalidSpotPosition | Outcompeted: the liqudated account's spot position was already liquidated. |
+| InvalidPerpPosition | Outcompeted: the liqudated account's perp position was already liquidated. |
 
 ## Jit Maker
 
@@ -204,22 +206,22 @@ Read the docs on the jit proxy client: https://github.com/drift-labs/jit-proxy/b
 
 Be aware that running a jit maker means taking on positional risk, so be sure to manage your risk properly!
 
-### Implementation
+### Implementation 
 
-This sample jit maker uses the jit proxy client, and updates `JitParams` for the markets specified in the config. The bot will update its bid and ask to match the current top level market in the DLOB, and specifies its maximum position size to keep leverage at 1. The jit maker will attempt to fill taker orders that cross its market that's specified in the `JitParams`. If the current auction price does not cross the bid/ask the transaction will fail during pre-flight simulation, because for the purposes of the jit proxy program, the market is considered the market maker's worst acceptable price of execution. For order execution, the jit maker currently uses the `JitterSniper` -- read more on the jitters and different options in the jit proxy client documentation (link above).
+This sample jit maker uses the jit proxy client, and updates ```JitParams``` for the markets specified in the config. The bot will update its bid and ask to match the current top level market in the DLOB, and specifies its maximum position size to keep leverage at 1. The jit maker will attempt to fill taker orders that cross its market that's specified in the ```JitParams```. If the current auction price does not cross the bid/ask the transaction will fail during pre-flight simulation, because for the purposes of the jit proxy program, the market is considered the market maker's worst acceptable price of execution. For order execution, the jit maker currently uses the ```JitterSniper``` -- read more on the jitters and different options in the jit proxy client documentation (link above). 
 
-This bot is meant to serve as a starting off point for participating in jit auctions. To increase strategy complexity, consider different strategies for updating your markets. To change the amount of leverage, change the constant `TARGET_LEVERAGE_PER_ACCOUNT` before running.
+This bot is meant to serve as a starting off point for participating in jit auctions. To increase strategy complexity, consider different strategies for updating your markets. To change the amount of leverage, change the constant ```TARGET_LEVERAGE_PER_ACCOUNT``` before running.
 
 ### Common errors
 
-| Error                       | Description                                                                                                                                                                                                                                                                                     |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Error             | Description |   
+| ----------------- | ------ |
 | BidNotCrossed/AskNotCrossed | The jit proxy program simulation fails if the auction price is not lower than the jit param bid or higher than jit param ask. Bot's market, oracle price, or auction price changed during execution. Can be a latency issue, either slow order submission or slow websocket/polling connection. |
-| OrderNotFound               | Outcompeted: the taker order was already filled.                                                                                                                                                                                                                                                |
+| OrderNotFound | Outcompeted: the taker order was already filled. |
 
 ### Running the bot and notes on configs
 
-`jitMaker.config.yaml` is supplied as an example, and a jit maker can be run with `yarn run dev --config-file=jitMaker.config.yaml`. Jit maker bots require colleteral, so make sure to specify depositing collateral in the config file using `forceDeposit`, or deposit collateral using the app or SDK before running the bot.
+```jitMaker.config.yaml``` is supplied as an example, and a jit maker can be run with ```yarn run dev --config-file=jitMaker.config.yaml```. Jit maker bots require colleteral, so make sure to specify depositing collateral in the config file using ```forceDeposit```, or deposit collateral using the app or SDK before running the bot. 
 
 To avoid errors being thrown during initialization, remember to enumerate in the global configs the subaccounts being used in the bot configs. An example below in a config.yaml file:
 

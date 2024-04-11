@@ -71,7 +71,7 @@ enabledBots:
 # below are bot configs
 botConfigs:
   fillerLite:
-    botId: 'fillerLite'
+    botId: "fillerLite"
     dryRun: false
     fillerPollingInterval: 500
     metricsPort: 9464
@@ -81,7 +81,7 @@ botConfigs:
     # Default is true
 
   markTwapCrank:
-    botId: 'mark-twap-cranker'
+    botId: "mark-twap-cranker"
     dryRun: false
     metricsPort: 9465
     crankIntervalToMarketIndicies:
