@@ -13,6 +13,7 @@ import {
 	isOracleValid,
 	isOrderExpired,
 	isVariant,
+	JupiterClient,
 	MakerInfo,
 	MarketType,
 	NodeToFill,
@@ -51,6 +52,7 @@ import {
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
 	sleepMs,
+	swapFillerHardEarnedUSDCForSOL,
 } from '../../utils';
 import {
 	spawnChildWithRetry,
@@ -72,6 +74,7 @@ import {
 } from '@opentelemetry/sdk-metrics-base';
 import {
 	CONFIRM_TX_RATE_LIMIT_BACKOFF_MS,
+	MINIMUM_SOL_TO_CONTINUE_FILLING,
 	TX_TIMEOUT_THRESHOLD_MS,
 	TxType,
 } from '../../bots/filler';
@@ -87,6 +90,7 @@ import {
 	isTakerBreachedMaintenanceMarginLog,
 } from '../../bots/common/txLogParse';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import { Mutex } from 'async-mutex';
 
 const logPrefix = '[Filler]';
 
@@ -217,6 +221,11 @@ export class FillerMultithreaded {
 	protected jitoLandedTipsGauge?: GaugeValue;
 	protected jitoBundleCount?: GaugeValue;
 
+	protected rebalanceFiller?: boolean;
+	protected hasEnoughSolToFill: boolean = true;
+	protected hasEnoughSolToFillMutex = new Mutex();
+	protected jupiterClient?: JupiterClient;
+
 	constructor(
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
@@ -262,6 +271,19 @@ export class FillerMultithreaded {
 		]);
 		this.runtimeSpec = runtimeSpec;
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
+
+		if (
+			config.rebalanceFiller &&
+			this.runtimeSpec.driftEnv === 'mainnet-beta'
+		) {
+			this.jupiterClient = new JupiterClient({
+				connection: this.driftClient.connection,
+			});
+		}
+		this.rebalanceFiller = config.rebalanceFiller ?? false;
+		logger.info(
+			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
+		);
 
 		this.pendingTxSigsToconfirm = new LRUCache<
 			string,
@@ -903,6 +925,18 @@ export class FillerMultithreaded {
 	public async triggerNodes(
 		serializedNodesToTrigger: SerializedNodeToTrigger[]
 	) {
+		const release = await this.hasEnoughSolToFillMutex.acquire();
+		try {
+			if (!this.hasEnoughSolToFill) {
+				logger.info(
+					`Not enough SOL to fill, skipping executeTriggerablePerpNodes`
+				);
+				return;
+			}
+		} finally {
+			release();
+		}
+
 		logger.info(
 			`${logPrefix} Triggering ${serializedNodesToTrigger.length} nodes...`
 		);
@@ -1090,6 +1124,16 @@ export class FillerMultithreaded {
 	}
 
 	public async fillNodes(serializedNodesToFill: SerializedNodeToFill[]) {
+		const release = await this.hasEnoughSolToFillMutex.acquire();
+		try {
+			if (!this.hasEnoughSolToFill) {
+				logger.info(`Not enough SOL to fill, skipping fillNodes`);
+				return;
+			}
+		} finally {
+			release();
+		}
+
 		logger.debug(
 			`${logPrefix} Filling ${serializedNodesToFill.length} nodes...`
 		);
@@ -1605,17 +1649,18 @@ export class FillerMultithreaded {
 		}
 	}
 
-	public async settlePnls() {
+	protected async settlePnls() {
 		const user = this.driftClient.getUser();
 		const marketIds = user
 			.getActivePerpPositions()
 			.map((pos) => pos.marketIndex);
 		const now = Date.now();
 		if (marketIds.length === MAX_POSITIONS_PER_USER) {
+			logger.info(
+				`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
+			);
 			if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
-				logger.info(
-					`${logPrefix} Want to settle positive pnl, but in cooldown...`
-				);
+				logger.info(`Want to settle positive pnl, but in cooldown...`);
 			} else {
 				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
 				for (let i = 0; i < marketIds.length; i += SETTLE_PNL_CHUNKS) {
@@ -1623,7 +1668,12 @@ export class FillerMultithreaded {
 					try {
 						const ixs = [
 							ComputeBudgetProgram.setComputeUnitLimit({
-								units: 1_400_000,
+								units: 1_400_000, // will be overridden by simulateTx
+							}),
+							ComputeBudgetProgram.setComputeUnitPrice({
+								microLamports: Math.floor(
+									this.priorityFeeSubscriber.getCustomStrategyResult()
+								),
 							}),
 						];
 						ixs.push(
@@ -1666,28 +1716,42 @@ export class FillerMultithreaded {
 							),
 						});
 
-						logger.info(
-							`${logPrefix} settlePnls estimatedCUs: ${simResult.cuEstimate}`
-						);
-						if (simResult.simError) {
+						if (this.simulateTxForCUEstimate && simResult.simError) {
 							logger.info(
 								`settlePnls simError: ${JSON.stringify(simResult.simError)}`
 							);
 						} else {
-							const slotsUntilJito = this.slotsUntilJitoLeader();
-							const buildForBundle =
-								slotsUntilJito !== undefined &&
-								slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
-							if (buildForBundle) {
-								this.sendTxThroughJito(simResult.tx, 'settlePnl');
-							} else {
-								settlePnlPromises.push(
-									this.driftClient.txSender.sendVersionedTransaction(
-										simResult.tx,
-										[],
-										this.driftClient.opts
-									)
+							if (!this.dryRun) {
+								const slotsUntilJito = this.slotsUntilJitoLeader();
+								const buildForBundle =
+									this.globalConfig.useJito &&
+									slotsUntilJito !== undefined &&
+									slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+
+								// @ts-ignore;
+								simResult.tx.sign([this.driftClient.wallet.payer]);
+								const txSig = bs58.encode(simResult.tx.signatures[0]);
+								this.registerTxSigToConfirm(
+									txSig,
+									Date.now(),
+									[],
+									-2,
+									'settlePnl'
 								);
+
+								if (buildForBundle) {
+									this.sendTxThroughJito(simResult.tx, 'settlePnl');
+								} else {
+									settlePnlPromises.push(
+										this.driftClient.txSender.sendVersionedTransaction(
+											simResult.tx,
+											[],
+											this.driftClient.opts
+										)
+									);
+								}
+							} else {
+								logger.info(`dry run, skipping settlePnls)`);
 							}
 						}
 					} catch (err) {
@@ -1711,9 +1775,42 @@ export class FillerMultithreaded {
 						);
 					}
 				} catch (e) {
-					logger.error(`${logPrefix} Error settling positive pnls: ${e}`);
+					logger.error(`Error settling positive pnls: ${e}`);
 				}
 				this.lastSettlePnl = now;
+			}
+		}
+		if (this.rebalanceFiller) {
+			logger.info(`Rebalancing filler`);
+			const fillerSolBalance = await this.driftClient.connection.getBalance(
+				this.driftClient.authority
+			);
+
+			const release = await this.hasEnoughSolToFillMutex.acquire();
+			try {
+				this.hasEnoughSolToFill =
+					fillerSolBalance >= MINIMUM_SOL_TO_CONTINUE_FILLING;
+
+				if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
+					logger.info(`Swapping USDC for SOL to rebalance filler`);
+					await swapFillerHardEarnedUSDCForSOL(
+						this.priorityFeeSubscriber,
+						this.driftClient,
+						this.jupiterClient,
+						await this.getBlockhashForTx()
+					);
+					const fillerSolBalanceAfterSwap =
+						await this.driftClient.connection.getBalance(
+							this.driftClient.authority,
+							'processed'
+						);
+					this.hasEnoughSolToFill =
+						fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;
+				} else {
+					this.hasEnoughSolToFill = true;
+				}
+			} finally {
+				release();
 			}
 		}
 	}
