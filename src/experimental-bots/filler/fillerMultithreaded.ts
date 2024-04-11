@@ -15,6 +15,7 @@ import {
 	isVariant,
 	MakerInfo,
 	MarketType,
+	NodeToFill,
 	PriorityFeeSubscriber,
 	ReferrerInfo,
 	SlotSubscriber,
@@ -31,6 +32,7 @@ import {
 	PublicKey,
 	SendTransactionError,
 	TransactionInstruction,
+	TransactionSignature,
 	VersionedTransaction,
 } from '@solana/web3.js';
 import { logger } from '../../logger';
@@ -48,12 +50,43 @@ import {
 	logMessageForNodeToFill,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
+	sleepMs,
 } from '../../utils';
 import {
 	spawnChildWithRetry,
 	deserializeNodeToFill,
 	deserializeOrder,
 } from './utils';
+import {
+	CounterValue,
+	GaugeValue,
+	HistogramValue,
+	metricAttrFromUserAccount,
+	Metrics,
+	RuntimeSpec,
+} from '../../metrics';
+import {
+	ExplicitBucketHistogramAggregation,
+	InstrumentType,
+	View,
+} from '@opentelemetry/sdk-metrics-base';
+import {
+	CONFIRM_TX_RATE_LIMIT_BACKOFF_MS,
+	TX_TIMEOUT_THRESHOLD_MS,
+	TxType,
+} from '../../bots/filler';
+import { LRUCache } from 'lru-cache';
+import {
+	isEndIxLog,
+	isErrFillingLog,
+	isErrStaleOracle,
+	isFillIxLog,
+	isIxLog,
+	isMakerBreachedMaintenanceMarginLog,
+	isOrderDoesNotExistLog,
+	isTakerBreachedMaintenanceMarginLog,
+} from '../../bots/common/txLogParse';
+import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 
 const logPrefix = '[Filler]';
 
@@ -68,8 +101,12 @@ const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana
 const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
+export const CONFIRM_TX_INTERVAL_MS = 5_000;
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
+export const TX_CONFIRMATION_BATCH_SIZE = 100;
+export const CACHED_BLOCKHASH_OFFSET = 5;
+const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
@@ -85,11 +122,33 @@ const errorCodesToSuppress = [
 	6112, // Error Message: OrderDidNotSatisfyTriggerCondition.
 ];
 
+enum METRIC_TYPES {
+	try_fill_duration_histogram = 'try_fill_duration_histogram',
+	runtime_specs = 'runtime_specs',
+	last_try_fill_time = 'last_try_fill_time',
+	sent_transactions = 'sent_transactions',
+	landed_transactions = 'landed_transactions',
+	tx_sim_error_count = 'tx_sim_error_count',
+	pending_tx_sigs_to_confirm = 'pending_tx_sigs_to_confirm',
+	pending_tx_sigs_loop_rate_limited = 'pending_tx_sigs_loop_rate_limited',
+	evicted_pending_tx_sigs_to_confirm = 'evicted_pending_tx_sigs_to_confirm',
+	estimated_tx_cu_histogram = 'estimated_tx_cu_histogram',
+	simulate_tx_duration_histogram = 'simulate_tx_duration_histogram',
+	expired_nodes_set_size = 'expired_nodes_set_size',
+
+	jito_bundles_accepted = 'jito_bundles_accepted',
+	jito_bundles_simulation_failure = 'jito_simulation_failure',
+	jito_dropped_bundle = 'jito_dropped_bundle',
+	jito_landed_tips = 'jito_landed_tips',
+	jito_bundle_count = 'jito_bundle_count',
+}
+
 const getNodeToTriggerSignature = (node: SerializedNodeToTrigger): string => {
 	return getOrderSignature(node.node.order.orderId, node.node.userAccount);
 };
 
 export class FillerMultithreaded {
+	private name: string;
 	private slotSubscriber: SlotSubscriber;
 	private bundleSender?: BundleSender;
 	private driftClient: DriftClient;
@@ -114,21 +173,74 @@ export class FillerMultithreaded {
 	private orderSubscriberHealthy = true;
 	private simulateTxForCUEstimate?: boolean;
 
+	private intervalIds: NodeJS.Timeout[] = [];
+
+	protected txConfirmationConnection: Connection;
+	protected pendingTxSigsToconfirm: LRUCache<
+		string,
+		{
+			ts: number;
+			nodeFilled: Array<NodeToFillWithBuffer>;
+			fillTxId: number;
+			txType: TxType;
+		}
+	>;
+	protected expiredNodesSet: LRUCache<string, boolean>;
+	protected confirmLoopRunning = false;
+	protected confirmLoopRateLimitTs =
+		Date.now() - CONFIRM_TX_RATE_LIMIT_BACKOFF_MS;
+	protected useBurstCULimit = false;
+	protected fillTxSinceBurstCU = 0;
+
+	// metrics
+	protected metricsInitialized = false;
+	protected metricsPort?: number;
+	protected metrics?: Metrics;
+	protected bootTimeMs?: number;
+
+	protected runtimeSpec: RuntimeSpec;
+	protected runtimeSpecsGauge?: GaugeValue;
+	protected estTxCuHistogram?: HistogramValue;
+	protected simulateTxHistogram?: HistogramValue;
+	protected lastTryFillTimeGauge?: GaugeValue;
+	protected sentTxsCounter?: CounterValue;
+	protected attemptedTriggersCounter?: CounterValue;
+	protected landedTxsCounter?: CounterValue;
+	protected txSimErrorCounter?: CounterValue;
+	protected pendingTxSigsToConfirmGauge?: GaugeValue;
+	protected pendingTxSigsLoopRateLimitedCounter?: CounterValue;
+	protected evictedPendingTxSigsToConfirmCounter?: CounterValue;
+	protected expiredNodesSetSize?: GaugeValue;
+	protected jitoBundlesAcceptedGauge?: GaugeValue;
+	protected jitoBundlesSimulationFailureGauge?: GaugeValue;
+	protected jitoDroppedBundleGauge?: GaugeValue;
+	protected jitoLandedTipsGauge?: GaugeValue;
+	protected jitoBundleCount?: GaugeValue;
+
 	constructor(
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
+		runtimeSpec: RuntimeSpec,
 		bundleSender?: BundleSender
 	) {
 		this.globalConfig = globalConfig;
+		this.name = config.botId;
 		this.config = config;
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		this.bundleSender = bundleSender;
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
+		if (globalConfig.txConfirmationEndpoint) {
+			this.txConfirmationConnection = new Connection(
+				globalConfig.txConfirmationEndpoint
+			);
+		} else {
+			this.txConfirmationConnection = this.driftClient.connection;
+		}
 
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
@@ -148,6 +260,29 @@ export class FillerMultithreaded {
 				marketIndex: this.config.marketIndex,
 			},
 		]);
+		this.runtimeSpec = runtimeSpec;
+		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
+
+		this.pendingTxSigsToconfirm = new LRUCache<
+			string,
+			{
+				ts: number;
+				nodeFilled: Array<NodeToFillWithBuffer>;
+				fillTxId: number;
+				txType: TxType;
+			}
+		>({
+			max: 10_000,
+			ttl: TX_TIMEOUT_THRESHOLD_MS,
+			ttlResolution: 1000,
+			disposeAfter: this.recordEvictedTxSig.bind(this),
+		});
+
+		this.expiredNodesSet = new LRUCache<string, boolean>({
+			max: 10_000,
+			ttl: TX_TIMEOUT_THRESHOLD_MS,
+			ttlResolution: 1000,
+		});
 	}
 
 	async init() {
@@ -165,6 +300,7 @@ export class FillerMultithreaded {
 			`--market-type=${this.config.marketType}`,
 			`--market-index=${this.config.marketIndex}`,
 		];
+		const user = this.driftClient.getUser();
 		const dlobBuilderProcess = spawnChildWithRetry(
 			'./src/experimental-bots/filler/dlobBuilder.ts',
 			childArgs,
@@ -183,6 +319,13 @@ export class FillerMultithreaded {
 						} else {
 							this.triggerNodes(msg.data);
 						}
+						this.lastTryFillTimeGauge?.setLatestValue(
+							Date.now(),
+							metricAttrFromUserAccount(
+								user.getUserAccountPublicKey(),
+								user.getUserAccount()
+							)
+						);
 						break;
 					case 'fillableNodes':
 						if (this.dryRun) {
@@ -190,6 +333,13 @@ export class FillerMultithreaded {
 						} else {
 							this.fillNodes(msg.data);
 						}
+						this.lastTryFillTimeGauge?.setLatestValue(
+							Date.now(),
+							metricAttrFromUserAccount(
+								user.getUserAccountPublicKey(),
+								user.getUserAccount()
+							)
+						);
 						break;
 					case 'health':
 						this.dlobHealthy = msg.data.healthy;
@@ -229,6 +379,165 @@ export class FillerMultithreaded {
 		logger.info(
 			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
 		);
+
+		this.intervalIds.push(
+			setInterval(
+				this.settlePnls.bind(this),
+				SETTLE_POSITIVE_PNL_COOLDOWN_MS / 2
+			)
+		);
+		this.intervalIds.push(
+			setInterval(this.confirmPendingTxSigs.bind(this), CONFIRM_TX_INTERVAL_MS)
+		);
+		if (this.bundleSender) {
+			this.intervalIds.push(
+				setInterval(this.recordJitoBundleStats.bind(this), 10_000)
+			);
+		}
+	}
+
+	protected recordEvictedTxSig(
+		_tsTxSigAdded: { ts: number; nodeFilled: Array<NodeToFillWithBuffer> },
+		txSig: string,
+		reason: 'evict' | 'set' | 'delete'
+	) {
+		if (reason === 'evict') {
+			logger.info(
+				`${this.name}: Evicted tx sig ${txSig} from this.txSigsToConfirm`
+			);
+			const user = this.driftClient.getUser();
+			this.evictedPendingTxSigsToConfirmCounter?.add(1, {
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+		}
+	}
+
+	protected initializeMetrics(metricsPort?: number) {
+		if (this.globalConfig.disableMetrics) {
+			logger.info(
+				`${this.name}: globalConfig.disableMetrics is true, not initializing metrics`
+			);
+			return;
+		}
+
+		if (!metricsPort) {
+			logger.info(
+				`${this.name}: bot.metricsPort and global.metricsPort not set, not initializing metrics`
+			);
+			return;
+		}
+
+		if (this.metricsInitialized) {
+			logger.error('Tried to initilaize metrics multiple times');
+			return;
+		}
+
+		this.metrics = new Metrics(
+			this.name,
+			[
+				new View({
+					instrumentName: METRIC_TYPES.try_fill_duration_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: this.name,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(20), (_, i) => 0 + i * 5),
+						true
+					),
+				}),
+				new View({
+					instrumentName: METRIC_TYPES.estimated_tx_cu_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: this.name,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(15), (_, i) => 0 + i * 100_000),
+						true
+					),
+				}),
+				new View({
+					instrumentName: METRIC_TYPES.simulate_tx_duration_histogram,
+					instrumentType: InstrumentType.HISTOGRAM,
+					meterName: this.name,
+					aggregation: new ExplicitBucketHistogramAggregation(
+						Array.from(new Array(20), (_, i) => 50 + i * 50),
+						true
+					),
+				}),
+			],
+			metricsPort!
+		);
+		this.bootTimeMs = Date.now();
+		this.runtimeSpecsGauge = this.metrics.addGauge(
+			METRIC_TYPES.runtime_specs,
+			'Runtime sepcification of this program'
+		);
+		this.estTxCuHistogram = this.metrics.addHistogram(
+			METRIC_TYPES.estimated_tx_cu_histogram,
+			'Histogram of the estimated fill cu used'
+		);
+		this.simulateTxHistogram = this.metrics.addHistogram(
+			METRIC_TYPES.simulate_tx_duration_histogram,
+			'Histogram of the duration of simulateTransaction RPC calls'
+		);
+		this.lastTryFillTimeGauge = this.metrics.addGauge(
+			METRIC_TYPES.last_try_fill_time,
+			'Last time that fill was attempted'
+		);
+		this.landedTxsCounter = this.metrics.addCounter(
+			METRIC_TYPES.landed_transactions,
+			'Count of fills that we successfully landed'
+		);
+		this.sentTxsCounter = this.metrics.addCounter(
+			METRIC_TYPES.sent_transactions,
+			'Count of transactions we sent out'
+		);
+		this.txSimErrorCounter = this.metrics.addCounter(
+			METRIC_TYPES.tx_sim_error_count,
+			'Count of errors from simulating transactions'
+		);
+		this.pendingTxSigsToConfirmGauge = this.metrics.addGauge(
+			METRIC_TYPES.pending_tx_sigs_to_confirm,
+			'Count of tx sigs that are pending confirmation'
+		);
+		this.pendingTxSigsLoopRateLimitedCounter = this.metrics.addCounter(
+			METRIC_TYPES.pending_tx_sigs_loop_rate_limited,
+			'Count of times the pending tx sigs loop was rate limited'
+		);
+		this.evictedPendingTxSigsToConfirmCounter = this.metrics.addCounter(
+			METRIC_TYPES.evicted_pending_tx_sigs_to_confirm,
+			'Count of tx sigs that were evicted from the pending tx sigs to confirm cache'
+		);
+		this.expiredNodesSetSize = this.metrics.addGauge(
+			METRIC_TYPES.expired_nodes_set_size,
+			'Count of nodes that are expired'
+		);
+		this.jitoBundlesAcceptedGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_bundles_accepted,
+			'Count of jito bundles that were accepted'
+		);
+		this.jitoBundlesSimulationFailureGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_bundles_simulation_failure,
+			'Count of jito bundles that failed simulation'
+		);
+		this.jitoDroppedBundleGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_dropped_bundle,
+			'Count of jito bundles that were dropped'
+		);
+		this.jitoLandedTipsGauge = this.metrics.addGauge(
+			METRIC_TYPES.jito_landed_tips,
+			'Gauge of historic bundle tips that landed'
+		);
+		this.jitoBundleCount = this.metrics.addGauge(
+			METRIC_TYPES.jito_bundle_count,
+			'Count of jito bundles that were sent, and their status'
+		);
+
+		this.metrics?.finalizeObservables();
+
+		this.runtimeSpecsGauge.setLatestValue(this.bootTimeMs, this.runtimeSpec);
+		this.metricsInitialized = true;
 	}
 
 	public healthCheck(): boolean {
@@ -239,6 +548,247 @@ export class FillerMultithreaded {
 			logger.error(`${logPrefix} Order subscriber not healthy`);
 		}
 		return this.dlobHealthy && this.orderSubscriberHealthy;
+	}
+
+	protected recordJitoBundleStats() {
+		const user = this.driftClient.getUser();
+		const bundleStats = this.bundleSender?.getBundleStats();
+		if (bundleStats) {
+			this.jitoBundlesAcceptedGauge?.setLatestValue(bundleStats.accepted, {
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+			this.jitoBundlesSimulationFailureGauge?.setLatestValue(
+				bundleStats.simulationFailure,
+				{
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoDroppedBundleGauge?.setLatestValue(bundleStats.droppedPruned, {
+				type: 'pruned',
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+			this.jitoDroppedBundleGauge?.setLatestValue(
+				bundleStats.droppedBlockhashExpired,
+				{
+					type: 'blockhash_expired',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoDroppedBundleGauge?.setLatestValue(
+				bundleStats.droppedBlockhashNotFound,
+				{
+					type: 'blockhash_not_found',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+		}
+
+		const tipStream = this.bundleSender?.getTipStream();
+		if (tipStream) {
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_25th_percentile,
+				{
+					percentile: 'p25',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_50th_percentile,
+				{
+					percentile: 'p50',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_75th_percentile,
+				{
+					percentile: 'p75',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_95th_percentile,
+				{
+					percentile: 'p95',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_99th_percentile,
+				{
+					percentile: 'p99',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.ema_landed_tips_50th_percentile,
+				{
+					percentile: 'ema_p50',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+
+			const bundleFailCount = this.bundleSender?.getBundleFailCount();
+			const bundleLandedCount = this.bundleSender?.getLandedCount();
+			const bundleDroppedCount = this.bundleSender?.getDroppedCount();
+			this.jitoBundleCount?.setLatestValue(bundleFailCount ?? 0, {
+				type: 'fail_count',
+			});
+			this.jitoBundleCount?.setLatestValue(bundleLandedCount ?? 0, {
+				type: 'landed',
+			});
+			this.jitoBundleCount?.setLatestValue(bundleDroppedCount ?? 0, {
+				type: 'dropped',
+			});
+		}
+	}
+
+	protected async confirmPendingTxSigs() {
+		const user = this.driftClient.getUser();
+		this.pendingTxSigsToConfirmGauge?.setLatestValue(
+			this.pendingTxSigsToconfirm.size,
+			{
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			}
+		);
+		this.expiredNodesSetSize?.setLatestValue(this.expiredNodesSet.size, {
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+		const nextTimeCanRun =
+			this.confirmLoopRateLimitTs + CONFIRM_TX_RATE_LIMIT_BACKOFF_MS;
+		if (Date.now() < nextTimeCanRun) {
+			logger.warn(
+				`Skipping confirm loop due to rate limit, next run in ${
+					nextTimeCanRun - Date.now()
+				} ms`
+			);
+			return;
+		}
+		if (this.confirmLoopRunning) {
+			return;
+		}
+		this.confirmLoopRunning = true;
+		try {
+			logger.info(`Confirming tx sigs: ${this.pendingTxSigsToconfirm.size}`);
+			const start = Date.now();
+			const txEntries = Array.from(this.pendingTxSigsToconfirm.entries());
+			for (let i = 0; i < txEntries.length; i += TX_CONFIRMATION_BATCH_SIZE) {
+				const txSigsBatch = txEntries.slice(i, i + TX_CONFIRMATION_BATCH_SIZE);
+				const txs = await this.txConfirmationConnection?.getTransactions(
+					txSigsBatch.map((tx) => tx[0]),
+					{
+						commitment: 'confirmed',
+						maxSupportedTransactionVersion: 0,
+					}
+				);
+				for (let j = 0; j < txs.length; j++) {
+					const txResp = txs[j];
+					const txConfirmationInfo = txSigsBatch[j];
+					const txSig = txConfirmationInfo[0];
+					const txAge = txConfirmationInfo[1].ts - Date.now();
+					const nodeFilled = txConfirmationInfo[1].nodeFilled;
+					const txType = txConfirmationInfo[1].txType;
+					const fillTxId = txConfirmationInfo[1].fillTxId;
+					if (txResp === null) {
+						logger.info(
+							`Tx not found, (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
+								txAge / 1000
+							} s`
+						);
+						if (Math.abs(txAge) > TX_TIMEOUT_THRESHOLD_MS) {
+							this.pendingTxSigsToconfirm.delete(txSig);
+						}
+					} else {
+						logger.info(
+							`Tx landed (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
+								txAge / 1000
+							} s`
+						);
+						this.pendingTxSigsToconfirm.delete(txSig);
+						if (txType === 'fill') {
+							const result = await this.handleTransactionLogs(
+								nodeFilled,
+								txResp.meta?.logMessages
+							);
+							if (result) {
+								this.landedTxsCounter?.add(result.filledNodes, {
+									type: txType,
+									...metricAttrFromUserAccount(
+										user.userAccountPublicKey,
+										user.getUserAccount()
+									),
+								});
+							}
+						} else {
+							this.landedTxsCounter?.add(1, {
+								type: txType,
+								...metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
+								),
+							});
+						}
+					}
+					await sleepMs(500);
+				}
+			}
+			logger.info(`Confirming tx sigs took: ${Date.now() - start} ms`);
+		} catch (e) {
+			const err = e as Error;
+			if (err.message.includes('429')) {
+				logger.info(`Confirming tx loop rate limited: ${err.message}`);
+				this.confirmLoopRateLimitTs = Date.now();
+				this.pendingTxSigsLoopRateLimitedCounter?.add(1, {
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+			} else {
+				logger.error(`Other error confirming tx sigs: ${err.message}`);
+			}
+		} finally {
+			this.confirmLoopRunning = false;
+		}
 	}
 
 	private async getBlockhashForTx(): Promise<string> {
@@ -464,6 +1014,23 @@ export class FillerMultithreaded {
 				this.simulateTxForCUEstimate,
 				await this.getBlockhashForTx()
 			);
+			const user = this.driftClient.getUser();
+			this.simulateTxHistogram?.record(simResult.simTxDuration, {
+				type: 'trigger',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+			this.estTxCuHistogram?.record(simResult.cuEstimate, {
+				type: 'trigger',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
 
 			logger.info(
 				`executeTriggerablePerpNodesForMarket estimated CUs: ${simResult.cuEstimate}`
@@ -512,6 +1079,14 @@ export class FillerMultithreaded {
 				}
 			}
 		}
+		const user = this.driftClient.getUser();
+		this.attemptedTriggersCounter?.add(
+			nodesToTrigger.length,
+			metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			)
+		);
 	}
 
 	public async fillNodes(serializedNodesToFill: SerializedNodeToFill[]) {
@@ -778,6 +1353,23 @@ export class FillerMultithreaded {
 					this.simulateTxForCUEstimate,
 					await this.getBlockhashForTx()
 				);
+				const user = this.driftClient.getUser();
+				this.simulateTxHistogram?.record(simResult.simTxDuration, {
+					type: 'multiMakerFill',
+					simError: simResult.simError !== null,
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+				this.estTxCuHistogram?.record(simResult.cuEstimate, {
+					type: 'multiMakerFill',
+					simError: simResult.simError !== null,
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
 				return simResult;
 			};
 
@@ -942,7 +1534,10 @@ export class FillerMultithreaded {
 		let writeAccs = 0;
 		const accountMetas: any[] = [];
 		const txStart = Date.now();
-		// tx.message.recentBlockhash = await this.getBlockhashForTx();
+		// @ts-ignore;
+		tx.sign([this.driftClient.wallet.payer]);
+		const txSig = bs58.encode(tx.signatures[0]);
+
 		if (buildForBundle) {
 			await this.sendTxThroughJito(tx, fillTxId);
 			this.removeFillingNodes(nodesSent);
@@ -971,6 +1566,9 @@ export class FillerMultithreaded {
 				this.driftClient.opts
 			);
 		}
+
+		this.registerTxSigToConfirm(txSig, Date.now(), nodesSent, fillTxId, 'fill');
+
 		if (txResp) {
 			txResp
 				.then((resp: TxSigAndSlot) => {
@@ -1051,6 +1649,23 @@ export class FillerMultithreaded {
 							this.simulateTxForCUEstimate,
 							await this.getBlockhashForTx()
 						);
+						this.simulateTxHistogram?.record(simResult.simTxDuration, {
+							type: 'settlePnl',
+							simError: simResult.simError !== null,
+							...metricAttrFromUserAccount(
+								user.userAccountPublicKey,
+								user.getUserAccount()
+							),
+						});
+						this.estTxCuHistogram?.record(simResult.cuEstimate, {
+							type: 'settlePnl',
+							simError: simResult.simError !== null,
+							...metricAttrFromUserAccount(
+								user.userAccountPublicKey,
+								user.getUserAccount()
+							),
+						});
+
 						logger.info(
 							`${logPrefix} settlePnls estimatedCUs: ${simResult.cuEstimate}`
 						);
@@ -1177,5 +1792,195 @@ export class FillerMultithreaded {
 			referrerInfo,
 			marketType: nodeToFill.node.order!.marketType,
 		});
+	}
+
+	/**
+	 * Queues up the txSig to be confirmed in a slower loop, and have tx logs handled
+	 * @param txSig
+	 */
+	protected async registerTxSigToConfirm(
+		txSig: TransactionSignature,
+		now: number,
+		nodeFilled: Array<NodeToFillWithBuffer>,
+		fillTxId: number,
+		txType: TxType
+	) {
+		this.pendingTxSigsToconfirm.set(txSig, {
+			ts: now,
+			nodeFilled,
+			fillTxId,
+			txType,
+		});
+		const user = this.driftClient.getUser();
+		this.sentTxsCounter?.add(1, {
+			txType,
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+	}
+
+	/**
+	 * Iterates through a tx's logs and handles it appropriately (e.g. throttling users, updating metrics, etc.)
+	 *
+	 * @param nodesFilled nodes that we sent a transaction to fill
+	 * @param logs logs from tx.meta.logMessages or this.clearingHouse.program._events._eventParser.parseLogs
+	 * @returns number of nodes successfully filled, and whether the tx exceeded CUs
+	 */
+	protected async handleTransactionLogs(
+		nodesFilled: Array<NodeToFill>,
+		logs: string[] | null | undefined
+	): Promise<{ filledNodes: number; exceededCUs: boolean }> {
+		if (!logs) {
+			return {
+				filledNodes: 0,
+				exceededCUs: false,
+			};
+		}
+
+		let inFillIx = false;
+		let errorThisFillIx = false;
+		let ixIdx = -1; // skip ComputeBudgetProgram
+		let successCount = 0;
+		let burstedCU = false;
+		for (const log of logs) {
+			if (log === null) {
+				logger.error(`log is null`);
+				continue;
+			}
+
+			if (log.includes('exceeded maximum number of instructions allowed')) {
+				// temporary burst CU limit
+				logger.warn(`Using bursted CU limit`);
+				this.useBurstCULimit = true;
+				this.fillTxSinceBurstCU = 0;
+				burstedCU = true;
+				continue;
+			}
+
+			if (isEndIxLog(this.driftClient.program.programId.toBase58(), log)) {
+				if (!errorThisFillIx) {
+					successCount++;
+				}
+
+				inFillIx = false;
+				errorThisFillIx = false;
+				continue;
+			}
+
+			if (isIxLog(log)) {
+				if (isFillIxLog(log)) {
+					inFillIx = true;
+					errorThisFillIx = false;
+					ixIdx++;
+				} else {
+					inFillIx = false;
+				}
+				continue;
+			}
+
+			if (!inFillIx) {
+				// this is not a log for a fill instruction
+				continue;
+			}
+
+			// try to handle the log line
+			const orderIdDoesNotExist = isOrderDoesNotExistLog(log);
+			if (orderIdDoesNotExist) {
+				const filledNode = nodesFilled[ixIdx];
+				if (filledNode) {
+					const isExpired = isOrderExpired(
+						filledNode.node.order!,
+						Date.now() / 1000
+					);
+					logger.error(
+						`assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${
+							filledNode.node.order!.orderId
+						}; does not exist (filled by someone else); ${log}, expired: ${isExpired}`
+					);
+					if (isExpired) {
+						const sig = getNodeToFillSignature(filledNode);
+						this.expiredNodesSet.set(sig, true);
+					}
+				}
+				errorThisFillIx = true;
+				continue;
+			}
+
+			const makerBreachedMaintenanceMargin =
+				isMakerBreachedMaintenanceMarginLog(log);
+			if (makerBreachedMaintenanceMargin !== null) {
+				logger.error(
+					`Throttling maker breached maintenance margin: ${makerBreachedMaintenanceMargin}`
+				);
+				this.setThrottledNode(makerBreachedMaintenanceMargin);
+				errorThisFillIx = true;
+				break;
+			}
+
+			const takerBreachedMaintenanceMargin =
+				isTakerBreachedMaintenanceMarginLog(log);
+			if (takerBreachedMaintenanceMargin && nodesFilled[ixIdx]) {
+				const filledNode = nodesFilled[ixIdx];
+				const takerNodeSignature = filledNode.node.userAccount!;
+				logger.error(
+					`taker breach maint. margin, assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${
+						filledNode.node.order!.orderId
+					}; (throttling ${takerNodeSignature} and force cancelling orders); ${log}`
+				);
+				this.setThrottledNode(takerNodeSignature);
+				errorThisFillIx = true;
+				continue;
+			}
+
+			const errFillingLog = isErrFillingLog(log);
+			if (errFillingLog) {
+				const orderId = errFillingLog[0];
+				const userAcc = errFillingLog[1];
+				const extractedSig = getFillSignatureFromUserAccountAndOrderId(
+					userAcc,
+					orderId
+				);
+				this.setThrottledNode(extractedSig);
+
+				const filledNode = nodesFilled[ixIdx];
+				const assocNodeSig = getNodeToFillSignature(filledNode);
+				logger.warn(
+					`Throttling node due to fill error. extractedSig: ${extractedSig}, assocNodeSig: ${assocNodeSig}, assocNodeIdx: ${ixIdx}`
+				);
+				errorThisFillIx = true;
+				continue;
+			}
+
+			if (isErrStaleOracle(log)) {
+				logger.error(`Stale oracle error: ${log}`);
+				errorThisFillIx = true;
+				continue;
+			}
+		}
+
+		if (!burstedCU) {
+			if (this.fillTxSinceBurstCU > TX_COUNT_COOLDOWN_ON_BURST) {
+				this.useBurstCULimit = false;
+			}
+			this.fillTxSinceBurstCU += 1;
+		}
+
+		if (logs.length > 0) {
+			if (
+				logs[logs.length - 1].includes('exceeded CUs meter at BPF instruction')
+			) {
+				return {
+					filledNodes: successCount,
+					exceededCUs: true,
+				};
+			}
+		}
+
+		return {
+			filledNodes: successCount,
+			exceededCUs: false,
+		};
 	}
 }
