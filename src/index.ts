@@ -165,7 +165,7 @@ program
 	)
 	.option(
 		'--event-susbcriber',
-		'Explicitly intialize an eventSubscriber (RPC heavy'
+		'Explicitly intialize an eventSubscriber (RPC heavy)'
 	)
 	.option(
 		'--tx-sender-type <string>',

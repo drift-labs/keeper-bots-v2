@@ -7,8 +7,10 @@ import {
 	DLOB,
 	DLOBNode,
 	DataAndSlot,
-	DriftEnv,
+	DriftClient,
 	HeliusPriorityLevel,
+	JupiterClient,
+	DriftEnv,
 	MakerInfo,
 	MarketType,
 	NodeToFill,
@@ -22,6 +24,7 @@ import {
 	PriorityFeeSubscriber,
 	QUOTE_PRECISION,
 	SpotMarketAccount,
+	// TEN,
 	TxSender,
 	User,
 	Wallet,
@@ -30,8 +33,11 @@ import {
 	getVariant,
 } from '@drift-labs/sdk';
 import {
+	NATIVE_MINT,
 	createAssociatedTokenAccountInstruction,
+	createCloseAccountInstruction,
 	getAssociatedTokenAddress,
+	getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
 import {
 	AddressLookupTableAccount,
@@ -55,6 +61,7 @@ export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
 	'V4v1mQiAdLz4qwckEb45WqHYceYizoib39cDBHSWfaB'
 );
 
+const JUPITER_SLIPPAGE_BPS = 100;
 export const PRIORITY_FEE_SERVER_RATE_LIMIT_PER_MIN = 300;
 
 export async function getOrCreateAssociatedTokenAccount(
@@ -714,6 +721,211 @@ export function getTransactionAccountMetas(
 	};
 }
 
+export async function swapFillerHardEarnedUSDCForSOL(
+	priorityFeeSubscriber: PriorityFeeSubscriber,
+	driftClient: DriftClient,
+	jupiterClient: JupiterClient,
+	blockhash: string
+) {
+	try {
+		const usdc = driftClient.getUser().getTokenAmount(0);
+		const sol = driftClient.getUser().getTokenAmount(1);
+
+		console.log(
+			`${driftClient.authority.toBase58()} has ${convertToNumber(
+				usdc,
+				QUOTE_PRECISION
+			)} usdc, ${convertToNumber(sol, BASE_PRECISION)} sol`
+		);
+
+		const usdcMarket = driftClient.getSpotMarketAccount(0);
+		const solMarket = driftClient.getSpotMarketAccount(1);
+
+		if (!usdcMarket || !solMarket) {
+			console.log('Market not found, skipping...');
+			return;
+		}
+
+		const inPrecision = new BN(10).pow(new BN(usdcMarket.decimals));
+		const outPrecision = new BN(10).pow(new BN(solMarket.decimals));
+
+		if (usdc.lt(new BN(1).mul(QUOTE_PRECISION))) {
+			console.log(
+				`${driftClient.authority.toBase58()} not enough USDC to swap (${convertToNumber(
+					usdc,
+					QUOTE_PRECISION
+				)}), skipping...`
+			);
+			return;
+		}
+
+		const start = performance.now();
+		const quote = await jupiterClient.getQuote({
+			inputMint: usdcMarket.mint,
+			outputMint: solMarket.mint,
+			amount: usdc.sub(new BN(1)),
+			maxAccounts: 10,
+			slippageBps: JUPITER_SLIPPAGE_BPS,
+			swapMode: 'ExactIn',
+		});
+
+		const quoteInNum = convertToNumber(new BN(quote.inAmount), inPrecision);
+		const quoteOutNum = convertToNumber(new BN(quote.outAmount), outPrecision);
+		const swapPrice = quoteInNum / quoteOutNum;
+		const oraclePrice = convertToNumber(
+			driftClient.getOracleDataForSpotMarket(1).price,
+			PRICE_PRECISION
+		);
+
+		if (swapPrice / oraclePrice - 1 > 0.01) {
+			console.log(`Swap price is 1% higher than oracle price, skipping...`);
+			return;
+		}
+
+		console.log(
+			`Quoted ${quoteInNum} USDC for ${quoteOutNum} SOL, swapPrice: ${swapPrice}, oraclePrice: ${oraclePrice}`
+		);
+
+		const driftLut = await driftClient.fetchMarketLookupTableAccount();
+
+		const transaction = await jupiterClient.getSwap({
+			quote,
+			userPublicKey: driftClient.provider.wallet.publicKey,
+			slippageBps: JUPITER_SLIPPAGE_BPS,
+		});
+
+		const { transactionMessage, lookupTables } =
+			await jupiterClient.getTransactionMessageAndLookupTables({
+				transaction,
+			});
+
+		const jupiterInstructions = jupiterClient.getJupiterInstructions({
+			transactionMessage,
+			inputMint: usdcMarket.mint,
+			outputMint: solMarket.mint,
+		});
+
+		const preInstructions = [];
+
+		const outAssociatedTokenAccount =
+			await driftClient.getAssociatedTokenAccount(1);
+
+		const solAccountInfo = await driftClient.connection.getAccountInfo(
+			outAssociatedTokenAccount
+		);
+
+		if (!solAccountInfo) {
+			preInstructions.push(
+				driftClient.createAssociatedTokenAccountIdempotentInstruction(
+					outAssociatedTokenAccount,
+					driftClient.provider.wallet.publicKey,
+					driftClient.provider.wallet.publicKey,
+					solMarket.mint
+				)
+			);
+		}
+
+		const inAssociatedTokenAccount =
+			await driftClient.getAssociatedTokenAccount(0);
+
+		const usdcAccountInfo = await driftClient.connection.getAccountInfo(
+			inAssociatedTokenAccount
+		);
+
+		if (!usdcAccountInfo) {
+			preInstructions.push(
+				driftClient.createAssociatedTokenAccountIdempotentInstruction(
+					inAssociatedTokenAccount,
+					driftClient.provider.wallet.publicKey,
+					driftClient.provider.wallet.publicKey,
+					usdcMarket.mint
+				)
+			);
+		}
+
+		const withdrawIx = await driftClient.getWithdrawIx(
+			usdc.muln(10), // gross overestimate just to get everything out of the account
+			0,
+			inAssociatedTokenAccount,
+			true
+		);
+
+		const withdrawerWrappedSolAta = getAssociatedTokenAddressSync(
+			NATIVE_MINT,
+			driftClient.authority
+		);
+
+		const closeAccountInstruction = createCloseAccountInstruction(
+			withdrawerWrappedSolAta,
+			driftClient.authority,
+			driftClient.authority
+		);
+
+		const ixs = [
+			...preInstructions,
+			withdrawIx,
+			...jupiterInstructions,
+			closeAccountInstruction,
+		];
+
+		const buildTx = async (cu: number): Promise<VersionedTransaction> => {
+			return await driftClient.txSender.getVersionedTransaction(
+				[
+					ComputeBudgetProgram.setComputeUnitLimit({
+						units: cu,
+					}),
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: Math.floor(
+							priorityFeeSubscriber.getHeliusPriorityFeeLevel(
+								HeliusPriorityLevel.LOW
+							) * 1.1
+						),
+					}),
+					...ixs,
+				],
+				[...lookupTables, driftLut],
+				[],
+				driftClient.opts
+			);
+		};
+
+		const tx = await buildTx(1_000_000);
+		tx.message.recentBlockhash = blockhash;
+
+		const simTxResult = await driftClient.connection.simulateTransaction(
+			await buildTx(1_000_000),
+			{
+				replaceRecentBlockhash: true,
+				commitment: 'confirmed',
+			}
+		);
+
+		if (simTxResult.value.err) {
+			console.log('Sim error:');
+			console.error(simTxResult.value.err);
+			console.log('Sim logs:');
+			console.log(simTxResult.value.logs);
+			console.log(`Units consumed: ${simTxResult.value.unitsConsumed}`);
+			return;
+		}
+
+		console.log(
+			`${driftClient.authority.toBase58()} sending swap tx... ${
+				performance.now() - start
+			}`
+		);
+
+		const txSigAndSlot = await driftClient.txSender.sendVersionedTransaction(
+			// @ts-ignore
+			await buildTx(Math.floor(simTxResult.value.unitsConsumed * 1.2)),
+			[],
+			driftClient.opts
+		);
+		console.log(`Swap tx: https://solana.fm/tx/${txSigAndSlot.txSig}`);
+	} catch (e) {
+		console.error(e);
+	}
+}
 export function getDriftPriorityFeeEndpoint(driftEnv: DriftEnv): string {
 	switch (driftEnv) {
 		case 'devnet':
