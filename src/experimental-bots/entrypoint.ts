@@ -274,6 +274,13 @@ const runBot = async () => {
 			driftClient,
 			slotSubscriber,
 			priorityFeeSubscriber,
+			{
+				rpcEndpoint: endpoint,
+				commit: '',
+				driftEnv: config.global.driftEnv!,
+				driftPid: driftPublicKey.toBase58(),
+				walletAuthority: wallet.publicKey.toBase58(),
+			},
 			bundleSender
 		);
 		bots.push(fillerMultithreaded);
