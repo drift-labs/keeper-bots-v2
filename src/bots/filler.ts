@@ -690,17 +690,6 @@ export class FillerBot implements Bot {
 	}
 
 	protected async confirmPendingTxSigs() {
-		// Check hasEnoughSolToFill before confirm the txs to not jam up the event loop if we're trying to rebalance
-		const release = await this.hasEnoughSolToFillMutex.acquire();
-		try {
-			if (!this.hasEnoughSolToFill) {
-				logger.info(`Not enough SOL to fill, skipping confirm pending tx sigs`);
-				return;
-			}
-		} finally {
-			release();
-		}
-
 		const user = this.driftClient.getUser();
 		this.pendingTxSigsToConfirmGauge?.setLatestValue(
 			this.pendingTxSigsToconfirm.size,
