@@ -140,8 +140,11 @@ src/**.js.map
 
 .env
 lib
-yarn.lock
 
 scratch
 
+<<<<<<< HEAD
 test.yaml
+=======
+test.config.yaml
+>>>>>>> upstream/master

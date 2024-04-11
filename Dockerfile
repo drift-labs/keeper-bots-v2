@@ -1,17 +1,16 @@
-FROM public.ecr.aws/bitnami/node:16
+FROM public.ecr.aws/bitnami/node:18
 RUN apt-get install git
 ENV NODE_ENV=production
 RUN npm install -g yarn
 RUN npm install -g typescript
+RUN npm install -g ts-node
 
 WORKDIR /app
 
-COPY package.json ./
-
-RUN yarn install --frozen-lockfile
 COPY . .
+RUN yarn install
 RUN yarn build
-RUN yarn install --production --frozen-lockfile
+RUN yarn install --production
 
 EXPOSE 9464
 

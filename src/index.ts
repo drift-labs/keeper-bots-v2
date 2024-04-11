@@ -38,6 +38,8 @@ import {
 	HeliusPriorityLevel,
 	AverageOverSlotsStrategy,
 	BlockhashSubscriber,
+	WhileValidTxSender,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -60,6 +62,8 @@ import {
 	TOKEN_FAUCET_PROGRAM_ID,
 	getWallet,
 	loadKeypair,
+	initializePriorityFeeSubscriberMap,
+	getDriftPriorityFeeEndpoint,
 } from './utils';
 import {
 	Config,
@@ -165,7 +169,15 @@ program
 	)
 	.option(
 		'--tx-sender-type <string>',
-		'Choose tx sender type, options are: fast, retry'
+		'Transaction sender type. Valid options: fast, retry, while-valid'
+	)
+	.option(
+		'--tx-max-retries <number>',
+		'Override maxRetries param when sending transactions'
+	)
+	.option(
+		'--tx-skip-preflight <string>',
+		'Value to set for skipPreflight when sending transactions. Valid options: true, false'
 	)
 	.option(
 		'--tx-retry-timeout-ms <string>',
@@ -323,6 +335,14 @@ const runBot = async () => {
 			confirmationStrategy: ConfirmationStrategy.Polling,
 			additionalConnections,
 		});
+	} else if (txSenderType === 'while-valid') {
+		txSender = new WhileValidTxSender({
+			connection: sendTxConnection,
+			wallet,
+			opts,
+			retrySleep: 2000,
+			additionalConnections,
+		});
 	} else {
 		const skipConfirmation =
 			configHasBot(config, 'fillerLite') ||
@@ -462,10 +482,6 @@ const runBot = async () => {
 	const priorityFeeMethod =
 		(config.global.priorityFeeMethod as PriorityFeeMethod) ??
 		PriorityFeeMethod.SOLANA;
-	const maxFeeMicroLamports = config.global.maxPriorityFeeMicroLamports;
-	logger.info(
-		`priorityFeeMethod: ${priorityFeeMethod}, maxFeeMicroLamports: ${maxFeeMicroLamports}`
-	);
 	const priorityFeeSubscriber = new PriorityFeeSubscriber({
 		connection: driftClient.connection,
 		frequencyMs: 5000,
@@ -484,9 +500,14 @@ const runBot = async () => {
 		addresses: [],
 		heliusRpcUrl: heliusEndpoint,
 		priorityFeeMethod,
-		maxFeeMicroLamports,
+		maxFeeMicroLamports: config.global.maxPriorityFeeMicroLamports,
 		priorityFeeMultiplier: config.global.priorityFeeMultiplier ?? 1.0,
 	});
+	logger.info(
+		`priorityFeeMethod: ${priorityFeeSubscriber.priorityFeeMethod}, maxFeeMicroLamports: ${priorityFeeSubscriber.maxFeeMicroLamports}, method: ${priorityFeeSubscriber.priorityFeeMethod}`
+	);
+
+	let priorityFeeSubscriberMap = new Map<string, PriorityFeeSubscriber>();
 
 	let needBlockhashSubscriber = false;
 	const blockhashSubscriber = new BlockhashSubscriber({
@@ -674,23 +695,6 @@ const runBot = async () => {
 		);
 	}
 
-	if (configHasBot(config, 'markTwapCrank')) {
-		needCheckDriftUser = true;
-		needUserMapSubscribe = true;
-		needPriorityFeeSubscriber = true;
-		bots.push(
-			new MakerBidAskTwapCrank(
-				driftClient,
-				slotSubscriber,
-				userMap,
-				config.botConfigs!.markTwapCrank!,
-				config.global.runOnce ?? false,
-				priorityFeeSubscriber,
-				config.botConfigs!.markTwapCrank!.crankIntervalToMarketIndicies
-			)
-		);
-	}
-
 	if (configHasBot(config, 'liquidator')) {
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
@@ -736,12 +740,11 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userPnlSettler')) {
-		needPriorityFeeSubscriber = true;
 		bots.push(
 			new UserPnlSettlerBot(
 				driftClientConfig,
 				config.botConfigs!.userPnlSettler!,
-				priorityFeeSubscriber,
+				config.global,
 				txSender
 			)
 		);
@@ -780,10 +783,53 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'fundingRateUpdater')) {
 		needCheckDriftUser = true;
+
+		priorityFeeSubscriberMap = await initializePriorityFeeSubscriberMap({
+			pfsMap: priorityFeeSubscriberMap,
+			connection: driftClient.connection,
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
+				config.global.driftEnv!
+			),
+			perpMarkets: PerpMarkets[config.global.driftEnv!],
+			includeQuoteMarket: false,
+			maxFeeMicroLamports: priorityFeeSubscriber.maxFeeMicroLamports,
+			priorityFeeMultiplier: priorityFeeSubscriber.priorityFeeMultiplier,
+		});
+
 		bots.push(
 			new FundingRateUpdaterBot(
 				driftClient,
-				config.botConfigs!.fundingRateUpdater!
+				config.botConfigs!.fundingRateUpdater!,
+				priorityFeeSubscriberMap
+			)
+		);
+	}
+
+	if (configHasBot(config, 'markTwapCrank')) {
+		needCheckDriftUser = true;
+		needUserMapSubscribe = true;
+
+		priorityFeeSubscriberMap = await initializePriorityFeeSubscriberMap({
+			pfsMap: priorityFeeSubscriberMap,
+			connection: driftClient.connection,
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
+				config.global.driftEnv!
+			),
+			perpMarkets: PerpMarkets[config.global.driftEnv!],
+			includeQuoteMarket: false,
+			maxFeeMicroLamports: priorityFeeSubscriber.maxFeeMicroLamports,
+			priorityFeeMultiplier: priorityFeeSubscriber.priorityFeeMultiplier,
+		});
+
+		bots.push(
+			new MakerBidAskTwapCrank(
+				driftClient,
+				slotSubscriber,
+				userMap,
+				config.botConfigs!.markTwapCrank!,
+				config.global.runOnce ?? false,
+				priorityFeeSubscriberMap,
+				config.botConfigs!.markTwapCrank!.crankIntervalToMarketIndicies
 			)
 		);
 	}

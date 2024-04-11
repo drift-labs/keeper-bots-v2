@@ -27,6 +27,8 @@ import {
 	TxSender,
 	isOperationPaused,
 	PerpOperation,
+	MarketType,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -34,10 +36,13 @@ import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
-import { BaseBotConfig } from '../config';
+import { BaseBotConfig, GlobalConfig } from '../config';
 import {
 	decodeName,
+	getDriftPriorityFeeEndpoint,
+	getMarketId,
 	handleSimResultError,
+	initializePriorityFeeSubscriberMap,
 	simulateAndGetTxWithCUs,
 	sleepMs,
 } from '../utils';
@@ -45,6 +50,7 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 	SendTransactionError,
+	TransactionExpiredBlockheightExceededError,
 } from '@solana/web3.js';
 
 const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
@@ -63,14 +69,15 @@ export class UserPnlSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly runOnce: boolean;
-	public readonly defaultIntervalMs: number = 600000;
+	public readonly defaultIntervalMs: number = 300_000;
 
 	private driftClient: DriftClient;
+	private globalConfig: GlobalConfig;
 	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private bulkAccountLoader: BulkAccountLoader;
 	private userMap: UserMap;
-	private priorityFeeSubscriber: PriorityFeeSubscriber;
+	private priorityFeeSubscribers: Map<string, PriorityFeeSubscriber>;
 	private inProgress = false;
 
 	private watchdogTimerMutex = new Mutex();
@@ -79,12 +86,13 @@ export class UserPnlSettlerBot implements Bot {
 	constructor(
 		driftClientConfigs: DriftClientConfig,
 		config: BaseBotConfig,
-		priorityFeeSubscriber: PriorityFeeSubscriber,
+		globalConfig: GlobalConfig,
 		txSender: TxSender
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
+		this.globalConfig = globalConfig;
 
 		const bulkAccountLoader = new BulkAccountLoader(
 			driftClientConfigs.connection,
@@ -112,36 +120,26 @@ export class UserPnlSettlerBot implements Bot {
 			includeIdle: false,
 		});
 
-		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.priorityFeeSubscribers = new Map<string, PriorityFeeSubscriber>();
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing`);
 		await this.driftClient.subscribe();
-		if (!(await this.driftClient.getUser().exists())) {
-			throw new Error(
-				`User for ${this.driftClient.wallet.publicKey.toString()} does not exist`
-			);
-		}
+
 		await this.userMap.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 
-		const spotMarkets = this.driftClient
-			.getSpotMarketAccounts()
-			.map((m) => m.pubkey);
-		const perpMarkets = this.driftClient
-			.getPerpMarketAccounts()
-			.map((m) => m.pubkey);
-
-		this.priorityFeeSubscriber.updateAddresses([
-			...spotMarkets,
-			...perpMarkets,
-		]);
-
-		logger.info(
-			`Pnl settler looking at ${spotMarkets.length} spot markets and ${perpMarkets.length} perp markets to determine priority fee`
-		);
+		this.priorityFeeSubscribers = await initializePriorityFeeSubscriberMap({
+			pfsMap: this.priorityFeeSubscribers,
+			connection: this.driftClient.connection,
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
+				this.globalConfig.driftEnv!
+			),
+			perpMarkets: PerpMarkets[this.globalConfig.driftEnv!],
+			includeQuoteMarket: true,
+		});
 
 		logger.info(`${this.name} init'd!`);
 	}
@@ -483,10 +481,6 @@ export class UserPnlSettlerBot implements Bot {
 					`Trying to settle PNL for ${params.length} users on market ${marketStr}`
 				);
 
-				if (this.dryRun) {
-					throw new Error('Dry run - not sending settle pnl tx');
-				}
-
 				const sortedParams = params
 					.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))
 					.slice(0, 100);
@@ -592,14 +586,20 @@ export class UserPnlSettlerBot implements Bot {
 
 		let success = false;
 		try {
+			const pfs = this.priorityFeeSubscribers.get(
+				getMarketId(MarketType.PERP, marketIndex)
+			);
+			if (!pfs) {
+				throw new Error(
+					`PriorityFeeSubscriber missing for market ${marketIndex}`
+				);
+			}
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
 				}),
 				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber!.getCustomStrategyResult()
-					),
+					microLamports: Math.floor(pfs.getCustomStrategyResult()),
 				}),
 			];
 			ixs.push(
@@ -628,13 +628,16 @@ export class UserPnlSettlerBot implements Bot {
 				handleSimResultError(simResult, errorCodesToSuppress, `(settlePnL)`);
 				success = false;
 			} else {
+				const sendTxStart = Date.now();
 				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
 					simResult.tx,
 					[],
-					{
-						...this.driftClient.opts,
-						maxRetries: 10,
-					}
+					this.driftClient.opts
+				);
+				logger.info(
+					`Settle PNL tx sent in ${Date.now() - sendTxStart}ms, response: ${
+						txSig.txSig
+					}`
 				);
 				success = true;
 
@@ -653,9 +656,14 @@ export class UserPnlSettlerBot implements Bot {
 				)
 				.join(', ');
 			logger.error(`Failed to settle pnl for users: ${userKeys}`);
-			logger.error(err);
+			console.error(err);
 
-			if (err instanceof Error) {
+			if (err instanceof TransactionExpiredBlockheightExceededError) {
+				logger.info(
+					`Blockheight exceeded error, retrying with same set of users (${users.length} users on market ${marketIndex})`
+				);
+				success = await this.sendTxForChunk(marketIndex, users);
+			} else if (err instanceof Error) {
 				const errorCode = getErrorCode(err) ?? 0;
 				if (!errorCodesToSuppress.includes(errorCode) && users.length === 1) {
 					if (err instanceof SendTransactionError) {
