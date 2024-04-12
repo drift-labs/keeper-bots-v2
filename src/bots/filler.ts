@@ -690,14 +690,6 @@ export class FillerBot implements Bot {
 	}
 
 	protected async confirmPendingTxSigs() {
-		// const release = await this.hasEnoughSolToFillMutex.acquire();
-		// try {
-		// 	if (!this.hasEnoughSolToFill) {
-		// 		return
-		// 	}
-		// } finally {
-		// 	release();
-		// }
 		const user = this.driftClient.getUser();
 		this.pendingTxSigsToConfirmGauge?.setLatestValue(
 			this.pendingTxSigsToconfirm.size,
