@@ -2457,14 +2457,10 @@ export class FillerBot implements Bot {
 			const fillerSolBalance = await this.driftClient.connection.getBalance(
 				this.driftClient.authority
 			);
-			logger.info(`Filler SOL balance: ${fillerSolBalance}`);
 			const release = await this.hasEnoughSolToFillMutex.acquire();
 			try {
 				this.hasEnoughSolToFill =
 					fillerSolBalance >= MINIMUM_SOL_TO_CONTINUE_FILLING;
-				logger.info(
-					`Filler has enough SOL to fill: ${this.hasEnoughSolToFill}`
-				);
 				if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
 					logger.info(`Swapping USDC for SOL to rebalance filler`);
 					swapFillerHardEarnedUSDCForSOL(
