@@ -125,6 +125,7 @@ const errorCodesToSuppress = [
 
 	6111, // Error Message: OrderNotTriggerable.
 	6112, // Error Message: OrderDidNotSatisfyTriggerCondition.
+	6036, // Error Message: OracleNotFound.
 ];
 
 enum METRIC_TYPES {
