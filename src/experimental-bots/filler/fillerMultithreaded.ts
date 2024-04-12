@@ -47,8 +47,8 @@ import {
 import { assert } from 'console';
 import {
 	getFillSignatureFromUserAccountAndOrderId,
-	getNodeToFillSignature,
 	logMessageForNodeToFill,
+	getNodeToFillSignature,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
 	sleepMs,
@@ -1278,10 +1278,202 @@ export class FillerMultithreaded {
 				return;
 			}
 			this.seenFillableOrders.add(getNodeToFillSignature(node));
-			if (node.makerNodes.length > 1) {
+			if (node.makerNodes.length > 1 && !this.config.oneMakerPerFill) {
 				this.tryFillMultiMakerPerpNodes(node, buildForBundle);
+			} else if (node.makerNodes.length > 1 && this.config.oneMakerPerFill) {
+				this.tryFillOneMakerPerpNode(node, buildForBundle);
 			} else {
 				this.tryFillPerpNode(node, buildForBundle);
+			}
+		}
+	}
+
+	protected async tryFillOneMakerPerpNode(
+		nodeToFill: NodeToFillWithBuffer,
+		buildForBundle: boolean
+	) {
+		let priorityFeeIx;
+		if (!buildForBundle) {
+			priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({
+				microLamports: Math.floor(
+					this.priorityFeeSubscriber.getCustomStrategyResult()
+				),
+			});
+		}
+
+		const {
+			makerInfos,
+			takerUser,
+			takerUserPubKey,
+			takerUserSlot,
+			referrerInfo,
+			marketType,
+		} = await this.getNodeFillInfo(nodeToFill);
+
+		if (!isVariant(marketType, 'perp')) {
+			throw new Error('expected perp market type');
+		}
+
+		for (const makerInfo of makerInfos) {
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000,
+				}),
+			];
+			if (!buildForBundle && priorityFeeIx) {
+				ixs.push(priorityFeeIx);
+			}
+
+			const fillTxId = this.fillTxId++;
+			logger.info(
+				logMessageForNodeToFill(
+					nodeToFill,
+					takerUserPubKey,
+					takerUserSlot,
+					makerInfos,
+					this.slotSubscriber.getSlot(),
+					`Filling perp node (fillTxId: ${fillTxId})`
+				)
+			);
+
+			const ix = await this.driftClient.getFillPerpOrderIx(
+				await getUserAccountPublicKey(
+					this.driftClient.program.programId,
+					takerUser.authority
+				),
+				takerUser,
+				nodeToFill.node.order!,
+				makerInfo.data,
+				referrerInfo
+			);
+			ixs.push(ix);
+			if (this.revertOnFailure) {
+				ixs.push(await this.driftClient.getRevertFillIx());
+			}
+
+			const simResult = await simulateAndGetTxWithCUs(
+				ixs,
+				this.driftClient.connection,
+				this.driftClient.txSender,
+				[this.lookupTableAccount!],
+				[],
+				this.driftClient.opts,
+				SIM_CU_ESTIMATE_MULTIPLIER,
+				this.simulateTxForCUEstimate
+			);
+			logger.info(
+				`tryOneMakerFillPerpNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
+			);
+			this.simulateTxHistogram?.record(simResult.simTxDuration, {
+				type: 'singleMakerFill',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					this.driftClient.getUser().userAccountPublicKey,
+					this.driftClient.getUser().getUserAccount()
+				),
+			});
+			this.estTxCuHistogram?.record(simResult.cuEstimate, {
+				type: 'singleMakerFill',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					this.driftClient.getUser().userAccountPublicKey,
+					this.driftClient.getUser().getUserAccount()
+				),
+			});
+
+			if (simResult.simError) {
+				logger.error(
+					`simError: ${JSON.stringify(
+						simResult.simError
+					)} (fillTxId: ${fillTxId})`
+				);
+			} else {
+				const tx = simResult.tx;
+				let txResp: Promise<TxSigAndSlot> | undefined = undefined;
+				let estTxSize: number | undefined = undefined;
+				let txAccounts = 0;
+				let writeAccs = 0;
+				const accountMetas: any[] = [];
+				const txStart = Date.now();
+				// @ts-ignore;
+				tx.sign([this.driftClient.wallet.payer]);
+				const txSig = bs58.encode(tx.signatures[0]);
+
+				if (buildForBundle) {
+					await this.sendTxThroughJito(tx, fillTxId);
+					this.fillingNodes.delete(
+						getNodeToFillSignature(nodeToFill, makerInfo.data)
+					);
+				} else {
+					estTxSize = tx.message.serialize().length;
+					const acc = tx.message.getAccountKeys({
+						addressLookupTableAccounts: [this.lookupTableAccount!],
+					});
+					txAccounts = acc.length;
+					for (let i = 0; i < txAccounts; i++) {
+						const meta: any = {};
+						if (tx.message.isAccountWritable(i)) {
+							writeAccs++;
+							meta['writeable'] = true;
+						}
+						if (tx.message.isAccountSigner(i)) {
+							meta['signer'] = true;
+						}
+						meta['address'] = acc.get(i)!.toBase58();
+						accountMetas.push(meta);
+					}
+
+					txResp = this.driftClient.txSender.sendVersionedTransaction(
+						tx,
+						[],
+						this.driftClient.opts
+					);
+				}
+
+				this.registerTxSigToConfirm(
+					txSig,
+					Date.now(),
+					[nodeToFill],
+					fillTxId,
+					'fill'
+				);
+
+				if (txResp) {
+					txResp
+						.then((resp: TxSigAndSlot) => {
+							const duration = Date.now() - txStart;
+							logger.info(
+								`${logPrefix} sent tx: ${resp.txSig}, took: ${duration}ms (fillTxId: ${fillTxId})`
+							);
+						})
+						.catch(async (e) => {
+							const simError = e as SendTransactionError;
+							logger.error(
+								`${logPrefix} Failed to send packed tx txAccountKeys: ${txAccounts} (${writeAccs} writeable) (fillTxId: ${fillTxId}), error: ${simError.message}`
+							);
+
+							if (e.message.includes('too large:')) {
+								logger.error(
+									`${logPrefix}: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${
+										e.message
+									}\n${JSON.stringify(accountMetas)}`
+								);
+								return;
+							}
+
+							if (simError.logs && simError.logs.length > 0) {
+								const errorCode = getErrorCode(e);
+								logger.error(
+									`${logPrefix} Failed to send tx, sim error (fillTxId: ${fillTxId}) error code: ${errorCode}`
+								);
+							}
+						})
+						.finally(() => {
+							this.fillingNodes.delete(
+								getNodeToFillSignature(nodeToFill, makerInfo.data)
+							);
+						});
+				}
 			}
 		}
 	}

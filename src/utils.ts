@@ -182,12 +182,17 @@ export function decodeName(bytes: number[]): string {
 	return buffer.toString('utf8').trim();
 }
 
-export function getNodeToFillSignature(node: NodeToFill): string {
+export const getNodeToFillSignature = (
+	node: NodeToFill,
+	maker?: MakerInfo
+): string => {
 	if (!node.node.userAccount) {
 		return '~';
 	}
-	return `${node.node.userAccount}-${node.node.order?.orderId.toString()}`;
-}
+	return `${
+		node.node.userAccount
+	}-${node.node.order?.orderId.toString()}-${maker?.maker.toString()}`;
+};
 
 export function getFillSignatureFromUserAccountAndOrderId(
 	userAccount: string,
