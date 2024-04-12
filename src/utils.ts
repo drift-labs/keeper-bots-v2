@@ -194,9 +194,7 @@ export const getNodeToFillSignature = (
 			node.node.userAccount
 		}-${node.node.order?.orderId.toString()}-${maker.maker.toString()}`;
 	} else {
-		return `${
-			node.node.userAccount
-		}-${node.node.order?.orderId.toString()}`;
+		return `${node.node.userAccount}-${node.node.order?.orderId.toString()}`;
 	}
 };
 

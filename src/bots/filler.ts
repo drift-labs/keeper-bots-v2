@@ -90,10 +90,6 @@ import { Metrics } from '../metrics';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 
-const MAX_TX_PACK_SIZE = 1230; //1232;
-const CU_PER_FILL = 260_000; // CU cost for a successful fill
-const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
-const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
@@ -2193,237 +2189,23 @@ export class FillerBot implements Bot {
 			);
 		}
 
-		/**
-		 * At all times, the running Tx size is:
-		 * - signatures (compact-u16 array, 64 bytes per elem)
-		 * - message header (3 bytes)
-		 * - affected accounts (compact-u16 array, 32 bytes per elem)
-		 * - previous block hash (32 bytes)
-		 * - message instructions (
-		 * 		- progamIdIdx (1 byte)
-		 * 		- accountsIdx (compact-u16, 1 byte per elem)
-		 *		- instruction data (compact-u16, 1 byte per elem)
-		 */
-		let runningTxSize = 0;
-		let runningCUUsed = 0;
-
-		const uniqueAccounts = new Set<string>();
-		uniqueAccounts.add(this.driftClient.provider.wallet.publicKey.toString()); // fee payer goes first
-
-		const computeBudgetIx = ixs[0];
-		computeBudgetIx.keys.forEach((key) =>
-			uniqueAccounts.add(key.pubkey.toString())
-		);
-		uniqueAccounts.add(computeBudgetIx.programId.toString());
-
-		// initialize the barebones transaction
-		// signatures
-		runningTxSize += this.calcCompactU16EncodedSize(new Array(1), 64);
-		// message header
-		runningTxSize += 3;
-		// accounts
-		runningTxSize += this.calcCompactU16EncodedSize(
-			new Array(uniqueAccounts.size),
-			32
-		);
-		// block hash
-		runningTxSize += 32;
-		runningTxSize += this.calcIxEncodedSize(computeBudgetIx);
-
 		const nodesSent: Array<NodeToFill> = [];
-		let idxUsed = 0;
-		const startingIxsSize = ixs.length;
-		const fillTxId = this.fillTxId++;
-		for (const [idx, nodeToFill] of nodesToFill.entries()) {
+		for (const [_idx, nodeToFill] of nodesToFill.entries()) {
 			// do multi maker fills in a separate tx since they're larger
 			if (nodeToFill.makerNodes.length > 1 && !this.config.oneMakerPerFill) {
-				await this.tryFillMultiMakerPerpNode(nodeToFill, buildForBundle);
+				this.tryFillMultiMakerPerpNode(nodeToFill, buildForBundle);
 				nodesSent.push(nodeToFill);
 				continue;
-			} else if (
-				nodeToFill.makerNodes.length > 1 &&
-				this.config.oneMakerPerFill
-			) {
-				this.tryFillOneMakerPerpNode(nodeToFill, buildForBundle);
-			}
-
-			// otherwise pack fill ixs until est. tx size or CU limit is hit
-			const {
-				makerInfos,
-				takerUser,
-				takerUserPubKey,
-				takerUserSlot,
-				referrerInfo,
-				marketType,
-			} = await this.getNodeFillInfo(nodeToFill);
-
-			logger.info(
-				logMessageForNodeToFill(
-					nodeToFill,
-					takerUserPubKey,
-					takerUserSlot,
-					makerInfos,
-					this.getMaxSlot(),
-					`Filling perp node ${idx} (fillTxId: ${fillTxId})`
-				)
-			);
-			this.logSlots();
-
-			if (!isVariant(marketType, 'perp')) {
-				throw new Error('expected perp market type');
-			}
-
-			const ix = await this.driftClient.getFillPerpOrderIx(
-				await getUserAccountPublicKey(
-					this.driftClient.program.programId,
-					takerUser.authority,
-					takerUser.subAccountId
-				),
-				takerUser,
-				nodeToFill.node.order!,
-				makerInfos.map((m) => m.data),
-				referrerInfo
-			);
-
-			if (!ix) {
-				logger.error(`failed to generate an ix`);
-				break;
-			}
-
-			this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
-
-			// first estimate new tx size with this additional ix and new accounts
-			const ixKeys = ix.keys.map((key) => key.pubkey);
-			const newAccounts = ixKeys
-				.concat(ix.programId)
-				.filter((key) => !uniqueAccounts.has(key.toString()));
-			const newIxCost = this.calcIxEncodedSize(ix);
-			const additionalAccountsCost =
-				newAccounts.length > 0
-					? this.calcCompactU16EncodedSize(newAccounts, 32) - 1
-					: 0;
-
-			// We have to use MAX_TX_PACK_SIZE because it appears we cannot send tx with a size of exactly 1232 bytes.
-			// Also, some logs may get truncated near the end of the tx, so we need to leave some room for that.
-			const cuToUsePerFill = this.useBurstCULimit
-				? BURST_CU_PER_FILL
-				: CU_PER_FILL;
-			if (
-				(runningTxSize + newIxCost + additionalAccountsCost >=
-					MAX_TX_PACK_SIZE ||
-					runningCUUsed + cuToUsePerFill >= MAX_CU_PER_TX) &&
-				ixs.length > startingIxsSize + 1 // ensure at least 1 attempted fill
-			) {
-				logger.info(
-					`Fully packed fill tx (ixs: ${ixs.length}): est. tx size ${
-						runningTxSize + newIxCost + additionalAccountsCost
-					}, max: ${MAX_TX_PACK_SIZE}, est. CU used: expected ${
-						runningCUUsed + cuToUsePerFill
-					}, max: ${MAX_CU_PER_TX}, (fillTxId: ${fillTxId})`
-				);
-				break;
-			}
-
-			// add to tx
-			logger.info(
-				`including taker ${(
-					await getUserAccountPublicKey(
-						this.driftClient.program.programId,
-						takerUser.authority,
-						takerUser.subAccountId
-					)
-				).toString()}-${nodeToFill.node.order!.orderId.toString()} (slot: ${takerUserSlot}) (fillTxId: ${fillTxId}), maker: ${makerInfos
-					.map((m) => `${m.data.maker.toBase58()}: ${m.slot}`)
-					.join(', ')}`
-			);
-			ixs.push(ix);
-			runningTxSize += newIxCost + additionalAccountsCost;
-			runningCUUsed += cuToUsePerFill;
-
-			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
-			idxUsed++;
-			nodesSent.push(nodeToFill);
-		}
-
-		if (idxUsed === 0) {
-			return nodesSent.length;
-		}
-
-		if (nodesSent.length === 0) {
-			return 0;
-		}
-
-		if (this.revertOnFailure) {
-			ixs.push(await this.driftClient.getRevertFillIx());
-		}
-
-		const user = this.driftClient.getUser();
-		const simResult = await simulateAndGetTxWithCUs(
-			ixs,
-			this.driftClient.connection,
-			this.driftClient.txSender,
-			[this.lookupTableAccount!],
-			[],
-			this.driftClient.opts,
-			SIM_CU_ESTIMATE_MULTIPLIER,
-			this.simulateTxForCUEstimate,
-			await this.getBlockhashForTx()
-		);
-		this.simulateTxHistogram?.record(simResult.simTxDuration, {
-			type: 'bulkFill',
-			simError: simResult.simError !== null,
-			...metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
-			),
-		});
-		this.estTxCuHistogram?.record(simResult.cuEstimate, {
-			type: 'bulkFill',
-			simError: simResult.simError !== null,
-			...metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
-			),
-		});
-
-		if (this.simulateTxForCUEstimate && simResult.simError) {
-			logger.error(
-				`simError: ${JSON.stringify(
-					simResult.simError
-				)} (fillTxId: ${fillTxId})`
-			);
-			handleSimResultError(
-				simResult,
-				errorCodesToSuppress,
-				`${this.name}: (fillTxId: ${fillTxId})`
-			);
-			if (simResult.simTxLogs) {
-				await this.handleTransactionLogs(nodesToFill, simResult.simTxLogs);
-			}
-		} else {
-			if (this.dryRun) {
-				logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
+			} else if (this.config.oneMakerPerFill) {
+				await this.tryFillOneMakerPerpNode(nodeToFill, buildForBundle);
+				nodesSent.push(nodeToFill);
 			} else {
-				const release = await this.hasEnoughSolToFillMutex.acquire();
-				try {
-					if (this.hasEnoughSolToFill) {
-						this.sendFillTxAndParseLogs(
-							fillTxId,
-							nodesSent,
-							simResult.tx,
-							buildForBundle
-						);
-					} else {
-						logger.info(
-							`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
-						);
-					}
-				} finally {
-					release();
-				}
+				await this.tryFillPerpNode(nodeToFill, buildForBundle);
+				nodesSent.push(nodeToFill);
 			}
+			continue;
+			// Leaving below code for legacy sake
 		}
-
 		return nodesSent.length;
 	}
 

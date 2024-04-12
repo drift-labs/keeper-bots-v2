@@ -1280,7 +1280,7 @@ export class FillerMultithreaded {
 			this.seenFillableOrders.add(getNodeToFillSignature(node));
 			if (node.makerNodes.length > 1 && !this.config.oneMakerPerFill) {
 				this.tryFillMultiMakerPerpNodes(node, buildForBundle);
-			} else if (node.makerNodes.length > 1 && this.config.oneMakerPerFill) {
+			} else if (this.config.oneMakerPerFill) {
 				this.tryFillOneMakerPerpNode(node, buildForBundle);
 			} else {
 				this.tryFillPerpNode(node, buildForBundle);
