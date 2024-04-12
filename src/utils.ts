@@ -189,9 +189,15 @@ export const getNodeToFillSignature = (
 	if (!node.node.userAccount) {
 		return '~';
 	}
-	return `${
-		node.node.userAccount
-	}-${node.node.order?.orderId.toString()}-${maker?.maker.toString()}`;
+	if (maker) {
+		return `${
+			node.node.userAccount
+		}-${node.node.order?.orderId.toString()}-${maker.maker.toString()}`;
+	} else {
+		return `${
+			node.node.userAccount
+		}-${node.node.order?.orderId.toString()}`;
+	}
 };
 
 export function getFillSignatureFromUserAccountAndOrderId(
