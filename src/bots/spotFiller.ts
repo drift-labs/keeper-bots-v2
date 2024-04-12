@@ -2460,19 +2460,20 @@ export class SpotFillerBot implements Bot {
 
 			if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
 				logger.info(`Swapping USDC for SOL to rebalance filler`);
-				await swapFillerHardEarnedUSDCForSOL(
+				swapFillerHardEarnedUSDCForSOL(
 					this.priorityFeeSubscriber,
 					this.driftClient,
 					this.jupiterClient,
 					await this.getBlockhashForTx()
-				);
-				const fillerSolBalanceAfterSwap =
-					await this.driftClient.connection.getBalance(
-						this.driftClient.authority,
-						'processed'
-					);
-				this.hasEnoughSolToFill =
-					fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;
+				).then(async () => {
+					const fillerSolBalanceAfterSwap =
+						await this.driftClient.connection.getBalance(
+							this.driftClient.authority,
+							'processed'
+						);
+					this.hasEnoughSolToFill =
+						fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;
+				});
 			} else {
 				this.hasEnoughSolToFill = true;
 			}

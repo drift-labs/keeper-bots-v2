@@ -690,6 +690,14 @@ export class FillerBot implements Bot {
 	}
 
 	protected async confirmPendingTxSigs() {
+		// const release = await this.hasEnoughSolToFillMutex.acquire();
+		// try {
+		// 	if (!this.hasEnoughSolToFill) {
+		// 		return
+		// 	}
+		// } finally {
+		// 	release();
+		// }
 		const user = this.driftClient.getUser();
 		this.pendingTxSigsToConfirmGauge?.setLatestValue(
 			this.pendingTxSigsToconfirm.size,
@@ -2457,27 +2465,30 @@ export class FillerBot implements Bot {
 			const fillerSolBalance = await this.driftClient.connection.getBalance(
 				this.driftClient.authority
 			);
-
+			logger.info(`Filler SOL balance: ${fillerSolBalance}`);
 			const release = await this.hasEnoughSolToFillMutex.acquire();
 			try {
 				this.hasEnoughSolToFill =
 					fillerSolBalance >= MINIMUM_SOL_TO_CONTINUE_FILLING;
-
+				logger.info(
+					`Filler has enough SOL to fill: ${this.hasEnoughSolToFill}`
+				);
 				if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
 					logger.info(`Swapping USDC for SOL to rebalance filler`);
-					await swapFillerHardEarnedUSDCForSOL(
+					swapFillerHardEarnedUSDCForSOL(
 						this.priorityFeeSubscriber,
 						this.driftClient,
 						this.jupiterClient,
 						await this.getBlockhashForTx()
-					);
-					const fillerSolBalanceAfterSwap =
-						await this.driftClient.connection.getBalance(
-							this.driftClient.authority,
-							'processed'
-						);
-					this.hasEnoughSolToFill =
-						fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;
+					).then(async () => {
+						const fillerSolBalanceAfterSwap =
+							await this.driftClient.connection.getBalance(
+								this.driftClient.authority,
+								'processed'
+							);
+						this.hasEnoughSolToFill =
+							fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;
+					});
 				} else {
 					this.hasEnoughSolToFill = true;
 				}
