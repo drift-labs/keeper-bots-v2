@@ -261,15 +261,15 @@ const runBot = async () => {
 	};
 	let userMapSubscriptionConfig:
 		| {
-			type: 'polling';
-			frequency: number;
-			commitment?: Commitment;
-		}
+				type: 'polling';
+				frequency: number;
+				commitment?: Commitment;
+		  }
 		| {
-			type: 'websocket';
-			resubTimeoutMs?: number;
-			commitment?: Commitment;
-		} = {
+				type: 'websocket';
+				resubTimeoutMs?: number;
+				commitment?: Commitment;
+		  } = {
 		type: 'websocket',
 		resubTimeoutMs: 30_000,
 		commitment: stateCommitment,
@@ -489,12 +489,12 @@ const runBot = async () => {
 		customStrategy:
 			priorityFeeMethod === PriorityFeeMethod.HELIUS
 				? {
-					calculate: (samples: HeliusPriorityFeeResponse) => {
-						return samples.result.priorityFeeLevels![
-							HeliusPriorityLevel.HIGH
-						];
-					},
-				}
+						calculate: (samples: HeliusPriorityFeeResponse) => {
+							return samples.result.priorityFeeLevels![
+								HeliusPriorityLevel.HIGH
+							];
+						},
+				  }
 				: new AverageOverSlotsStrategy(),
 		// the specific bot will update this, if multiple bots are using this,
 		// the last one to update it will determine the addresses to use...

@@ -557,12 +557,16 @@ export class LiquidatorBot implements Bot {
 		}
 		const subAccountId = this.perpMarketToSubAccount.get(marketIndex);
 		if (subAccountId === undefined) {
-			logger.info(`no configured subaccount to liquidate perp market ${marketIndex}`);
+			logger.info(
+				`no configured subaccount to liquidate perp market ${marketIndex}`
+			);
 			return undefined;
 		}
 
 		if (!this.hasCollateralToLiquidate(subAccountId)) {
-			logger.info(`subaccount ${subAccountId} has insufficient collateral to liquidate perp market ${marketIndex}`);
+			logger.info(
+				`subaccount ${subAccountId} has insufficient collateral to liquidate perp market ${marketIndex}`
+			);
 			return undefined;
 		}
 		return subAccountId;
@@ -576,11 +580,15 @@ export class LiquidatorBot implements Bot {
 		}
 		const subAccountId = this.spotMarketToSubAccount.get(marketIndex);
 		if (subAccountId === undefined) {
-			logger.info(`no configured subaccount to liquidate spot market ${marketIndex}`);
+			logger.info(
+				`no configured subaccount to liquidate spot market ${marketIndex}`
+			);
 			return undefined;
 		}
 		if (!this.hasCollateralToLiquidate(subAccountId)) {
-			logger.info(`subaccount ${subAccountId} has insufficient collateral to liquidate spot market ${marketIndex}`);
+			logger.info(
+				`subaccount ${subAccountId} has insufficient collateral to liquidate spot market ${marketIndex}`
+			);
 			return undefined;
 		}
 		return subAccountId;
@@ -633,8 +641,8 @@ export class LiquidatorBot implements Bot {
 			marketType === 'perp'
 				? this.liquidatorConfig.deriskAlgoPerp
 				: marketType === 'spot'
-					? this.liquidatorConfig.deriskAlgoSpot
-					: undefined;
+				? this.liquidatorConfig.deriskAlgoSpot
+				: undefined;
 
 		return (
 			derisk === 'twap' && this.liquidatorConfig.twapDurationSec !== undefined
@@ -721,9 +729,10 @@ export class LiquidatorBot implements Bot {
 			`${this.name} free collateral: $${convertToNumber(
 				freeCollateral,
 				QUOTE_PRECISION
-			)}, spending at most ${(this.maxPositionTakeoverPctOfCollateralNum.toNumber() /
-				this.maxPositionTakeoverPctOfCollateralDenom.toNumber()) *
-			100.0
+			)}, spending at most ${
+				(this.maxPositionTakeoverPctOfCollateralNum.toNumber() /
+					this.maxPositionTakeoverPctOfCollateralDenom.toNumber()) *
+				100.0
 			}% per liquidation`
 		);
 	}
@@ -737,7 +746,8 @@ export class LiquidatorBot implements Bot {
 
 		if (!healthy) {
 			logger.error(
-				`Bot ${this.name} is unhealthy, last pat time: ${this.watchdogTimerLastPatTime - Date.now()
+				`Bot ${this.name} is unhealthy, last pat time: ${
+					this.watchdogTimerLastPatTime - Date.now()
 				}ms ago`
 			);
 		}
@@ -757,7 +767,7 @@ export class LiquidatorBot implements Bot {
 	): BN {
 		const slippageBN = new BN(
 			(this.liquidatorConfig.maxSlippageBps! / BPS_PRECISION) *
-			PERCENTAGE_PRECISION.toNumber()
+				PERCENTAGE_PRECISION.toNumber()
 		);
 		if (isVariant(direction, 'long')) {
 			return price
@@ -926,7 +936,9 @@ export class LiquidatorBot implements Bot {
 			);
 
 			logger.info(
-				`closed spot position for market ${spotMarketIndex.toString()} on subaccount ${subAccountId}: ${resp.txSig} `
+				`closed spot position for market ${spotMarketIndex.toString()} on subaccount ${subAccountId}: ${
+					resp.txSig
+				} `
 			);
 		}
 	}
@@ -967,7 +979,8 @@ export class LiquidatorBot implements Bot {
 			baseAssetAmount = twapProgress.getExecutionSlice(nowSec);
 			twapProgress.updateExecution(nowSec);
 			logger.info(
-				`twap progress for PERP subaccount ${subaccountId} for market ${position.marketIndex
+				`twap progress for PERP subaccount ${subaccountId} for market ${
+					position.marketIndex
 				}, tradeSize: ${baseAssetAmount.toString()}, amountRemaining: ${twapProgress
 					.getAmountRemaining()
 					.toString()}`
@@ -1023,7 +1036,8 @@ export class LiquidatorBot implements Bot {
 			));
 		} catch (e) {
 			logger.error(
-				`Failed to calculate estimated perp entry price on market: ${position.marketIndex
+				`Failed to calculate estimated perp entry price on market: ${
+					position.marketIndex
 				}, amt: ${baseAssetAmount.toString()}, ${getVariant(direction)}`
 			);
 			throw e;
@@ -1093,7 +1107,8 @@ export class LiquidatorBot implements Bot {
 
 					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 						webhookMessage(
-							`[${this.name}]: :x: error in placePerpOrder in market ${position.marketIndex
+							`[${this.name}]: :x: error in placePerpOrder in market ${
+								position.marketIndex
 							}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 						);
 					}
@@ -1109,7 +1124,8 @@ export class LiquidatorBot implements Bot {
 				const userAccountPubkey =
 					await this.driftClient.getUserAccountPublicKey();
 				logger.info(
-					`Settling negative perp pnl for ${userAccountPubkey.toBase58()} on market ${position.marketIndex
+					`Settling negative perp pnl for ${userAccountPubkey.toBase58()} on market ${
+						position.marketIndex
 					}`
 				);
 				const ix = await this.driftClient.getSettlePNLsIxs(
@@ -1129,7 +1145,8 @@ export class LiquidatorBot implements Bot {
 				);
 				if (simResult.simError !== null) {
 					logger.error(
-						`Error in SettlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${position.marketIndex
+						`Error in SettlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${
+							position.marketIndex
 						}`
 					);
 					const errorCode = handleSimResultError(
@@ -1139,8 +1156,10 @@ export class LiquidatorBot implements Bot {
 					);
 					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 						webhookMessage(
-							`[${this.name
-							}]: :x: error in settlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${position.marketIndex
+							`[${
+								this.name
+							}]: :x: error in settlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${
+								position.marketIndex
 							}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 						);
 					}
@@ -1151,7 +1170,8 @@ export class LiquidatorBot implements Bot {
 						this.driftClient.opts
 					);
 					logger.info(
-						`did settle negative pnl for ${userAccountPubkey.toBase58()} on market ${position.marketIndex
+						`did settle negative pnl for ${userAccountPubkey.toBase58()} on market ${
+							position.marketIndex
 						} tx: ${resp.txSig} `
 					);
 				}
@@ -1165,7 +1185,8 @@ export class LiquidatorBot implements Bot {
 					const userAccountPubkey =
 						await this.driftClient.getUserAccountPublicKey();
 					logger.info(
-						`Settling positive perp pnl for ${userAccountPubkey.toBase58()} on market ${position.marketIndex
+						`Settling positive perp pnl for ${userAccountPubkey.toBase58()} on market ${
+							position.marketIndex
 						}`
 					);
 					const ix = await this.driftClient.getSettlePNLsIxs(
@@ -1185,7 +1206,8 @@ export class LiquidatorBot implements Bot {
 						);
 					if (simResult.simError !== null) {
 						logger.error(
-							`Error in SettlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${position.marketIndex
+							`Error in SettlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${
+								position.marketIndex
 							}`
 						);
 						const errorCode = handleSimResultError(
@@ -1195,9 +1217,12 @@ export class LiquidatorBot implements Bot {
 						);
 						if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 							webhookMessage(
-								`[${this.name
-								}]: :x: error in settlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${position.marketIndex
-								}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+								`[${
+									this.name
+								}]: :x: error in settlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${
+									position.marketIndex
+								}: \n${
+									simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 								}`
 							);
 						}
@@ -1209,7 +1234,8 @@ export class LiquidatorBot implements Bot {
 								this.driftClient.opts
 							);
 						logger.info(
-							`did settle positive pnl for ${userAccountPubkey.toBase58()} on market ${position.marketIndex
+							`did settle positive pnl for ${userAccountPubkey.toBase58()} on market ${
+								position.marketIndex
 							} tx: ${resp.txSig} `
 						);
 					}
@@ -1278,7 +1304,8 @@ export class LiquidatorBot implements Bot {
 		logger.info(
 			`Getting jupiter quote, ${getVariant(
 				orderDirection
-			)} amount: ${amountIn.toString()}, inMarketIdx: ${inMarket.marketIndex
+			)} amount: ${amountIn.toString()}, inMarketIdx: ${
+				inMarket.marketIndex
 			}, outMarketIdx: ${outMarket.marketIndex}, slippageBps: ${slippageBps}`
 		);
 		let quote: QuoteResponse | undefined;
@@ -1392,7 +1419,8 @@ export class LiquidatorBot implements Bot {
 			tokenAmount = twapProgress.getExecutionSlice(nowSec);
 			twapProgress.updateExecution(nowSec);
 			logger.info(
-				`twap progress for SPOT subaccount ${subaccountId} for market ${position.marketIndex
+				`twap progress for SPOT subaccount ${subaccountId} for market ${
+					position.marketIndex
 				}, tradeSize: ${tokenAmount.toString()}, amountRemaining: ${twapProgress
 					.getAmountRemaining()
 					.toString()}`
@@ -1602,7 +1630,8 @@ export class LiquidatorBot implements Bot {
 			);
 			if (this.liquidatorConfig.notifyOnLiquidation) {
 				webhookMessage(
-					`[${this.name
+					`[${
+						this.name
 					}]: Resolving perp market for userAcc: ${userKey.toBase58()}, marketIndex: ${perpIdx} `
 				);
 			}
@@ -1628,8 +1657,10 @@ export class LiquidatorBot implements Bot {
 				);
 				if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 					webhookMessage(
-						`[${this.name
-						}]: :x: error in resolveBankruptcy for userAccount ${userKey.toBase58()}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+						`[${
+							this.name
+						}]: :x: error in resolveBankruptcy for userAccount ${userKey.toBase58()}: \n${
+							simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 						}`
 					);
 				}
@@ -1640,7 +1671,8 @@ export class LiquidatorBot implements Bot {
 					this.driftClient.opts
 				);
 				logger.info(
-					`did resolveBankruptcy for ${userKey.toBase58()} in perp market ${perpIdx} tx: ${resp.txSig
+					`did resolveBankruptcy for ${userKey.toBase58()} in perp market ${perpIdx} tx: ${
+						resp.txSig
 					} `
 				);
 			}
@@ -1652,7 +1684,8 @@ export class LiquidatorBot implements Bot {
 			);
 			if (this.liquidatorConfig.notifyOnLiquidation) {
 				webhookMessage(
-					`[${this.name
+					`[${
+						this.name
 					}]: Resolving spot market for userAcc: ${userKey.toBase58()}, marketIndex: ${spotIdx} `
 				);
 			}
@@ -1679,8 +1712,10 @@ export class LiquidatorBot implements Bot {
 				);
 				if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 					webhookMessage(
-						`[${this.name
-						}]: :x: error in resolveBankruptcy for userAccount ${userKey.toBase58()}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+						`[${
+							this.name
+						}]: :x: error in resolveBankruptcy for userAccount ${userKey.toBase58()}: \n${
+							simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 						}`
 					);
 				}
@@ -1691,7 +1726,8 @@ export class LiquidatorBot implements Bot {
 					this.driftClient.opts
 				);
 				logger.info(
-					`did resolveBankruptcy for ${userKey.toBase58()} in spot market ${spotIdx} tx: ${resp.txSig
+					`did resolveBankruptcy for ${userKey.toBase58()} in spot market ${spotIdx} tx: ${
+						resp.txSig
 					} `
 				);
 			}
@@ -1699,16 +1735,22 @@ export class LiquidatorBot implements Bot {
 	}
 
 	private getCollateralAvailableToLiquidate(subAccountId: number): BN {
-		const currUser = this.driftClient.getUser(subAccountId);;
-		const freeCollateral = currUser.getFreeCollateral('Initial')
-		return freeCollateral.mul(this.maxPositionTakeoverPctOfCollateralNum).div(this.maxPositionTakeoverPctOfCollateralDenom);
+		const currUser = this.driftClient.getUser(subAccountId);
+		const freeCollateral = currUser.getFreeCollateral('Initial');
+		return freeCollateral
+			.mul(this.maxPositionTakeoverPctOfCollateralNum)
+			.div(this.maxPositionTakeoverPctOfCollateralDenom);
 	}
 
 	private hasCollateralToLiquidate(subAccountId: number): boolean {
-		const currUser = this.driftClient.getUser(subAccountId);;
-		const freeCollateral = currUser.getFreeCollateral('Initial')
-		const subAccountValue = new BN(calculateAccountValueUsd(currUser) * QUOTE_PRECISION.toNumber());
-		const minFreeCollateral = subAccountValue.mul(this.maxPositionTakeoverPctOfCollateralNum).div(this.maxPositionTakeoverPctOfCollateralDenom);
+		const currUser = this.driftClient.getUser(subAccountId);
+		const freeCollateral = currUser.getFreeCollateral('Initial');
+		const subAccountValue = new BN(
+			calculateAccountValueUsd(currUser) * QUOTE_PRECISION.toNumber()
+		);
+		const minFreeCollateral = subAccountValue
+			.mul(this.maxPositionTakeoverPctOfCollateralNum)
+			.div(this.maxPositionTakeoverPctOfCollateralDenom);
 		return freeCollateral.gte(minFreeCollateral);
 	}
 
@@ -1718,10 +1760,15 @@ export class LiquidatorBot implements Bot {
 		borrowAmountToLiq: BN,
 		user: User
 	) {
-		const borrowMarket = this.driftClient.getSpotMarketAccount(borrowMarketIndextoLiq)!;
+		const borrowMarket = this.driftClient.getSpotMarketAccount(
+			borrowMarketIndextoLiq
+		)!;
 		const spotPrecision = TEN.pow(new BN(borrowMarket.decimals));
 		logger.info(
-			`liqBorrow: ${user.userAccountPublicKey.toBase58()} amountToLiq: ${convertToNumber(borrowAmountToLiq, spotPrecision)} on market ${borrowMarketIndextoLiq}`
+			`liqBorrow: ${user.userAccountPublicKey.toBase58()} amountToLiq: ${convertToNumber(
+				borrowAmountToLiq,
+				spotPrecision
+			)} on market ${borrowMarketIndextoLiq}`
 		);
 
 		const subAccountToLiqSpot = this.getSubAccountIdToLiquidateSpot(
@@ -1732,17 +1779,30 @@ export class LiquidatorBot implements Bot {
 		}
 
 		const currUser = this.driftClient.getUser(subAccountToLiqSpot);
-		const oracle = this.driftClient.getOracleDataForSpotMarket(borrowMarketIndextoLiq);
-		const borrowValue = getTokenValue(borrowAmountToLiq, borrowMarket.decimals, oracle)
+		const oracle = this.driftClient.getOracleDataForSpotMarket(
+			borrowMarketIndextoLiq
+		);
+		const borrowValue = getTokenValue(
+			borrowAmountToLiq,
+			borrowMarket.decimals,
+			oracle
+		);
 		const subAccountValue = calculateAccountValueUsd(currUser);
-		const freeCollateral = currUser.getFreeCollateral('Initial')
-		const collateralAvailable = freeCollateral.mul(this.maxPositionTakeoverPctOfCollateralNum).div(this.maxPositionTakeoverPctOfCollateralDenom);
+		const freeCollateral = currUser.getFreeCollateral('Initial');
+		const collateralAvailable = freeCollateral
+			.mul(this.maxPositionTakeoverPctOfCollateralNum)
+			.div(this.maxPositionTakeoverPctOfCollateralDenom);
 
 		let amountToLiqBN = borrowAmountToLiq;
 		if (borrowValue.gt(collateralAvailable)) {
-			amountToLiqBN = spotPrecision.mul(collateralAvailable).div(oracle.price)
+			amountToLiqBN = spotPrecision.mul(collateralAvailable).div(oracle.price);
 		}
-		logger.info(`Subaccount ${subAccountToLiqSpot}: BorrowValue: ${borrowValue}, accountValue: ${subAccountValue}, collateralAvailable: ${convertToNumber(collateralAvailable, QUOTE_PRECISION)}, amountToLiq: ${convertToNumber(amountToLiqBN, spotPrecision)}`)
+		logger.info(
+			`Subaccount ${subAccountToLiqSpot}: BorrowValue: ${borrowValue}, accountValue: ${subAccountValue}, collateralAvailable: ${convertToNumber(
+				collateralAvailable,
+				QUOTE_PRECISION
+			)}, amountToLiq: ${convertToNumber(amountToLiqBN, spotPrecision)}`
+		);
 
 		const ix = await this.driftClient.getLiquidateSpotIx(
 			user.userAccountPublicKey,
@@ -1770,8 +1830,10 @@ export class LiquidatorBot implements Bot {
 			);
 			if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 				webhookMessage(
-					`[${this.name
-					}]: :x: error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+					`[${
+						this.name
+					}]: :x: error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()}: \n${
+						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 					}`
 				);
 			}
@@ -1782,14 +1844,17 @@ export class LiquidatorBot implements Bot {
 				this.driftClient.opts
 			);
 			logger.info(
-				`did liquidateSpot for ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq} tx: ${resp.txSig
+				`did liquidateSpot for ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq} tx: ${
+					resp.txSig
 				} `
 			);
 
 			if (this.liquidatorConfig.notifyOnLiquidation) {
 				webhookMessage(
-					`[${this.name
-					}]: liquidateBorrow for userAccount ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq} tx: ${resp.txSig
+					`[${
+						this.name
+					}]: liquidateBorrow for userAccount ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq} tx: ${
+						resp.txSig
 					} `
 				);
 			}
@@ -1807,7 +1872,8 @@ export class LiquidatorBot implements Bot {
 		borrowAmountToLiq: BN
 	) {
 		logger.info(
-			`liqPerpPnl: ${user.userAccountPublicKey.toBase58()} depositAmountToLiq: ${depositAmountToLiq.toString()} (depMktIndex: ${depositMarketIndextoLiq}). borrowAmountToLiq: ${borrowAmountToLiq.toString()} (brwMktIndex: ${borrowMarketIndextoLiq}). liqeePositionQuoteAmount: ${liquidateePosition.quoteAssetAmount.toNumber()} (perpMktIdx: ${perpMarketAccount.marketIndex
+			`liqPerpPnl: ${user.userAccountPublicKey.toBase58()} depositAmountToLiq: ${depositAmountToLiq.toString()} (depMktIndex: ${depositMarketIndextoLiq}). borrowAmountToLiq: ${borrowAmountToLiq.toString()} (brwMktIndex: ${borrowMarketIndextoLiq}). liqeePositionQuoteAmount: ${liquidateePosition.quoteAssetAmount.toNumber()} (perpMktIdx: ${
+				perpMarketAccount.marketIndex
 			})`
 		);
 
@@ -1988,7 +2054,8 @@ export class LiquidatorBot implements Bot {
 
 				if (simResult.simError !== null) {
 					logger.error(
-						`Error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+						`Error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+							liquidateePosition.marketIndex
 						}`
 					);
 					const errorCode = handleSimResultError(
@@ -1998,8 +2065,10 @@ export class LiquidatorBot implements Bot {
 					);
 					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 						webhookMessage(
-							`[${this.name
-							}]: :x: error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+							`[${
+								this.name
+							}]: :x: error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
 							}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 						);
 					} else {
@@ -2015,20 +2084,24 @@ export class LiquidatorBot implements Bot {
 						this.driftClient.opts
 					);
 					logger.info(
-						`did liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+						`did liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+							liquidateePosition.marketIndex
 						} tx: ${resp.txSig} `
 					);
 					if (this.liquidatorConfig.notifyOnLiquidation) {
 						webhookMessage(
-							`[${this.name
-							}]: liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+							`[${
+								this.name
+							}]: liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
 							} tx: ${resp.txSig} `
 						);
 					}
 				}
 			} catch (err) {
 				logger.error(
-					`Error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+					`Error in liquidatePerpPnlForDeposit for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+						liquidateePosition.marketIndex
 					}`
 				);
 				console.error(err);
@@ -2116,7 +2189,8 @@ export class LiquidatorBot implements Bot {
 					const now = Date.now();
 					if (lastAttempt + LIQUIDATE_THROTTLE_BACKOFF > now) {
 						logger.warn(
-							`skipping user(throttled, retry in ${lastAttempt + LIQUIDATE_THROTTLE_BACKOFF - now
+							`skipping user(throttled, retry in ${
+								lastAttempt + LIQUIDATE_THROTTLE_BACKOFF - now
 							}ms) ${auth}: ${userKey} `
 						);
 						continue;
@@ -2264,7 +2338,8 @@ export class LiquidatorBot implements Bot {
 							);
 						if (simResult.simError !== null) {
 							logger.error(
-								`Error in liquidatePerp for userAccount ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+								`Error in liquidatePerp for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+									liquidateePosition.marketIndex
 								}`
 							);
 							const errorCode = handleSimResultError(
@@ -2274,9 +2349,12 @@ export class LiquidatorBot implements Bot {
 							);
 							if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 								webhookMessage(
-									`[${this.name
-									}]: :x: error in liquidatePerp for userAccount ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
-									}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+									`[${
+										this.name
+									}]: :x: error in liquidatePerp for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+										liquidateePosition.marketIndex
+									}: \n${
+										simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 									}`
 								);
 							} else {
@@ -2293,20 +2371,24 @@ export class LiquidatorBot implements Bot {
 									this.driftClient.opts
 								);
 							logger.info(
-								`did liquidatePerp for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+								`did liquidatePerp for ${user.userAccountPublicKey.toBase58()} on market ${
+									liquidateePosition.marketIndex
 								} tx: ${resp.txSig} `
 							);
 							if (this.liquidatorConfig.notifyOnLiquidation) {
 								webhookMessage(
-									`[${this.name
-									}]: liquidatePerp for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+									`[${
+										this.name
+									}]: liquidatePerp for ${user.userAccountPublicKey.toBase58()} on market ${
+										liquidateePosition.marketIndex
 									} tx: ${resp.txSig} `
 								);
 							}
 						}
 					} else if (liquidateeHasLpPos) {
 						logger.info(
-							`liquidatePerp ${auth}-${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+							`liquidatePerp ${auth}-${user.userAccountPublicKey.toBase58()} on market ${
+								liquidateePosition.marketIndex
 							} has lp shares but no perp pos, trying to clear it:`
 						);
 
@@ -2326,7 +2408,8 @@ export class LiquidatorBot implements Bot {
 							);
 						if (simResult.simError !== null) {
 							logger.error(
-								`Error in liquidatePerp (with lp shares and no perp pos) for userAccount ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+								`Error in liquidatePerp (with lp shares and no perp pos) for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+									liquidateePosition.marketIndex
 								}`
 							);
 							const errorCode = handleSimResultError(
@@ -2336,9 +2419,12 @@ export class LiquidatorBot implements Bot {
 							);
 							if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 								webhookMessage(
-									`[${this.name
-									}]: :x: error in liquidatePerp (with lp shares and no perp pos) for userAccount ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
-									}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+									`[${
+										this.name
+									}]: :x: error in liquidatePerp (with lp shares and no perp pos) for userAccount ${user.userAccountPublicKey.toBase58()} on market ${
+										liquidateePosition.marketIndex
+									}: \n${
+										simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 									}`
 								);
 							} else {
@@ -2355,13 +2441,16 @@ export class LiquidatorBot implements Bot {
 									this.driftClient.opts
 								);
 							logger.info(
-								`did liquidatePerp (with lp shares and no perp pos) for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+								`did liquidatePerp (with lp shares and no perp pos) for ${user.userAccountPublicKey.toBase58()} on market ${
+									liquidateePosition.marketIndex
 								} tx: ${resp.txSig} `
 							);
 							if (this.liquidatorConfig.notifyOnLiquidation) {
 								webhookMessage(
-									`[${this.name
-									}]: liquidatePerp (with lp shares and no perp pos) for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePosition.marketIndex
+									`[${
+										this.name
+									}]: liquidatePerp (with lp shares and no perp pos) for ${user.userAccountPublicKey.toBase58()} on market ${
+										liquidateePosition.marketIndex
 									} tx: ${resp.txSig} `
 								);
 							}
@@ -2414,8 +2503,10 @@ export class LiquidatorBot implements Bot {
 							);
 							if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 								webhookMessage(
-									`[${this.name
-									}]: :x: error in liquidatePerp (with open orders and no perp pos) for userAccount ${user.userAccountPublicKey.toBase58()} on market ${liquidateePerpIndexWithOpenOrders}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+									`[${
+										this.name
+									}]: :x: error in liquidatePerp (with open orders and no perp pos) for userAccount ${user.userAccountPublicKey.toBase58()} on market ${liquidateePerpIndexWithOpenOrders}: \n${
+										simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 									}`
 								);
 							} else {
@@ -2432,13 +2523,16 @@ export class LiquidatorBot implements Bot {
 									this.driftClient.opts
 								);
 							logger.info(
-								`did liquidatePerp (with open orders and no perp pos) for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePerpIndexWithOpenOrders} tx: ${resp.txSig
+								`did liquidatePerp (with open orders and no perp pos) for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePerpIndexWithOpenOrders} tx: ${
+									resp.txSig
 								} `
 							);
 							if (this.liquidatorConfig.notifyOnLiquidation) {
 								webhookMessage(
-									`[${this.name
-									}]: liquidatePerp (with open orders and no perp pos) for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePerpIndexWithOpenOrders} tx: ${resp.txSig
+									`[${
+										this.name
+									}]: liquidatePerp (with open orders and no perp pos) for ${user.userAccountPublicKey.toBase58()} on market ${liquidateePerpIndexWithOpenOrders} tx: ${
+										resp.txSig
 									} `
 								);
 							}
@@ -2484,8 +2578,10 @@ export class LiquidatorBot implements Bot {
 							);
 							if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 								webhookMessage(
-									`[${this.name
-									}]: :x: error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${indexWithOpenOrders}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+									`[${
+										this.name
+									}]: :x: error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} on market ${indexWithOpenOrders}: \n${
+										simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 									}`
 								);
 							} else {
@@ -2502,13 +2598,16 @@ export class LiquidatorBot implements Bot {
 									this.driftClient.opts
 								);
 							logger.info(
-								`did liquidateSpot for ${user.userAccountPublicKey.toBase58()} on market ${indexWithOpenOrders} tx: ${resp.txSig
+								`did liquidateSpot for ${user.userAccountPublicKey.toBase58()} on market ${indexWithOpenOrders} tx: ${
+									resp.txSig
 								} `
 							);
 							if (this.liquidatorConfig.notifyOnLiquidation) {
 								webhookMessage(
-									`[${this.name
-									}]: liquidateSpot for ${user.userAccountPublicKey.toBase58()} on market ${indexWithOpenOrders} tx: ${resp.txSig
+									`[${
+										this.name
+									}]: liquidateSpot for ${user.userAccountPublicKey.toBase58()} on market ${indexWithOpenOrders} tx: ${
+										resp.txSig
 									} `
 								);
 							}
@@ -2519,7 +2618,8 @@ export class LiquidatorBot implements Bot {
 				// liquidate the user to bring them out of liquidation status, can liquidate any market even
 				// if the user doesn't have a position in it
 				logger.info(
-					`[${this.name
+					`[${
+						this.name
 					}]: user stuck in beingLiquidated status, need to clear it for ${user.userAccountPublicKey.toBase58()}`
 				);
 
@@ -2548,7 +2648,8 @@ export class LiquidatorBot implements Bot {
 					);
 					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 						webhookMessage(
-							`[${this.name
+							`[${
+								this.name
 							}]: :x: error in liquidatePerp for userAccount ${user.userAccountPublicKey.toBase58()} stuck in liq status
 							}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 						);
@@ -2565,7 +2666,8 @@ export class LiquidatorBot implements Bot {
 						this.driftClient.opts
 					);
 					logger.info(
-						`did liquidatePerp for ${user.userAccountPublicKey.toBase58()} stuck in liq status tx: ${resp.txSig
+						`did liquidatePerp for ${user.userAccountPublicKey.toBase58()} stuck in liq status tx: ${
+							resp.txSig
 						} `
 					);
 				}
@@ -2608,15 +2710,18 @@ export class LiquidatorBot implements Bot {
 			console.error(e);
 			if (e instanceof Error) {
 				webhookMessage(
-					`[${this.name}]: :x: uncaught error: \n${e.stack ? e.stack : e.message
+					`[${this.name}]: :x: uncaught error: \n${
+						e.stack ? e.stack : e.message
 					} `
 				);
 			}
 		} finally {
 			if (ran) {
 				logger.debug(
-					`${this.name
-					} Bot checked ${checkedUsers} users, ${liquidatableUsers} liquidateable took ${Date.now() - start
+					`${
+						this.name
+					} Bot checked ${checkedUsers} users, ${liquidatableUsers} liquidateable took ${
+						Date.now() - start
 					}ms to run`
 				);
 				this.watchdogTimerLastPatTime = Date.now();
