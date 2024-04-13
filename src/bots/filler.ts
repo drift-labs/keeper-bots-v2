@@ -111,7 +111,6 @@ export const TX_CONFIRMATION_BATCH_SIZE = 100;
 export const TX_TIMEOUT_THRESHOLD_MS = 60_000; // tx considered stale after this time and give up confirming
 export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until trying to confirm tx again if rate limited
 export const CACHED_BLOCKHASH_OFFSET = 5;
-export const MINIMUM_SOL_TO_CONTINUE_FILLING = 0.1 * LAMPORTS_PER_SOL;
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
@@ -208,7 +207,6 @@ export class FillerBot implements Bot {
 		Date.now() - CONFIRM_TX_RATE_LIMIT_BACKOFF_MS;
 
 	protected hasEnoughSolToFill: boolean = true;
-	protected hasEnoughSolToFillMutex = new Mutex();
 
 	protected jupiterClient?: JupiterClient;
 
@@ -240,6 +238,7 @@ export class FillerBot implements Bot {
 	protected jitoBundleCount?: GaugeValue;
 
 	protected rebalanceFiller?: boolean;
+	protected minimumAmountToFill: number;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -305,10 +304,16 @@ export class FillerBot implements Bot {
 				connection: this.driftClient.connection,
 			});
 		}
-		this.rebalanceFiller = config.rebalanceFiller ?? false;
+		this.rebalanceFiller = config.rebalanceFiller ?? true;
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
+
+		if (config.minimumAmountToFill === undefined) {
+			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
+		} else {
+			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
+		}
 
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
 		this.priorityFeeSubscriber.updateAddresses([
@@ -1801,22 +1806,17 @@ export class FillerBot implements Bot {
 				if (this.dryRun) {
 					logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
 				} else {
-					const release = await this.hasEnoughSolToFillMutex.acquire();
-					try {
-						if (this.hasEnoughSolToFill) {
-							this.sendFillTxAndParseLogs(
-								fillTxId,
-								[nodeToFill],
-								simResult.tx,
-								buildForBundle
-							);
-						} else {
-							logger.info(
-								`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
-							);
-						}
-					} finally {
-						release();
+					if (this.hasEnoughSolToFill) {
+						this.sendFillTxAndParseLogs(
+							fillTxId,
+							[nodeToFill],
+							simResult.tx,
+							buildForBundle
+						);
+					} else {
+						logger.info(
+							`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
+						);
 					}
 				}
 			}
@@ -2115,22 +2115,17 @@ export class FillerBot implements Bot {
 			if (this.dryRun) {
 				logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
 			} else {
-				const release = await this.hasEnoughSolToFillMutex.acquire();
-				try {
-					if (this.hasEnoughSolToFill) {
-						this.sendFillTxAndParseLogs(
-							fillTxId,
-							nodesSent,
-							simResult.tx,
-							buildForBundle
-						);
-					} else {
-						logger.info(
-							`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
-						);
-					}
-				} finally {
-					release();
+				if (this.hasEnoughSolToFill) {
+					this.sendFillTxAndParseLogs(
+						fillTxId,
+						nodesSent,
+						simResult.tx,
+						buildForBundle
+					);
+				} else {
+					logger.info(
+						`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
+					);
 				}
 			}
 		}
@@ -2251,53 +2246,48 @@ export class FillerBot implements Bot {
 				);
 			} else {
 				if (!this.dryRun) {
-					const release = await this.hasEnoughSolToFillMutex.acquire();
-					try {
-						if (this.hasEnoughSolToFill) {
-							// Assuming the SOL check is now within the mutex's scope
-							// @ts-ignore;
-							simResult.tx.sign([this.driftClient.wallet.payer]);
-							const txSig = bs58.encode(simResult.tx.signatures[0]);
-							this.registerTxSigToConfirm(txSig, Date.now(), [], -1, 'trigger');
+					if (this.hasEnoughSolToFill) {
+						// Assuming the SOL check is now within the mutex's scope
+						// @ts-ignore;
+						simResult.tx.sign([this.driftClient.wallet.payer]);
+						const txSig = bs58.encode(simResult.tx.signatures[0]);
+						this.registerTxSigToConfirm(txSig, Date.now(), [], -1, 'trigger');
 
-							if (buildForBundle) {
-								this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
-							} else if (this.canSendOutsideJito()) {
-								this.driftClient
-									.sendTransaction(simResult.tx)
-									.catch((error) => {
-										nodeToTrigger.node.haveTrigger = false;
+						if (buildForBundle) {
+							this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
+						} else if (this.canSendOutsideJito()) {
+							this.driftClient
+								.sendTransaction(simResult.tx)
+								.catch((error) => {
+									nodeToTrigger.node.haveTrigger = false;
 
-										const errorCode = getErrorCode(error);
-										if (
-											errorCode &&
-											!errorCodesToSuppress.includes(errorCode) &&
-											!(error as Error).message.includes(
-												'Transaction was not confirmed'
-											)
-										) {
-											logger.error(
-												`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-											);
-											logger.error(error);
-											webhookMessage(
-												`[${
-													this.name
-												}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-													error.stack ? error.stack : error.message
-												}`
-											);
-										}
-									})
-									.finally(() => {
-										this.removeTriggeringNodes(nodeToTrigger);
-									});
-							}
-						} else {
-							logger.info(`Not enough SOL to fill, not triggering node`);
+									const errorCode = getErrorCode(error);
+									if (
+										errorCode &&
+										!errorCodesToSuppress.includes(errorCode) &&
+										!(error as Error).message.includes(
+											'Transaction was not confirmed'
+										)
+									) {
+										logger.error(
+											`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+										);
+										logger.error(error);
+										webhookMessage(
+											`[${
+												this.name
+											}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+												error.stack ? error.stack : error.message
+											}`
+										);
+									}
+								})
+								.finally(() => {
+									this.removeTriggeringNodes(nodeToTrigger);
+								});
 						}
-					} finally {
-						release();
+					} else {
+						logger.info(`Not enough SOL to fill, not triggering node`);
 					}
 				} else {
 					logger.info(`dry run, not triggering node`);
@@ -2457,31 +2447,25 @@ export class FillerBot implements Bot {
 			const fillerSolBalance = await this.driftClient.connection.getBalance(
 				this.driftClient.authority
 			);
-			const release = await this.hasEnoughSolToFillMutex.acquire();
-			try {
-				this.hasEnoughSolToFill =
-					fillerSolBalance >= MINIMUM_SOL_TO_CONTINUE_FILLING;
-				if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
-					logger.info(`Swapping USDC for SOL to rebalance filler`);
-					swapFillerHardEarnedUSDCForSOL(
-						this.priorityFeeSubscriber,
-						this.driftClient,
-						this.jupiterClient,
-						await this.getBlockhashForTx()
-					).then(async () => {
-						const fillerSolBalanceAfterSwap =
-							await this.driftClient.connection.getBalance(
-								this.driftClient.authority,
-								'processed'
-							);
-						this.hasEnoughSolToFill =
-							fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;
-					});
-				} else {
-					this.hasEnoughSolToFill = true;
-				}
-			} finally {
-				release();
+			this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
+			if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
+				logger.info(`Swapping USDC for SOL to rebalance filler`);
+				swapFillerHardEarnedUSDCForSOL(
+					this.priorityFeeSubscriber,
+					this.driftClient,
+					this.jupiterClient,
+					await this.getBlockhashForTx()
+				).then(async () => {
+					const fillerSolBalanceAfterSwap =
+						await this.driftClient.connection.getBalance(
+							this.driftClient.authority,
+							'processed'
+						);
+					this.hasEnoughSolToFill =
+						fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
+				});
+			} else {
+				this.hasEnoughSolToFill = true;
 			}
 		}
 	}
@@ -2511,17 +2495,12 @@ export class FillerBot implements Bot {
 
 		try {
 			// Check hasEnoughSolToFill before trying to fill, we do not want to fill if we don't have enough SOL
-			const release = await this.hasEnoughSolToFillMutex.acquire();
-			try {
-				if (!this.hasEnoughSolToFill) {
-					logger.info(`Not enough SOL to fill, skipping fill`);
-					await this.watchdogTimerMutex.runExclusive(async () => {
-						this.watchdogTimerLastPatTime = Date.now();
-					});
-					return;
-				}
-			} finally {
-				release();
+			if (!this.hasEnoughSolToFill) {
+				logger.info(`Not enough SOL to fill, skipping fill`);
+				await this.watchdogTimerMutex.runExclusive(async () => {
+					this.watchdogTimerLastPatTime = Date.now();
+				});
+				return;
 			}
 
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {

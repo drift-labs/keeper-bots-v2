@@ -30,6 +30,7 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 	Connection,
+	LAMPORTS_PER_SOL,
 	PublicKey,
 	SendTransactionError,
 	TransactionInstruction,
@@ -74,7 +75,6 @@ import {
 } from '@opentelemetry/sdk-metrics-base';
 import {
 	CONFIRM_TX_RATE_LIMIT_BACKOFF_MS,
-	MINIMUM_SOL_TO_CONTINUE_FILLING,
 	TX_TIMEOUT_THRESHOLD_MS,
 	TxType,
 } from '../../bots/filler';
@@ -90,7 +90,6 @@ import {
 	isTakerBreachedMaintenanceMarginLog,
 } from '../../bots/common/txLogParse';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
-import { Mutex } from 'async-mutex';
 
 const logPrefix = '[Filler]';
 
@@ -223,7 +222,8 @@ export class FillerMultithreaded {
 
 	protected rebalanceFiller?: boolean;
 	protected hasEnoughSolToFill: boolean = true;
-	protected hasEnoughSolToFillMutex = new Mutex();
+	protected minimumAmountToFill: number;
+
 	protected jupiterClient?: JupiterClient;
 
 	constructor(
@@ -280,9 +280,19 @@ export class FillerMultithreaded {
 				connection: this.driftClient.connection,
 			});
 		}
-		this.rebalanceFiller = config.rebalanceFiller ?? false;
+		this.rebalanceFiller = config.rebalanceFiller ?? true;
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
+		);
+
+		if (config.minimumAmountToFill === undefined) {
+			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
+		} else {
+			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
+		}
+
+		logger.info(
+			`${this.name}: minimumAmountToFill: ${this.minimumAmountToFill}`
 		);
 
 		this.pendingTxSigsToconfirm = new LRUCache<
@@ -925,16 +935,11 @@ export class FillerMultithreaded {
 	public async triggerNodes(
 		serializedNodesToTrigger: SerializedNodeToTrigger[]
 	) {
-		const release = await this.hasEnoughSolToFillMutex.acquire();
-		try {
-			if (!this.hasEnoughSolToFill) {
-				logger.info(
-					`Not enough SOL to fill, skipping executeTriggerablePerpNodes`
-				);
-				return;
-			}
-		} finally {
-			release();
+		if (!this.hasEnoughSolToFill) {
+			logger.info(
+				`Not enough SOL to fill, skipping executeTriggerablePerpNodes`
+			);
+			return;
 		}
 
 		logger.info(
@@ -1124,14 +1129,9 @@ export class FillerMultithreaded {
 	}
 
 	public async fillNodes(serializedNodesToFill: SerializedNodeToFill[]) {
-		const release = await this.hasEnoughSolToFillMutex.acquire();
-		try {
-			if (!this.hasEnoughSolToFill) {
-				logger.info(`Not enough SOL to fill, skipping fillNodes`);
-				return;
-			}
-		} finally {
-			release();
+		if (!this.hasEnoughSolToFill) {
+			logger.info(`Not enough SOL to fill, skipping fillNodes`);
+			return;
 		}
 
 		logger.debug(
@@ -1786,32 +1786,26 @@ export class FillerMultithreaded {
 				this.driftClient.authority
 			);
 
-			const release = await this.hasEnoughSolToFillMutex.acquire();
-			try {
-				this.hasEnoughSolToFill =
-					fillerSolBalance >= MINIMUM_SOL_TO_CONTINUE_FILLING;
+			this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
 
-				if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
-					logger.info(`Swapping USDC for SOL to rebalance filler`);
-					swapFillerHardEarnedUSDCForSOL(
-						this.priorityFeeSubscriber,
-						this.driftClient,
-						this.jupiterClient,
-						await this.getBlockhashForTx()
-					).then(async () => {
-						const fillerSolBalanceAfterSwap =
-							await this.driftClient.connection.getBalance(
-								this.driftClient.authority,
-								'processed'
-							);
-						this.hasEnoughSolToFill =
-							fillerSolBalanceAfterSwap >= MINIMUM_SOL_TO_CONTINUE_FILLING;
-					});
-				} else {
-					this.hasEnoughSolToFill = true;
-				}
-			} finally {
-				release();
+			if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
+				logger.info(`Swapping USDC for SOL to rebalance filler`);
+				swapFillerHardEarnedUSDCForSOL(
+					this.priorityFeeSubscriber,
+					this.driftClient,
+					this.jupiterClient,
+					await this.getBlockhashForTx()
+				).then(async () => {
+					const fillerSolBalanceAfterSwap =
+						await this.driftClient.connection.getBalance(
+							this.driftClient.authority,
+							'processed'
+						);
+					this.hasEnoughSolToFill =
+						fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
+				});
+			} else {
+				this.hasEnoughSolToFill = true;
 			}
 		}
 	}
