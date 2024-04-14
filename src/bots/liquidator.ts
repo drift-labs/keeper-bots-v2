@@ -523,7 +523,7 @@ export class LiquidatorBot implements Bot {
 		}
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
 		this.priorityFeeSubscriber.updateAddresses([
-			new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC
+			new PublicKey('6gMq3mRCKf8aP3ttTyYhuijVZ2LGi14oDsBbkgubfLB3'), // USDC SPOT
 		]);
 
 		if (!config.maxPositionTakeoverPctOfCollateral) {
@@ -2101,7 +2101,7 @@ tx: ${tx} `
 							);
 							continue;
 						}
-						await this.liqPerpPnl(
+						this.liqPerpPnl(
 							user,
 							perpMarket,
 							usdcMarket,
@@ -2110,7 +2110,9 @@ tx: ${tx} `
 							depositAmountToLiq,
 							borrowMarketIndextoLiq,
 							borrowAmountToLiq
-						);
+						).catch(e => {
+							console.error('error in liqPerpPnl', e);
+						});
 					}
 
 					const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
