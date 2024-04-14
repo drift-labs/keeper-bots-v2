@@ -1075,7 +1075,7 @@ export class LiquidatorBot implements Bot {
 					}`
 				);
 				this.driftClient
-					.settlePNL(userAccountPubkey, userAccount, position.marketIndex)
+					.settlePNL(userAccountPubkey, userAccount, position.marketIndex, this.getTxParamsWithPriorityFees())
 					.then((tx) => {
 						logger.info(
 							`settling negative perp pnl on market ${position.marketIndex.toString()}: ${tx} `
@@ -1121,7 +1121,7 @@ export class LiquidatorBot implements Bot {
 						}`
 					);
 					this.driftClient
-						.settlePNL(userAccountPubkey, userAccount, position.marketIndex)
+						.settlePNL(userAccountPubkey, userAccount, position.marketIndex, this.getTxParamsWithPriorityFees())
 						.then((tx) => {
 							logger.info(
 								`settling positive perp pnl on market ${position.marketIndex.toString()}: ${tx} `
@@ -1718,7 +1718,8 @@ tx: ${tx} `
 					.settlePNL(
 						user.userAccountPublicKey,
 						user.getUserAccount(),
-						liquidateePosition.marketIndex
+						liquidateePosition.marketIndex,
+						this.getTxParamsWithPriorityFees()
 					)
 					.then((tx) => {
 						logger.info(
