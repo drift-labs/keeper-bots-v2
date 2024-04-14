@@ -2102,7 +2102,7 @@ tx: ${tx} `
 							);
 							continue;
 						}
-						this.liqPerpPnl(
+						await this.liqPerpPnl(
 							user,
 							perpMarket,
 							usdcMarket,
@@ -2111,9 +2111,7 @@ tx: ${tx} `
 							depositAmountToLiq,
 							borrowMarketIndextoLiq,
 							borrowAmountToLiq
-						).catch(e => {
-							console.error('error in liqPerpPnl', e);
-						});
+						);
 					}
 
 					const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
