@@ -1630,6 +1630,16 @@ export class LiquidatorBot implements Bot {
 			return;
 		}
 
+		const subAccountToLiqDep = this.getSubAccountIdToLiquidateSpot(
+			depositMarketIndextoLiq
+		);
+		if (subAccountToLiqDep === undefined) {
+			logger.info(
+				`skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} because the deposit market it not in subaccounts`
+			);
+			return;
+		}
+
 		const start = Date.now();
 		this.driftClient
 			.liquidateSpot(
