@@ -1016,3 +1016,12 @@ export async function initializePriorityFeeSubscriberMap({
 
 	return pfsMap;
 }
+
+export function validMinimumAmountToFill(
+	amount: number | undefined
+): number | undefined {
+	if (amount === undefined || amount < 0) {
+		return undefined;
+	}
+	return amount;
+}

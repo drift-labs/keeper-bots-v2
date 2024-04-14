@@ -83,6 +83,7 @@ import {
 	simulateAndGetTxWithCUs,
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
+	validMinimumAmountToFill,
 } from '../utils';
 import { selectMakers } from '../makerSelection';
 import { BundleSender } from '../bundleSender';
@@ -309,9 +310,10 @@ export class FillerBot implements Bot {
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
 
-		if (config.minimumAmountToFill === undefined) {
+		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
 			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
+			// @ts-ignore
 			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
 		}
 

@@ -85,6 +85,7 @@ import {
 	SimulateAndGetTxWithCUsResponse,
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
+	validMinimumAmountToFill,
 } from '../utils';
 import { BundleSender } from '../bundleSender';
 import {
@@ -374,9 +375,10 @@ export class SpotFillerBot implements Bot {
 
 		this.userMap = userMap;
 
-		if (config.minimumAmountToFill === undefined) {
+		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
 			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
+			// @ts-ignore
 			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
 		}
 
