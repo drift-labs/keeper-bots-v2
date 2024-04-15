@@ -31,6 +31,7 @@ import {
 	convertToNumber,
 	getOrderSignature,
 	getVariant,
+	WhileValidTxSender,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -807,17 +808,19 @@ export async function swapFillerHardEarnedUSDCForSOL(
 
 		const preInstructions = [];
 
-		const outAssociatedTokenAccount =
-			await driftClient.getAssociatedTokenAccount(1);
+		const withdrawerWrappedSolAta = getAssociatedTokenAddressSync(
+			NATIVE_MINT,
+			driftClient.authority
+		);
 
 		const solAccountInfo = await driftClient.connection.getAccountInfo(
-			outAssociatedTokenAccount
+			withdrawerWrappedSolAta
 		);
 
 		if (!solAccountInfo) {
 			preInstructions.push(
 				driftClient.createAssociatedTokenAccountIdempotentInstruction(
-					outAssociatedTokenAccount,
+					withdrawerWrappedSolAta,
 					driftClient.provider.wallet.publicKey,
 					driftClient.provider.wallet.publicKey,
 					solMarket.mint
@@ -825,17 +828,16 @@ export async function swapFillerHardEarnedUSDCForSOL(
 			);
 		}
 
-		const inAssociatedTokenAccount =
-			await driftClient.getAssociatedTokenAccount(0);
+		const withdrawerUsdcAta = await driftClient.getAssociatedTokenAccount(0);
 
 		const usdcAccountInfo = await driftClient.connection.getAccountInfo(
-			inAssociatedTokenAccount
+			withdrawerUsdcAta
 		);
 
 		if (!usdcAccountInfo) {
 			preInstructions.push(
 				driftClient.createAssociatedTokenAccountIdempotentInstruction(
-					inAssociatedTokenAccount,
+					withdrawerUsdcAta,
 					driftClient.provider.wallet.publicKey,
 					driftClient.provider.wallet.publicKey,
 					usdcMarket.mint
@@ -846,13 +848,8 @@ export async function swapFillerHardEarnedUSDCForSOL(
 		const withdrawIx = await driftClient.getWithdrawIx(
 			usdc.muln(10), // gross overestimate just to get everything out of the account
 			0,
-			inAssociatedTokenAccount,
+			withdrawerUsdcAta,
 			true
-		);
-
-		const withdrawerWrappedSolAta = getAssociatedTokenAddressSync(
-			NATIVE_MINT,
-			driftClient.authority
 		);
 
 		const closeAccountInstruction = createCloseAccountInstruction(
@@ -915,7 +912,13 @@ export async function swapFillerHardEarnedUSDCForSOL(
 			}`
 		);
 
-		const txSigAndSlot = await driftClient.txSender.sendVersionedTransaction(
+		const txSender = new WhileValidTxSender({
+			connection: driftClient.connection,
+			wallet: driftClient.wallet,
+			retrySleep: 1000,
+		});
+
+		const txSigAndSlot = await txSender.sendVersionedTransaction(
 			// @ts-ignore
 			await buildTx(Math.floor(simTxResult.value.unitsConsumed * 1.2)),
 			[],
@@ -1012,4 +1015,13 @@ export async function initializePriorityFeeSubscriberMap({
 	}
 
 	return pfsMap;
+}
+
+export function validMinimumAmountToFill(
+	amount: number | undefined
+): number | undefined {
+	if (amount === undefined || amount < 0) {
+		return undefined;
+	}
+	return amount;
 }
