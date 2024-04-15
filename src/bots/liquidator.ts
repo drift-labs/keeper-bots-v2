@@ -1818,7 +1818,7 @@ export class LiquidatorBot implements Bot {
 			.mul(this.maxPositionTakeoverPctOfCollateralNum)
 			.div(this.maxPositionTakeoverPctOfCollateralDenom);
 
-		let amountToLiqBN = borrowAmountToLiq;
+		let amountToLiqBN = borrowAmountToLiq.muln(2); // double to make sure it clears out extra interest
 		if (borrowValue.gt(collateralAvailable)) {
 			amountToLiqBN = spotPrecision.mul(collateralAvailable).div(oracle.price);
 		}
