@@ -490,9 +490,10 @@ const runBot = async () => {
 			priorityFeeMethod === PriorityFeeMethod.HELIUS
 				? {
 						calculate: (samples: HeliusPriorityFeeResponse) => {
-							return samples.result.priorityFeeLevels![
-								HeliusPriorityLevel.HIGH
-							];
+							return Math.min(
+								50_000,
+								samples.result.priorityFeeLevels![HeliusPriorityLevel.HIGH]
+							);
 						},
 				  }
 				: new AverageOverSlotsStrategy(),

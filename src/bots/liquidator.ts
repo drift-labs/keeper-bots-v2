@@ -15,7 +15,6 @@ import {
 	PerpMarketAccount,
 	SpotMarketAccount,
 	QUOTE_SPOT_MARKET_INDEX,
-	calculateClaimablePnl,
 	calculateMarketAvailablePNL,
 	SerumFulfillmentConfigMap,
 	initialize,
@@ -45,7 +44,6 @@ import {
 	getOrderParams,
 	OrderType,
 	getTokenValue,
-	SpotBalanceType,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -167,9 +165,6 @@ function findBestSpotPosition(
 		// Skip any position that is less than the configured minimum amount
 		// for the specific market
 		const minAmount = new BN(minDepositToLiq.get(position.marketIndex) ?? 0);
-		logger.debug(
-			`findBestspotPosition: Min liquidation for market ${position.marketIndex} is ${minAmount}`
-		);
 		if (position.scaledBalance.abs().lt(minAmount)) {
 			logger.debug(
 				`findBestspotPosition: Amount ${position.scaledBalance} below ${minAmount} liquidation threshold`
@@ -1315,7 +1310,7 @@ export class LiquidatorBot implements Bot {
 				outputMint: outMarket.mint,
 				amount: amountIn.abs(),
 				slippageBps: slippageBps,
-				maxAccounts: 20,
+				maxAccounts: 10,
 				excludeDexes: ['Raydium CLMM'],
 			});
 		} catch (e) {
@@ -1877,7 +1872,8 @@ export class LiquidatorBot implements Bot {
 			})`
 		);
 
-		if (liquidateePosition.quoteAssetAmount.gt(ZERO) && false) {
+		const skip = true;
+		if (liquidateePosition.quoteAssetAmount.gt(ZERO) && skip) {
 			/*
 			const claimablePnl = calculateClaimablePnl(
 				perpMarketAccount,
@@ -1905,7 +1901,8 @@ export class LiquidatorBot implements Bot {
 				);
 				if (simResult.simError !== null) {
 					logger.error(
-						`Error in settlePnl for userAccount ${user.userAccountPublicKey.toBase58()} in perp market ${liquidateePosition.marketIndex
+						`Error in settlePnl for userAccount ${user.userAccountPublicKey.toBase58()} in perp market ${
+							liquidateePosition.marketIndex
 						}`
 					);
 
@@ -1916,8 +1913,10 @@ export class LiquidatorBot implements Bot {
 					);
 					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 						webhookMessage(
-							`[${this.name
-							}]: :x: error in settlePnl for userAccount ${user.userAccountPublicKey.toBase58()}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+							`[${
+								this.name
+							}]: :x: error in settlePnl for userAccount ${user.userAccountPublicKey.toBase58()}: \n${
+								simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 							}`
 						);
 					}
@@ -1928,7 +1927,8 @@ export class LiquidatorBot implements Bot {
 						this.driftClient.opts
 					);
 					logger.info(
-						`did settlePnl for ${user.userAccountPublicKey.toBase58()} in perp market ${liquidateePosition.marketIndex
+						`did settlePnl for ${user.userAccountPublicKey.toBase58()} in perp market ${
+							liquidateePosition.marketIndex
 						} tx: ${resp.txSig} `
 					);
 				}
@@ -1978,8 +1978,10 @@ export class LiquidatorBot implements Bot {
 					);
 					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
 						webhookMessage(
-							`[${this.name
-							}]: :x: error in liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+							`[${
+								this.name
+							}]: :x: error in liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()}: \n${
+								simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 							}`
 						);
 					}
@@ -1990,14 +1992,17 @@ export class LiquidatorBot implements Bot {
 						this.driftClient.opts
 					);
 					logger.info(
-						`did liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq} tx: ${resp.txSig
+						`did liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq} tx: ${
+							resp.txSig
 						} `
 					);
 
 					if (this.liquidatorConfig.notifyOnLiquidation) {
 						webhookMessage(
-							`[${this.name
-							}]: liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq} tx: ${resp.txSig
+							`[${
+								this.name
+							}]: liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq} tx: ${
+								resp.txSig
 							} `
 						);
 					}
@@ -2016,9 +2021,9 @@ export class LiquidatorBot implements Bot {
 				user.getSafestTiers();
 			const perpTier = getPerpMarketTierNumber(perpMarketAccount);
 			if (!perpTierIsAsSafeAs(perpTier, safestPerpTier, safestSpotTier)) {
-				logger.info(
-					`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on spot market ${depositMarketIndextoLiq} because there is a safer perp/spot tier. perp tier ${perpTier} safestPerpTier ${safestPerpTier} safestSpotTier ${safestSpotTier}`
-				);
+				// logger.info(
+				// 	`skipping liquidatePerpPnlForDeposit of ${user.userAccountPublicKey.toBase58()} on spot market ${depositMarketIndextoLiq} because there is a safer perp/spot tier. perp tier ${perpTier} safestPerpTier ${safestPerpTier} safestSpotTier ${safestSpotTier}`
+				// );
 				return;
 			}
 
@@ -2175,7 +2180,7 @@ export class LiquidatorBot implements Bot {
 		for (const {
 			user,
 			userKey,
-			marginRequirement,
+			marginRequirement: _marginRequirement,
 			canBeLiquidated,
 		} of usersCanBeLiquidated) {
 			const userAcc = user.getUserAccount();
@@ -2279,7 +2284,7 @@ export class LiquidatorBot implements Bot {
 						!liquidateePosition.quoteAssetAmount.isZero();
 					liquidateeHasLpPos = !liquidateePosition.lpShares.isZero();
 
-					if (liquidateeHasUnsettledPerpPnl) {
+					if (liquidateeHasUnsettledPerpPnl && depositMarketIndextoLiq > 0) {
 						const perpMarket = this.driftClient.getPerpMarketAccount(
 							liquidateePosition.marketIndex
 						);
@@ -2548,6 +2553,9 @@ export class LiquidatorBot implements Bot {
 						);
 						const subAccountToLiqSpot =
 							this.getSubAccountIdToLiquidateSpot(indexWithOpenOrders);
+						logger.info(
+							`skipping liquidateSpot call for ${user.userAccountPublicKey.toBase58()} on market with open orders ${indexWithOpenOrders}`
+						);
 						if (subAccountToLiqSpot === undefined) {
 							break;
 						}
