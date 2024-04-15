@@ -44,6 +44,7 @@ import {
 	getOrderParams,
 	OrderType,
 	getTokenValue,
+	calculateClaimablePnl,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -1872,9 +1873,7 @@ export class LiquidatorBot implements Bot {
 			})`
 		);
 
-		const skip = true;
-		if (liquidateePosition.quoteAssetAmount.gt(ZERO) && skip) {
-			/*
+		if (liquidateePosition.quoteAssetAmount.gt(ZERO)) {
 			const claimablePnl = calculateClaimablePnl(
 				perpMarketAccount,
 				usdcAccount,
@@ -2013,7 +2012,6 @@ export class LiquidatorBot implements Bot {
 				);
 				logger.info(`skipping liquidateBorrowForPerpPnl`);
 			}
-			*/
 		} else {
 			const start = Date.now();
 
@@ -2270,7 +2268,13 @@ export class LiquidatorBot implements Bot {
 				let liquidateeHasLpPos = false;
 				let liquidateePerpHasOpenOrders = false;
 				let liquidateePerpIndexWithOpenOrders = -1;
-				for (const liquidateePosition of user.getActivePerpPositions()) {
+
+				// shuffle user perp positions to get good position coverage in case some
+				// positions put the liquidator into a bad state.
+				const userPerpPositions = user.getActivePerpPositions();
+				userPerpPositions.sort(() => Math.random() - 0.5);
+
+				for (const liquidateePosition of userPerpPositions) {
 					if (liquidateePosition.openOrders > 0) {
 						liquidateePerpHasOpenOrders = true;
 						liquidateePerpIndexWithOpenOrders = liquidateePosition.marketIndex;
