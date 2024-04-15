@@ -34,8 +34,7 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 	private readonly marketIndexes: number[];
 	private readonly marketTypeStr: string;
 
-	// To keep track if user has an open Order
-	private readonly userStatus = new Map<string, boolean>();
+	// To keep track of where the user has open orders in the markets we care about
 	private readonly userMarkets: UserMarkets = {};
 
 	constructor(
@@ -156,7 +155,6 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 			for (const key of this.usersAccounts.keys()) {
 				if (!programAccountSet.has(key)) {
 					this.usersAccounts.delete(key);
-					this.userStatus.delete(key);
 					this.userMarkets[key].forEach((marketIndex) => {
 						this.sendUserAccountUpdateMessage(
 							Buffer.from([]),
