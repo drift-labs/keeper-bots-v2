@@ -1133,7 +1133,9 @@ export class LiquidatorBot implements Bot {
 				}
 			} else if (position.quoteAssetAmount.lt(ZERO)) {
 				const userAccountPubkey =
-					await this.driftClient.getUserAccountPublicKey();
+					await this.driftClient.getUserAccountPublicKey(
+						userAccount.subAccountId
+					);
 				logger.info(
 					`Settling negative perp pnl for ${userAccountPubkey.toBase58()} on market ${
 						position.marketIndex
@@ -1194,7 +1196,9 @@ export class LiquidatorBot implements Bot {
 
 				if (availablePnl.gt(ZERO)) {
 					const userAccountPubkey =
-						await this.driftClient.getUserAccountPublicKey();
+						await this.driftClient.getUserAccountPublicKey(
+							userAccount.subAccountId
+						);
 					logger.info(
 						`Settling positive perp pnl for ${userAccountPubkey.toBase58()} on market ${
 							position.marketIndex
@@ -1498,7 +1502,7 @@ export class LiquidatorBot implements Bot {
 
 	private async deriskForSubaccount(subaccountId: number, dlob: DLOB) {
 		this.driftClient.switchActiveUser(subaccountId, this.driftClient.authority);
-		const userAccount = this.driftClient.getUserAccount();
+		const userAccount = this.driftClient.getUserAccount(subaccountId);
 		if (!userAccount) {
 			logger.error('failed to get user account');
 			return;
