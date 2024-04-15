@@ -26,7 +26,7 @@ import {
 import { sleepMs } from '../../utils';
 
 const logPrefix = '[DLOBBuilder]';
-export class DLOBBuilder {
+class DLOBBuilder {
 	private userAccountData = new Map<string, UserAccount>();
 	private userAccountDataBuffers = new Map<string, Buffer>();
 	private dlob: DLOB;
