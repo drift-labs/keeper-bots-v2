@@ -60,6 +60,8 @@ global:
   # - 0
   # - 1
   # - 2
+  subaccounts:
+    - 0
 
   eventSubscriberPollingInterval: 5000
   bulkAccountLoaderPollingInterval: 5000
@@ -82,9 +84,6 @@ global:
   jitoTipMultiplier: 3
   jitoBlockEngineUrl: frankfurt.mainnet.block-engine.jito.wtf
   jitoAuthPrivateKey: /path/to/jito/bundle/signing/key/auth.json
-
-  # which subaccounts to load, if null will load subaccount 0 (default)
-  subaccounts:
 
 # Which bots to run, be careful with this, running multiple bots in one instance
 # might use more resources than expected.
@@ -153,16 +152,14 @@ botConfigs:
     perpMarketIndicies:
     spotMarketIndicies:
 
-    # this replaces perpMarketIndicies and spotMarketIndicies by allowing you to specify
-    # which subaccount is responsible for liquidating markets
-    # Markets are defined on perpMarkets.ts and spotMarkets.ts on the protocol codebase
-    # Note: you must set global.subaccounts with all the subaccounts you want to load
+    # specify which subaccount is ok with inheriting risk in each specified
+    # perp or spot market index. Leaving it null will watch
+    # all markets on the default global.subaccounts.0
     perpSubAccountConfig:
       0: # subaccount 0 will watch perp markets 0 and 1
         - 0
         - 1
-    spotSubAccountConfig:
-      0: # subaccount 0 will watch all spot markets
+    spotSubAccountConfig: # will watch all spot markets on the default global.subaccounts.0
 
     # deprecated (bad naming): use maxSlippageBps
     maxSlippagePct: 50
