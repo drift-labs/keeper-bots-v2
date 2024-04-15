@@ -33,7 +33,6 @@ import {
 	UserAccount,
 	OptionalOrderParams,
 	TEN,
-	TxParams,
 	PriorityFeeSubscriber,
 	QuoteResponse,
 	getLimitOrderParams,
@@ -465,15 +464,6 @@ export class LiquidatorBot implements Bot {
 			return undefined;
 		}
 		return this.driftClient.getUser(subAccountId);
-	}
-
-	private getTxParamsWithPriorityFees(): TxParams {
-		return {
-			computeUnits: 1_400_000,
-			computeUnitsPrice: Math.floor(
-				this.priorityFeeSubscriber.getCustomStrategyResult()
-			),
-		};
 	}
 
 	private async buildVersionedTransactionWithSimulatedCus(
@@ -1675,7 +1665,6 @@ export class LiquidatorBot implements Bot {
 	}
 
 	private findBestSpotPosition(
-		driftClient: DriftClient,
 		liquidateeUser: User,
 		spotPositions: SpotPosition[],
 		isBorrow: boolean,
@@ -1706,12 +1695,14 @@ export class LiquidatorBot implements Bot {
 			const minAmount = new BN(minDepositToLiq.get(position.marketIndex) ?? 0);
 			if (position.scaledBalance.abs().lt(minAmount)) {
 				logger.debug(
-					`findBestspotPosition: Amount ${position.scaledBalance} below ${minAmount} liquidation threshold`
+					`findBestSpotPosition: Amount ${position.scaledBalance} below ${minAmount} liquidation threshold`
 				);
 				continue;
 			}
 
-			const market = driftClient.getSpotMarketAccount(position.marketIndex);
+			const market = this.driftClient.getSpotMarketAccount(
+				position.marketIndex
+			);
 			if (!market) {
 				logger.error(`No spot market found for ${position.marketIndex}`);
 				continue;
@@ -1740,7 +1731,9 @@ export class LiquidatorBot implements Bot {
 				continue;
 			}
 
-			const spotMarket = driftClient.getSpotMarketAccount(position.marketIndex);
+			const spotMarket = this.driftClient.getSpotMarketAccount(
+				position.marketIndex
+			);
 			if (!spotMarket) {
 				logger.error(`No spot market found for ${position.marketIndex}`);
 				continue;
@@ -1754,7 +1747,7 @@ export class LiquidatorBot implements Bot {
 			}
 
 			const tokenAmount = calculateSpotTokenAmountToLiquidate(
-				driftClient,
+				this.driftClient,
 				liquidatorUser,
 				position,
 				positionTakerOverPctNumerator,
@@ -2254,7 +2247,6 @@ export class LiquidatorBot implements Bot {
 					indexWithMaxAssets,
 					indexWithOpenOrders,
 				} = this.findBestSpotPosition(
-					this.driftClient,
 					user,
 					liquidateeUserAccount.spotPositions,
 					false,
@@ -2267,7 +2259,6 @@ export class LiquidatorBot implements Bot {
 					bestIndex: borrowMarketIndextoLiq,
 					bestAmount: borrowAmountToLiq,
 				} = this.findBestSpotPosition(
-					this.driftClient,
 					user,
 					liquidateeUserAccount.spotPositions,
 					true,
