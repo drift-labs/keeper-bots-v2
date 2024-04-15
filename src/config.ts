@@ -53,7 +53,9 @@ export type SubaccountConfig = {
 export type LiquidatorConfig = BaseBotConfig & {
 	disableAutoDerisking: boolean;
 	useJupiter: boolean;
+	/// @deprecated, use {@link perpSubAccountConfig} to restrict markets
 	perpMarketIndicies?: Array<number>;
+	/// @deprecated, use {@link spotSubAccountConfig} to restrict markets
 	spotMarketIndicies?: Array<number>;
 	perpSubAccountConfig?: SubaccountConfig;
 	spotSubAccountConfig?: SubaccountConfig;
