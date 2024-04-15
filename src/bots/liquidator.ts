@@ -278,6 +278,7 @@ export class LiquidatorBot implements Bot {
 	private throttledUsers = new Map<string, number>();
 	private disableAutoDerisking: boolean;
 	private liquidatorConfig: LiquidatorConfig;
+	private settlingOwnPnl: boolean = false;
 
 	// metrics
 	private runtimeSpecsGauge?: ObservableGauge;
@@ -731,6 +732,14 @@ export class LiquidatorBot implements Bot {
 				3.3 * intervalMs!
 			); // try to make it not overlap with the normal liquidation loop
 			this.intervalIds.push(deRiskIntervalId);
+		}
+
+		if (this.perpMarketIndicies.length > 0) {
+			const settleOwnPerpPnlIntervalId = setInterval(
+				this.settleOwnPerpPnl.bind(this),
+				2 * intervalMs!
+			);
+			this.intervalIds.push(settleOwnPerpPnlIntervalId);
 		}
 
 		logger.info(`${this.name} Bot started!`);
@@ -1543,6 +1552,84 @@ export class LiquidatorBot implements Bot {
 			}
 		} finally {
 			this.releaseMutex(this.deriskMutex);
+		}
+	}
+
+	/**
+	 * calls settlePnl for dangling perp positions (no open position but has unsettled pnl)
+	 */
+	private async settleOwnPerpPnl() {
+		if (this.settlingOwnPnl) {
+			return;
+		}
+		this.settlingOwnPnl = true;
+
+		try {
+			for (const subAccount of this.allSubaccounts) {
+				const user = this.driftClient.getUser(subAccount);
+				for (const perpPosition of user.getActivePerpPositions()) {
+					if (
+						perpPosition.baseAssetAmount.eq(ZERO) &&
+						!perpPosition.quoteAssetAmount.eq(ZERO)
+					) {
+						logger.info(
+							`Settling dangling pnl on subaccount ${subAccount}, marketIndex: ${perpPosition.marketIndex}`
+						);
+
+						const ix = await this.driftClient.getSettlePNLsIxs(
+							[
+								{
+									settleeUserAccount: user.getUserAccount(),
+									settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
+								},
+							],
+							[perpPosition.marketIndex]
+						);
+						const simResult =
+							await this.buildVersionedTransactionWithSimulatedCus(
+								ix,
+								[this.driftLookupTables!],
+								Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
+							);
+						if (simResult.simError !== null) {
+							const errorCode = handleSimResultError(
+								simResult,
+								errorCodesToSuppress,
+								`${this.name}: own settlePnl`
+							);
+							logger.error(
+								`Error in settlePnl for my subaccount ${subAccount} ${user.userAccountPublicKey.toBase58()} in perp market ${
+									perpPosition.marketIndex
+								}: ${JSON.stringify(simResult.simError)}`
+							);
+
+							if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
+								webhookMessage(
+									`[${
+										this.name
+									}]: :x: error in settlePnl for own userAccount (subaccount ${subAccount}): ${user.userAccountPublicKey.toBase58()}: \n${
+										simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+									}`
+								);
+							}
+						} else {
+							const resp =
+								await this.driftClient.txSender.sendVersionedTransaction(
+									simResult.tx,
+									undefined,
+									this.driftClient.opts
+								);
+							logger.info(
+								`did settlePnl for own subaccount: ${subAccount} ${user.userAccountPublicKey.toBase58()} in perp market ${
+									perpPosition.marketIndex
+								} tx: ${resp.txSig} `
+							);
+						}
+					}
+				}
+			}
+		} finally {
+			this.settlingOwnPnl = false;
 		}
 	}
 
