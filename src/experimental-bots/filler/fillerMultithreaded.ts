@@ -273,15 +273,12 @@ export class FillerMultithreaded {
 		this.runtimeSpec = runtimeSpec;
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
-		if (
-			config.rebalanceFiller &&
-			this.runtimeSpec.driftEnv === 'mainnet-beta'
-		) {
+		this.rebalanceFiller = config.rebalanceFiller ?? true;
+		if (this.rebalanceFiller && this.runtimeSpec.driftEnv === 'mainnet-beta') {
 			this.jupiterClient = new JupiterClient({
 				connection: this.driftClient.connection,
 			});
 		}
-		this.rebalanceFiller = config.rebalanceFiller ?? true;
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
