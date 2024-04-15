@@ -231,7 +231,12 @@ const main = async () => {
 
 	const args = parseArgs(process.argv.slice(2));
 	const marketTypeStr = args['market-type'];
-	const marketIndex = args['market-index'];
+	let marketIndexes;
+	if (typeof args['market-indexes'] === 'string') {
+		marketIndexes = args['market-indexes'].split(',').map(Number);
+	} else {
+		marketIndexes = [args['market-indexes']];
+	}
 	if (marketTypeStr !== 'perp' && marketTypeStr !== 'spot') {
 		throw new Error("market-type must be either 'perp' or 'spot'");
 	}
@@ -262,7 +267,7 @@ const main = async () => {
 	const driftClient = getDriftClientFromArgs({
 		connection,
 		wallet,
-		marketIndexes: [marketIndex],
+		marketIndexes,
 		marketTypeStr,
 	});
 	await driftClient.subscribe();
@@ -271,7 +276,7 @@ const main = async () => {
 		driftClient,
 		marketType,
 		marketTypeStr,
-		marketIndex
+		marketIndexes
 	);
 
 	await dlobBuilder.subscribe();

@@ -269,7 +269,8 @@ const main = async () => {
 	dotenv.config();
 
 	const args = parseArgs(process.argv.slice(2));
-	const marketIndexes = args['market-indexes'].map(Number);
+	const marketIndexesStr = args['market-indexes'] as string;
+	const marketIndexes = marketIndexesStr.split(',').map(Number);
 	const marketTypeStr = args['market-type'] as string;
 	if (marketTypeStr !== 'perp' && marketTypeStr !== 'spot') {
 		throw new Error("market-type must be either 'perp' or 'spot'");

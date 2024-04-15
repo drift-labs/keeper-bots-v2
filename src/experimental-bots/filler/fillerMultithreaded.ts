@@ -372,7 +372,7 @@ export class FillerMultithreaded {
 							for (const dlobBuilder of this.dlobBuilders) {
 								if (
 									dlobBuilder.marketIndexes.every(
-										(val, index) => val === msg.data.marketIndexes[index]
+										(val, index) => val === msg.data[index]
 									)
 								) {
 									dlobBuilder.ready = true;
@@ -432,7 +432,7 @@ export class FillerMultithreaded {
 
 		const routeMessageToDlobBuilder = (msg: any) => {
 			for (const dlobBuilder of this.dlobBuilders) {
-				if (dlobBuilder.marketIndexes.includes(msg.marketIndex)) {
+				if (dlobBuilder.marketIndexes.includes(msg.data.marketIndex)) {
 					if (typeof dlobBuilder.process.send == 'function') {
 						if (dlobBuilder.ready) {
 							dlobBuilder.process.send(msg);
