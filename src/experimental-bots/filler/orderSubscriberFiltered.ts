@@ -97,21 +97,7 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 			}
 		});
 
-		this.updateUserMarkets(key, userMarkets);
-		// const hasFilteredOpenOrders = userAccount.orders.some(
-		// 	(order) =>
-		// 		this.marketIndexes.includes(order.marketIndex) &&
-		// 		isVariant(order.marketType, this.marketTypeStr)
-		// );
-		// if (!hasFilteredOpenOrders) {
-		// 	if (this.userStatus.get(key)) {
-		// 		this.sendUserAccountUpdateMessage(buffer, key, 'delete');
-		// 	}
-		// 	this.userStatus.set(key, false);
-		// } else {
-		// 	this.sendUserAccountUpdateMessage(buffer, key, 'update');
-		// 	this.userStatus.set(key, true);
-		// }
+		this.updateUserMarkets(key, buffer, userMarkets);
 		this.usersAccounts.set(key, { slot, userAccount });
 	}
 
@@ -223,7 +209,11 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 		}
 	}
 
-	private updateUserMarkets(userId: string, currentMarkets: Set<number>): void {
+	private updateUserMarkets(
+		userId: string,
+		buffer: Buffer,
+		currentMarkets: Set<number>
+	): void {
 		const previousMarkets = this.userMarkets[userId] || new Set<number>();
 
 		const newMarkets = new Set<number>();
@@ -243,21 +233,11 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 		this.userMarkets[userId] = currentMarkets;
 
 		for (const marketIndex of newMarkets) {
-			this.sendUserAccountUpdateMessage(
-				Buffer.from([]),
-				userId,
-				'update',
-				marketIndex
-			);
+			this.sendUserAccountUpdateMessage(buffer, userId, 'update', marketIndex);
 		}
 
 		for (const marketIndex of removedMarkets) {
-			this.sendUserAccountUpdateMessage(
-				Buffer.from([]),
-				userId,
-				'delete',
-				marketIndex
-			);
+			this.sendUserAccountUpdateMessage(buffer, userId, 'delete', marketIndex);
 		}
 	}
 }
