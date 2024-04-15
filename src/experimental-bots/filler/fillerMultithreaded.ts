@@ -91,6 +91,7 @@ import {
 	isTakerBreachedMaintenanceMarginLog,
 } from '../../bots/common/txLogParse';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import { ChildProcess } from 'child_process';
 
 const logPrefix = '[Filler]';
 
@@ -149,6 +150,12 @@ enum METRIC_TYPES {
 
 const getNodeToTriggerSignature = (node: SerializedNodeToTrigger): string => {
 	return getOrderSignature(node.node.order.orderId, node.node.userAccount);
+};
+
+type DLOBBuilderWithProcess = {
+	process: ChildProcess;
+	ready: boolean;
+	marketIndexes: number[];
 };
 
 export class FillerMultithreaded {
@@ -227,6 +234,11 @@ export class FillerMultithreaded {
 
 	protected jupiterClient?: JupiterClient;
 
+	protected dlobBuilders: DLOBBuilderWithProcess[] = [];
+
+	protected marketIndexes: Array<number[]>;
+	protected marketIndexesFlattened: number[];
+
 	constructor(
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
@@ -242,6 +254,8 @@ export class FillerMultithreaded {
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
+		this.marketIndexes = config.marketIndexes;
+		this.marketIndexesFlattened = config.marketIndexes.flat();
 		this.bundleSender = bundleSender;
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
 		if (globalConfig.txConfirmationEndpoint) {
@@ -264,12 +278,14 @@ export class FillerMultithreaded {
 			connection: driftClient.connection,
 		});
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
-		this.priorityFeeSubscriber.updateMarketTypeAndIndex([
-			{
+
+		const driftMarkets = this.marketIndexesFlattened.map((marketIndex) => {
+			return {
 				marketType: this.config.marketType,
-				marketIndex: this.config.marketIndex,
-			},
-		]);
+				marketIndex: marketIndex,
+			};
+		});
+		this.priorityFeeSubscriber.updateMarketTypeAndIndex(driftMarkets);
 		this.runtimeSpec = runtimeSpec;
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
@@ -320,79 +336,121 @@ export class FillerMultithreaded {
 	}
 
 	async init() {
+		logger.info(`${this.name}: Initializing`);
 		await this.blockhashSubscriber.subscribe();
 
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 		assert(this.lookupTableAccount, 'Lookup table account not found');
 		this.startProcesses();
+		logger.info(`${this.name}: Initialized`);
 	}
 
 	private startProcesses() {
-		let dlobBuilderReady = false;
-		const childArgs = [
+		logger.info(`${this.name}: Starting processes`);
+		const orderSubscriberArgs = [
 			`--market-type=${this.config.marketType}`,
-			`--market-index=${this.config.marketIndex}`,
+			`--market-indexes=${this.config.marketIndexes.map(String)}`,
 		];
 		const user = this.driftClient.getUser();
-		const dlobBuilderProcess = spawnChildWithRetry(
-			'./src/experimental-bots/filler/dlobBuilder.ts',
-			childArgs,
-			'dlobBuilder',
-			(msg: any) => {
-				switch (msg.type) {
-					case 'initialized':
-						dlobBuilderReady = true;
-						logger.info(
-							`${logPrefix} dlobBuilderProcess initialized and acknowledged`
-						);
-						break;
-					case 'triggerableNodes':
-						if (this.dryRun) {
-							logger.info(`Triggerable node received`);
-						} else {
-							this.triggerNodes(msg.data);
+
+		for (const marketIndexes of this.marketIndexes) {
+			logger.info(
+				`${this.name}: Spawning dlobBuilder for marketIndexes: ${marketIndexes}`
+			);
+			const dlobBuilderArgs = [
+				`--market-type=${this.config.marketType}`,
+				`--market-indexes=${marketIndexes.map(String)}`,
+			];
+			const dlobBuilderProcess = spawnChildWithRetry(
+				'./src/experimental-bots/filler/dlobBuilder.ts',
+				dlobBuilderArgs,
+				'dlobBuilder',
+				(msg: any) => {
+					switch (msg.type) {
+						case 'initialized':
+							for (const dlobBuilder of this.dlobBuilders) {
+								if (
+									dlobBuilder.marketIndexes.every(
+										(val, index) => val === msg.data.marketIndexes[index]
+									)
+								) {
+									dlobBuilder.ready = true;
+									logger.info(
+										`${logPrefix} dlobBuilderProcess initialized and acknowledged`
+									);
+									break;
+								}
+							}
+							break;
+						case 'triggerableNodes':
+							if (this.dryRun) {
+								logger.info(`Triggerable node received`);
+							} else {
+								this.triggerNodes(msg.data);
+							}
+							this.lastTryFillTimeGauge?.setLatestValue(
+								Date.now(),
+								metricAttrFromUserAccount(
+									user.getUserAccountPublicKey(),
+									user.getUserAccount()
+								)
+							);
+							break;
+						case 'fillableNodes':
+							if (this.dryRun) {
+								logger.info(`Fillable node received`);
+							} else {
+								this.fillNodes(msg.data);
+							}
+							this.lastTryFillTimeGauge?.setLatestValue(
+								Date.now(),
+								metricAttrFromUserAccount(
+									user.getUserAccountPublicKey(),
+									user.getUserAccount()
+								)
+							);
+							break;
+						case 'health':
+							this.dlobHealthy = msg.data.healthy;
+							break;
+					}
+				},
+				'[FillerMultithreaded]'
+			);
+
+			this.dlobBuilders.push({
+				process: dlobBuilderProcess,
+				ready: false,
+				marketIndexes: marketIndexes.map(Number),
+			});
+
+			logger.info(
+				`dlobBuilder spawned with pid: ${dlobBuilderProcess.pid} marketIndexes: ${dlobBuilderArgs}`
+			);
+		}
+
+		const routeMessageToDlobBuilder = (msg: any) => {
+			for (const dlobBuilder of this.dlobBuilders) {
+				if (dlobBuilder.marketIndexes.includes(msg.marketIndex)) {
+					if (typeof dlobBuilder.process.send == 'function') {
+						if (dlobBuilder.ready) {
+							dlobBuilder.process.send(msg);
+							return;
 						}
-						this.lastTryFillTimeGauge?.setLatestValue(
-							Date.now(),
-							metricAttrFromUserAccount(
-								user.getUserAccountPublicKey(),
-								user.getUserAccount()
-							)
-						);
-						break;
-					case 'fillableNodes':
-						if (this.dryRun) {
-							logger.info(`Fillable node received`);
-						} else {
-							this.fillNodes(msg.data);
-						}
-						this.lastTryFillTimeGauge?.setLatestValue(
-							Date.now(),
-							metricAttrFromUserAccount(
-								user.getUserAccountPublicKey(),
-								user.getUserAccount()
-							)
-						);
-						break;
-					case 'health':
-						this.dlobHealthy = msg.data.healthy;
-						break;
+					}
 				}
-			},
-			'[FillerMultithreaded]'
-		);
+			}
+		};
 
 		const orderSubscriberProcess = spawnChildWithRetry(
 			'./src/experimental-bots/filler/orderSubscriberFiltered.ts',
-			childArgs,
+			orderSubscriberArgs,
 			'orderSubscriber',
 			(msg: any) => {
 				switch (msg.type) {
 					case 'userAccountUpdate':
-						if (dlobBuilderReady) {
-							dlobBuilderProcess.send(msg);
-						}
+						routeMessageToDlobBuilder(msg);
 						break;
 					case 'health':
 						this.orderSubscriberHealthy = msg.data.healthy;
@@ -404,12 +462,13 @@ export class FillerMultithreaded {
 
 		process.on('SIGINT', () => {
 			logger.info(`${logPrefix} Received SIGINT, killing children`);
-			dlobBuilderProcess.kill();
+			for (const dlobBuilder of this.dlobBuilders) {
+				dlobBuilder.process.kill();
+			}
 			orderSubscriberProcess.kill();
 			process.exit(0);
 		});
 
-		logger.info(`dlobBuilder spawned with pid: ${dlobBuilderProcess.pid}`);
 		logger.info(
 			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
 		);

@@ -26,14 +26,14 @@ import {
 import { sleepMs } from '../../utils';
 
 const logPrefix = '[DLOBBuilder]';
-class DLOBBuilder {
+export class DLOBBuilder {
 	private userAccountData = new Map<string, UserAccount>();
 	private userAccountDataBuffers = new Map<string, Buffer>();
 	private dlob: DLOB;
 	public readonly slotSubscriber: SlotSubscriber;
 	public readonly marketTypeString: string;
 	public readonly marketType: MarketType;
-	public readonly marketIndex: number;
+	public readonly marketIndexes: number[];
 	public driftClient: DriftClient;
 	public initialized: boolean = false;
 
@@ -41,13 +41,13 @@ class DLOBBuilder {
 		driftClient: DriftClient,
 		marketType: MarketType,
 		marketTypeString: string,
-		marketIndex: number
+		marketIndexes: number[]
 	) {
 		this.dlob = new DLOB();
 		this.slotSubscriber = new SlotSubscriber(driftClient.connection);
 		this.marketType = marketType;
 		this.marketTypeString = marketTypeString;
-		this.marketIndex = marketIndex;
+		this.marketIndexes = marketIndexes;
 		this.driftClient = driftClient;
 	}
 
@@ -84,7 +84,7 @@ class DLOBBuilder {
 		this.userAccountData.forEach((userAccount, pubkey) => {
 			userAccount.orders.forEach((order) => {
 				if (
-					order.marketIndex != this.marketIndex ||
+					!this.marketIndexes.includes(order.marketIndex) ||
 					!isVariant(order.marketType, this.marketTypeString.toLowerCase())
 				) {
 					return;
@@ -99,36 +99,40 @@ class DLOBBuilder {
 
 	public getNodesToTriggerAndNodesToFill(): [NodeToFill[], NodeToTrigger[]] {
 		const dlob = this.build();
-		const perpMarket = this.driftClient.getPerpMarketAccount(this.marketIndex);
-		if (!perpMarket) {
-			throw new Error('PerpMarket not found');
+		const nodesToFill: NodeToFill[] = [];
+		const nodesToTrigger: NodeToTrigger[] = [];
+		for (const marketIndex of this.marketIndexes) {
+			const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex);
+			if (!perpMarket) {
+				throw new Error('PerpMarket not found');
+			}
+			const oraclePriceData =
+				this.driftClient.getOracleDataForPerpMarket(marketIndex);
+			const vBid = calculateBidPrice(perpMarket, oraclePriceData);
+			const vAsk = calculateAskPrice(perpMarket, oraclePriceData);
+			const stateAccount = this.driftClient.getStateAccount();
+			const slot = this.slotSubscriber.getSlot();
+			const nodesToFillForMarket = dlob.findNodesToFill(
+				marketIndex,
+				vBid,
+				vAsk,
+				slot,
+				Date.now(),
+				this.marketType,
+				oraclePriceData,
+				stateAccount,
+				perpMarket
+			);
+			const nodesToTriggerForMarket = dlob.findNodesToTrigger(
+				marketIndex,
+				slot,
+				oraclePriceData.price,
+				this.marketType,
+				stateAccount
+			);
+			nodesToFill.push(...nodesToFillForMarket);
+			nodesToTrigger.push(...nodesToTriggerForMarket);
 		}
-		const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(
-			this.marketIndex
-		);
-		const vBid = calculateBidPrice(perpMarket, oraclePriceData);
-		const vAsk = calculateAskPrice(perpMarket, oraclePriceData);
-		const stateAccount = this.driftClient.getStateAccount();
-		const slot = this.slotSubscriber.getSlot();
-		const nodesToFill = dlob.findNodesToFill(
-			this.marketIndex,
-			vBid,
-			vAsk,
-			slot,
-			Date.now(),
-			this.marketType,
-			oraclePriceData,
-			stateAccount,
-			perpMarket
-		);
-		const nodesToTrigger = dlob.findNodesToTrigger(
-			this.marketIndex,
-			slot,
-			oraclePriceData.price,
-			this.marketType,
-			stateAccount
-		);
-
 		return [nodesToFill, nodesToTrigger];
 	}
 
@@ -258,7 +262,7 @@ const main = async () => {
 	const driftClient = getDriftClientFromArgs({
 		connection,
 		wallet,
-		marketIndex,
+		marketIndexes: [marketIndex],
 		marketTypeStr,
 	});
 	await driftClient.subscribe();
@@ -274,7 +278,7 @@ const main = async () => {
 	await sleepMs(5000); // Give the dlob some time to get built
 	if (typeof process.send === 'function') {
 		logger.info('DLOBBuilder started');
-		process.send({ type: 'initialized' });
+		process.send({ type: 'initialized', data: dlobBuilder.marketIndexes });
 	}
 
 	process.on('message', (msg: any) => {

@@ -32,7 +32,7 @@ export type MarkTwapCrankConfig = BaseBotConfig & {
 
 export type FillerMultiThreadedConfig = BaseBotConfig & {
 	marketType: string;
-	marketIndex: number;
+	marketIndexes: Array<number[]>;
 	simulateTxForCUEstimate?: boolean;
 	rebalanceFiller?: boolean;
 	minimumAmountToFill?: number;

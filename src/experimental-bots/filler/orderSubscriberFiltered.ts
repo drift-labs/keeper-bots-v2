@@ -23,22 +23,28 @@ export type UserAccountUpdate = {
 	type: string;
 	userAccount: string;
 	pubkey: string;
+	marketIndex: number;
 };
 
+export interface UserMarkets {
+	[key: string]: Set<number>;
+}
+
 class OrderSubscriberFiltered extends OrderSubscriber {
-	private readonly marketIndex: number;
+	private readonly marketIndexes: number[];
 	private readonly marketTypeStr: string;
 
 	// To keep track if user has an open Order
 	private readonly userStatus = new Map<string, boolean>();
+	private readonly userMarkets: UserMarkets = {};
 
 	constructor(
 		config: OrderSubscriberConfig,
-		marketIndex: number,
+		marketIndexes: number[],
 		marketType: MarketType
 	) {
 		super(config);
-		this.marketIndex = marketIndex;
+		this.marketIndexes = marketIndexes;
 		this.marketTypeStr = getVariant(marketType);
 	}
 
@@ -80,20 +86,32 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 		}
 
 		const userAccount = this.decodeFn('User', buffer) as UserAccount;
-		const hasFilteredOpenOrders = userAccount.orders.some(
-			(order) =>
-				order.marketIndex === this.marketIndex &&
+		const userMarkets = new Set<number>();
+
+		userAccount.orders.forEach((order) => {
+			if (
+				this.marketIndexes.includes(order.marketIndex) &&
 				isVariant(order.marketType, this.marketTypeStr)
-		);
-		if (!hasFilteredOpenOrders) {
-			if (this.userStatus.get(key)) {
-				this.sendUserAccountUpdateMessage(buffer, key, 'delete');
+			) {
+				userMarkets.add(order.marketIndex);
 			}
-			this.userStatus.set(key, false);
-		} else {
-			this.sendUserAccountUpdateMessage(buffer, key, 'update');
-			this.userStatus.set(key, true);
-		}
+		});
+
+		this.updateUserMarkets(key, userMarkets);
+		// const hasFilteredOpenOrders = userAccount.orders.some(
+		// 	(order) =>
+		// 		this.marketIndexes.includes(order.marketIndex) &&
+		// 		isVariant(order.marketType, this.marketTypeStr)
+		// );
+		// if (!hasFilteredOpenOrders) {
+		// 	if (this.userStatus.get(key)) {
+		// 		this.sendUserAccountUpdateMessage(buffer, key, 'delete');
+		// 	}
+		// 	this.userStatus.set(key, false);
+		// } else {
+		// 	this.sendUserAccountUpdateMessage(buffer, key, 'update');
+		// 	this.userStatus.set(key, true);
+		// }
 		this.usersAccounts.set(key, { slot, userAccount });
 	}
 
@@ -153,7 +171,15 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 				if (!programAccountSet.has(key)) {
 					this.usersAccounts.delete(key);
 					this.userStatus.delete(key);
-					this.sendUserAccountUpdateMessage(Buffer.from([]), key, 'delete');
+					this.userMarkets[key].forEach((marketIndex) => {
+						this.sendUserAccountUpdateMessage(
+							Buffer.from([]),
+							key,
+							'delete',
+							marketIndex
+						);
+					});
+					delete this.userMarkets[key];
 				}
 				// give event loop a chance to breathe
 				await new Promise((resolve) => setTimeout(resolve, 0));
@@ -169,12 +195,14 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 	sendUserAccountUpdateMessage(
 		buffer: Buffer,
 		key: string,
-		msgType: 'update' | 'delete'
+		msgType: 'update' | 'delete',
+		marketIndex: number
 	) {
 		const userAccountUpdate: UserAccountUpdate = {
 			type: msgType,
 			userAccount: buffer.toString('base64'),
 			pubkey: key,
+			marketIndex,
 		};
 		if (typeof process.send === 'function') {
 			process.send({
@@ -194,6 +222,44 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 			});
 		}
 	}
+
+	private updateUserMarkets(userId: string, currentMarkets: Set<number>): void {
+		const previousMarkets = this.userMarkets[userId] || new Set<number>();
+
+		const newMarkets = new Set<number>();
+		currentMarkets.forEach((marketIndex) => {
+			if (!previousMarkets.has(marketIndex)) {
+				newMarkets.add(marketIndex);
+			}
+		});
+
+		const removedMarkets = new Set<number>();
+		previousMarkets.forEach((marketIndex) => {
+			if (!currentMarkets.has(marketIndex)) {
+				removedMarkets.add(marketIndex);
+			}
+		});
+
+		this.userMarkets[userId] = currentMarkets;
+
+		for (const marketIndex of newMarkets) {
+			this.sendUserAccountUpdateMessage(
+				Buffer.from([]),
+				userId,
+				'update',
+				marketIndex
+			);
+		}
+
+		for (const marketIndex of removedMarkets) {
+			this.sendUserAccountUpdateMessage(
+				Buffer.from([]),
+				userId,
+				'delete',
+				marketIndex
+			);
+		}
+	}
 }
 
 const main = async () => {
@@ -203,7 +269,7 @@ const main = async () => {
 	dotenv.config();
 
 	const args = parseArgs(process.argv.slice(2));
-	const marketIndex = args['market-index'];
+	const marketIndexes = args['market-indexes'].map(Number);
 	const marketTypeStr = args['market-type'] as string;
 	if (marketTypeStr !== 'perp' && marketTypeStr !== 'spot') {
 		throw new Error("market-type must be either 'perp' or 'spot'");
@@ -235,7 +301,7 @@ const main = async () => {
 	const driftClient = getDriftClientFromArgs({
 		connection,
 		wallet,
-		marketIndex,
+		marketIndexes,
 		marketTypeStr,
 	});
 	await driftClient.subscribe();
@@ -255,7 +321,7 @@ const main = async () => {
 
 	const orderSubscriberFiltered = new OrderSubscriberFiltered(
 		orderSubscriberConfig,
-		marketIndex,
+		marketIndexes,
 		marketType
 	);
 
