@@ -135,113 +135,6 @@ function calculateSpotTokenAmountToLiquidate(
 	}
 }
 
-function findBestSpotPosition(
-	driftClient: DriftClient,
-	liquidateeUser: User,
-	liquidatorUser: User,
-	spotPositions: SpotPosition[],
-	isBorrow: boolean,
-	positionTakerOverPctNumerator: BN,
-	positionTakerOverPctDenominator: BN,
-	minDepositToLiq: Map<number, number>
-): {
-	bestIndex: number;
-	bestAmount: BN;
-	indexWithMaxAssets: number;
-	indexWithOpenOrders: number;
-} {
-	let bestIndex = -1;
-	let bestAmount = ZERO;
-	let currentAstWeight = 0;
-	let currentLibWeight = Number.MAX_VALUE;
-	let indexWithMaxAssets = -1;
-	let maxAssets = new BN(-1);
-	let indexWithOpenOrders = -1;
-
-	for (const position of spotPositions) {
-		if (position.scaledBalance.eq(ZERO)) {
-			continue;
-		}
-
-		// Skip any position that is less than the configured minimum amount
-		// for the specific market
-		const minAmount = new BN(minDepositToLiq.get(position.marketIndex) ?? 0);
-		if (position.scaledBalance.abs().lt(minAmount)) {
-			logger.debug(
-				`findBestspotPosition: Amount ${position.scaledBalance} below ${minAmount} liquidation threshold`
-			);
-			continue;
-		}
-
-		const market = driftClient.getSpotMarketAccount(position.marketIndex);
-		if (!market) {
-			logger.error(`No spot market found for ${position.marketIndex}`);
-			continue;
-		}
-
-		if (position.openOrders > 0) {
-			indexWithOpenOrders = position.marketIndex;
-		}
-
-		const totalAssetValue = liquidateeUser.getSpotMarketAssetValue(
-			position.marketIndex,
-			'Maintenance',
-			true,
-			undefined,
-			undefined
-		);
-		if (totalAssetValue.abs().gt(maxAssets)) {
-			maxAssets = totalAssetValue.abs();
-			indexWithMaxAssets = position.marketIndex;
-		}
-
-		if (
-			(isBorrow && isVariant(position.balanceType, 'deposit')) ||
-			(!isBorrow && isVariant(position.balanceType, 'borrow'))
-		) {
-			continue;
-		}
-
-		const spotMarket = driftClient.getSpotMarketAccount(position.marketIndex);
-		if (!spotMarket) {
-			logger.error(`No spot market found for ${position.marketIndex}`);
-			continue;
-		}
-		const tokenAmount = calculateSpotTokenAmountToLiquidate(
-			driftClient,
-			liquidatorUser,
-			position,
-			positionTakerOverPctNumerator,
-			positionTakerOverPctDenominator
-		);
-
-		liquidatorUser.getSpotMarketAssetAndLiabilityValue();
-
-		if (isBorrow) {
-			if (spotMarket.maintenanceLiabilityWeight < currentLibWeight) {
-				bestAmount = tokenAmount;
-				bestIndex = position.marketIndex;
-				currentAstWeight = spotMarket.maintenanceAssetWeight;
-				currentLibWeight = spotMarket.maintenanceLiabilityWeight;
-			}
-		} else {
-			if (spotMarket.maintenanceAssetWeight > currentAstWeight) {
-				bestAmount = tokenAmount;
-				bestIndex = position.marketIndex;
-				currentAstWeight = spotMarket.maintenanceAssetWeight;
-				currentLibWeight = spotMarket.maintenanceLiabilityWeight;
-			}
-		}
-	}
-
-	return {
-		bestIndex,
-		bestAmount,
-		indexWithMaxAssets: indexWithMaxAssets,
-		indexWithOpenOrders,
-	};
-}
-
 enum METRIC_TYPES {
 	total_leverage = 'total_leverage',
 	total_collateral = 'total_collateral',
@@ -564,6 +457,16 @@ export class LiquidatorBot implements Bot {
 		return subAccountId;
 	}
 
+	private getLiquidatorUserForSpotMarket(
+		marketIndex: number
+	): User | undefined {
+		const subAccountId = this.spotMarketToSubAccount.get(marketIndex);
+		if (subAccountId === undefined) {
+			return undefined;
+		}
+		return this.driftClient.getUser(subAccountId);
+	}
+
 	private getTxParamsWithPriorityFees(): TxParams {
 		return {
 			computeUnits: 1_400_000,
@@ -735,17 +638,23 @@ export class LiquidatorBot implements Bot {
 
 		logger.info(`${this.name} Bot started!`);
 
-		const freeCollateral = this.driftClient.getUser().getFreeCollateral();
-		logger.info(
-			`${this.name} free collateral: $${convertToNumber(
-				freeCollateral,
-				QUOTE_PRECISION
-			)}, spending at most ${
-				(this.maxPositionTakeoverPctOfCollateralNum.toNumber() /
-					this.maxPositionTakeoverPctOfCollateralDenom.toNumber()) *
-				100.0
-			}% per liquidation`
-		);
+		for (const subAccount of this.allSubaccounts) {
+			const freeCollateral = this.driftClient
+				.getUser(subAccount)
+				.getFreeCollateral();
+			logger.info(
+				`[${
+					this.name
+				}] Subaccount: ${subAccount}:  free collateral: $${convertToNumber(
+					freeCollateral,
+					QUOTE_PRECISION
+				)}, spending at most ${
+					(this.maxPositionTakeoverPctOfCollateralNum.toNumber() /
+						this.maxPositionTakeoverPctOfCollateralDenom.toNumber()) *
+					100.0
+				}% per liquidation`
+			);
+		}
 	}
 
 	public async healthCheck(): Promise<boolean> {
@@ -1550,10 +1459,14 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
-	private calculateBaseAmountToLiquidate(
-		liquidatorUser: User,
-		liquidateePosition: PerpPosition
-	): BN {
+	private calculateBaseAmountToLiquidate(liquidateePosition: PerpPosition): BN {
+		const liquidatorUser = this.getLiquidatorUserForSpotMarket(
+			liquidateePosition.marketIndex
+		);
+		if (!liquidatorUser) {
+			return ZERO;
+		}
+
 		const oraclePrice = this.driftClient.getOracleDataForPerpMarket(
 			liquidateePosition.marketIndex
 		).price;
@@ -1749,14 +1662,6 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
-	private getCollateralAvailableToLiquidate(subAccountId: number): BN {
-		const currUser = this.driftClient.getUser(subAccountId);
-		const freeCollateral = currUser.getFreeCollateral('Initial');
-		return freeCollateral
-			.mul(this.maxPositionTakeoverPctOfCollateralNum)
-			.div(this.maxPositionTakeoverPctOfCollateralDenom);
-	}
-
 	private hasCollateralToLiquidate(subAccountId: number): boolean {
 		const currUser = this.driftClient.getUser(subAccountId);
 		const freeCollateral = currUser.getFreeCollateral('Initial');
@@ -1767,6 +1672,118 @@ export class LiquidatorBot implements Bot {
 			.mul(this.maxPositionTakeoverPctOfCollateralNum)
 			.div(this.maxPositionTakeoverPctOfCollateralDenom);
 		return freeCollateral.gte(minFreeCollateral);
+	}
+
+	private findBestSpotPosition(
+		driftClient: DriftClient,
+		liquidateeUser: User,
+		spotPositions: SpotPosition[],
+		isBorrow: boolean,
+		positionTakerOverPctNumerator: BN,
+		positionTakerOverPctDenominator: BN,
+		minDepositToLiq: Map<number, number>
+	): {
+		bestIndex: number;
+		bestAmount: BN;
+		indexWithMaxAssets: number;
+		indexWithOpenOrders: number;
+	} {
+		let bestIndex = -1;
+		let bestAmount = ZERO;
+		let currentAstWeight = 0;
+		let currentLibWeight = Number.MAX_VALUE;
+		let indexWithMaxAssets = -1;
+		let maxAssets = new BN(-1);
+		let indexWithOpenOrders = -1;
+
+		for (const position of spotPositions) {
+			if (position.scaledBalance.eq(ZERO)) {
+				continue;
+			}
+
+			// Skip any position that is less than the configured minimum amount
+			// for the specific market
+			const minAmount = new BN(minDepositToLiq.get(position.marketIndex) ?? 0);
+			if (position.scaledBalance.abs().lt(minAmount)) {
+				logger.debug(
+					`findBestspotPosition: Amount ${position.scaledBalance} below ${minAmount} liquidation threshold`
+				);
+				continue;
+			}
+
+			const market = driftClient.getSpotMarketAccount(position.marketIndex);
+			if (!market) {
+				logger.error(`No spot market found for ${position.marketIndex}`);
+				continue;
+			}
+
+			if (position.openOrders > 0) {
+				indexWithOpenOrders = position.marketIndex;
+			}
+
+			const totalAssetValue = liquidateeUser.getSpotMarketAssetValue(
+				position.marketIndex,
+				'Maintenance',
+				true,
+				undefined,
+				undefined
+			);
+			if (totalAssetValue.abs().gt(maxAssets)) {
+				maxAssets = totalAssetValue.abs();
+				indexWithMaxAssets = position.marketIndex;
+			}
+
+			if (
+				(isBorrow && isVariant(position.balanceType, 'deposit')) ||
+				(!isBorrow && isVariant(position.balanceType, 'borrow'))
+			) {
+				continue;
+			}
+
+			const spotMarket = driftClient.getSpotMarketAccount(position.marketIndex);
+			if (!spotMarket) {
+				logger.error(`No spot market found for ${position.marketIndex}`);
+				continue;
+			}
+
+			const liquidatorUser = this.getLiquidatorUserForSpotMarket(
+				position.marketIndex
+			);
+			if (!liquidatorUser) {
+				continue;
+			}
+
+			const tokenAmount = calculateSpotTokenAmountToLiquidate(
+				driftClient,
+				liquidatorUser,
+				position,
+				positionTakerOverPctNumerator,
+				positionTakerOverPctDenominator
+			);
+
+			if (isBorrow) {
+				if (spotMarket.maintenanceLiabilityWeight < currentLibWeight) {
+					bestAmount = tokenAmount;
+					bestIndex = position.marketIndex;
+					currentAstWeight = spotMarket.maintenanceAssetWeight;
+					currentLibWeight = spotMarket.maintenanceLiabilityWeight;
+				}
+			} else {
+				if (spotMarket.maintenanceAssetWeight > currentAstWeight) {
+					bestAmount = tokenAmount;
+					bestIndex = position.marketIndex;
+					currentAstWeight = spotMarket.maintenanceAssetWeight;
+					currentLibWeight = spotMarket.maintenanceLiabilityWeight;
+				}
+			}
+		}
+
+		return {
+			bestIndex,
+			bestAmount,
+			indexWithMaxAssets: indexWithMaxAssets,
+			indexWithOpenOrders,
+		};
 	}
 
 	private async liqBorrow(
@@ -2228,7 +2245,6 @@ export class LiquidatorBot implements Bot {
 					);
 				}
 
-				const liquidatorUser = this.driftClient.getUser();
 				const liquidateeUserAccount = user.getUserAccount();
 
 				// most attractive spot market liq
@@ -2237,10 +2253,9 @@ export class LiquidatorBot implements Bot {
 					bestAmount: depositAmountToLiq,
 					indexWithMaxAssets,
 					indexWithOpenOrders,
-				} = findBestSpotPosition(
+				} = this.findBestSpotPosition(
 					this.driftClient,
 					user,
-					liquidatorUser,
 					liquidateeUserAccount.spotPositions,
 					false,
 					this.maxPositionTakeoverPctOfCollateralNum,
@@ -2251,10 +2266,9 @@ export class LiquidatorBot implements Bot {
 				const {
 					bestIndex: borrowMarketIndextoLiq,
 					bestAmount: borrowAmountToLiq,
-				} = findBestSpotPosition(
+				} = this.findBestSpotPosition(
 					this.driftClient,
 					user,
-					liquidatorUser,
 					liquidateeUserAccount.spotPositions,
 					true,
 					this.maxPositionTakeoverPctOfCollateralNum,
@@ -2330,7 +2344,6 @@ export class LiquidatorBot implements Bot {
 					}
 
 					const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
-						liquidatorUser,
 						user.getPerpPositionWithLPSettle(
 							liquidateePosition.marketIndex,
 							liquidateePosition
