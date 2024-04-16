@@ -33,12 +33,14 @@ export type MarkTwapCrankConfig = BaseBotConfig & {
 export type FillerMultiThreadedConfig = BaseBotConfig & {
 	marketType: string;
 	marketIndex: number;
+	oneMakerPerFill?: boolean;
 	simulateTxForCUEstimate?: boolean;
 	rebalanceFiller?: boolean;
 	minimumAmountToFill?: number;
 };
 
 export type FillerConfig = BaseBotConfig & {
+	oneMakerPerFill?: boolean;
 	fillerPollingInterval?: number;
 	revertOnFailure?: boolean;
 	simulateTxForCUEstimate?: boolean;

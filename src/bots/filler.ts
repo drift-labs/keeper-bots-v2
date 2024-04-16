@@ -91,10 +91,6 @@ import { Metrics } from '../metrics';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 
-const MAX_TX_PACK_SIZE = 1230; //1232;
-const CU_PER_FILL = 260_000; // CU cost for a successful fill
-const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
-const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
@@ -171,6 +167,7 @@ export class FillerBot implements Bot {
 	protected bundleSender?: BundleSender;
 
 	private globalConfig: GlobalConfig;
+	private config: FillerConfig;
 	private dlobSubscriber?: DLOBSubscriber;
 
 	private userMap?: UserMap;
@@ -257,6 +254,7 @@ export class FillerBot implements Bot {
 		this.globalConfig = globalConfig;
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
+		this.config = config;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		if (globalConfig.txConfirmationEndpoint) {
@@ -298,15 +296,13 @@ export class FillerBot implements Bot {
 			`${this.name}: jito enabled: ${this.bundleSender !== undefined}`
 		);
 
-		if (
-			config.rebalanceFiller &&
-			this.runtimeSpec.driftEnv === 'mainnet-beta'
-		) {
+		this.rebalanceFiller = config.rebalanceFiller ?? true;
+		if (this.rebalanceFiller && this.runtimeSpec.driftEnv === 'mainnet-beta') {
 			this.jupiterClient = new JupiterClient({
 				connection: this.driftClient.connection,
 			});
 		}
-		this.rebalanceFiller = config.rebalanceFiller ?? true;
+
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
@@ -1893,6 +1889,288 @@ export class FillerBot implements Bot {
 		return nodesSent;
 	}
 
+	protected async tryFillOneMakerPerpNode(
+		nodeToFill: NodeToFill,
+		buildForBundle: boolean
+	) {
+		let priorityFeeIx;
+		if (!buildForBundle) {
+			priorityFeeIx = ComputeBudgetProgram.setComputeUnitPrice({
+				microLamports: Math.floor(
+					this.priorityFeeSubscriber.getCustomStrategyResult()
+				),
+			});
+		}
+
+		const {
+			makerInfos,
+			takerUser,
+			takerUserPubKey,
+			takerUserSlot,
+			referrerInfo,
+			marketType,
+		} = await this.getNodeFillInfo(nodeToFill);
+
+		if (!isVariant(marketType, 'perp')) {
+			throw new Error('expected perp market type');
+		}
+
+		for (const makerInfo of makerInfos) {
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000,
+				}),
+			];
+			if (!buildForBundle && priorityFeeIx) {
+				ixs.push(priorityFeeIx);
+			}
+
+			const fillTxId = this.fillTxId++;
+			logger.info(
+				logMessageForNodeToFill(
+					nodeToFill,
+					takerUserPubKey,
+					takerUserSlot,
+					makerInfos,
+					this.slotSubscriber.getSlot(),
+					`Filling perp node (fillTxId: ${fillTxId})`
+				)
+			);
+
+			const ix = await this.driftClient.getFillPerpOrderIx(
+				await getUserAccountPublicKey(
+					this.driftClient.program.programId,
+					takerUser.authority
+				),
+				takerUser,
+				nodeToFill.node.order!,
+				makerInfo.data,
+				referrerInfo
+			);
+			ixs.push(ix);
+			if (this.revertOnFailure) {
+				ixs.push(await this.driftClient.getRevertFillIx());
+			}
+
+			const simResult = await simulateAndGetTxWithCUs(
+				ixs,
+				this.driftClient.connection,
+				this.driftClient.txSender,
+				[this.lookupTableAccount!],
+				[],
+				this.driftClient.opts,
+				SIM_CU_ESTIMATE_MULTIPLIER,
+				this.simulateTxForCUEstimate
+			);
+			logger.info(
+				`tryOneMakerFillPerpNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
+			);
+			this.simulateTxHistogram?.record(simResult.simTxDuration, {
+				type: 'singleMakerFill',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					this.driftClient.getUser().userAccountPublicKey,
+					this.driftClient.getUser().getUserAccount()
+				),
+			});
+			this.estTxCuHistogram?.record(simResult.cuEstimate, {
+				type: 'singleMakerFill',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					this.driftClient.getUser().userAccountPublicKey,
+					this.driftClient.getUser().getUserAccount()
+				),
+			});
+
+			if (simResult.simError) {
+				logger.error(
+					`simError: ${JSON.stringify(
+						simResult.simError
+					)} (fillTxId: ${fillTxId})`
+				);
+			} else {
+				const tx = simResult.tx;
+				let txResp: Promise<TxSigAndSlot> | undefined = undefined;
+				let estTxSize: number | undefined = undefined;
+				let txAccounts = 0;
+				let writeAccs = 0;
+				const accountMetas: any[] = [];
+				const txStart = Date.now();
+				// @ts-ignore;
+				tx.sign([this.driftClient.wallet.payer]);
+				const txSig = bs58.encode(tx.signatures[0]);
+
+				if (buildForBundle) {
+					await this.sendTxThroughJito(tx, fillTxId);
+					this.fillingNodes.delete(
+						getNodeToFillSignature(nodeToFill, makerInfo.data)
+					);
+				} else {
+					estTxSize = tx.message.serialize().length;
+					const acc = tx.message.getAccountKeys({
+						addressLookupTableAccounts: [this.lookupTableAccount!],
+					});
+					txAccounts = acc.length;
+					for (let i = 0; i < txAccounts; i++) {
+						const meta: any = {};
+						if (tx.message.isAccountWritable(i)) {
+							writeAccs++;
+							meta['writeable'] = true;
+						}
+						if (tx.message.isAccountSigner(i)) {
+							meta['signer'] = true;
+						}
+						meta['address'] = acc.get(i)!.toBase58();
+						accountMetas.push(meta);
+					}
+
+					txResp = this.driftClient.txSender.sendVersionedTransaction(
+						tx,
+						[],
+						this.driftClient.opts
+					);
+				}
+
+				this.registerTxSigToConfirm(
+					txSig,
+					Date.now(),
+					[nodeToFill],
+					fillTxId,
+					'fill'
+				);
+
+				if (txResp) {
+					txResp
+						.then((resp: TxSigAndSlot) => {
+							const duration = Date.now() - txStart;
+							logger.info(
+								`Sent tx: ${resp.txSig}, took: ${duration}ms (fillTxId: ${fillTxId})`
+							);
+						})
+						.catch(async (e) => {
+							const simError = e as SendTransactionError;
+							logger.error(
+								`Failed to send packed tx txAccountKeys: ${txAccounts} (${writeAccs} writeable) (fillTxId: ${fillTxId}), error: ${simError.message}`
+							);
+
+							if (e.message.includes('too large:')) {
+								logger.error(
+									`Tx too large, estimated to be ${estTxSize} (fillId: ${fillTxId}). ${
+										e.message
+									}\n${JSON.stringify(accountMetas)}`
+								);
+								return;
+							}
+
+							if (simError.logs && simError.logs.length > 0) {
+								const errorCode = getErrorCode(e);
+								logger.error(
+									`Failed to send tx, sim error (fillTxId: ${fillTxId}) error code: ${errorCode}`
+								);
+							}
+						})
+						.finally(() => {
+							this.fillingNodes.delete(
+								getNodeToFillSignature(nodeToFill, makerInfo.data)
+							);
+						});
+				}
+			}
+		}
+	}
+
+	protected async tryFillPerpNode(
+		nodeToFill: NodeToFill,
+		buildForBundle: boolean
+	) {
+		const ixs = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000,
+			}),
+		];
+
+		if (!buildForBundle) {
+			ixs.push(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult()
+					),
+				})
+			);
+		}
+		const fillTxId = this.fillTxId++;
+
+		const {
+			makerInfos,
+			takerUser,
+			takerUserPubKey,
+			takerUserSlot,
+			referrerInfo,
+			marketType,
+		} = await this.getNodeFillInfo(nodeToFill);
+		logger.info(
+			logMessageForNodeToFill(
+				nodeToFill,
+				takerUserPubKey,
+				takerUserSlot,
+				makerInfos,
+				this.slotSubscriber.getSlot(),
+				`Filling perp node (fillTxId: ${fillTxId})`
+			)
+		);
+
+		if (!isVariant(marketType, 'perp')) {
+			throw new Error('expected perp market type');
+		}
+
+		const ix = await this.driftClient.getFillPerpOrderIx(
+			await getUserAccountPublicKey(
+				this.driftClient.program.programId,
+				takerUser.authority,
+				takerUser.subAccountId
+			),
+			takerUser,
+			nodeToFill.node.order!,
+			makerInfos.map((m) => m.data),
+			referrerInfo
+		);
+
+		ixs.push(ix);
+
+		if (this.revertOnFailure) {
+			ixs.push(await this.driftClient.getRevertFillIx());
+		}
+
+		const simResult = await simulateAndGetTxWithCUs(
+			ixs,
+			this.driftClient.connection,
+			this.driftClient.txSender,
+			[this.lookupTableAccount!],
+			[],
+			this.driftClient.opts,
+			SIM_CU_ESTIMATE_MULTIPLIER,
+			this.simulateTxForCUEstimate
+		);
+		logger.info(
+			`tryFillPerpNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
+		);
+
+		if (simResult.simError) {
+			logger.error(
+				`simError: ${JSON.stringify(
+					simResult.simError
+				)} (fillTxId: ${fillTxId})`
+			);
+		} else {
+			this.sendFillTxAndParseLogs(
+				fillTxId,
+				[nodeToFill],
+				simResult.tx,
+				buildForBundle
+			);
+		}
+	}
+
 	protected async tryBulkFillPerpNodesForMarket(
 		nodesToFill: Array<NodeToFill>,
 		buildForBundle: boolean
@@ -1912,227 +2190,28 @@ export class FillerBot implements Bot {
 			);
 		}
 
-		/**
-		 * At all times, the running Tx size is:
-		 * - signatures (compact-u16 array, 64 bytes per elem)
-		 * - message header (3 bytes)
-		 * - affected accounts (compact-u16 array, 32 bytes per elem)
-		 * - previous block hash (32 bytes)
-		 * - message instructions (
-		 * 		- progamIdIdx (1 byte)
-		 * 		- accountsIdx (compact-u16, 1 byte per elem)
-		 *		- instruction data (compact-u16, 1 byte per elem)
-		 */
-		let runningTxSize = 0;
-		let runningCUUsed = 0;
-
-		const uniqueAccounts = new Set<string>();
-		uniqueAccounts.add(this.driftClient.provider.wallet.publicKey.toString()); // fee payer goes first
-
-		const computeBudgetIx = ixs[0];
-		computeBudgetIx.keys.forEach((key) =>
-			uniqueAccounts.add(key.pubkey.toString())
-		);
-		uniqueAccounts.add(computeBudgetIx.programId.toString());
-
-		// initialize the barebones transaction
-		// signatures
-		runningTxSize += this.calcCompactU16EncodedSize(new Array(1), 64);
-		// message header
-		runningTxSize += 3;
-		// accounts
-		runningTxSize += this.calcCompactU16EncodedSize(
-			new Array(uniqueAccounts.size),
-			32
-		);
-		// block hash
-		runningTxSize += 32;
-		runningTxSize += this.calcIxEncodedSize(computeBudgetIx);
-
 		const nodesSent: Array<NodeToFill> = [];
-		let idxUsed = 0;
-		const startingIxsSize = ixs.length;
-		const fillTxId = this.fillTxId++;
-		for (const [idx, nodeToFill] of nodesToFill.entries()) {
-			// do multi maker fills in a separate tx since they're larger
-			if (nodeToFill.makerNodes.length > 1) {
-				await this.tryFillMultiMakerPerpNode(nodeToFill, buildForBundle);
-				nodesSent.push(nodeToFill);
-				continue;
-			}
-
-			// otherwise pack fill ixs until est. tx size or CU limit is hit
-			const {
-				makerInfos,
-				takerUser,
-				takerUserPubKey,
-				takerUserSlot,
-				referrerInfo,
-				marketType,
-			} = await this.getNodeFillInfo(nodeToFill);
-
-			logger.info(
-				logMessageForNodeToFill(
-					nodeToFill,
-					takerUserPubKey,
-					takerUserSlot,
-					makerInfos,
-					this.getMaxSlot(),
-					`Filling perp node ${idx} (fillTxId: ${fillTxId})`
-				)
-			);
-			this.logSlots();
-
-			if (!isVariant(marketType, 'perp')) {
-				throw new Error('expected perp market type');
-			}
-
-			const ix = await this.driftClient.getFillPerpOrderIx(
-				await getUserAccountPublicKey(
-					this.driftClient.program.programId,
-					takerUser.authority,
-					takerUser.subAccountId
-				),
-				takerUser,
-				nodeToFill.node.order!,
-				makerInfos.map((m) => m.data),
-				referrerInfo
-			);
-
-			if (!ix) {
-				logger.error(`failed to generate an ix`);
-				break;
-			}
-
-			this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
-
-			// first estimate new tx size with this additional ix and new accounts
-			const ixKeys = ix.keys.map((key) => key.pubkey);
-			const newAccounts = ixKeys
-				.concat(ix.programId)
-				.filter((key) => !uniqueAccounts.has(key.toString()));
-			const newIxCost = this.calcIxEncodedSize(ix);
-			const additionalAccountsCost =
-				newAccounts.length > 0
-					? this.calcCompactU16EncodedSize(newAccounts, 32) - 1
-					: 0;
-
-			// We have to use MAX_TX_PACK_SIZE because it appears we cannot send tx with a size of exactly 1232 bytes.
-			// Also, some logs may get truncated near the end of the tx, so we need to leave some room for that.
-			const cuToUsePerFill = this.useBurstCULimit
-				? BURST_CU_PER_FILL
-				: CU_PER_FILL;
-			if (
-				(runningTxSize + newIxCost + additionalAccountsCost >=
-					MAX_TX_PACK_SIZE ||
-					runningCUUsed + cuToUsePerFill >= MAX_CU_PER_TX) &&
-				ixs.length > startingIxsSize + 1 // ensure at least 1 attempted fill
-			) {
-				logger.info(
-					`Fully packed fill tx (ixs: ${ixs.length}): est. tx size ${
-						runningTxSize + newIxCost + additionalAccountsCost
-					}, max: ${MAX_TX_PACK_SIZE}, est. CU used: expected ${
-						runningCUUsed + cuToUsePerFill
-					}, max: ${MAX_CU_PER_TX}, (fillTxId: ${fillTxId})`
-				);
-				break;
-			}
-
-			// add to tx
-			logger.info(
-				`including taker ${(
-					await getUserAccountPublicKey(
-						this.driftClient.program.programId,
-						takerUser.authority,
-						takerUser.subAccountId
-					)
-				).toString()}-${nodeToFill.node.order!.orderId.toString()} (slot: ${takerUserSlot}) (fillTxId: ${fillTxId}), maker: ${makerInfos
-					.map((m) => `${m.data.maker.toBase58()}: ${m.slot}`)
-					.join(', ')}`
-			);
-			ixs.push(ix);
-			runningTxSize += newIxCost + additionalAccountsCost;
-			runningCUUsed += cuToUsePerFill;
-
-			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
-			idxUsed++;
-			nodesSent.push(nodeToFill);
-		}
-
-		if (idxUsed === 0) {
-			return nodesSent.length;
-		}
-
-		if (nodesSent.length === 0) {
-			return 0;
-		}
-
-		if (this.revertOnFailure) {
-			ixs.push(await this.driftClient.getRevertFillIx());
-		}
-
-		const user = this.driftClient.getUser();
-		const simResult = await simulateAndGetTxWithCUs(
-			ixs,
-			this.driftClient.connection,
-			this.driftClient.txSender,
-			[this.lookupTableAccount!],
-			[],
-			this.driftClient.opts,
-			SIM_CU_ESTIMATE_MULTIPLIER,
-			this.simulateTxForCUEstimate,
-			await this.getBlockhashForTx()
-		);
-		this.simulateTxHistogram?.record(simResult.simTxDuration, {
-			type: 'bulkFill',
-			simError: simResult.simError !== null,
-			...metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
-			),
-		});
-		this.estTxCuHistogram?.record(simResult.cuEstimate, {
-			type: 'bulkFill',
-			simError: simResult.simError !== null,
-			...metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
-			),
-		});
-
-		if (this.simulateTxForCUEstimate && simResult.simError) {
-			logger.error(
-				`simError: ${JSON.stringify(
-					simResult.simError
-				)} (fillTxId: ${fillTxId})`
-			);
-			handleSimResultError(
-				simResult,
-				errorCodesToSuppress,
-				`${this.name}: (fillTxId: ${fillTxId})`
-			);
-			if (simResult.simTxLogs) {
-				await this.handleTransactionLogs(nodesToFill, simResult.simTxLogs);
-			}
-		} else {
-			if (this.dryRun) {
-				logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
-			} else {
-				if (this.hasEnoughSolToFill) {
-					this.sendFillTxAndParseLogs(
-						fillTxId,
-						nodesSent,
-						simResult.tx,
-						buildForBundle
-					);
+		for (const [_idx, nodeToFill] of nodesToFill.entries()) {
+			if (this.hasEnoughSolToFill) {
+				if (nodeToFill.makerNodes.length > 1 && !this.config.oneMakerPerFill) {
+					this.tryFillMultiMakerPerpNode(nodeToFill, buildForBundle);
+					nodesSent.push(nodeToFill);
+					continue;
+				} else if (this.config.oneMakerPerFill) {
+					await this.tryFillOneMakerPerpNode(nodeToFill, buildForBundle);
+					nodesSent.push(nodeToFill);
 				} else {
-					logger.info(
-						`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
-					);
+					await this.tryFillPerpNode(nodeToFill, buildForBundle);
+					nodesSent.push(nodeToFill);
 				}
+				continue;
+			} else {
+				logger.info(`not filling because we don't have enough SOL to fill`);
 			}
-		}
+			// do multi maker fills in a separate tx since they're larger
 
+			// Leaving below code for legacy sake
+		}
 		return nodesSent.length;
 	}
 
