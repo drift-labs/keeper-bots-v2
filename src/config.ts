@@ -5,7 +5,7 @@ import {
 	loadCommaDelimitToStringArray,
 } from './utils';
 import { OrderExecutionAlgoType } from './types';
-import { DriftEnv } from '@drift-labs/sdk';
+import { BN, DriftEnv } from '@drift-labs/sdk';
 
 export type BaseBotConfig = {
 	botId: string;
@@ -73,6 +73,13 @@ export type LiquidatorConfig = BaseBotConfig & {
 	excludedAccounts?: Set<string>;
 	maxPositionTakeoverPctOfCollateral?: number;
 	notifyOnLiquidation?: boolean;
+
+	/// The threshold at which to consider spot asset "dust". Dust will be periodically withdrawn to
+	/// authority wallet to free up spot position slots.
+	/// In human precision: 100.0 for 100.0 USD worth of spot assets
+	spotDustValueThreshold?: number;
+	/// Placeholder, liquidator will set this to the raw BN of {@link LiquidatorConfig.spotDustValueThreshold}
+	spotDustValueThresholdBN?: BN;
 };
 
 export type BotConfigMap = {

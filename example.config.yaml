@@ -196,6 +196,10 @@ botConfigs:
     # sends a webhook notification (slack, discord, etc.) when a liquidation is attempted (can be noisy due to partial liquidations)
     notifyOnLiquidation: true
 
+    # Will consider spot assets below this value to be "dust" and will be withdrawn to the authority wallet
+    # in human USD terms: 10.0 for 10.0 USD worth of spot assets
+    spotDustValueThreshold: 10
+
   trigger:
     botId: "trigger"
     dryRun: false

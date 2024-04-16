@@ -75,6 +75,7 @@ import {
 	AddressLookupTableAccount,
 	TransactionInstruction,
 } from '@solana/web3.js';
+import { getAssociatedTokenAddress } from '@solana/spl-token';
 import {
 	calculateAccountValueUsd,
 	handleSimResultError,
@@ -241,6 +242,15 @@ export class LiquidatorBot implements Bot {
 		this.liquidatorConfig.deriskAlgoSpot =
 			config.deriskAlgoSpot ?? config.deriskAlgo;
 
+		if (this.liquidatorConfig.spotDustValueThreshold !== undefined) {
+			this.liquidatorConfig.spotDustValueThresholdBN = new BN(
+				Math.floor(
+					this.liquidatorConfig.spotDustValueThreshold *
+						QUOTE_PRECISION.toNumber()
+				)
+			);
+		}
+
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
@@ -400,8 +410,8 @@ export class LiquidatorBot implements Bot {
 			this.maxPositionTakeoverPctOfCollateralNum = new BN(50);
 		} else {
 			if (config.maxPositionTakeoverPctOfCollateral > 1.0) {
-				throw new Error(
-					`liquidator.config.maxPositionTakeoverPctOfCollateral cannot be > 1.00`
+				logger.warn(
+					`liquidator.config.maxPositionTakeoverPctOfCollateral is > 1.00: ${config.maxPositionTakeoverPctOfCollateral}`
 				);
 			}
 			this.maxPositionTakeoverPctOfCollateralNum = new BN(
@@ -799,7 +809,7 @@ export class LiquidatorBot implements Bot {
 				this.driftClient.opts
 			);
 			logger.info(
-				`did derisk placeSpotOrder for on market ${marketIndex} tx: ${resp.txSig} `
+				`Sent derisk placeSpotOrder tx for on market ${marketIndex} tx: ${resp.txSig} `
 			);
 		}
 	}
@@ -1064,7 +1074,9 @@ export class LiquidatorBot implements Bot {
 						undefined,
 						this.driftClient.opts
 					);
-					logger.info(`did deriskPerpPosition, tx: ${resp.txSig} `);
+					logger.info(
+						`Sent deriskPerpPosition tx on market ${position.marketIndex}: ${resp.txSig} `
+					);
 				}
 			} else if (position.quoteAssetAmount.lt(ZERO)) {
 				const userAccountPubkey =
@@ -1118,7 +1130,7 @@ export class LiquidatorBot implements Bot {
 						this.driftClient.opts
 					);
 					logger.info(
-						`did settle negative pnl for ${userAccountPubkey.toBase58()} on market ${
+						`Sent settlePnl (negative pnl) tx for ${userAccountPubkey.toBase58()} on market ${
 							position.marketIndex
 						} tx: ${resp.txSig} `
 					);
@@ -1184,7 +1196,7 @@ export class LiquidatorBot implements Bot {
 								this.driftClient.opts
 							);
 						logger.info(
-							`did settle positive pnl for ${userAccountPubkey.toBase58()} on market ${
+							`Sent settlePnl (positive pnl) tx for ${userAccountPubkey.toBase58()} on market ${
 								position.marketIndex
 							} tx: ${resp.txSig} `
 						);
@@ -1394,6 +1406,74 @@ export class LiquidatorBot implements Bot {
 		};
 	}
 
+	private async withdrawDust(userAccount: UserAccount, position: SpotPosition) {
+		if (this.liquidatorConfig.spotDustValueThresholdBN === undefined) {
+			return;
+		}
+
+		// can only withdraw dust for now
+		if (isVariant(position.balanceType, 'borrow')) {
+			return;
+		}
+		const spotMarket = this.driftClient.getSpotMarketAccount(
+			position.marketIndex
+		);
+		if (!spotMarket) {
+			throw new Error(
+				`failed to get spot market account for market ${position.marketIndex}`
+			);
+		}
+		const oracle = this.driftClient.getOracleDataForSpotMarket(
+			position.marketIndex
+		);
+		const tokenAmount = getTokenAmount(
+			position.scaledBalance,
+			spotMarket,
+			position.balanceType
+		);
+		const spotPositionValue = getTokenValue(
+			tokenAmount,
+			spotMarket.decimals,
+			oracle
+		);
+		if (spotPositionValue.lte(this.liquidatorConfig.spotDustValueThresholdBN)) {
+			const ata = await getAssociatedTokenAddress(
+				spotMarket.mint,
+				userAccount.authority
+			);
+			const withdrawIx = await this.driftClient.getWithdrawIx(
+				tokenAmount,
+				position.marketIndex,
+				ata,
+				undefined,
+				userAccount.subAccountId
+			);
+			const simResult = await this.buildVersionedTransactionWithSimulatedCus(
+				[withdrawIx],
+				[this.driftLookupTables!],
+				Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
+			);
+			if (simResult.simError !== null) {
+				logger.error(
+					`Error trying to withdraw spot dust for market ${
+						position.marketIndex
+					}, subaccount start ${
+						userAccount.subAccountId
+					}, simError: ${JSON.stringify(simResult.simError)}`
+				);
+			} else {
+				const resp = await this.driftClient.txSender.sendVersionedTransaction(
+					simResult.tx,
+					undefined,
+					this.driftClient.opts
+				);
+				logger.info(
+					`Sent withdraw dust on market ${position.marketIndex} tx: ${resp.txSig} `
+				);
+			}
+		}
+	}
+
 	private async deriskSpotPositions(userAccount: UserAccount) {
 		for (const position of userAccount.spotPositions) {
 			if (position.scaledBalance.eq(ZERO) || position.marketIndex === 0) {
@@ -1432,6 +1512,8 @@ export class LiquidatorBot implements Bot {
 					userAccount.subAccountId
 				);
 			}
+
+			await this.withdrawDust(userAccount, position);
 		}
 	}
 
@@ -1627,7 +1709,7 @@ export class LiquidatorBot implements Bot {
 					this.driftClient.opts
 				);
 				logger.info(
-					`did resolveBankruptcy for ${userKey.toBase58()} in perp market ${perpIdx} tx: ${
+					`Sent resolveBankruptcy tx for ${userKey.toBase58()} in perp market ${perpIdx} tx: ${
 						resp.txSig
 					} `
 				);
@@ -1684,7 +1766,7 @@ export class LiquidatorBot implements Bot {
 					this.driftClient.opts
 				);
 				logger.info(
-					`did resolveBankruptcy for ${userKey.toBase58()} in spot market ${spotIdx} tx: ${
+					`Sent resolveBankruptcy tx for ${userKey.toBase58()} in spot market ${spotIdx} tx: ${
 						resp.txSig
 					} `
 				);
@@ -1870,7 +1952,7 @@ export class LiquidatorBot implements Bot {
 			);
 			sentTx = true;
 			logger.info(
-				`did liquidateSpot for ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndexToLiq} tx: ${
+				`Sent liquidateSpot tx for ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndexToLiq} tx: ${
 					resp.txSig
 				} `
 			);
@@ -2018,7 +2100,7 @@ export class LiquidatorBot implements Bot {
 						this.driftClient.opts
 					);
 					logger.info(
-						`did settlePnl for ${user.userAccountPublicKey.toBase58()} in perp market ${
+						`Sent settlePnl tx for ${user.userAccountPublicKey.toBase58()} in perp market ${
 							liquidateePosition.marketIndex
 						} tx: ${resp.txSig} `
 					);
@@ -2085,7 +2167,7 @@ export class LiquidatorBot implements Bot {
 						this.driftClient.opts
 					);
 					logger.info(
-						`did liquidateBorrowForPerpPnl for ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq} tx: ${
+						`Sent liquidateBorrowForPerpPnl tx for ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq} tx: ${
 							resp.txSig
 						} `
 					);
@@ -2182,7 +2264,7 @@ export class LiquidatorBot implements Bot {
 					);
 					sentTx = true;
 					logger.info(
-						`did liquidatePerpPnlForDeposit for ${user.userAccountPublicKey.toBase58()} on market ${
+						`Sent liquidatePerpPnlForDeposit tx for ${user.userAccountPublicKey.toBase58()} on market ${
 							liquidateePosition.marketIndex
 						} tx: ${resp.txSig} `
 					);
@@ -2264,7 +2346,7 @@ export class LiquidatorBot implements Bot {
 			);
 			txSent = true;
 			logger.info(
-				`did liquidatePerp for ${user.userAccountPublicKey.toBase58()} on market ${perpMarketIndex} tx: ${
+				`Sent liquidatePerp tx for ${user.userAccountPublicKey.toBase58()} on market ${perpMarketIndex} tx: ${
 					resp.txSig
 				} `
 			);
