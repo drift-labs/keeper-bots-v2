@@ -102,7 +102,6 @@ const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a n
 export const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
 const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana-labs/solana/issues/27241
 
-const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 export const CONFIRM_TX_INTERVAL_MS = 5_000;
@@ -2314,16 +2313,25 @@ export class FillerBot implements Bot {
 			.getActivePerpPositions()
 			.map((pos) => pos.marketIndex);
 		const now = Date.now();
-		if (marketIds.length === MAX_POSITIONS_PER_USER) {
+		if (
+			marketIds.length === MAX_POSITIONS_PER_USER ||
+			!this.hasEnoughSolToFill
+		) {
 			logger.info(
 				`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
 			);
 			if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
 				logger.info(`Want to settle positive pnl, but in cooldown...`);
 			} else {
+				let chunk_size;
+				if (marketIds.length === 1) {
+					chunk_size = 1;
+				} else {
+					chunk_size = marketIds.length / 2;
+				}
 				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
-				for (let i = 0; i < marketIds.length; i += SETTLE_PNL_CHUNKS) {
-					const marketIdChunks = marketIds.slice(i, i + SETTLE_PNL_CHUNKS);
+				for (let i = 0; i < marketIds.length; i += chunk_size) {
+					const marketIdChunks = marketIds.slice(i, i + chunk_size);
 					try {
 						const ixs = [
 							ComputeBudgetProgram.setComputeUnitLimit({
