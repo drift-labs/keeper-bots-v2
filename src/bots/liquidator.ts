@@ -761,7 +761,13 @@ export class LiquidatorBot implements Bot {
 			orderDirection
 		);
 
-		const ix = await this.driftClient.getPlaceSpotOrderIx(
+		const cancelOrdersIx = await this.driftClient.getCancelOrdersIx(
+			MarketType.SPOT,
+			marketIndex,
+			orderDirection,
+			subAccountId
+		);
+		const placeOrderIx = await this.driftClient.getPlaceSpotOrderIx(
 			getLimitOrderParams({
 				marketIndex: marketIndex,
 				direction: orderDirection,
@@ -776,7 +782,7 @@ export class LiquidatorBot implements Bot {
 		);
 
 		const simResult = await this.buildVersionedTransactionWithSimulatedCus(
-			[ix],
+			[cancelOrdersIx, placeOrderIx],
 			[this.driftLookupTables!],
 			Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 		);
@@ -1013,13 +1019,19 @@ export class LiquidatorBot implements Bot {
 				if (orderParams === undefined) {
 					continue;
 				}
-				const ix = await this.driftClient.getPlacePerpOrderIx(
+				const cancelOrdersIx = await this.driftClient.getCancelOrdersIx(
+					MarketType.PERP,
+					position.marketIndex,
+					orderParams.direction,
+					userAccount.subAccountId
+				);
+				const placeOrderIx = await this.driftClient.getPlacePerpOrderIx(
 					orderParams,
 					userAccount.subAccountId
 				);
 
 				const simResult = await this.buildVersionedTransactionWithSimulatedCus(
-					[ix],
+					[cancelOrdersIx, placeOrderIx],
 					[this.driftLookupTables!],
 					Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 				);
