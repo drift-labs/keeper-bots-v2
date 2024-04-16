@@ -782,9 +782,10 @@ export class LiquidatorBot implements Bot {
 		);
 		if (simResult.simError !== null) {
 			logger.error(
-				`Error trying to close spot position for market ${marketIndex}, subaccount start ${subAccountId}`
+				`Error trying to close spot position for market ${marketIndex}, subaccount start ${subAccountId}, simError: ${JSON.stringify(
+					simResult.simError
+				)}`
 			);
-			console.error(simResult.simError);
 		} else {
 			const resp = await this.driftClient.txSender.sendVersionedTransaction(
 				simResult.tx,
@@ -853,7 +854,9 @@ export class LiquidatorBot implements Bot {
 			logger.error(
 				`Error trying to ${getVariant(
 					orderDirection
-				)} spot position for market ${spotMarketIndex} on jupiter, subaccount start ${subAccountId}`
+				)} spot position for market ${spotMarketIndex} on jupiter, subaccount start ${subAccountId}, simError: ${JSON.stringify(
+					simResult.simError
+				)}`
 			);
 		} else {
 			const resp = await this.driftClient.txSender.sendVersionedTransaction(
@@ -1023,7 +1026,9 @@ export class LiquidatorBot implements Bot {
 
 				if (simResult.simError !== null) {
 					logger.error(
-						`Error error in placePerpOrder in market: ${position.marketIndex}`
+						`Error error in placePerpOrder in market: ${
+							position.marketIndex
+						}, simError: ${JSON.stringify(simResult.simError)}`
 					);
 
 					const errorCode = handleSimResultError(
@@ -1033,11 +1038,13 @@ export class LiquidatorBot implements Bot {
 					);
 
 					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-						webhookMessage(
-							`[${this.name}]: :x: error in placePerpOrder in market ${
-								position.marketIndex
-							}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
-						);
+						const msg = `[${
+							this.name
+						}]: :x: error in placePerpOrder in market ${
+							position.marketIndex
+						}: \n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`;
+						logger.error(msg);
+						webhookMessage(msg);
 					}
 				} else {
 					const resp = await this.driftClient.txSender.sendVersionedTransaction(
@@ -1076,7 +1083,7 @@ export class LiquidatorBot implements Bot {
 					logger.error(
 						`Error in SettlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${
 							position.marketIndex
-						}`
+						}, simError: ${JSON.stringify(simResult.simError)}`
 					);
 					const errorCode = handleSimResultError(
 						simResult,
@@ -1139,7 +1146,7 @@ export class LiquidatorBot implements Bot {
 						logger.error(
 							`Error in SettlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${
 								position.marketIndex
-							}`
+							}, simError: ${JSON.stringify(simResult.simError)}`
 						);
 						const errorCode = handleSimResultError(
 							simResult,
@@ -1147,15 +1154,15 @@ export class LiquidatorBot implements Bot {
 							`${this.name}: settlePositivePnl`
 						);
 						if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-							webhookMessage(
-								`[${
-									this.name
-								}]: :x: error in settlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${
-									position.marketIndex
-								}: \n${
-									simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
-								}`
-							);
+							const msg = `[${
+								this.name
+							}]: :x: error in settlePnl for userAccount ${userAccountPubkey.toBase58()} on market ${
+								position.marketIndex
+							}: \n${
+								simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+							}`;
+							logger.error(msg);
+							webhookMessage(msg);
 						}
 					} else {
 						const resp =
@@ -1582,7 +1589,9 @@ export class LiquidatorBot implements Bot {
 			);
 			if (simResult.simError !== null) {
 				logger.error(
-					`Error in resolveBankruptcy for userAccount ${userKey.toBase58()} on market ${perpIdx}`
+					`Error in resolveBankruptcy for userAccount ${userKey.toBase58()} on market ${perpIdx}, simError: ${JSON.stringify(
+						simResult.simError
+					)}`
 				);
 
 				const errorCode = handleSimResultError(
@@ -1591,13 +1600,13 @@ export class LiquidatorBot implements Bot {
 					`${this.name}: resolveBankruptcy`
 				);
 				if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-					webhookMessage(
-						`[${
-							this.name
-						}]: :x: error in resolveBankruptcy for userAccount ${userKey.toBase58()}: \n${
-							simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
-						}`
-					);
+					const msg = `[${
+						this.name
+					}]: :x: error in resolveBankruptcy for userAccount ${userKey.toBase58()}: \n${
+						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+					}`;
+					logger.error(msg);
+					webhookMessage(msg);
 				}
 			} else {
 				const resp = await this.driftClient.txSender.sendVersionedTransaction(
@@ -1637,7 +1646,9 @@ export class LiquidatorBot implements Bot {
 			);
 			if (simResult.simError !== null) {
 				logger.error(
-					`Error in resolveBankruptcy for userAccount ${userKey.toBase58()} in spot market ${spotIdx}`
+					`Error in resolveBankruptcy for userAccount ${userKey.toBase58()} in spot market ${spotIdx}, simError: ${JSON.stringify(
+						simResult.simError
+					)}`
 				);
 
 				const errorCode = handleSimResultError(
@@ -1646,13 +1657,13 @@ export class LiquidatorBot implements Bot {
 					`${this.name}: resolveBankruptcy`
 				);
 				if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-					webhookMessage(
-						`[${
-							this.name
-						}]: :x: error in resolveBankruptcy for userAccount ${userKey.toBase58()}: \n${
-							simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
-						}`
-					);
+					const msg = `[${
+						this.name
+					}]: :x: error in resolveBankruptcy for userAccount ${userKey.toBase58()}: \n${
+						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+					}`;
+					logger.error(msg);
+					webhookMessage(msg);
 				}
 			} else {
 				const resp = await this.driftClient.txSender.sendVersionedTransaction(
@@ -1820,7 +1831,9 @@ export class LiquidatorBot implements Bot {
 		);
 		if (simResult.simError !== null) {
 			logger.error(
-				`Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndexToLiq}`
+				`Error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndexToLiq}, simError: ${JSON.stringify(
+					simResult.simError
+				)}`
 			);
 
 			const errorCode = handleSimResultError(
@@ -1829,13 +1842,13 @@ export class LiquidatorBot implements Bot {
 				`${this.name}: liquidateSpot`
 			);
 			if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-				webhookMessage(
-					`[${
-						this.name
-					}]: :x: error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()}: \n${
-						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
-					}`
-				);
+				const msg = `[${
+					this.name
+				}]: :x: error in liquidateSpot for userAccount ${user.userAccountPublicKey.toBase58()}: \n${
+					simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+				}`;
+				logger.error(msg);
+				webhookMessage(msg);
 			}
 		} else {
 			const resp = await this.driftClient.txSender.sendVersionedTransaction(
@@ -1969,7 +1982,7 @@ export class LiquidatorBot implements Bot {
 					logger.error(
 						`Error in settlePnl for userAccount ${user.userAccountPublicKey.toBase58()} in perp market ${
 							liquidateePosition.marketIndex
-						}`
+						}, simError: ${JSON.stringify(simResult.simError)}`
 					);
 
 					const errorCode = handleSimResultError(
@@ -1978,13 +1991,13 @@ export class LiquidatorBot implements Bot {
 						`${this.name}: settlePnl`
 					);
 					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-						webhookMessage(
-							`[${
-								this.name
-							}]: :x: error in settlePnl for userAccount ${user.userAccountPublicKey.toBase58()}: \n${
-								simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
-							}`
-						);
+						const msg = `[${
+							this.name
+						}]: :x: error in settlePnl for userAccount ${user.userAccountPublicKey.toBase58()}: \n${
+							simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+						}`;
+						logger.error(msg);
+						webhookMessage(msg);
 					}
 				} else {
 					const resp = await this.driftClient.txSender.sendVersionedTransaction(
@@ -2034,7 +2047,9 @@ export class LiquidatorBot implements Bot {
 				);
 				if (simResult.simError !== null) {
 					logger.error(
-						`Error in liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq}`
+						`Error in liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()} in spot market ${borrowMarketIndextoLiq}, simError: ${JSON.stringify(
+							simResult.simError
+						)}`
 					);
 
 					const errorCode = handleSimResultError(
@@ -2043,13 +2058,13 @@ export class LiquidatorBot implements Bot {
 						`${this.name}: liquidateBorrowForPerpPnl`
 					);
 					if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-						webhookMessage(
-							`[${
-								this.name
-							}]: :x: error in liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()}: \n${
-								simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
-							}`
-						);
+						const msg = `[${
+							this.name
+						}]: :x: error in liquidateBorrowForPerpPnl for userAccount ${user.userAccountPublicKey.toBase58()}: \n${
+							simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+						}`;
+						logger.error(msg);
+						webhookMessage(msg);
 					}
 				} else {
 					const resp = await this.driftClient.txSender.sendVersionedTransaction(
@@ -2206,7 +2221,9 @@ export class LiquidatorBot implements Bot {
 		);
 		if (simResult.simError !== null) {
 			logger.error(
-				`Error in liquidatePerp for userAccount ${user.userAccountPublicKey.toBase58()} on market ${perpMarketIndex}`
+				`Error in liquidatePerp for userAccount ${user.userAccountPublicKey.toBase58()} on market ${perpMarketIndex}, simError: ${JSON.stringify(
+					simResult.simError
+				)}`
 			);
 			const errorCode = handleSimResultError(
 				simResult,
@@ -2214,13 +2231,13 @@ export class LiquidatorBot implements Bot {
 				`${this.name}: liquidatePerp`
 			);
 			if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-				webhookMessage(
-					`[${
-						this.name
-					}]: :x: error in liquidatePerp for userAccount ${user.userAccountPublicKey.toBase58()} on market ${perpMarketIndex}: \n${
-						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
-					}`
-				);
+				const msg = `[${
+					this.name
+				}]: :x: error in liquidatePerp for userAccount ${user.userAccountPublicKey.toBase58()} on market ${perpMarketIndex}: \n${
+					simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+				}`;
+				logger.error(msg);
+				webhookMessage(msg);
 			} else {
 				this.throttledUsers.set(
 					user.userAccountPublicKey.toBase58(),
