@@ -2068,13 +2068,16 @@ export class LiquidatorBot implements Bot {
 				return;
 			}
 
+			const pnlToLiq = this.driftClient
+				.getUser(subAccountToTakeOverPerpPnl)
+				.getFreeCollateral('Initial');
 			try {
 				const ix = await this.driftClient.getLiquidatePerpPnlForDepositIx(
 					user.userAccountPublicKey,
 					user.getUserAccount(),
 					liquidateePosition.marketIndex,
 					depositMarketIndextoLiq,
-					depositAmountToLiq,
+					pnlToLiq,
 					undefined,
 					subAccountToTakeOverPerpPnl
 				);
