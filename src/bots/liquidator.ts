@@ -410,8 +410,8 @@ export class LiquidatorBot implements Bot {
 			this.maxPositionTakeoverPctOfCollateralNum = new BN(50);
 		} else {
 			if (config.maxPositionTakeoverPctOfCollateral > 1.0) {
-				throw new Error(
-					`liquidator.config.maxPositionTakeoverPctOfCollateral cannot be > 1.00`
+				logger.warn(
+					`liquidator.config.maxPositionTakeoverPctOfCollateral is > 1.00: ${config.maxPositionTakeoverPctOfCollateral}`
 				);
 			}
 			this.maxPositionTakeoverPctOfCollateralNum = new BN(
