@@ -326,29 +326,33 @@ export const getOracleInfoForMarket = (
 export const getDriftClientFromArgs = ({
 	connection,
 	wallet,
-	marketIndex,
+	marketIndexes,
 	marketTypeStr,
 }: {
 	connection: Connection;
 	wallet: Wallet;
-	marketIndex: number;
+	marketIndexes: number[];
 	marketTypeStr: 'spot' | 'perp';
 }) => {
 	let perpMarketIndexes: number[] = [];
 	const spotMarketIndexes: number[] = [0];
 	if (marketTypeStr.toLowerCase() === 'perp') {
-		perpMarketIndexes = [marketIndex];
+		perpMarketIndexes = marketIndexes;
 	} else if (marketTypeStr.toLowerCase() === 'spot') {
-		spotMarketIndexes.push(marketIndex);
+		spotMarketIndexes.push(...marketIndexes);
 	} else {
 		throw new Error('Invalid market type provided: ' + marketTypeStr);
 	}
 	const sdkConfig = initialize({ env: 'mainnet-beta' });
-	const oracleInfo = getOracleInfoForMarket(
-		sdkConfig,
-		marketIndex,
-		marketTypeStr
-	);
+	const oracleInfos = [];
+	for (const marketIndex of marketIndexes) {
+		const oracleInfo = getOracleInfoForMarket(
+			sdkConfig,
+			marketIndex,
+			marketTypeStr
+		);
+		oracleInfos.push(oracleInfo);
+	}
 	const driftClient = new DriftClient({
 		connection,
 		wallet: wallet,
@@ -357,7 +361,7 @@ export const getDriftClientFromArgs = ({
 		),
 		perpMarketIndexes,
 		spotMarketIndexes,
-		oracleInfos: [oracleInfo],
+		oracleInfos,
 	});
 	return driftClient;
 };

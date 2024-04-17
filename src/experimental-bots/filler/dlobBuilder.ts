@@ -33,7 +33,7 @@ class DLOBBuilder {
 	public readonly slotSubscriber: SlotSubscriber;
 	public readonly marketTypeString: string;
 	public readonly marketType: MarketType;
-	public readonly marketIndex: number;
+	public readonly marketIndexes: number[];
 	public driftClient: DriftClient;
 	public initialized: boolean = false;
 
@@ -41,13 +41,13 @@ class DLOBBuilder {
 		driftClient: DriftClient,
 		marketType: MarketType,
 		marketTypeString: string,
-		marketIndex: number
+		marketIndexes: number[]
 	) {
 		this.dlob = new DLOB();
 		this.slotSubscriber = new SlotSubscriber(driftClient.connection);
 		this.marketType = marketType;
 		this.marketTypeString = marketTypeString;
-		this.marketIndex = marketIndex;
+		this.marketIndexes = marketIndexes;
 		this.driftClient = driftClient;
 	}
 
@@ -84,7 +84,7 @@ class DLOBBuilder {
 		this.userAccountData.forEach((userAccount, pubkey) => {
 			userAccount.orders.forEach((order) => {
 				if (
-					order.marketIndex != this.marketIndex ||
+					!this.marketIndexes.includes(order.marketIndex) ||
 					!isVariant(order.marketType, this.marketTypeString.toLowerCase())
 				) {
 					return;
@@ -99,36 +99,40 @@ class DLOBBuilder {
 
 	public getNodesToTriggerAndNodesToFill(): [NodeToFill[], NodeToTrigger[]] {
 		const dlob = this.build();
-		const perpMarket = this.driftClient.getPerpMarketAccount(this.marketIndex);
-		if (!perpMarket) {
-			throw new Error('PerpMarket not found');
+		const nodesToFill: NodeToFill[] = [];
+		const nodesToTrigger: NodeToTrigger[] = [];
+		for (const marketIndex of this.marketIndexes) {
+			const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex);
+			if (!perpMarket) {
+				throw new Error('PerpMarket not found');
+			}
+			const oraclePriceData =
+				this.driftClient.getOracleDataForPerpMarket(marketIndex);
+			const vBid = calculateBidPrice(perpMarket, oraclePriceData);
+			const vAsk = calculateAskPrice(perpMarket, oraclePriceData);
+			const stateAccount = this.driftClient.getStateAccount();
+			const slot = this.slotSubscriber.getSlot();
+			const nodesToFillForMarket = dlob.findNodesToFill(
+				marketIndex,
+				vBid,
+				vAsk,
+				slot,
+				Date.now(),
+				this.marketType,
+				oraclePriceData,
+				stateAccount,
+				perpMarket
+			);
+			const nodesToTriggerForMarket = dlob.findNodesToTrigger(
+				marketIndex,
+				slot,
+				oraclePriceData.price,
+				this.marketType,
+				stateAccount
+			);
+			nodesToFill.push(...nodesToFillForMarket);
+			nodesToTrigger.push(...nodesToTriggerForMarket);
 		}
-		const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(
-			this.marketIndex
-		);
-		const vBid = calculateBidPrice(perpMarket, oraclePriceData);
-		const vAsk = calculateAskPrice(perpMarket, oraclePriceData);
-		const stateAccount = this.driftClient.getStateAccount();
-		const slot = this.slotSubscriber.getSlot();
-		const nodesToFill = dlob.findNodesToFill(
-			this.marketIndex,
-			vBid,
-			vAsk,
-			slot,
-			Date.now(),
-			this.marketType,
-			oraclePriceData,
-			stateAccount,
-			perpMarket
-		);
-		const nodesToTrigger = dlob.findNodesToTrigger(
-			this.marketIndex,
-			slot,
-			oraclePriceData.price,
-			this.marketType,
-			stateAccount
-		);
-
 		return [nodesToFill, nodesToTrigger];
 	}
 
@@ -227,7 +231,12 @@ const main = async () => {
 
 	const args = parseArgs(process.argv.slice(2));
 	const marketTypeStr = args['market-type'];
-	const marketIndex = args['market-index'];
+	let marketIndexes;
+	if (typeof args['market-indexes'] === 'string') {
+		marketIndexes = args['market-indexes'].split(',').map(Number);
+	} else {
+		marketIndexes = [args['market-indexes']];
+	}
 	if (marketTypeStr !== 'perp' && marketTypeStr !== 'spot') {
 		throw new Error("market-type must be either 'perp' or 'spot'");
 	}
@@ -258,7 +267,7 @@ const main = async () => {
 	const driftClient = getDriftClientFromArgs({
 		connection,
 		wallet,
-		marketIndex,
+		marketIndexes,
 		marketTypeStr,
 	});
 	await driftClient.subscribe();
@@ -267,17 +276,18 @@ const main = async () => {
 		driftClient,
 		marketType,
 		marketTypeStr,
-		marketIndex
+		marketIndexes
 	);
 
 	await dlobBuilder.subscribe();
 	await sleepMs(5000); // Give the dlob some time to get built
 	if (typeof process.send === 'function') {
 		logger.info('DLOBBuilder started');
-		process.send({ type: 'initialized' });
+		process.send({ type: 'initialized', data: dlobBuilder.marketIndexes });
 	}
 
 	process.on('message', (msg: any) => {
+		// console.log("received msg");
 		if (!msg.data || typeof msg.data.type === 'undefined') {
 			logger.warn(`${logPrefix} Received message without data.type field.`);
 			return;

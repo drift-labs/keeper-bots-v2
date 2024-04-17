@@ -268,6 +268,21 @@ const runBot = async () => {
 		if (!config.botConfigs?.fillerMultithreaded) {
 			throw new Error('fillerMultithreaded bot config not found');
 		}
+
+		// Ensure that there are no duplicate market indexes in the Array<number[]> marketIndexes config
+		const marketIndexes = new Set<number>();
+		for (const marketIndexList of config.botConfigs.fillerMultithreaded
+			.marketIndexes) {
+			for (const marketIndex of marketIndexList) {
+				if (marketIndexes.has(marketIndex)) {
+					throw new Error(
+						`Market index ${marketIndex} is duplicated in the config`
+					);
+				}
+				marketIndexes.add(marketIndex);
+			}
+		}
+
 		const fillerMultithreaded = new FillerMultithreaded(
 			config.global,
 			config.botConfigs?.fillerMultithreaded,
