@@ -170,6 +170,7 @@ export class FillerBot implements Bot {
 	protected lookupTableAccount?: AddressLookupTableAccount;
 	protected bundleSender?: BundleSender;
 
+	private fillerConfig: FillerConfig;
 	private globalConfig: GlobalConfig;
 	private dlobSubscriber?: DLOBSubscriber;
 
@@ -249,14 +250,15 @@ export class FillerBot implements Bot {
 		userMap: UserMap | undefined,
 		runtimeSpec: RuntimeSpec,
 		globalConfig: GlobalConfig,
-		config: FillerConfig,
+		fillerConfig: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
 		bundleSender?: BundleSender
 	) {
 		this.globalConfig = globalConfig;
-		this.name = config.botId;
-		this.dryRun = config.dryRun;
+		this.fillerConfig = fillerConfig;
+		this.name = this.fillerConfig.botId;
+		this.dryRun = this.fillerConfig.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		if (globalConfig.txConfirmationEndpoint) {
@@ -282,13 +284,16 @@ export class FillerBot implements Bot {
 		}
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
-			config.fillerPollingInterval ?? this.defaultIntervalMs;
+			this.fillerConfig.fillerPollingInterval ?? this.defaultIntervalMs;
 
-		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
+		this.initializeMetrics(
+			this.fillerConfig.metricsPort ?? this.globalConfig.metricsPort
+		);
 		this.userMap = userMap;
 
-		this.revertOnFailure = config.revertOnFailure ?? true;
-		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
+		this.revertOnFailure = this.fillerConfig.revertOnFailure ?? true;
+		this.simulateTxForCUEstimate =
+			this.fillerConfig.simulateTxForCUEstimate ?? true;
 		logger.info(
 			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
 		);
@@ -299,23 +304,23 @@ export class FillerBot implements Bot {
 		);
 
 		if (
-			config.rebalanceFiller &&
+			this.fillerConfig.rebalanceFiller &&
 			this.runtimeSpec.driftEnv === 'mainnet-beta'
 		) {
 			this.jupiterClient = new JupiterClient({
 				connection: this.driftClient.connection,
 			});
 		}
-		this.rebalanceFiller = config.rebalanceFiller ?? true;
+		this.rebalanceFiller = this.fillerConfig.rebalanceFiller ?? true;
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
 
-		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
+		if (!validMinimumAmountToFill(this.fillerConfig.minimumAmountToFill)) {
 			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
-			// @ts-ignore
-			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
+			this.minimumAmountToFill =
+				this.fillerConfig.minimumAmountToFill ?? 0 * LAMPORTS_PER_SOL;
 		}
 
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
@@ -2386,11 +2391,7 @@ export class FillerBot implements Bot {
 							);
 						} else {
 							if (!this.dryRun) {
-								const slotsUntilJito = this.slotsUntilJitoLeader();
-								const buildForBundle =
-									this.usingJito() &&
-									slotsUntilJito !== undefined &&
-									slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+								const buildForBundle = this.shouldBuildForBundle();
 
 								// @ts-ignore;
 								simResult.tx.sign([this.driftClient.wallet.payer]);
@@ -2492,6 +2493,20 @@ export class FillerBot implements Bot {
 		return this.bundleSender?.slotsUntilNextLeader();
 	}
 
+	protected shouldBuildForBundle(): boolean {
+		if (!this.usingJito()) {
+			return false;
+		}
+		if (this.globalConfig.onlySendDuringJitoLeader === true) {
+			const slotsUntilJito = this.slotsUntilJitoLeader();
+			if (slotsUntilJito === undefined) {
+				return false;
+			}
+			return slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+		}
+		return true;
+	}
+
 	protected async tryFill() {
 		const startTime = Date.now();
 		let ran = false;
@@ -2550,11 +2565,7 @@ export class FillerBot implements Bot {
 					`filtered fillable nodes from ${fillableNodes.length} to ${filteredFillableNodes.length}, filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length}`
 				);
 
-				const slotsUntilJito = this.slotsUntilJitoLeader();
-				const buildForBundle =
-					this.usingJito() &&
-					slotsUntilJito !== undefined &&
-					slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+				const buildForBundle = this.shouldBuildForBundle();
 
 				// fill the perp nodes
 				await Promise.all([
