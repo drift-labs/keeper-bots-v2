@@ -234,7 +234,7 @@ export class FillerMultithreaded {
 
 	protected jupiterClient?: JupiterClient;
 
-	protected dlobBuilders: DLOBBuilderWithProcess[] = [];
+	protected dlobBuilders: Map<number, DLOBBuilderWithProcess> = new Map();
 
 	protected marketIndexes: Array<number[]>;
 	protected marketIndexesFlattened: number[];
@@ -369,17 +369,16 @@ export class FillerMultithreaded {
 				(msg: any) => {
 					switch (msg.type) {
 						case 'initialized':
-							for (const dlobBuilder of this.dlobBuilders) {
-								if (
-									dlobBuilder.marketIndexes.every(
-										(val, index) => val === msg.data[index]
-									)
-								) {
+							{
+								const dlobBuilder = this.dlobBuilders.get(msg.data[0]);
+								if (dlobBuilder) {
 									dlobBuilder.ready = true;
+									for (const marketIndex of msg.data) {
+										this.dlobBuilders.set(Number(marketIndex), dlobBuilder);
+									}
 									logger.info(
 										`${logPrefix} dlobBuilderProcess initialized and acknowledged`
 									);
-									break;
 								}
 							}
 							break;
@@ -419,11 +418,13 @@ export class FillerMultithreaded {
 				'[FillerMultithreaded]'
 			);
 
-			this.dlobBuilders.push({
-				process: dlobBuilderProcess,
-				ready: false,
-				marketIndexes: marketIndexes.map(Number),
-			});
+			for (const marketIndex of marketIndexes) {
+				this.dlobBuilders.set(Number(marketIndex), {
+					process: dlobBuilderProcess,
+					ready: false,
+					marketIndexes: marketIndexes.map(Number),
+				});
+			}
 
 			logger.info(
 				`dlobBuilder spawned with pid: ${dlobBuilderProcess.pid} marketIndexes: ${dlobBuilderArgs}`
@@ -431,13 +432,18 @@ export class FillerMultithreaded {
 		}
 
 		const routeMessageToDlobBuilder = (msg: any) => {
-			for (const dlobBuilder of this.dlobBuilders) {
-				if (dlobBuilder.marketIndexes.includes(msg.data.marketIndex)) {
-					if (typeof dlobBuilder.process.send == 'function') {
-						if (dlobBuilder.ready) {
-							dlobBuilder.process.send(msg);
-							return;
-						}
+			const dlobBuilder = this.dlobBuilders.get(Number(msg.data.marketIndex));
+			if (dlobBuilder === undefined) {
+				logger.error(
+					`Received message for unknown marketIndex: ${msg.data.marketIndex}`
+				);
+				return;
+			}
+			if (dlobBuilder.marketIndexes.includes(Number(msg.data.marketIndex))) {
+				if (typeof dlobBuilder.process.send == 'function') {
+					if (dlobBuilder.ready) {
+						dlobBuilder.process.send(msg);
+						return;
 					}
 				}
 			}
@@ -462,9 +468,9 @@ export class FillerMultithreaded {
 
 		process.on('SIGINT', () => {
 			logger.info(`${logPrefix} Received SIGINT, killing children`);
-			for (const dlobBuilder of this.dlobBuilders) {
-				dlobBuilder.process.kill();
-			}
+			this.dlobBuilders.forEach((value: DLOBBuilderWithProcess, _: number) => {
+				value.process.kill();
+			});
 			orderSubscriberProcess.kill();
 			process.exit(0);
 		});

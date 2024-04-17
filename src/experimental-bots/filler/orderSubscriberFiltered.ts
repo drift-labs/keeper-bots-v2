@@ -230,7 +230,7 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 
 		this.userMarkets[userId] = currentMarkets;
 
-		for (const marketIndex of newMarkets) {
+		for (const marketIndex of currentMarkets) {
 			this.sendUserAccountUpdateMessage(buffer, userId, 'update', marketIndex);
 		}
 

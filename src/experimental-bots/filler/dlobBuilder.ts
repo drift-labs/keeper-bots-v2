@@ -287,6 +287,7 @@ const main = async () => {
 	}
 
 	process.on('message', (msg: any) => {
+		// console.log("received msg");
 		if (!msg.data || typeof msg.data.type === 'undefined') {
 			logger.warn(`${logPrefix} Received message without data.type field.`);
 			return;
