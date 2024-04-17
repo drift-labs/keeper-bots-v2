@@ -84,6 +84,7 @@ global:
   jitoTipMultiplier: 3
   jitoBlockEngineUrl: frankfurt.mainnet.block-engine.jito.wtf
   jitoAuthPrivateKey: /path/to/jito/bundle/signing/key/auth.json
+  onlySendDuringJitoLeader: false
 
 # Which bots to run, be careful with this, running multiple bots in one instance
 # might use more resources than expected.

@@ -289,8 +289,8 @@ export class FillerMultithreaded {
 		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
 			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
-			// @ts-ignore
-			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
+			this.minimumAmountToFill =
+				config.minimumAmountToFill ?? 0 * LAMPORTS_PER_SOL;
 		}
 
 		logger.info(
@@ -934,6 +934,20 @@ export class FillerMultithreaded {
 		return this.bundleSender?.slotsUntilNextLeader();
 	}
 
+	protected shouldBuildForBundle(): boolean {
+		if (!this.globalConfig.useJito) {
+			return false;
+		}
+		if (this.globalConfig.onlySendDuringJitoLeader === true) {
+			const slotsUntilJito = this.slotsUntilJitoLeader();
+			if (slotsUntilJito === undefined) {
+				return false;
+			}
+			return slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+		}
+		return true;
+	}
+
 	public async triggerNodes(
 		serializedNodesToTrigger: SerializedNodeToTrigger[]
 	) {
@@ -960,11 +974,7 @@ export class FillerMultithreaded {
 			`${logPrefix} Filtered down to ${filteredTriggerableNodes.length} triggerable nodes...`
 		);
 
-		const slotsUntilJito = this.slotsUntilJitoLeader();
-		const buildForBundle =
-			this.globalConfig.useJito &&
-			slotsUntilJito !== undefined &&
-			slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+		const buildForBundle = this.shouldBuildForBundle();
 
 		try {
 			await this.executeTriggerablePerpNodes(
@@ -1155,11 +1165,7 @@ export class FillerMultithreaded {
 			`${logPrefix} Filtered down to ${filteredFillableNodes.length} fillable nodes...`
 		);
 
-		const slotsUntilJito = this.slotsUntilJitoLeader();
-		const buildForBundle =
-			this.globalConfig.useJito &&
-			slotsUntilJito !== undefined &&
-			slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+		const buildForBundle = this.shouldBuildForBundle();
 
 		try {
 			await this.executeFillablePerpNodesForMarket(
@@ -1724,11 +1730,7 @@ export class FillerMultithreaded {
 							);
 						} else {
 							if (!this.dryRun) {
-								const slotsUntilJito = this.slotsUntilJitoLeader();
-								const buildForBundle =
-									this.globalConfig.useJito &&
-									slotsUntilJito !== undefined &&
-									slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+								const buildForBundle = this.shouldBuildForBundle();
 
 								// @ts-ignore;
 								simResult.tx.sign([this.driftClient.wallet.payer]);
