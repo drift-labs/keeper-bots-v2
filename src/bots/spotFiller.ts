@@ -86,6 +86,7 @@ import {
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
 	validMinimumAmountToFill,
+	validMinimumAmountToSettle,
 } from '../utils';
 import { BundleSender } from '../bundleSender';
 import {
@@ -310,6 +311,7 @@ export class SpotFillerBot implements Bot {
 	protected jupiterClient?: JupiterClient;
 
 	protected minimumAmountToFill: number;
+	protected minimumAmountToSettle: BN;
 
 	constructor(
 		driftClient: DriftClient,
@@ -379,8 +381,18 @@ export class SpotFillerBot implements Bot {
 			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
 		}
 
+		if (!validMinimumAmountToSettle(config.minimumAmountToSettle)) {
+			this.minimumAmountToSettle = new BN(20);
+		} else {
+			this.minimumAmountToSettle = new BN(config.minimumAmountToSettle!);
+		}
+
 		logger.info(
 			`${this.name}: minimumAmountToFill: ${this.minimumAmountToFill}`
+		);
+
+		logger.info(
+			`${this.name}: minimumAmountToSettle: ${this.minimumAmountToSettle}`
 		);
 
 		if (this.driftClient.userAccountSubscriptionConfig.type === 'websocket') {
@@ -2438,27 +2450,39 @@ export class SpotFillerBot implements Bot {
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
 		);
+		const fillerDriftAccountUsdcBalance = this.driftClient.getTokenAmount(0);
+		const usdcSpotMarket = this.driftClient.getSpotMarketAccount(0);
+		const normalizedFillerDriftAccountUsdcBalance =
+			fillerDriftAccountUsdcBalance.divn(10 ** usdcSpotMarket!.decimals);
+		const isUsdcAmountRebalanceable =
+			normalizedFillerDriftAccountUsdcBalance.gte(this.minimumAmountToSettle);
 
-		this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
+		logger.info(
+			`SpotFiller has ${normalizedFillerDriftAccountUsdcBalance.toNumber()} USDC`
+		);
 
-		if (this.jupiterClient !== undefined) {
-			logger.info(`Swapping USDC for SOL to rebalance filler`);
-			swapFillerHardEarnedUSDCForSOL(
-				this.priorityFeeSubscriber,
-				this.driftClient,
-				this.jupiterClient,
-				await this.getBlockhashForTx()
-			).then(async () => {
-				const fillerSolBalanceAfterSwap =
-					await this.driftClient.connection.getBalance(
-						this.driftClient.authority,
-						'processed'
-					);
-				this.hasEnoughSolToFill =
-					fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
-			});
-		} else {
-			this.hasEnoughSolToFill = true;
+		if (isUsdcAmountRebalanceable) {
+			this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
+
+			if (this.jupiterClient !== undefined) {
+				logger.info(`Swapping USDC for SOL to rebalance filler`);
+				swapFillerHardEarnedUSDCForSOL(
+					this.priorityFeeSubscriber,
+					this.driftClient,
+					this.jupiterClient,
+					await this.getBlockhashForTx()
+				).then(async () => {
+					const fillerSolBalanceAfterSwap =
+						await this.driftClient.connection.getBalance(
+							this.driftClient.authority,
+							'processed'
+						);
+					this.hasEnoughSolToFill =
+						fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
+				});
+			} else {
+				this.hasEnoughSolToFill = true;
+			}
 		}
 	}
 }

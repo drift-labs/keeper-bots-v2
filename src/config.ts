@@ -36,6 +36,7 @@ export type FillerMultiThreadedConfig = BaseBotConfig & {
 	simulateTxForCUEstimate?: boolean;
 	rebalanceFiller?: boolean;
 	minimumAmountToFill?: number;
+	minimumAmountToSettle?: number;
 };
 
 export type FillerConfig = BaseBotConfig & {
@@ -44,6 +45,7 @@ export type FillerConfig = BaseBotConfig & {
 	simulateTxForCUEstimate?: boolean;
 	rebalanceFiller?: boolean;
 	minimumAmountToFill?: number;
+	minimumAmountToSettle?: number;
 };
 
 export type SubaccountConfig = {

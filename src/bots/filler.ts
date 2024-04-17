@@ -29,6 +29,8 @@ import {
 	DataAndSlot,
 	BlockhashSubscriber,
 	JupiterClient,
+	BN,
+	QUOTE_PRECISION,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -84,6 +86,7 @@ import {
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
 	validMinimumAmountToFill,
+	validMinimumAmountToSettle,
 } from '../utils';
 import { selectMakers } from '../makerSelection';
 import { BundleSender } from '../bundleSender';
@@ -240,6 +243,7 @@ export class FillerBot implements Bot {
 
 	protected rebalanceFiller?: boolean;
 	protected minimumAmountToFill: number;
+	protected minimumAmountToSettle: BN;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -313,6 +317,20 @@ export class FillerBot implements Bot {
 			// @ts-ignore
 			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
 		}
+
+		if (!validMinimumAmountToSettle(config.minimumAmountToSettle)) {
+			this.minimumAmountToSettle = new BN(20);
+		} else {
+			this.minimumAmountToSettle = new BN(config.minimumAmountToSettle!);
+		}
+
+		logger.info(
+			`${this.name}: minimumAmountToFill: ${this.minimumAmountToFill}`
+		);
+
+		logger.info(
+			`${this.name}: minimumAmountToSettle: ${this.minimumAmountToSettle}`
+		);
 
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
 		this.priorityFeeSubscriber.updateAddresses([
@@ -2306,176 +2324,217 @@ export class FillerBot implements Bot {
 
 	protected async settlePnls() {
 		const user = this.driftClient.getUser();
-		const marketIds = user
-			.getActivePerpPositions()
-			.sort((a, b) => {
-				return b.quoteAssetAmount.sub(a.quoteAssetAmount).toNumber();
-			})
-			.map((pos) => pos.marketIndex);
+		const activePerpPositions = user.getActivePerpPositions().sort((a, b) => {
+			return b.quoteAssetAmount.sub(a.quoteAssetAmount).toNumber();
+		});
+		const marketIds = activePerpPositions.map((pos) => pos.marketIndex);
+		const totalUnsettledPnl = activePerpPositions.reduce(
+			(totalUnsettledPnl, position) => {
+				return totalUnsettledPnl.add(position.quoteAssetAmount);
+			},
+			new BN(0)
+		);
+		const fillerDriftAccountUsdcBalance = this.driftClient.getTokenAmount(0);
+		const usdcSpotMarket = this.driftClient.getSpotMarketAccount(0);
+		const normalizedFillerDriftAccountUsdcBalance =
+			fillerDriftAccountUsdcBalance.divn(10 ** usdcSpotMarket!.decimals);
+		const totalFillerUsdcWithUnsettledPnlAndUsdcBalance = totalUnsettledPnl
+			.div(QUOTE_PRECISION)
+			.add(normalizedFillerDriftAccountUsdcBalance);
+		const isTotalUnsettledPnlSettlable =
+			totalFillerUsdcWithUnsettledPnlAndUsdcBalance.gte(
+				this.minimumAmountToSettle
+			);
+
+		logger.info(
+			`Filler has ${totalUnsettledPnl.div(QUOTE_PRECISION).toNumber()} upnl`
+		);
+		logger.info(
+			`Filler has ${totalFillerUsdcWithUnsettledPnlAndUsdcBalance} usdc incl upnl`
+		);
+		logger.info(`minimumAmountToSettle: ${this.minimumAmountToSettle}`);
+		logger.info(
+			`Settlable?: ${totalFillerUsdcWithUnsettledPnlAndUsdcBalance.gte(
+				this.minimumAmountToSettle
+			)}`
+		);
+
 		const now = Date.now();
-		if (marketIds.length === MAX_POSITIONS_PER_USER || this.rebalanceFiller) {
-			logger.info(
-				`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
-			);
-			if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
-				logger.info(`Want to settle positive pnl, but in cooldown...`);
-			} else {
-				let chunk_size;
-				if (marketIds.length < 5) {
-					chunk_size = marketIds.length;
+		if (this.rebalanceFiller) {
+			if (
+				isTotalUnsettledPnlSettlable ||
+				marketIds.length === MAX_POSITIONS_PER_USER
+			) {
+				logger.info(
+					`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
+				);
+				if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
+					logger.info(`Want to settle positive pnl, but in cooldown...`);
 				} else {
-					chunk_size = marketIds.length / 2;
-				}
-				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
-				for (let i = 0; i < marketIds.length; i += chunk_size) {
-					const marketIdChunks = marketIds.slice(i, i + chunk_size);
-					try {
-						const ixs = [
-							ComputeBudgetProgram.setComputeUnitLimit({
-								units: 1_400_000, // will be overridden by simulateTx
-							}),
-							ComputeBudgetProgram.setComputeUnitPrice({
-								microLamports: Math.floor(
-									this.priorityFeeSubscriber.getCustomStrategyResult()
+					let chunk_size;
+					if (marketIds.length < 5) {
+						chunk_size = marketIds.length;
+					} else {
+						chunk_size = marketIds.length / 2;
+					}
+					const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
+					for (let i = 0; i < marketIds.length; i += chunk_size) {
+						const marketIdChunks = marketIds.slice(i, i + chunk_size);
+						try {
+							const ixs = [
+								ComputeBudgetProgram.setComputeUnitLimit({
+									units: 1_400_000, // will be overridden by simulateTx
+								}),
+								ComputeBudgetProgram.setComputeUnitPrice({
+									microLamports: Math.floor(
+										this.priorityFeeSubscriber.getCustomStrategyResult()
+									),
+								}),
+							];
+							ixs.push(
+								...(await this.driftClient.getSettlePNLsIxs(
+									[
+										{
+											settleeUserAccountPublicKey:
+												user.getUserAccountPublicKey(),
+											settleeUserAccount: this.driftClient.getUserAccount()!,
+										},
+									],
+									marketIdChunks
+								))
+							);
+
+							const simResult = await simulateAndGetTxWithCUs(
+								ixs,
+								this.driftClient.connection,
+								this.driftClient.txSender,
+								[this.lookupTableAccount!],
+								[],
+								this.driftClient.opts,
+								SIM_CU_ESTIMATE_MULTIPLIER,
+								this.simulateTxForCUEstimate,
+								await this.getBlockhashForTx()
+							);
+							this.simulateTxHistogram?.record(simResult.simTxDuration, {
+								type: 'settlePnl',
+								simError: simResult.simError !== null,
+								...metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
 								),
-							}),
-						];
-						ixs.push(
-							...(await this.driftClient.getSettlePNLsIxs(
-								[
-									{
-										settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
-										settleeUserAccount: this.driftClient.getUserAccount()!,
-									},
-								],
-								marketIdChunks
-							))
-						);
+							});
+							this.estTxCuHistogram?.record(simResult.cuEstimate, {
+								type: 'settlePnl',
+								simError: simResult.simError !== null,
+								...metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
+								),
+							});
 
-						const simResult = await simulateAndGetTxWithCUs(
-							ixs,
-							this.driftClient.connection,
-							this.driftClient.txSender,
-							[this.lookupTableAccount!],
-							[],
-							this.driftClient.opts,
-							SIM_CU_ESTIMATE_MULTIPLIER,
-							this.simulateTxForCUEstimate,
-							await this.getBlockhashForTx()
-						);
-						this.simulateTxHistogram?.record(simResult.simTxDuration, {
-							type: 'settlePnl',
-							simError: simResult.simError !== null,
-							...metricAttrFromUserAccount(
-								user.userAccountPublicKey,
-								user.getUserAccount()
-							),
-						});
-						this.estTxCuHistogram?.record(simResult.cuEstimate, {
-							type: 'settlePnl',
-							simError: simResult.simError !== null,
-							...metricAttrFromUserAccount(
-								user.userAccountPublicKey,
-								user.getUserAccount()
-							),
-						});
-
-						if (this.simulateTxForCUEstimate && simResult.simError) {
-							logger.info(
-								`settlePnls simError: ${JSON.stringify(simResult.simError)}`
-							);
-							handleSimResultError(
-								simResult,
-								errorCodesToSuppress,
-								`${this.name}: (settlePnls)`
-							);
-						} else {
-							if (!this.dryRun) {
-								const slotsUntilJito = this.slotsUntilJitoLeader();
-								const buildForBundle =
-									this.usingJito() &&
-									slotsUntilJito !== undefined &&
-									slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
-
-								// @ts-ignore;
-								simResult.tx.sign([this.driftClient.wallet.payer]);
-								const txSig = bs58.encode(simResult.tx.signatures[0]);
-								this.registerTxSigToConfirm(
-									txSig,
-									Date.now(),
-									[],
-									-2,
-									'settlePnl'
+							if (this.simulateTxForCUEstimate && simResult.simError) {
+								logger.info(
+									`settlePnls simError: ${JSON.stringify(simResult.simError)}`
 								);
-
-								if (buildForBundle) {
-									this.sendTxThroughJito(simResult.tx, 'settlePnl', txSig);
-								} else if (this.canSendOutsideJito()) {
-									settlePnlPromises.push(
-										this.driftClient.txSender.sendVersionedTransaction(
-											simResult.tx,
-											[],
-											this.driftClient.opts,
-											true
-										)
-									);
-								}
+								handleSimResultError(
+									simResult,
+									errorCodesToSuppress,
+									`${this.name}: (settlePnls)`
+								);
 							} else {
-								logger.info(`dry run, skipping settlePnls)`);
+								if (!this.dryRun) {
+									const slotsUntilJito = this.slotsUntilJitoLeader();
+									const buildForBundle =
+										this.usingJito() &&
+										slotsUntilJito !== undefined &&
+										slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+
+									// @ts-ignore;
+									simResult.tx.sign([this.driftClient.wallet.payer]);
+									const txSig = bs58.encode(simResult.tx.signatures[0]);
+									this.registerTxSigToConfirm(
+										txSig,
+										Date.now(),
+										[],
+										-2,
+										'settlePnl'
+									);
+
+									if (buildForBundle) {
+										this.sendTxThroughJito(simResult.tx, 'settlePnl', txSig);
+									} else if (this.canSendOutsideJito()) {
+										settlePnlPromises.push(
+											this.driftClient.txSender.sendVersionedTransaction(
+												simResult.tx,
+												[],
+												this.driftClient.opts,
+												true
+											)
+										);
+									}
+								} else {
+									logger.info(`dry run, skipping settlePnls)`);
+								}
 							}
+						} catch (err) {
+							if (!(err instanceof Error)) {
+								return;
+							}
+							const errorCode = getErrorCode(err) ?? 0;
+							logger.error(
+								`Error code: ${errorCode} while settling pnls for markets ${JSON.stringify(
+									marketIds
+								)}: ${err.message}`
+							);
+							console.error(err);
 						}
-					} catch (err) {
-						if (!(err instanceof Error)) {
-							return;
+					}
+					try {
+						const txs = await Promise.all(settlePnlPromises);
+						for (const tx of txs) {
+							logger.info(
+								`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
+							);
 						}
-						const errorCode = getErrorCode(err) ?? 0;
-						logger.error(
-							`Error code: ${errorCode} while settling pnls for markets ${JSON.stringify(
-								marketIds
-							)}: ${err.message}`
-						);
-						console.error(err);
+					} catch (e) {
+						logger.error(`Error settling positive pnls: ${e}`);
 					}
+					this.lastSettlePnl = now;
 				}
-				try {
-					const txs = await Promise.all(settlePnlPromises);
-					for (const tx of txs) {
-						logger.info(
-							`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
-						);
-					}
-				} catch (e) {
-					logger.error(`Error settling positive pnls: ${e}`);
-				}
-				this.lastSettlePnl = now;
 			}
 
-			logger.info(`Rebalancing filler`);
-			const fillerSolBalance = await this.driftClient.connection.getBalance(
-				this.driftClient.authority
-			);
-
-			this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
-
-			if (this.jupiterClient !== undefined) {
-				logger.info(`Swapping USDC for SOL to rebalance filler`);
-				swapFillerHardEarnedUSDCForSOL(
-					this.priorityFeeSubscriber,
-					this.driftClient,
-					this.jupiterClient,
-					await this.getBlockhashForTx()
-				).then(async () => {
-					const fillerSolBalanceAfterSwap =
-						await this.driftClient.connection.getBalance(
-							this.driftClient.authority,
-							'processed'
-						);
-					this.hasEnoughSolToFill =
-						fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
-				});
-			} else {
-				this.hasEnoughSolToFill = true;
+			if (isTotalUnsettledPnlSettlable) {
+				await this.rebalance();
 			}
+		}
+	}
+
+	protected async rebalance() {
+		logger.info(`Rebalancing filler`);
+		const fillerSolBalance = await this.driftClient.connection.getBalance(
+			this.driftClient.authority
+		);
+
+		this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
+
+		if (this.jupiterClient !== undefined) {
+			logger.info(`Swapping USDC for SOL to rebalance filler`);
+			swapFillerHardEarnedUSDCForSOL(
+				this.priorityFeeSubscriber,
+				this.driftClient,
+				this.jupiterClient,
+				await this.getBlockhashForTx()
+			).then(async () => {
+				const fillerSolBalanceAfterSwap =
+					await this.driftClient.connection.getBalance(
+						this.driftClient.authority,
+						'processed'
+					);
+				this.hasEnoughSolToFill =
+					fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
+			});
+		} else {
+			this.hasEnoughSolToFill = true;
 		}
 	}
 
