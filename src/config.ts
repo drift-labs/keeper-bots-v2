@@ -36,6 +36,7 @@ export type FillerMultiThreadedConfig = BaseBotConfig & {
 	simulateTxForCUEstimate?: boolean;
 	rebalanceFiller?: boolean;
 	minimumAmountToFill?: number;
+	revertOnFailure?: boolean;
 };
 
 export type FillerConfig = BaseBotConfig & {
@@ -84,6 +85,7 @@ export type LiquidatorConfig = BaseBotConfig & {
 
 export type BotConfigMap = {
 	fillerMultithreaded?: FillerMultiThreadedConfig;
+	spotFillerMultithreaded?: FillerMultiThreadedConfig;
 	filler?: FillerConfig;
 	fillerLite?: FillerConfig;
 	fillerBulk?: FillerConfig;

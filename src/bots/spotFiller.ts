@@ -161,9 +161,9 @@ function getMakerNodeFromNodeToFill(
 	return nodeToFill.makerNodes[0];
 }
 
-type FallbackLiquiditySource = 'serum' | 'phoenix';
+export type FallbackLiquiditySource = 'serum' | 'phoenix';
 
-type NodesToFillWithContext = {
+export type NodesToFillWithContext = {
 	nodesToFill: NodeToFill[];
 	fallbackAskSource?: FallbackLiquiditySource;
 	fallbackBidSource?: FallbackLiquiditySource;
@@ -2444,7 +2444,7 @@ export class SpotFillerBot implements Bot {
 
 		this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
 
-		if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
+		if (this.jupiterClient !== undefined) {
 			logger.info(`Swapping USDC for SOL to rebalance filler`);
 			swapFillerHardEarnedUSDCForSOL(
 				this.priorityFeeSubscriber,

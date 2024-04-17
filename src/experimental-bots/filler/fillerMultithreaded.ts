@@ -44,7 +44,7 @@ import {
 	NodeToFillWithBuffer,
 	SerializedNodeToTrigger,
 	SerializedNodeToFill,
-} from './types';
+} from '../filler-common/types';
 import { assert } from 'console';
 import {
 	getFillSignatureFromUserAccountAndOrderId,
@@ -60,7 +60,7 @@ import {
 	spawnChildWithRetry,
 	deserializeNodeToFill,
 	deserializeOrder,
-} from './utils';
+} from '../filler-common/utils';
 import {
 	CounterValue,
 	GaugeValue,
@@ -253,6 +253,7 @@ export class FillerMultithreaded {
 		this.config = config;
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
+		this.revertOnFailure = config.revertOnFailure ?? true;
 		this.driftClient = driftClient;
 		this.marketIndexes = config.marketIndexes;
 		this.marketIndexesFlattened = config.marketIndexes.flat();
@@ -363,7 +364,7 @@ export class FillerMultithreaded {
 				`--market-indexes=${marketIndexes.map(String)}`,
 			];
 			const dlobBuilderProcess = spawnChildWithRetry(
-				'./src/experimental-bots/filler/dlobBuilder.ts',
+				'./src/experimental-bots/filler-common/dlobBuilder.ts',
 				dlobBuilderArgs,
 				'dlobBuilder',
 				(msg: any) => {
@@ -450,7 +451,7 @@ export class FillerMultithreaded {
 		};
 
 		const orderSubscriberProcess = spawnChildWithRetry(
-			'./src/experimental-bots/filler/orderSubscriberFiltered.ts',
+			'./src/experimental-bots/filler-common/orderSubscriberFiltered.ts',
 			orderSubscriberArgs,
 			'orderSubscriber',
 			(msg: any) => {
