@@ -2444,7 +2444,7 @@ export class SpotFillerBot implements Bot {
 
 		this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
 
-		if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
+		if (this.jupiterClient !== undefined) {
 			logger.info(`Swapping USDC for SOL to rebalance filler`);
 			swapFillerHardEarnedUSDCForSOL(
 				this.priorityFeeSubscriber,

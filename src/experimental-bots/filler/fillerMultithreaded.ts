@@ -272,15 +272,12 @@ export class FillerMultithreaded {
 		this.runtimeSpec = runtimeSpec;
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
-		if (
-			config.rebalanceFiller &&
-			this.runtimeSpec.driftEnv === 'mainnet-beta'
-		) {
+		this.rebalanceFiller = config.rebalanceFiller ?? true;
+		if (this.rebalanceFiller && this.runtimeSpec.driftEnv === 'mainnet-beta') {
 			this.jupiterClient = new JupiterClient({
 				connection: this.driftClient.connection,
 			});
 		}
-		this.rebalanceFiller = config.rebalanceFiller ?? true;
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
@@ -1672,12 +1669,13 @@ export class FillerMultithreaded {
 		const user = this.driftClient.getUser();
 		const marketIds = user
 			.getActivePerpPositions()
+			.sort((a, b) => {
+				return b.quoteAssetAmount.sub(a.quoteAssetAmount).toNumber();
+			})
 			.map((pos) => pos.marketIndex);
+
 		const now = Date.now();
-		if (
-			marketIds.length === MAX_POSITIONS_PER_USER ||
-			!this.hasEnoughSolToFill
-		) {
+		if (marketIds.length === MAX_POSITIONS_PER_USER || this.rebalanceFiller) {
 			logger.info(
 				`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
 			);
@@ -1685,8 +1683,8 @@ export class FillerMultithreaded {
 				logger.info(`Want to settle positive pnl, but in cooldown...`);
 			} else {
 				let chunk_size;
-				if (marketIds.length === 1) {
-					chunk_size = 1;
+				if (marketIds.length < 5) {
+					chunk_size = marketIds.length;
 				} else {
 					chunk_size = marketIds.length / 2;
 				}
@@ -1807,8 +1805,7 @@ export class FillerMultithreaded {
 				}
 				this.lastSettlePnl = now;
 			}
-		}
-		if (this.rebalanceFiller) {
+
 			logger.info(`Rebalancing filler`);
 			const fillerSolBalance = await this.driftClient.connection.getBalance(
 				this.driftClient.authority
@@ -1816,7 +1813,7 @@ export class FillerMultithreaded {
 
 			this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
 
-			if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
+			if (this.jupiterClient !== undefined) {
 				logger.info(`Swapping USDC for SOL to rebalance filler`);
 				swapFillerHardEarnedUSDCForSOL(
 					this.priorityFeeSubscriber,
