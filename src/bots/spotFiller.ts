@@ -378,8 +378,8 @@ export class SpotFillerBot implements Bot {
 		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
 			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
-			// @ts-ignore
-			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
+			this.minimumAmountToFill =
+				config.minimumAmountToFill ?? 0 * LAMPORTS_PER_SOL;
 		}
 
 		logger.info(
@@ -1610,6 +1610,20 @@ export class SpotFillerBot implements Bot {
 		return this.bundleSender?.slotsUntilNextLeader();
 	}
 
+	private shouldBuildForBundle(): boolean {
+		if (!this.usingJito()) {
+			return false;
+		}
+		if (this.globalConfig.onlySendDuringJitoLeader === true) {
+			const slotsUntilJito = this.slotsUntilJitoLeader();
+			if (slotsUntilJito === undefined) {
+				return false;
+			}
+			return slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+		}
+		return true;
+	}
+
 	private async getBlockhashForTx(): Promise<string> {
 		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(
 			CACHED_BLOCKHASH_OFFSET
@@ -2377,11 +2391,7 @@ export class SpotFillerBot implements Bot {
 					`filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length} `
 				);
 
-				const slotsUntilJito = this.slotsUntilJitoLeader();
-				const buildForBundle =
-					this.usingJito() &&
-					slotsUntilJito !== undefined &&
-					slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+				const buildForBundle = this.shouldBuildForBundle();
 
 				await Promise.all([
 					this.executeFillableSpotNodesForMarket(fillableNodes, buildForBundle),
