@@ -1803,7 +1803,7 @@ export class LiquidatorBot implements Bot {
 				position.marketIndex
 			);
 			if (!market) {
-				logger.error(`No spot market found for ${position.marketIndex}`);
+				throw new Error('No spot market found, drift client misconfigured');
 				continue;
 			}
 
