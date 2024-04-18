@@ -30,6 +30,7 @@ import {
 	BlockhashSubscriber,
 	JupiterClient,
 	BN,
+	QUOTE_PRECISION,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -2369,7 +2370,9 @@ export class FillerBot implements Bot {
 		// - we have hit max positions to free up slots
 		if (
 			(this.rebalanceFiller &&
-				(totalUnsettledPnl >= this.rebalanceSettledPnlThreshold ||
+				(totalUnsettledPnl.gte(
+					this.rebalanceSettledPnlThreshold.mul(QUOTE_PRECISION)
+				) ||
 					!this.hasEnoughSolToFill)) ||
 			marketIds.length === MAX_POSITIONS_PER_USER
 		) {

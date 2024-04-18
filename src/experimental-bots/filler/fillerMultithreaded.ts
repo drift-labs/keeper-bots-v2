@@ -19,6 +19,7 @@ import {
 	MarketType,
 	NodeToFill,
 	PriorityFeeSubscriber,
+	QUOTE_PRECISION,
 	ReferrerInfo,
 	SlotSubscriber,
 	TxSigAndSlot,
@@ -369,7 +370,7 @@ export class FillerMultithreaded {
 						break;
 					case 'triggerableNodes':
 						if (this.dryRun) {
-							logger.info(`Triggerable node received`);
+							logger.debug(`Triggerable node received`);
 						} else {
 							this.triggerNodes(msg.data);
 						}
@@ -383,7 +384,7 @@ export class FillerMultithreaded {
 						break;
 					case 'fillableNodes':
 						if (this.dryRun) {
-							logger.info(`Fillable node received`);
+							logger.debug(`Fillable node received`);
 						} else {
 							this.fillNodes(msg.data);
 						}
@@ -1733,7 +1734,9 @@ export class FillerMultithreaded {
 		// - we have hit max positions to free up slots
 		if (
 			(this.rebalanceFiller &&
-				(totalUnsettledPnl >= this.rebalanceSettledPnlThreshold ||
+				(totalUnsettledPnl.gte(
+					this.rebalanceSettledPnlThreshold.mul(QUOTE_PRECISION)
+				) ||
 					!this.hasEnoughSolToFill)) ||
 			marketIds.length === MAX_POSITIONS_PER_USER
 		) {
