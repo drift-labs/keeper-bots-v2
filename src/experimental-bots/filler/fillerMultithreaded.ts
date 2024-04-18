@@ -56,8 +56,8 @@ import {
 	SimulateAndGetTxWithCUsResponse,
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
-	validMinimumAmountToFill,
-	validMinimumAmountToSettle,
+	validMinimumGasAmount,
+	validRebalanceSettledPnlThreshold,
 } from '../../utils';
 import {
 	spawnChildWithRetry,
@@ -225,8 +225,8 @@ export class FillerMultithreaded {
 
 	protected rebalanceFiller?: boolean;
 	protected hasEnoughSolToFill: boolean = true;
-	protected minimumAmountToFill: number;
-	protected minimumAmountToSettle: BN;
+	protected minGasBalanceToFill: number;
+	protected rebalanceSettledPnlThreshold: BN;
 
 	protected jupiterClient?: JupiterClient;
 
@@ -285,26 +285,28 @@ export class FillerMultithreaded {
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
-
-		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
-			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
+		if (!validMinimumGasAmount(config.minGasBalanceToFill)) {
+			this.minGasBalanceToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
-			// @ts-ignore
-			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
+			this.minGasBalanceToFill = config.minGasBalanceToFill! * LAMPORTS_PER_SOL;
 		}
 
-		if (!validMinimumAmountToSettle(config.minimumAmountToSettle)) {
-			this.minimumAmountToSettle = new BN(20);
+		if (
+			!validRebalanceSettledPnlThreshold(config.rebalanceSettledPnlThreshold)
+		) {
+			this.rebalanceSettledPnlThreshold = new BN(20);
 		} else {
-			this.minimumAmountToSettle = new BN(config.minimumAmountToSettle!);
+			this.rebalanceSettledPnlThreshold = new BN(
+				config.rebalanceSettledPnlThreshold!
+			);
 		}
 
 		logger.info(
-			`${this.name}: minimumAmountToFill: ${this.minimumAmountToFill}`
+			`${this.name}: minimumAmountToFill: ${this.minGasBalanceToFill}`
 		);
 
 		logger.info(
-			`${this.name}: minimumAmountToSettle: ${this.minimumAmountToSettle}`
+			`${this.name}: minimumAmountToSettle: ${this.rebalanceSettledPnlThreshold}`
 		);
 
 		this.pendingTxSigsToconfirm = new LRUCache<
