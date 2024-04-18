@@ -240,7 +240,7 @@ export class FillerBot implements Bot {
 	protected jitoLandedTipsGauge?: GaugeValue;
 	protected jitoBundleCount?: GaugeValue;
 
-	protected hasEnoughSolToFill: boolean = true;
+	protected hasEnoughSolToFill: boolean = false;
 	protected rebalanceFiller: boolean;
 	protected minGasBalanceToFill: number;
 	protected rebalanceSettledPnlThreshold: BN;
