@@ -302,7 +302,7 @@ const runBot = async () => {
 		bots.push(fillerMultithreaded);
 	}
 
-	if (configHasBot(config, "spotFillerMultithreaded")) {
+	if (configHasBot(config, 'spotFillerMultithreaded')) {
 		if (!config.botConfigs?.spotFillerMultithreaded) {
 			throw new Error('spotFillerMultithreaded bot config not found');
 		}

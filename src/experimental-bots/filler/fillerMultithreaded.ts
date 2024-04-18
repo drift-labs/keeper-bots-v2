@@ -253,7 +253,6 @@ export class FillerMultithreaded {
 		this.config = config;
 		this.dryRun = config.dryRun;
 		this.slotSubscriber = slotSubscriber;
-		this.revertOnFailure = config.revertOnFailure ?? true;
 		this.driftClient = driftClient;
 		this.marketIndexes = config.marketIndexes;
 		this.marketIndexesFlattened = config.marketIndexes.flat();

@@ -1,22 +1,82 @@
-import { DriftClient, BlockhashSubscriber, UserStatsMap, SerumFulfillmentConfigMap, SerumSubscriber, PhoenixFulfillmentConfigMap, PhoenixSubscriber, PriorityFeeSubscriber, NodeToFill, JupiterClient, BulkAccountLoader, initialize, DriftEnv, PollingDriftClientAccountSubscriber, getVariant, isOneOfVariant, isVariant } from "@drift-labs/sdk";
-import { Connection, AddressLookupTableAccount, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
-import { Mutex } from "async-mutex";
-import { LRUCache } from "lru-cache";
-import { TxType, CONFIRM_TX_RATE_LIMIT_BACKOFF_MS, TX_TIMEOUT_THRESHOLD_MS, CONFIRM_TX_INTERVAL_MS } from "src/bots/filler";
-import { BundleSender } from "src/bundleSender";
-import { FillerMultiThreadedConfig, GlobalConfig } from "src/config";
-import { logger } from "src/logger";
-import { RuntimeSpec, GaugeValue, HistogramValue, CounterValue, Metrics, metricAttrFromUserAccount } from "src/metrics";
-import { swapFillerHardEarnedUSDCForSOL, validMinimumAmountToFill } from "src/utils";
+import {
+	DriftClient,
+	BlockhashSubscriber,
+	UserStatsMap,
+	SerumFulfillmentConfigMap,
+	SerumSubscriber,
+	PhoenixFulfillmentConfigMap,
+	PhoenixSubscriber,
+	PriorityFeeSubscriber,
+	NodeToFill,
+	JupiterClient,
+	BulkAccountLoader,
+	initialize,
+	DriftEnv,
+	PollingDriftClientAccountSubscriber,
+	getVariant,
+	isOneOfVariant,
+	isVariant,
+	DLOBNode,
+	getOrderSignature,
+} from '@drift-labs/sdk';
+import {
+	Connection,
+	AddressLookupTableAccount,
+	LAMPORTS_PER_SOL,
+	PublicKey,
+	SendTransactionError,
+	VersionedTransaction,
+	TransactionSignature,
+	VersionedTransactionResponse,
+} from '@solana/web3.js';
+import { Mutex } from 'async-mutex';
+import { LRUCache } from 'lru-cache';
+import { FillerMultiThreadedConfig, GlobalConfig } from '../../config';
+import { BundleSender } from '../../bundleSender';
+import { logger } from '../../logger';
+import {
+	CounterValue,
+	GaugeValue,
+	HistogramValue,
+	metricAttrFromUserAccount,
+	Metrics,
+	RuntimeSpec,
+} from '../../metrics';
+import {
+	getFillSignatureFromUserAccountAndOrderId,
+	getNodeToFillSignature,
+	getTransactionAccountMetas,
+	sleepMs,
+	swapFillerHardEarnedUSDCForSOL,
+	validMinimumAmountToFill,
+} from '../../utils';
 import {
 	ExplicitBucketHistogramAggregation,
 	InstrumentType,
 	View,
 } from '@opentelemetry/sdk-metrics-base';
-import { ChildProcess } from "child_process";
-import { spawnChildWithRetry } from "../filler-common/utils";
-import { CACHED_BLOCKHASH_OFFSET } from "../filler/fillerMultithreaded";
-import { SerializedNodeToFill, SerializedNodeToTrigger } from "../filler-common/types";
+import { ChildProcess } from 'child_process';
+import { spawnChildWithRetry } from '../filler-common/utils';
+import {
+	CACHED_BLOCKHASH_OFFSET,
+	TX_CONFIRMATION_BATCH_SIZE,
+} from '../filler/fillerMultithreaded';
+import {
+	NodeToFillWithBuffer,
+	SerializedNodeToFill,
+	SerializedNodeToTrigger,
+} from '../filler-common/types';
+import {
+	isEndIxLog,
+	isFillIxLog,
+	isIxLog,
+	isMakerBreachedMaintenanceMarginLog,
+	isOrderDoesNotExistLog,
+	isTakerBreachedMaintenanceMarginLog,
+} from '../../bots/common/txLogParse';
+import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import { getErrorCode } from 'src/error';
+import { webhookMessage } from 'src/webhook';
 
 enum METRIC_TYPES {
 	try_fill_duration_histogram = 'try_fill_duration_histogram',
@@ -40,16 +100,58 @@ enum METRIC_TYPES {
 	jito_bundle_count = 'jito_bundle_count',
 }
 
+const errorCodesToSuppress = [
+	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
+	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
+	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
+	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
+
+	6111, // Error Message: OrderNotTriggerable.
+	6112, // Error Message: OrderDidNotSatisfyTriggerCondition.
+];
+
+function getMakerNodeFromNodeToFill(
+	nodeToFill: NodeToFill
+): DLOBNode | undefined {
+	if (nodeToFill.makerNodes.length === 0) {
+		return undefined;
+	}
+
+	if (nodeToFill.makerNodes.length > 1) {
+		logger.error(
+			`Found more than one maker node for spot nodeToFill: ${JSON.stringify(
+				nodeToFill
+			)}`
+		);
+		return undefined;
+	}
+
+	return nodeToFill.makerNodes[0];
+}
+
+const getNodeToTriggerSignature = (node: SerializedNodeToTrigger): string => {
+	return getOrderSignature(node.node.order.orderId, node.node.userAccount);
+};
+
 type DLOBBuilderWithProcess = {
 	process: ChildProcess;
 	ready: boolean;
 	marketIndexes: number[];
 };
 
+export type TxType = 'fill' | 'trigger' | 'settlePnl';
+
+export const TX_TIMEOUT_THRESHOLD_MS = 60_000; // tx considered stale after this time and give up confirming
+export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until trying to confirm tx again if rate limited
+export const CONFIRM_TX_INTERVAL_MS = 5_000;
+const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
+const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
+const CONFIRM_TX_ATTEMPTS = 2;
+
 const logPrefix = '[SpotFiller]';
 
 export class SpotFillerMultithreaded {
-    public readonly name: string;
+	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 2000;
 
@@ -70,8 +172,6 @@ export class SpotFillerMultithreaded {
 	private phoenixFulfillmentConfigMap: PhoenixFulfillmentConfigMap;
 	private phoenixSubscribers: Map<number, PhoenixSubscriber>;
 
-	private periodicTaskMutex = new Mutex();
-
 	protected hasEnoughSolToFill: boolean = true;
 
 	private watchdogTimerMutex = new Mutex();
@@ -91,7 +191,7 @@ export class SpotFillerMultithreaded {
 		string,
 		{
 			ts: number;
-			nodeFilled?: NodeToFill;
+			nodeFilled: Array<NodeToFillWithBuffer>;
 			fillTxId: number;
 			txType: TxType;
 		}
@@ -132,14 +232,14 @@ export class SpotFillerMultithreaded {
 
 	protected minimumAmountToFill: number;
 
-    protected dlobBuilders: Map<number, DLOBBuilderWithProcess> = new Map();
+	protected dlobBuilders: Map<number, DLOBBuilderWithProcess> = new Map();
 
 	protected marketIndexes: Array<number[]>;
 	protected marketIndexesFlattened: number[];
 
-    private config: FillerMultiThreadedConfig;
+	private config: FillerMultiThreadedConfig;
 
-    private dlobHealthy = true;
+	private dlobHealthy = true;
 	private orderSubscriberHealthy = true;
 
 	constructor(
@@ -151,11 +251,11 @@ export class SpotFillerMultithreaded {
 		bundleSender?: BundleSender
 	) {
 		this.globalConfig = globalConfig;
-        this.config = config;
+		this.config = config;
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
-        this.marketIndexes = config.marketIndexes;
+		this.marketIndexes = config.marketIndexes;
 		this.marketIndexesFlattened = config.marketIndexes.flat();
 		if (globalConfig.txConfirmationEndpoint) {
 			this.txConfirmationConnection = new Connection(
@@ -203,7 +303,6 @@ export class SpotFillerMultithreaded {
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
 
-
 		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
 			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
@@ -215,7 +314,7 @@ export class SpotFillerMultithreaded {
 			`${this.name}: minimumAmountToFill: ${this.minimumAmountToFill}`
 		);
 
-        this.userStatsMap = new UserStatsMap(
+		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
 			new BulkAccountLoader(
 				new Connection(this.driftClient.connection.rpcEndpoint),
@@ -249,12 +348,12 @@ export class SpotFillerMultithreaded {
 		});
 	}
 
-    async init() {
-        logger.info(`${this.name}: Initializing`);
-        await this.blockhashSubscriber.subscribe();
+	async init() {
+		logger.info(`${this.name}: Initializing`);
+		await this.blockhashSubscriber.subscribe();
 
-        const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
-        const marketSetupPromises = config.SPOT_MARKETS.map(
+		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
+		const marketSetupPromises = config.SPOT_MARKETS.map(
 			async (spotMarketConfig) => {
 				const spotMarket = this.driftClient.getSpotMarketAccount(
 					spotMarketConfig.marketIndex
@@ -374,22 +473,33 @@ export class SpotFillerMultithreaded {
 		);
 		await Promise.all(marketSetupPromises);
 
-        this.driftLutAccount = 
-            await this.driftClient.fetchMarketLookupTableAccount();
-            if ('SERUM_LOOKUP_TABLE' in config) {
-                const lutAccount = (
-                    await this.driftClient.connection.getAddressLookupTable(
-                        new PublicKey(config.SERUM_LOOKUP_TABLE as string)
-                    )
-                ).value;
-                if (lutAccount) {
-                    this.driftSpotLutAccount = lutAccount;
-                }
-            }
+		this.driftLutAccount =
+			await this.driftClient.fetchMarketLookupTableAccount();
+		if ('SERUM_LOOKUP_TABLE' in config) {
+			const lutAccount = (
+				await this.driftClient.connection.getAddressLookupTable(
+					new PublicKey(config.SERUM_LOOKUP_TABLE as string)
+				)
+			).value;
+			if (lutAccount) {
+				this.driftSpotLutAccount = lutAccount;
+			}
+		}
 
-        this.startProcesses();
-        logger.info(`${this.name}: Initialized`);
-    }
+		this.startProcesses();
+		logger.info(`${this.name}: Initialized`);
+	}
+
+	public healthCheck(): boolean {
+		if (!this.dlobHealthy) {
+			logger.error(`${logPrefix} DLOB not healthy`);
+		}
+		if (!this.orderSubscriberHealthy) {
+			logger.error(`${logPrefix} Order subscriber not healthy`);
+		}
+		return this.dlobHealthy && this.orderSubscriberHealthy;
+	}
+
 	private startProcesses() {
 		logger.info(`${this.name}: Starting processes`);
 		const orderSubscriberArgs = [
@@ -524,10 +634,7 @@ export class SpotFillerMultithreaded {
 		);
 
 		this.intervalIds.push(
-			setInterval(
-				this.rebalanceSpotFiller.bind(this),
-				60_000
-			)
+			setInterval(this.rebalanceSpotFiller.bind(this), 60_000)
 		);
 		this.intervalIds.push(
 			setInterval(this.confirmPendingTxSigs.bind(this), CONFIRM_TX_INTERVAL_MS)
@@ -539,20 +646,88 @@ export class SpotFillerMultithreaded {
 		}
 	}
 
-    public async triggerNodes(
-        _serializedNodesToTrigger: SerializedNodeToTrigger[]
-    ) {
+	public async triggerNodes(
+		_serializedNodesToTrigger: SerializedNodeToTrigger[]
+	) {}
 
-    }
+	public async fillNodes(_serializedNodesToFill: SerializedNodeToFill[]) {}
 
-    public async fillNodes(
-        _serializedNodesToFill: SerializedNodeToFill[]
-    ) {
+	protected async tryFillMultiMakerSpotNodes() {
 
-    }
+	}
 
+	private async fillMultiMakerSpotNodes() {
 
-    protected initializeMetrics(metricsPort?: number) {
+	}
+
+	protected async tryFillSpotNode() {
+
+	}
+
+	protected isThrottledNodeStillThrottled(throttleKey: string): boolean {
+		const lastFillAttempt = this.throttledNodes.get(throttleKey) || 0;
+		if (lastFillAttempt + FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
+			return true;
+		} else {
+			this.clearThrottledNode(throttleKey);
+			return false;
+		}
+	}
+
+	protected isDLOBNodeThrottled(dlobNode: DLOBNode): boolean {
+		if (!dlobNode.userAccount || !dlobNode.order) {
+			return false;
+		}
+
+		// first check if the userAccount itself is throttled
+		const userAccountPubkey = dlobNode.userAccount;
+		if (this.throttledNodes.has(userAccountPubkey)) {
+			if (this.isThrottledNodeStillThrottled(userAccountPubkey)) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+
+		// then check if the specific order is throttled
+		const orderSignature = getFillSignatureFromUserAccountAndOrderId(
+			dlobNode.userAccount,
+			dlobNode.order.orderId.toString()
+		);
+		if (this.throttledNodes.has(orderSignature)) {
+			if (this.isThrottledNodeStillThrottled(orderSignature)) {
+				return true;
+			} else {
+				return false;
+			}
+		}
+
+		return false;
+	}
+
+	private setThrottleNode(nodeSignature: string) {
+		this.throttledNodes.set(nodeSignature, Date.now());
+	}
+
+	private clearThrottledNode(nodeSignature: string) {
+		this.throttledNodes.delete(nodeSignature);
+	}
+
+	private pruneThrottledNode() {
+		if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
+			for (const [key, value] of this.throttledNodes.entries()) {
+				if (value + 2 * FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
+					this.throttledNodes.delete(key);
+				}
+			}
+		}
+	}
+
+	private removeTriggeringNodes(node: SerializedNodeToTrigger) {
+		this.triggeringNodes.delete(getNodeToTriggerSignature(node));
+	}
+	
+	protected initializeMetrics(metricsPort?: number) {
 		if (this.globalConfig.disableMetrics) {
 			logger.info(
 				`${this.name}: globalConfig.disableMetrics is true, not initializing metrics`
@@ -677,8 +852,7 @@ export class SpotFillerMultithreaded {
 		this.metricsInitialized = true;
 	}
 
-
-    protected recordEvictedTxSig(
+	protected recordEvictedTxSig(
 		_tsTxSigAdded: { ts: number; nodeFilled?: NodeToFill },
 		txSig: string,
 		reason: 'evict' | 'set' | 'delete'
@@ -697,7 +871,7 @@ export class SpotFillerMultithreaded {
 		}
 	}
 
-    private async getBlockhashForTx(): Promise<string> {
+	private async getBlockhashForTx(): Promise<string> {
 		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(
 			CACHED_BLOCKHASH_OFFSET
 		);
@@ -712,9 +886,599 @@ export class SpotFillerMultithreaded {
 
 		return recentBlockhash.blockhash;
 	}
-    
-    protected async rebalanceSpotFiller() {
-        logger.info(`Rebalancing filler`);
+
+	protected recordJitoBundleStats() {
+		const user = this.driftClient.getUser();
+		const bundleStats = this.bundleSender?.getBundleStats();
+		if (bundleStats) {
+			this.jitoBundlesAcceptedGauge?.setLatestValue(bundleStats.accepted, {
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+			this.jitoBundlesSimulationFailureGauge?.setLatestValue(
+				bundleStats.simulationFailure,
+				{
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoDroppedBundleGauge?.setLatestValue(bundleStats.droppedPruned, {
+				type: 'pruned',
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+			this.jitoDroppedBundleGauge?.setLatestValue(
+				bundleStats.droppedBlockhashExpired,
+				{
+					type: 'blockhash_expired',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoDroppedBundleGauge?.setLatestValue(
+				bundleStats.droppedBlockhashNotFound,
+				{
+					type: 'blockhash_not_found',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+		}
+
+		const tipStream = this.bundleSender?.getTipStream();
+		if (tipStream) {
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_25th_percentile,
+				{
+					percentile: 'p25',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_50th_percentile,
+				{
+					percentile: 'p50',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_75th_percentile,
+				{
+					percentile: 'p75',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_95th_percentile,
+				{
+					percentile: 'p95',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.landed_tips_99th_percentile,
+				{
+					percentile: 'p99',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+			this.jitoLandedTipsGauge?.setLatestValue(
+				tipStream.ema_landed_tips_50th_percentile,
+				{
+					percentile: 'ema_p50',
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
+
+			const bundleFailCount = this.bundleSender?.getBundleFailCount();
+			const bundleLandedCount = this.bundleSender?.getLandedCount();
+			const bundleDroppedCount = this.bundleSender?.getDroppedCount();
+			this.jitoBundleCount?.setLatestValue(bundleFailCount ?? 0, {
+				type: 'fail_count',
+			});
+			this.jitoBundleCount?.setLatestValue(bundleLandedCount ?? 0, {
+				type: 'landed',
+			});
+			this.jitoBundleCount?.setLatestValue(bundleDroppedCount ?? 0, {
+				type: 'dropped',
+			});
+		}
+	}
+
+	protected async confirmPendingTxSigs() {
+		const user = this.driftClient.getUser();
+		this.pendingTxSigsToConfirmGauge?.setLatestValue(
+			this.pendingTxSigsToconfirm.size,
+			{
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			}
+		);
+		this.expiredNodesSetSize?.setLatestValue(this.expiredNodesSet.size, {
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+		const nextTimeCanRun =
+			this.confirmLoopRateLimitTs + CONFIRM_TX_RATE_LIMIT_BACKOFF_MS;
+		if (Date.now() < nextTimeCanRun) {
+			logger.warn(
+				`Skipping confirm loop due to rate limit, next run in ${
+					nextTimeCanRun - Date.now()
+				} ms`
+			);
+			return;
+		}
+		if (this.confirmLoopRunning) {
+			return;
+		}
+		this.confirmLoopRunning = true;
+		try {
+			logger.info(`Confirming tx sigs: ${this.pendingTxSigsToconfirm.size}`);
+			const start = Date.now();
+			const txEntries = Array.from(this.pendingTxSigsToconfirm.entries());
+			for (let i = 0; i < txEntries.length; i += TX_CONFIRMATION_BATCH_SIZE) {
+				const txSigsBatch = txEntries.slice(i, i + TX_CONFIRMATION_BATCH_SIZE);
+				const txs = await this.txConfirmationConnection?.getTransactions(
+					txSigsBatch.map((tx) => tx[0]),
+					{
+						commitment: 'confirmed',
+						maxSupportedTransactionVersion: 0,
+					}
+				);
+				for (let j = 0; j < txs.length; j++) {
+					const txResp = txs[j];
+					const txConfirmationInfo = txSigsBatch[j];
+					const txSig = txConfirmationInfo[0];
+					const txAge = txConfirmationInfo[1].ts - Date.now();
+					const nodeFilled = txConfirmationInfo[1].nodeFilled;
+					const txType = txConfirmationInfo[1].txType;
+					const fillTxId = txConfirmationInfo[1].fillTxId;
+					if (txResp === null) {
+						logger.info(
+							`Tx not found, (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
+								txAge / 1000
+							} s`
+						);
+						if (Math.abs(txAge) > TX_TIMEOUT_THRESHOLD_MS) {
+							this.pendingTxSigsToconfirm.delete(txSig);
+						}
+					} else {
+						logger.info(
+							`Tx landed (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
+								txAge / 1000
+							} s`
+						);
+						this.pendingTxSigsToconfirm.delete(txSig);
+						if (txType === 'fill') {
+							const result = await this.handleTransactionLogs(
+								nodeFilled!,
+								txResp.meta?.logMessages
+							);
+							if (result) {
+								this.landedTxsCounter?.add(result.filledNodes, {
+									type: txType,
+									...metricAttrFromUserAccount(
+										user.userAccountPublicKey,
+										user.getUserAccount()
+									),
+								});
+							}
+						} else {
+							this.landedTxsCounter?.add(1, {
+								type: txType,
+								...metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
+								),
+							});
+						}
+					}
+					await sleepMs(500);
+				}
+			}
+			logger.info(`Confirming tx sigs took: ${Date.now() - start} ms`);
+		} catch (e) {
+			const err = e as Error;
+			if (err.message.includes('429')) {
+				logger.info(`Confirming tx loop rate limited: ${err.message}`);
+				this.confirmLoopRateLimitTs = Date.now();
+				this.pendingTxSigsLoopRateLimitedCounter?.add(1, {
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+			} else {
+				logger.error(`Other error confirming tx sigs: ${err.message}`);
+			}
+		} finally {
+			this.confirmLoopRunning = false;
+		}
+	}
+
+	private async sendTxThroughJito(
+		tx: VersionedTransaction,
+		metadata: number | string,
+		txSig?: string
+	) {
+		if (this.bundleSender === undefined) {
+			logger.error(`Called sendTxThroughJito without jito properly enabled`);
+			return;
+		}
+		if (
+			this.bundleSender?.strategy === 'jito-only' ||
+			this.bundleSender?.strategy === 'hybrid'
+		) {
+			const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
+			if (slotsUntilNextLeader !== undefined) {
+				this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`, txSig);
+			}
+		}
+	}
+
+	private usingJito(): boolean {
+		return this.bundleSender !== undefined;
+	}
+
+	private canSendOutsideJito(): boolean {
+		return (
+			!this.usingJito() ||
+			this.bundleSender?.strategy === 'non-jito-only' ||
+			this.bundleSender?.strategy === 'hybrid'
+		);
+	}
+
+	protected async registerTxSigToConfirm(
+		txSig: TransactionSignature,
+		now: number,
+		nodeFilled: Array<NodeToFillWithBuffer>,
+		fillTxId: number,
+		txType: TxType
+	) {
+		this.pendingTxSigsToconfirm.set(txSig, {
+			ts: now,
+			nodeFilled,
+			fillTxId,
+			txType,
+		});
+		const user = this.driftClient.getUser();
+		this.sentTxsCounter?.add(1, {
+			txType,
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+	}
+
+	private async processBulkFillTxLogs(
+		fillTxId: number,
+		nodeToFill: NodeToFill,
+		txSig: string,
+		tx?: VersionedTransaction
+	): Promise<number> {
+		let txResp: VersionedTransactionResponse | null = null;
+		let attempts = 0;
+		while (txResp === null && attempts < CONFIRM_TX_ATTEMPTS) {
+			logger.info(
+				`(fillTxId: ${fillTxId}) waiting for https://solscan.io/tx/${txSig} to be confirmed`
+			);
+			txResp = await this.driftClient.connection.getTransaction(txSig, {
+				commitment: 'confirmed',
+				maxSupportedTransactionVersion: 0,
+			});
+
+			if (txResp === null) {
+				if (tx !== undefined) {
+					await this.driftClient.txSender.sendVersionedTransaction(
+						tx,
+						[],
+						this.driftClient.opts
+					);
+				}
+				attempts++;
+				await this.sleep(1000);
+			}
+		}
+
+		if (txResp === null) {
+			logger.error(
+				`(fillTxId: ${fillTxId})tx ${txSig} not found after ${attempts}`
+			);
+			return 0;
+		}
+
+		return (
+			await this.handleTransactionLogs(nodeToFill, txResp.meta!.logMessages!)
+		).filledNodes;
+	}
+
+	private async sleep(ms: number) {
+		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
+	
+	protected async sendFillTxAndParseLogs(
+		fillTxId: number,
+		nodeSent: Array<NodeToFillWithBuffer>,
+		tx: VersionedTransaction,
+		buildForBundle: boolean,
+		lutAccounts: Array<AddressLookupTableAccount>
+	) {
+		// @ts-ignore;
+		tx.sign([this.driftClient.wallet.payer]);
+		const txSig = bs58.encode(tx.signatures[0]);
+		this.registerTxSigToConfirm(txSig, Date.now(), nodeSent, fillTxId, 'fill');
+
+		const { estTxSize, accountMetas, writeAccs, txAccounts } =
+			getTransactionAccountMetas(tx, lutAccounts);
+
+		if (buildForBundle) {
+			await this.sendTxThroughJito(tx, fillTxId, txSig);
+		} else if (this.canSendOutsideJito()) {
+			this.driftClient.txSender
+				.sendVersionedTransaction(tx, [], this.driftClient.opts, true)
+				.then(async (txSig) => {
+					logger.info(
+						`Filled spot order (fillTxId: ${fillTxId}): https://solscan.io/tx/${txSig.txSig}`
+					);
+
+					const parseLogsStart = Date.now();
+					this.processBulkFillTxLogs(fillTxId, nodeSent, txSig.txSig, tx)
+						.then((successfulFills) => {
+							const processBulkFillLogsDuration = Date.now() - parseLogsStart;
+							logger.info(
+								`parse logs took ${processBulkFillLogsDuration}ms, successfulFills ${successfulFills} (fillTxId: ${fillTxId})`
+							);
+						})
+						.catch((err) => {
+							const e = err as Error;
+							logger.error(
+								`Failed to process fill tx logs (fillTxId: ${fillTxId}):\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+							webhookMessage(
+								`[${this.name}]: :x: error processing fill tx logs:\n${
+									e.stack ? e.stack : e.message
+								}`
+							);
+						});
+				})
+				.catch(async (e) => {
+					const simError = e as SendTransactionError;
+					logger.error(
+						`Failed to send packed tx txAccountKeys: ${txAccounts} (${writeAccs} writeable) (fillTxId: ${fillTxId}), error: ${simError.message}`
+					);
+
+					if (e.message.includes('too large:')) {
+						logger.error(
+							`[${
+								this.name
+							}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillTxId: ${fillTxId}). ${
+								e.message
+							}\n${JSON.stringify(accountMetas)}`
+						);
+						webhookMessage(
+							`[${
+								this.name
+							}]: :boxing_glove: Tx too large (fillTxId: ${fillTxId}). ${
+								e.message
+							}\n${JSON.stringify(accountMetas)}`
+						);
+						return;
+					}
+
+					if (simError.logs && simError.logs.length > 0) {
+						await this.handleTransactionLogs(nodeSent, simError.logs);
+
+						const errorCode = getErrorCode(e);
+						logger.error(
+							`Failed to send tx, sim error (fillTxId: ${fillTxId}) error code: ${errorCode}`
+						);
+
+						if (
+							errorCode &&
+							!errorCodesToSuppress.includes(errorCode) &&
+							!(e as Error).message.includes('Transaction was not confirmed')
+						) {
+							const user = this.driftClient.getUser();
+							this.txSimErrorCounter?.add(1, {
+								errorCode: errorCode.toString(),
+								...metricAttrFromUserAccount(
+									user.userAccountPublicKey,
+									user.getUserAccount()
+								),
+							});
+
+							logger.error(
+								`Failed to send tx, sim error (fillTxId: ${fillTxId}) sim logs:\n${
+									simError.logs ? simError.logs.join('\n') : ''
+								}\n${e.stack || e}`
+							);
+
+							webhookMessage(
+								`[${this.name}]: :x: error simulating tx:\n${
+									simError.logs ? simError.logs.join('\n') : ''
+								}\n${e.stack || e}`
+							);
+						}
+					}
+				})
+				.finally(() => {
+					this.clearThrottledNode(getNodeToFillSignature(nodeSent));
+				});
+		}
+	}
+	
+	/**
+	 * Iterates through a tx's logs and handles it appropriately e.g. throttling users, updating metrics, etc.)
+	 *
+	 * @param nodesFilled nodes that we sent a transaction to fill
+	 * @param logs logs from tx.meta.logMessages or this.driftClient.program._events._eventParser.parseLogs
+	 *
+	 * @returns number of nodes successfully filled, and whether the tx exceeded CUs
+	 */
+	private async handleTransactionLogs(
+		nodeFilled: NodeToFill,
+		logs: string[] | null | undefined
+	): Promise<{ filledNodes: number; exceededCUs: boolean }> {
+		if (!logs) {
+			return {
+				filledNodes: 0,
+				exceededCUs: false,
+			};
+		}
+
+		let inFillIx = false;
+		let errorThisFillIx = false;
+		let successCount = 0;
+		for (const log of logs) {
+			if (log === null) {
+				logger.error(`log is null`);
+				continue;
+			}
+
+			const node = nodeFilled.node;
+			const order = node.order!;
+
+			if (isEndIxLog(this.driftClient.program.programId.toBase58(), log)) {
+				if (!errorThisFillIx) {
+					successCount++;
+				}
+
+				inFillIx = false;
+				errorThisFillIx = false;
+				continue;
+			}
+
+			if (isIxLog(log)) {
+				if (isFillIxLog(log)) {
+					inFillIx = true;
+					errorThisFillIx = false;
+				} else {
+					inFillIx = false;
+				}
+				continue;
+			}
+
+			if (!inFillIx) {
+				// this is not a log for a fill instruction
+				continue;
+			}
+
+			// try to handle the log line
+			const orderIdDoesNotExist = isOrderDoesNotExistLog(log);
+			if (orderIdDoesNotExist) {
+				logger.error(
+					`spot node filled: ${node.userAccount!.toString()}, ${
+						order.orderId
+					}; does not exist (filled by someone else); ${log}`
+				);
+				this.throttledNodes.delete(getNodeToFillSignature(nodeFilled));
+				errorThisFillIx = true;
+				continue;
+			}
+
+			const makerBreachedMaintenanceMargin =
+				isMakerBreachedMaintenanceMarginLog(log);
+			if (makerBreachedMaintenanceMargin) {
+				const makerNode = getMakerNodeFromNodeToFill(nodeFilled);
+				if (!makerNode) {
+					logger.error(
+						`Got maker breached maint. margin log, but don't have a maker node: ${log}\n${JSON.stringify(
+							nodeFilled,
+							null,
+							2
+						)}`
+					);
+					continue;
+				}
+				const order = makerNode.order!;
+				const makerNodeSignature = getFillSignatureFromUserAccountAndOrderId(
+					makerNode.userAccount!.toString(),
+					order.orderId.toString()
+				);
+				logger.error(
+					`maker breach maint. margin, assoc node: ${makerNode.userAccount!.toString()}, ${
+						order.orderId
+					}; (throttling ${makerNodeSignature}); ${log}`
+				);
+				this.throttledNodes.set(makerNodeSignature, Date.now());
+				errorThisFillIx = true;
+				continue;
+			}
+
+			const takerBreachedMaintenanceMargin =
+				isTakerBreachedMaintenanceMarginLog(log);
+			if (takerBreachedMaintenanceMargin) {
+				const node = nodeFilled.node!;
+				const order = node.order!;
+				const takerNodeSignature = getFillSignatureFromUserAccountAndOrderId(
+					node.userAccount!.toString(),
+					order.orderId.toString()
+				);
+				logger.error(
+					`taker breach maint. margin, assoc node: ${node.userAccount!.toString()}, ${
+						order.orderId
+					}; (throttling ${takerNodeSignature} and force cancelling orders); ${log}`
+				);
+				this.throttledNodes.set(takerNodeSignature, Date.now());
+				errorThisFillIx = true;
+				continue;
+			}
+		}
+
+		if (logs.length > 0) {
+			if (
+				logs[logs.length - 1].includes('exceeded CUs meter at BPF instruction')
+			) {
+				return {
+					filledNodes: successCount,
+					exceededCUs: true,
+				};
+			}
+		}
+
+		return {
+			filledNodes: successCount,
+			exceededCUs: false,
+		};
+	}
+
+	protected async rebalanceSpotFiller() {
+		logger.info(`Rebalancing filler`);
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
 		);
@@ -740,6 +1504,5 @@ export class SpotFillerMultithreaded {
 		} else {
 			this.hasEnoughSolToFill = true;
 		}
-    }
-
+	}
 }
