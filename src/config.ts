@@ -147,6 +147,7 @@ export interface GlobalConfig {
 	jitoMaxBundleTip?: number;
 	jitoMaxBundleFailCount?: number;
 	jitoTipMultiplier?: number;
+	onlySendDuringJitoLeader?: boolean;
 
 	txRetryTimeoutMs?: number;
 	txSenderType?: 'fast' | 'retry' | 'while-valid';
@@ -200,6 +201,7 @@ const defaultConfig: Partial<Config> = {
 		jitoBlockEngineUrl: process.env.JITO_BLOCK_ENGINE_URL,
 		jitoAuthPrivateKey: process.env.JITO_AUTH_PRIVATE_KEY,
 		txRetryTimeoutMs: parseInt(process.env.TX_RETRY_TIMEOUT_MS ?? '30000'),
+		onlySendDuringJitoLeader: false,
 		txSkipPreflight: false,
 		txMaxRetries: 0,
 
