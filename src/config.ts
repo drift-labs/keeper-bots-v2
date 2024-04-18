@@ -43,9 +43,10 @@ export type FillerConfig = BaseBotConfig & {
 	fillerPollingInterval?: number;
 	revertOnFailure?: boolean;
 	simulateTxForCUEstimate?: boolean;
+
 	rebalanceFiller?: boolean;
-	minimumAmountToFill?: number;
-	minimumAmountToSettle?: number;
+	rebalanceSettledPnlThreshold?: number;
+	minGasBalanceToFill?: number;
 };
 
 export type SubaccountConfig = {

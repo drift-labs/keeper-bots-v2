@@ -30,7 +30,6 @@ import {
 	BlockhashSubscriber,
 	JupiterClient,
 	BN,
-	QUOTE_PRECISION,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -85,8 +84,8 @@ import {
 	simulateAndGetTxWithCUs,
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
-	validMinimumAmountToFill,
-	validMinimumAmountToSettle,
+	validMinimumGasAmount,
+	validRebalanceSettledPnlThreshold,
 } from '../utils';
 import { selectMakers } from '../makerSelection';
 import { BundleSender } from '../bundleSender';
@@ -242,8 +241,8 @@ export class FillerBot implements Bot {
 	protected jitoBundleCount?: GaugeValue;
 
 	protected rebalanceFiller?: boolean;
-	protected minimumAmountToFill: number;
-	protected minimumAmountToSettle: BN;
+	protected minGasBalanceToFill: number;
+	protected rebalanceSettledPnlThreshold: BN;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -311,25 +310,28 @@ export class FillerBot implements Bot {
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
 
-		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
-			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
+		if (!validMinimumGasAmount(config.minGasBalanceToFill)) {
+			this.minGasBalanceToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
-			// @ts-ignore
-			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
+			this.minGasBalanceToFill = config.minGasBalanceToFill! * LAMPORTS_PER_SOL;
 		}
 
-		if (!validMinimumAmountToSettle(config.minimumAmountToSettle)) {
-			this.minimumAmountToSettle = new BN(20);
+		if (
+			!validRebalanceSettledPnlThreshold(config.rebalanceSettledPnlThreshold)
+		) {
+			this.rebalanceSettledPnlThreshold = new BN(20);
 		} else {
-			this.minimumAmountToSettle = new BN(config.minimumAmountToSettle!);
+			this.rebalanceSettledPnlThreshold = new BN(
+				config.rebalanceSettledPnlThreshold!
+			);
 		}
 
 		logger.info(
-			`${this.name}: minimumAmountToFill: ${this.minimumAmountToFill}`
+			`${this.name}: minimumAmountToFill: ${this.minGasBalanceToFill}`
 		);
 
 		logger.info(
-			`${this.name}: minimumAmountToSettle: ${this.minimumAmountToSettle}`
+			`${this.name}: minimumAmountToSettle: ${this.rebalanceSettledPnlThreshold}`
 		);
 
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
@@ -2323,6 +2325,12 @@ export class FillerBot implements Bot {
 	}
 
 	protected async settlePnls() {
+		// Check if we have enough SOL to fill
+		const fillerSolBalance = await this.driftClient.connection.getBalance(
+			this.driftClient.authority
+		);
+		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
+
 		const user = this.driftClient.getUser();
 		const activePerpPositions = user.getActivePerpPositions().sort((a, b) => {
 			return b.quoteAssetAmount.sub(a.quoteAssetAmount).toNumber();
@@ -2334,176 +2342,172 @@ export class FillerBot implements Bot {
 			},
 			new BN(0)
 		);
-		const fillerDriftAccountUsdcBalance = this.driftClient.getTokenAmount(0);
-		const usdcSpotMarket = this.driftClient.getSpotMarketAccount(0);
-		const normalizedFillerDriftAccountUsdcBalance =
-			fillerDriftAccountUsdcBalance.divn(10 ** usdcSpotMarket!.decimals);
-		const totalFillerUsdcWithUnsettledPnlAndUsdcBalance = totalUnsettledPnl
-			.div(QUOTE_PRECISION)
-			.add(normalizedFillerDriftAccountUsdcBalance);
-		const isTotalUnsettledPnlSettlable =
-			totalFillerUsdcWithUnsettledPnlAndUsdcBalance.gte(
-				this.minimumAmountToSettle
-			);
-
-		logger.info(
-			`Filler has ${totalUnsettledPnl.div(QUOTE_PRECISION).toNumber()} upnl`
-		);
-		logger.info(
-			`Filler has ${totalFillerUsdcWithUnsettledPnlAndUsdcBalance} usdc incl upnl`
-		);
-		logger.info(`minimumAmountToSettle: ${this.minimumAmountToSettle}`);
-		logger.info(
-			`Settlable?: ${totalFillerUsdcWithUnsettledPnlAndUsdcBalance.gte(
-				this.minimumAmountToSettle
-			)}`
-		);
 
 		const now = Date.now();
+		// Settle pnl if:
+		// - we are rebalancing and have enough unsettled pnl to rebalance preemptively
+		// - we are rebalancing and don't have enough SOL to fill
+		// - we have hit max positions to free up slots
+		if (
+			(this.rebalanceFiller &&
+				(totalUnsettledPnl >= this.rebalanceSettledPnlThreshold ||
+					!this.hasEnoughSolToFill)) ||
+			marketIds.length === MAX_POSITIONS_PER_USER
+		) {
+			logger.info(
+				`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
+			);
+			if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
+				logger.info(`Want to settle positive pnl, but in cooldown...`);
+			} else {
+				let chunk_size;
+				if (marketIds.length < 5) {
+					chunk_size = marketIds.length;
+				} else {
+					chunk_size = marketIds.length / 2;
+				}
+				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
+				for (let i = 0; i < marketIds.length; i += chunk_size) {
+					const marketIdChunks = marketIds.slice(i, i + chunk_size);
+					try {
+						const ixs = [
+							ComputeBudgetProgram.setComputeUnitLimit({
+								units: 1_400_000, // will be overridden by simulateTx
+							}),
+							ComputeBudgetProgram.setComputeUnitPrice({
+								microLamports: Math.floor(
+									this.priorityFeeSubscriber.getCustomStrategyResult()
+								),
+							}),
+						];
+						ixs.push(
+							...(await this.driftClient.getSettlePNLsIxs(
+								[
+									{
+										settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
+										settleeUserAccount: this.driftClient.getUserAccount()!,
+									},
+								],
+								marketIdChunks
+							))
+						);
+
+						const simResult = await simulateAndGetTxWithCUs(
+							ixs,
+							this.driftClient.connection,
+							this.driftClient.txSender,
+							[this.lookupTableAccount!],
+							[],
+							this.driftClient.opts,
+							SIM_CU_ESTIMATE_MULTIPLIER,
+							this.simulateTxForCUEstimate,
+							await this.getBlockhashForTx()
+						);
+						this.simulateTxHistogram?.record(simResult.simTxDuration, {
+							type: 'settlePnl',
+							simError: simResult.simError !== null,
+							...metricAttrFromUserAccount(
+								user.userAccountPublicKey,
+								user.getUserAccount()
+							),
+						});
+						this.estTxCuHistogram?.record(simResult.cuEstimate, {
+							type: 'settlePnl',
+							simError: simResult.simError !== null,
+							...metricAttrFromUserAccount(
+								user.userAccountPublicKey,
+								user.getUserAccount()
+							),
+						});
+
+						if (this.simulateTxForCUEstimate && simResult.simError) {
+							logger.info(
+								`settlePnls simError: ${JSON.stringify(simResult.simError)}`
+							);
+							handleSimResultError(
+								simResult,
+								errorCodesToSuppress,
+								`${this.name}: (settlePnls)`
+							);
+						} else {
+							if (!this.dryRun) {
+								const slotsUntilJito = this.slotsUntilJitoLeader();
+								const buildForBundle =
+									this.usingJito() &&
+									slotsUntilJito !== undefined &&
+									slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+
+								// @ts-ignore;
+								simResult.tx.sign([this.driftClient.wallet.payer]);
+								const txSig = bs58.encode(simResult.tx.signatures[0]);
+								this.registerTxSigToConfirm(
+									txSig,
+									Date.now(),
+									[],
+									-2,
+									'settlePnl'
+								);
+
+								if (buildForBundle) {
+									this.sendTxThroughJito(simResult.tx, 'settlePnl', txSig);
+								} else if (this.canSendOutsideJito()) {
+									settlePnlPromises.push(
+										this.driftClient.txSender.sendVersionedTransaction(
+											simResult.tx,
+											[],
+											this.driftClient.opts,
+											true
+										)
+									);
+								}
+							} else {
+								logger.info(`dry run, skipping settlePnls)`);
+							}
+						}
+					} catch (err) {
+						if (!(err instanceof Error)) {
+							return;
+						}
+						const errorCode = getErrorCode(err) ?? 0;
+						logger.error(
+							`Error code: ${errorCode} while settling pnls for markets ${JSON.stringify(
+								marketIds
+							)}: ${err.message}`
+						);
+						console.error(err);
+					}
+				}
+				try {
+					const txs = await Promise.all(settlePnlPromises);
+					for (const tx of txs) {
+						logger.info(
+							`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
+						);
+					}
+				} catch (e) {
+					logger.error(`Error settling positive pnls: ${e}`);
+				}
+				this.lastSettlePnl = now;
+			}
+		}
+
+		// If we are rebalancing, check if we have enough settled pnl in usdc account to rebalance,
+		// or if we have to go below threshold since we don't have enough sol
 		if (this.rebalanceFiller) {
+			const fillerDriftAccountUsdcBalance = this.driftClient.getTokenAmount(0);
+			const usdcSpotMarket = this.driftClient.getSpotMarketAccount(0);
+			const normalizedFillerDriftAccountUsdcBalance =
+				fillerDriftAccountUsdcBalance.divn(10 ** usdcSpotMarket!.decimals);
+
 			if (
-				isTotalUnsettledPnlSettlable ||
-				marketIds.length === MAX_POSITIONS_PER_USER
+				normalizedFillerDriftAccountUsdcBalance.gte(
+					this.rebalanceSettledPnlThreshold
+				) ||
+				!this.hasEnoughSolToFill
 			) {
 				logger.info(
-					`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
+					`Filler has ${normalizedFillerDriftAccountUsdcBalance.toNumber()} usdc to rebalance`
 				);
-				if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
-					logger.info(`Want to settle positive pnl, but in cooldown...`);
-				} else {
-					let chunk_size;
-					if (marketIds.length < 5) {
-						chunk_size = marketIds.length;
-					} else {
-						chunk_size = marketIds.length / 2;
-					}
-					const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
-					for (let i = 0; i < marketIds.length; i += chunk_size) {
-						const marketIdChunks = marketIds.slice(i, i + chunk_size);
-						try {
-							const ixs = [
-								ComputeBudgetProgram.setComputeUnitLimit({
-									units: 1_400_000, // will be overridden by simulateTx
-								}),
-								ComputeBudgetProgram.setComputeUnitPrice({
-									microLamports: Math.floor(
-										this.priorityFeeSubscriber.getCustomStrategyResult()
-									),
-								}),
-							];
-							ixs.push(
-								...(await this.driftClient.getSettlePNLsIxs(
-									[
-										{
-											settleeUserAccountPublicKey:
-												user.getUserAccountPublicKey(),
-											settleeUserAccount: this.driftClient.getUserAccount()!,
-										},
-									],
-									marketIdChunks
-								))
-							);
-
-							const simResult = await simulateAndGetTxWithCUs(
-								ixs,
-								this.driftClient.connection,
-								this.driftClient.txSender,
-								[this.lookupTableAccount!],
-								[],
-								this.driftClient.opts,
-								SIM_CU_ESTIMATE_MULTIPLIER,
-								this.simulateTxForCUEstimate,
-								await this.getBlockhashForTx()
-							);
-							this.simulateTxHistogram?.record(simResult.simTxDuration, {
-								type: 'settlePnl',
-								simError: simResult.simError !== null,
-								...metricAttrFromUserAccount(
-									user.userAccountPublicKey,
-									user.getUserAccount()
-								),
-							});
-							this.estTxCuHistogram?.record(simResult.cuEstimate, {
-								type: 'settlePnl',
-								simError: simResult.simError !== null,
-								...metricAttrFromUserAccount(
-									user.userAccountPublicKey,
-									user.getUserAccount()
-								),
-							});
-
-							if (this.simulateTxForCUEstimate && simResult.simError) {
-								logger.info(
-									`settlePnls simError: ${JSON.stringify(simResult.simError)}`
-								);
-								handleSimResultError(
-									simResult,
-									errorCodesToSuppress,
-									`${this.name}: (settlePnls)`
-								);
-							} else {
-								if (!this.dryRun) {
-									const slotsUntilJito = this.slotsUntilJitoLeader();
-									const buildForBundle =
-										this.usingJito() &&
-										slotsUntilJito !== undefined &&
-										slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
-
-									// @ts-ignore;
-									simResult.tx.sign([this.driftClient.wallet.payer]);
-									const txSig = bs58.encode(simResult.tx.signatures[0]);
-									this.registerTxSigToConfirm(
-										txSig,
-										Date.now(),
-										[],
-										-2,
-										'settlePnl'
-									);
-
-									if (buildForBundle) {
-										this.sendTxThroughJito(simResult.tx, 'settlePnl', txSig);
-									} else if (this.canSendOutsideJito()) {
-										settlePnlPromises.push(
-											this.driftClient.txSender.sendVersionedTransaction(
-												simResult.tx,
-												[],
-												this.driftClient.opts,
-												true
-											)
-										);
-									}
-								} else {
-									logger.info(`dry run, skipping settlePnls)`);
-								}
-							}
-						} catch (err) {
-							if (!(err instanceof Error)) {
-								return;
-							}
-							const errorCode = getErrorCode(err) ?? 0;
-							logger.error(
-								`Error code: ${errorCode} while settling pnls for markets ${JSON.stringify(
-									marketIds
-								)}: ${err.message}`
-							);
-							console.error(err);
-						}
-					}
-					try {
-						const txs = await Promise.all(settlePnlPromises);
-						for (const tx of txs) {
-							logger.info(
-								`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
-							);
-						}
-					} catch (e) {
-						logger.error(`Error settling positive pnls: ${e}`);
-					}
-					this.lastSettlePnl = now;
-				}
-			}
-
-			if (isTotalUnsettledPnlSettlable) {
 				await this.rebalance();
 			}
 		}
@@ -2511,12 +2515,6 @@ export class FillerBot implements Bot {
 
 	protected async rebalance() {
 		logger.info(`Rebalancing filler`);
-		const fillerSolBalance = await this.driftClient.connection.getBalance(
-			this.driftClient.authority
-		);
-
-		this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
-
 		if (this.jupiterClient !== undefined) {
 			logger.info(`Swapping USDC for SOL to rebalance filler`);
 			swapFillerHardEarnedUSDCForSOL(
@@ -2531,10 +2529,10 @@ export class FillerBot implements Bot {
 						'processed'
 					);
 				this.hasEnoughSolToFill =
-					fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
+					fillerSolBalanceAfterSwap >= this.minGasBalanceToFill;
 			});
 		} else {
-			this.hasEnoughSolToFill = true;
+			throw new Error('Jupiter client not initialized but trying to rebalance');
 		}
 	}
 
