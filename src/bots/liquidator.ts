@@ -2543,7 +2543,14 @@ export class LiquidatorBot implements Bot {
 						!liquidateePosition.quoteAssetAmount.isZero();
 					liquidateeHasLpPos = !liquidateePosition.lpShares.isZero();
 
-					if (liquidateeHasUnsettledPerpPnl && depositMarketIndextoLiq > 0) {
+					const tryLiqPerp =
+						liquidateeHasUnsettledPerpPnl &&
+						// call liquidatePerpPnlForDeposit
+						((liquidateePosition.quoteAssetAmount.lt(ZERO) &&
+							depositMarketIndextoLiq > 0) ||
+							// call liquidateBorrowForPerpPnl or settlePnl
+							liquidateePosition.quoteAssetAmount.gt(ZERO));
+					if (tryLiqPerp) {
 						const perpMarket = this.driftClient.getPerpMarketAccount(
 							liquidateePosition.marketIndex
 						);
