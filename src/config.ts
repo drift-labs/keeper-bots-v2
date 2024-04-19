@@ -34,17 +34,20 @@ export type FillerMultiThreadedConfig = BaseBotConfig & {
 	marketType: string;
 	marketIndexes: Array<number[]>;
 	simulateTxForCUEstimate?: boolean;
+
 	rebalanceFiller?: boolean;
-	minimumAmountToFill?: number;
-	revertOnFailure?: boolean;
+	rebalanceSettledPnlThreshold?: number;
+	minGasBalanceToFill?: number;
 };
 
 export type FillerConfig = BaseBotConfig & {
 	fillerPollingInterval?: number;
 	revertOnFailure?: boolean;
 	simulateTxForCUEstimate?: boolean;
+
 	rebalanceFiller?: boolean;
-	minimumAmountToFill?: number;
+	rebalanceSettledPnlThreshold?: number;
+	minGasBalanceToFill?: number;
 };
 
 export type SubaccountConfig = {
@@ -145,6 +148,7 @@ export interface GlobalConfig {
 	jitoMaxBundleTip?: number;
 	jitoMaxBundleFailCount?: number;
 	jitoTipMultiplier?: number;
+	onlySendDuringJitoLeader?: boolean;
 
 	txRetryTimeoutMs?: number;
 	txSenderType?: 'fast' | 'retry' | 'while-valid';
@@ -198,6 +202,7 @@ const defaultConfig: Partial<Config> = {
 		jitoBlockEngineUrl: process.env.JITO_BLOCK_ENGINE_URL,
 		jitoAuthPrivateKey: process.env.JITO_AUTH_PRIVATE_KEY,
 		txRetryTimeoutMs: parseInt(process.env.TX_RETRY_TIMEOUT_MS ?? '30000'),
+		onlySendDuringJitoLeader: false,
 		txSkipPreflight: false,
 		txMaxRetries: 0,
 

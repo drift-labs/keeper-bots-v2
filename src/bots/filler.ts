@@ -29,6 +29,8 @@ import {
 	DataAndSlot,
 	BlockhashSubscriber,
 	JupiterClient,
+	BN,
+	QUOTE_PRECISION,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -83,7 +85,8 @@ import {
 	simulateAndGetTxWithCUs,
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
-	validMinimumAmountToFill,
+	validMinimumGasAmount,
+	validRebalanceSettledPnlThreshold,
 } from '../utils';
 import { selectMakers } from '../makerSelection';
 import { BundleSender } from '../bundleSender';
@@ -102,7 +105,6 @@ const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a n
 export const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
 const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana-labs/solana/issues/27241
 
-const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 export const CONFIRM_TX_INTERVAL_MS = 5_000;
@@ -170,6 +172,7 @@ export class FillerBot implements Bot {
 	protected lookupTableAccount?: AddressLookupTableAccount;
 	protected bundleSender?: BundleSender;
 
+	private fillerConfig: FillerConfig;
 	private globalConfig: GlobalConfig;
 	private dlobSubscriber?: DLOBSubscriber;
 
@@ -208,8 +211,6 @@ export class FillerBot implements Bot {
 	protected confirmLoopRateLimitTs =
 		Date.now() - CONFIRM_TX_RATE_LIMIT_BACKOFF_MS;
 
-	protected hasEnoughSolToFill: boolean = true;
-
 	protected jupiterClient?: JupiterClient;
 
 	// metrics
@@ -239,8 +240,10 @@ export class FillerBot implements Bot {
 	protected jitoLandedTipsGauge?: GaugeValue;
 	protected jitoBundleCount?: GaugeValue;
 
-	protected rebalanceFiller?: boolean;
-	protected minimumAmountToFill: number;
+	protected hasEnoughSolToFill: boolean = false;
+	protected rebalanceFiller: boolean;
+	protected minGasBalanceToFill: number;
+	protected rebalanceSettledPnlThreshold: BN;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -249,14 +252,15 @@ export class FillerBot implements Bot {
 		userMap: UserMap | undefined,
 		runtimeSpec: RuntimeSpec,
 		globalConfig: GlobalConfig,
-		config: FillerConfig,
+		fillerConfig: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
 		bundleSender?: BundleSender
 	) {
 		this.globalConfig = globalConfig;
-		this.name = config.botId;
-		this.dryRun = config.dryRun;
+		this.fillerConfig = fillerConfig;
+		this.name = this.fillerConfig.botId;
+		this.dryRun = this.fillerConfig.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		if (globalConfig.txConfirmationEndpoint) {
@@ -282,13 +286,16 @@ export class FillerBot implements Bot {
 		}
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
-			config.fillerPollingInterval ?? this.defaultIntervalMs;
+			this.fillerConfig.fillerPollingInterval ?? this.defaultIntervalMs;
 
-		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
+		this.initializeMetrics(
+			this.fillerConfig.metricsPort ?? this.globalConfig.metricsPort
+		);
 		this.userMap = userMap;
 
-		this.revertOnFailure = config.revertOnFailure ?? true;
-		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
+		this.revertOnFailure = this.fillerConfig.revertOnFailure ?? true;
+		this.simulateTxForCUEstimate =
+			this.fillerConfig.simulateTxForCUEstimate ?? true;
 		logger.info(
 			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
 		);
@@ -299,24 +306,45 @@ export class FillerBot implements Bot {
 		);
 
 		if (
-			config.rebalanceFiller &&
+			this.fillerConfig.rebalanceFiller &&
 			this.runtimeSpec.driftEnv === 'mainnet-beta'
 		) {
 			this.jupiterClient = new JupiterClient({
 				connection: this.driftClient.connection,
 			});
 		}
-		this.rebalanceFiller = config.rebalanceFiller ?? true;
+
+		this.rebalanceFiller = this.fillerConfig.rebalanceFiller ?? true;
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
 
-		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
-			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
+		if (!validMinimumGasAmount(this.fillerConfig.minGasBalanceToFill)) {
+			this.minGasBalanceToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
-			// @ts-ignore
-			this.minimumAmountToFill = config.minimumAmountToFill * LAMPORTS_PER_SOL;
+			this.minGasBalanceToFill =
+				this.fillerConfig.minGasBalanceToFill! * LAMPORTS_PER_SOL;
 		}
+
+		if (
+			!validRebalanceSettledPnlThreshold(
+				this.fillerConfig.rebalanceSettledPnlThreshold
+			)
+		) {
+			this.rebalanceSettledPnlThreshold = new BN(20);
+		} else {
+			this.rebalanceSettledPnlThreshold = new BN(
+				this.fillerConfig.rebalanceSettledPnlThreshold!
+			);
+		}
+
+		logger.info(
+			`${this.name}: minimumAmountToFill: ${this.minGasBalanceToFill}`
+		);
+
+		logger.info(
+			`${this.name}: minimumAmountToSettle: ${this.rebalanceSettledPnlThreshold}`
+		);
 
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
 		this.priorityFeeSubscriber.updateAddresses([
@@ -523,6 +551,14 @@ export class FillerBot implements Bot {
 
 	public async init() {
 		await this.baseInit();
+
+		const fillerSolBalance = await this.driftClient.connection.getBalance(
+			this.driftClient.authority
+		);
+		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
+		logger.info(
+			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
+		);
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap!,
@@ -2309,21 +2345,52 @@ export class FillerBot implements Bot {
 	}
 
 	protected async settlePnls() {
+		// Check if we have enough SOL to fill
+		const fillerSolBalance = await this.driftClient.connection.getBalance(
+			this.driftClient.authority
+		);
+		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
+
 		const user = this.driftClient.getUser();
-		const marketIds = user
-			.getActivePerpPositions()
-			.map((pos) => pos.marketIndex);
+		const activePerpPositions = user.getActivePerpPositions().sort((a, b) => {
+			return b.quoteAssetAmount.sub(a.quoteAssetAmount).toNumber();
+		});
+		const marketIds = activePerpPositions.map((pos) => pos.marketIndex);
+		const totalUnsettledPnl = activePerpPositions.reduce(
+			(totalUnsettledPnl, position) => {
+				return totalUnsettledPnl.add(position.quoteAssetAmount);
+			},
+			new BN(0)
+		);
+
 		const now = Date.now();
-		if (marketIds.length === MAX_POSITIONS_PER_USER) {
+		// Settle pnl if:
+		// - we are rebalancing and have enough unsettled pnl to rebalance preemptively
+		// - we are rebalancing and don't have enough SOL to fill
+		// - we have hit max positions to free up slots
+		if (
+			(this.rebalanceFiller &&
+				(totalUnsettledPnl.gte(
+					this.rebalanceSettledPnlThreshold.mul(QUOTE_PRECISION)
+				) ||
+					!this.hasEnoughSolToFill)) ||
+			marketIds.length === MAX_POSITIONS_PER_USER
+		) {
 			logger.info(
 				`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
 			);
 			if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
 				logger.info(`Want to settle positive pnl, but in cooldown...`);
 			} else {
+				let chunk_size;
+				if (marketIds.length < 5) {
+					chunk_size = marketIds.length;
+				} else {
+					chunk_size = marketIds.length / 2;
+				}
 				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
-				for (let i = 0; i < marketIds.length; i += SETTLE_PNL_CHUNKS) {
-					const marketIdChunks = marketIds.slice(i, i + SETTLE_PNL_CHUNKS);
+				for (let i = 0; i < marketIds.length; i += chunk_size) {
+					const marketIdChunks = marketIds.slice(i, i + chunk_size);
 					try {
 						const ixs = [
 							ComputeBudgetProgram.setComputeUnitLimit({
@@ -2386,11 +2453,7 @@ export class FillerBot implements Bot {
 							);
 						} else {
 							if (!this.dryRun) {
-								const slotsUntilJito = this.slotsUntilJitoLeader();
-								const buildForBundle =
-									this.usingJito() &&
-									slotsUntilJito !== undefined &&
-									slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+								const buildForBundle = this.shouldBuildForBundle();
 
 								// @ts-ignore;
 								simResult.tx.sign([this.driftClient.wallet.payer]);
@@ -2445,31 +2508,49 @@ export class FillerBot implements Bot {
 				this.lastSettlePnl = now;
 			}
 		}
+
+		// If we are rebalancing, check if we have enough settled pnl in usdc account to rebalance,
+		// or if we have to go below threshold since we don't have enough sol
 		if (this.rebalanceFiller) {
-			logger.info(`Rebalancing filler`);
-			const fillerSolBalance = await this.driftClient.connection.getBalance(
-				this.driftClient.authority
-			);
-			this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
-			if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
-				logger.info(`Swapping USDC for SOL to rebalance filler`);
-				swapFillerHardEarnedUSDCForSOL(
-					this.priorityFeeSubscriber,
-					this.driftClient,
-					this.jupiterClient,
-					await this.getBlockhashForTx()
-				).then(async () => {
-					const fillerSolBalanceAfterSwap =
-						await this.driftClient.connection.getBalance(
-							this.driftClient.authority,
-							'processed'
-						);
-					this.hasEnoughSolToFill =
-						fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
-				});
-			} else {
-				this.hasEnoughSolToFill = true;
+			const fillerDriftAccountUsdcBalance = this.driftClient.getTokenAmount(0);
+			const usdcSpotMarket = this.driftClient.getSpotMarketAccount(0);
+			const normalizedFillerDriftAccountUsdcBalance =
+				fillerDriftAccountUsdcBalance.divn(10 ** usdcSpotMarket!.decimals);
+
+			if (
+				normalizedFillerDriftAccountUsdcBalance.gte(
+					this.rebalanceSettledPnlThreshold
+				) ||
+				!this.hasEnoughSolToFill
+			) {
+				logger.info(
+					`Filler has ${normalizedFillerDriftAccountUsdcBalance.toNumber()} usdc to rebalance`
+				);
+				await this.rebalance();
 			}
+		}
+	}
+
+	protected async rebalance() {
+		logger.info(`Rebalancing filler`);
+		if (this.jupiterClient !== undefined) {
+			logger.info(`Swapping USDC for SOL to rebalance filler`);
+			swapFillerHardEarnedUSDCForSOL(
+				this.priorityFeeSubscriber,
+				this.driftClient,
+				this.jupiterClient,
+				await this.getBlockhashForTx()
+			).then(async () => {
+				const fillerSolBalanceAfterSwap =
+					await this.driftClient.connection.getBalance(
+						this.driftClient.authority,
+						'processed'
+					);
+				this.hasEnoughSolToFill =
+					fillerSolBalanceAfterSwap >= this.minGasBalanceToFill;
+			});
+		} else {
+			throw new Error('Jupiter client not initialized but trying to rebalance');
 		}
 	}
 
@@ -2490,6 +2571,20 @@ export class FillerBot implements Bot {
 			return undefined;
 		}
 		return this.bundleSender?.slotsUntilNextLeader();
+	}
+
+	protected shouldBuildForBundle(): boolean {
+		if (!this.usingJito()) {
+			return false;
+		}
+		if (this.globalConfig.onlySendDuringJitoLeader === true) {
+			const slotsUntilJito = this.slotsUntilJitoLeader();
+			if (slotsUntilJito === undefined) {
+				return false;
+			}
+			return slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+		}
+		return true;
 	}
 
 	protected async tryFill() {
@@ -2550,11 +2645,7 @@ export class FillerBot implements Bot {
 					`filtered fillable nodes from ${fillableNodes.length} to ${filteredFillableNodes.length}, filtered triggerable nodes from ${triggerableNodes.length} to ${filteredTriggerableNodes.length}`
 				);
 
-				const slotsUntilJito = this.slotsUntilJitoLeader();
-				const buildForBundle =
-					this.usingJito() &&
-					slotsUntilJito !== undefined &&
-					slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+				const buildForBundle = this.shouldBuildForBundle();
 
 				// fill the perp nodes
 				await Promise.all([

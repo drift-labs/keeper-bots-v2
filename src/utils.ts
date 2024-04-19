@@ -1017,11 +1017,18 @@ export async function initializePriorityFeeSubscriberMap({
 	return pfsMap;
 }
 
-export function validMinimumAmountToFill(
-	amount: number | undefined
-): number | undefined {
+export function validMinimumGasAmount(amount: number | undefined): boolean {
 	if (amount === undefined || amount < 0) {
-		return undefined;
+		return false;
 	}
-	return amount;
+	return true;
+}
+
+export function validRebalanceSettledPnlThreshold(
+	amount: number | undefined
+): boolean {
+	if (amount === undefined || amount < 1 || !Number.isInteger(amount)) {
+		return false;
+	}
+	return true;
 }
