@@ -1091,7 +1091,7 @@ export class FillerMultithreaded {
 						nodeToTrigger.node.userAccount
 					}, order ${nodeToTrigger.node.order.orderId.toString()}`
 				);
-				return;
+				continue;
 			}
 			this.seenTriggerableOrders.add(nodeSignature);
 			this.triggeringNodes.set(nodeSignature, Date.now());
@@ -1342,7 +1342,7 @@ export class FillerMultithreaded {
 						node.node.userAccount
 					}, order ${node.node.order?.orderId.toString()}`
 				);
-				return;
+				continue;
 			}
 			this.seenFillableOrders.add(getNodeToFillSignature(node));
 			if (node.makerNodes.length > 1) {
