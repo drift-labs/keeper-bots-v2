@@ -323,6 +323,7 @@ const runBot = async () => {
 
 		const spotFillerMultithreaded = new SpotFillerMultithreaded(
 			driftClient,
+			slotSubscriber,
 			{
 				rpcEndpoint: endpoint,
 				commit: '',

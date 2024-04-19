@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
 	DriftClient,
 	BlockhashSubscriber,
@@ -18,6 +19,16 @@ import {
 	isVariant,
 	DLOBNode,
 	getOrderSignature,
+	BN,
+	PhoenixV1FulfillmentConfigAccount,
+	SerumV3FulfillmentConfigAccount,
+	TEN,
+	SlotSubscriber,
+	DataAndSlot,
+	MakerInfo,
+	MarketType,
+	UserAccount,
+	decodeUser,
 } from '@drift-labs/sdk';
 import {
 	Connection,
@@ -28,8 +39,9 @@ import {
 	VersionedTransaction,
 	TransactionSignature,
 	VersionedTransactionResponse,
+	ComputeBudgetProgram,
+	TransactionInstruction,
 } from '@solana/web3.js';
-import { Mutex } from 'async-mutex';
 import { LRUCache } from 'lru-cache';
 import { FillerMultiThreadedConfig, GlobalConfig } from '../../config';
 import { BundleSender } from '../../bundleSender';
@@ -43,9 +55,13 @@ import {
 	RuntimeSpec,
 } from '../../metrics';
 import {
+	SimulateAndGetTxWithCUsResponse,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getTransactionAccountMetas,
+	handleSimResultError,
+	logMessageForNodeToFill,
+	simulateAndGetTxWithCUs,
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
 	validMinimumAmountToFill,
@@ -56,9 +72,16 @@ import {
 	View,
 } from '@opentelemetry/sdk-metrics-base';
 import { ChildProcess } from 'child_process';
-import { spawnChildWithRetry } from '../filler-common/utils';
+import {
+	deserializeNodeToFill,
+	deserializeOrder,
+	serializeNodeToFill,
+	spawnChildWithRetry,
+} from '../filler-common/utils';
 import {
 	CACHED_BLOCKHASH_OFFSET,
+	MAX_MAKERS_PER_FILL,
+	MakerNodeMap,
 	TX_CONFIRMATION_BATCH_SIZE,
 } from '../filler/fillerMultithreaded';
 import {
@@ -75,8 +98,9 @@ import {
 	isTakerBreachedMaintenanceMarginLog,
 } from '../../bots/common/txLogParse';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
-import { getErrorCode } from 'src/error';
-import { webhookMessage } from 'src/webhook';
+import { getErrorCode } from '../../error';
+import { webhookMessage } from '../../webhook';
+import { selectMakers } from '../../makerSelection';
 
 enum METRIC_TYPES {
 	try_fill_duration_histogram = 'try_fill_duration_histogram',
@@ -140,6 +164,7 @@ type DLOBBuilderWithProcess = {
 };
 
 export type TxType = 'fill' | 'trigger' | 'settlePnl';
+export type FallbackLiquiditySource = 'serum' | 'phoenix';
 
 export const TX_TIMEOUT_THRESHOLD_MS = 60_000; // tx considered stale after this time and give up confirming
 export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until trying to confirm tx again if rate limited
@@ -147,6 +172,10 @@ export const CONFIRM_TX_INTERVAL_MS = 5_000;
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
 const CONFIRM_TX_ATTEMPTS = 2;
+const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
+const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
+const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
+const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana-labs/solana/issues/27241
 
 const logPrefix = '[SpotFiller]';
 
@@ -158,7 +187,10 @@ export class SpotFillerMultithreaded {
 	private driftClient: DriftClient;
 	/// Connection to use specifically for confirming transactions
 	private txConfirmationConnection: Connection;
+	private slotSubscriber: SlotSubscriber;
 	private globalConfig: GlobalConfig;
+	private seenFillableOrders = new Set<string>();
+	private seenTriggerableOrders = new Set<string>();
 	private blockhashSubscriber: BlockhashSubscriber;
 	private driftLutAccount?: AddressLookupTableAccount;
 	private driftSpotLutAccount?: AddressLookupTableAccount;
@@ -173,9 +205,6 @@ export class SpotFillerMultithreaded {
 	private phoenixSubscribers: Map<number, PhoenixSubscriber>;
 
 	protected hasEnoughSolToFill: boolean = true;
-
-	private watchdogTimerMutex = new Mutex();
-	private watchdogTimerLastPatTime = Date.now();
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
@@ -244,6 +273,7 @@ export class SpotFillerMultithreaded {
 
 	constructor(
 		driftClient: DriftClient,
+		slotSubscriber: SlotSubscriber,
 		runtimeSpec: RuntimeSpec,
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
@@ -255,6 +285,7 @@ export class SpotFillerMultithreaded {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
+		this.slotSubscriber = slotSubscriber;
 		this.marketIndexes = config.marketIndexes;
 		this.marketIndexesFlattened = config.marketIndexes.flat();
 		if (globalConfig.txConfirmationEndpoint) {
@@ -330,12 +361,12 @@ export class SpotFillerMultithreaded {
 			string,
 			{
 				ts: number;
-				nodeFilled?: NodeToFill;
+				nodeFilled: Array<NodeToFillWithBuffer>;
 				fillTxId: number;
 				txType: TxType;
 			}
 		>({
-			max: 5_000,
+			max: 10_000,
 			ttl: TX_TIMEOUT_THRESHOLD_MS,
 			ttlResolution: 1000,
 			disposeAfter: this.recordEvictedTxSig.bind(this),
@@ -647,21 +678,773 @@ export class SpotFillerMultithreaded {
 	}
 
 	public async triggerNodes(
-		_serializedNodesToTrigger: SerializedNodeToTrigger[]
-	) {}
+		serializedNodesToTrigger: SerializedNodeToTrigger[]
+	) {
+		if (!this.hasEnoughSolToFill) {
+			logger.info(
+				`Not enough SOL to fill, skipping executeTriggerablePerpNodes`
+			);
+			return;
+		}
 
-	public async fillNodes(_serializedNodesToFill: SerializedNodeToFill[]) {}
+		logger.info(
+			`${logPrefix} Triggering ${serializedNodesToTrigger.length} nodes...`
+		);
+		const seenTriggerableNodes = new Set<string>();
+		const filteredTriggerableNodes = serializedNodesToTrigger.filter((node) => {
+			const sig = getNodeToTriggerSignature(node);
+			if (seenTriggerableNodes.has(sig)) {
+				return false;
+			}
+			seenTriggerableNodes.add(sig);
+			return this.filterTriggerableNodes(node);
+		});
+		logger.info(
+			`${logPrefix} Filtered down to ${filteredTriggerableNodes.length} triggerable nodes...`
+		);
 
-	protected async tryFillMultiMakerSpotNodes() {
+		const slotsUntilJito = this.slotsUntilJitoLeader();
+		const buildForBundle =
+			this.globalConfig.useJito &&
+			slotsUntilJito !== undefined &&
+			slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
 
+		try {
+			await this.executeTriggerableSpotNodes(
+				filteredTriggerableNodes,
+				!!buildForBundle
+			);
+		} catch (e) {
+			if (e instanceof Error) {
+				logger.error(
+					`${logPrefix} Error triggering nodes: ${
+						e.stack ? e.stack : e.message
+					}`
+				);
+			}
+		}
 	}
 
-	private async fillMultiMakerSpotNodes() {
+	private filterTriggerableNodes(
+		nodeToTrigger: SerializedNodeToTrigger
+	): boolean {
+		if (nodeToTrigger.node.haveTrigger) {
+			return false;
+		}
 
+		const now = Date.now();
+		const nodeToFillSignature = getNodeToTriggerSignature(nodeToTrigger);
+		const timeStartedToTriggerNode =
+			this.triggeringNodes.get(nodeToFillSignature);
+		if (timeStartedToTriggerNode) {
+			if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
-	protected async tryFillSpotNode() {
+	private async executeTriggerableSpotNodes(
+		serializedNodesToTrigger: SerializedNodeToTrigger[],
+		buildForBundle: boolean
+	) {
+		for (const nodeToTrigger of serializedNodesToTrigger) {
+			nodeToTrigger.node.haveTrigger = true;
+			// @ts-ignore
+			const buffer = Buffer.from(nodeToTrigger.node.userAccountData.data);
+			// @ts-ignore
+			const userAccount = decodeUser(buffer);
 
+			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
+			this.triggeringNodes.set(nodeSignature, Date.now());
+
+			const ixs = [];
+			ixs.push(
+				await this.driftClient.getTriggerOrderIx(
+					new PublicKey(nodeToTrigger.node.userAccount),
+					userAccount,
+					deserializeOrder(nodeToTrigger.node.order)
+				)
+			);
+
+			if (this.revertOnFailure) {
+				ixs.push(await this.driftClient.getRevertFillIx());
+			}
+
+			const simResult = await simulateAndGetTxWithCUs(
+				ixs,
+				this.driftClient.connection,
+				this.driftClient.txSender,
+				[this.driftLutAccount!],
+				[],
+				this.driftClient.opts,
+				SIM_CU_ESTIMATE_MULTIPLIER,
+				this.simulateTxForCUEstimate
+			);
+			const driftUser = this.driftClient.getUser();
+			this.simulateTxHistogram?.record(simResult.simTxDuration, {
+				type: 'trigger',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					driftUser.userAccountPublicKey,
+					driftUser.getUserAccount()
+				),
+			});
+			this.estTxCuHistogram?.record(simResult.cuEstimate, {
+				type: 'trigger',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					driftUser.userAccountPublicKey,
+					driftUser.getUserAccount()
+				),
+			});
+
+			if (this.simulateTxForCUEstimate && simResult.simError) {
+				handleSimResultError(
+					simResult,
+					errorCodesToSuppress,
+					`${this.name}: (executeTriggerableSpotNodesForMarket)`
+				);
+				logger.error(
+					`executeTriggerableSpotNodesForMarket simError: (simError: ${JSON.stringify(
+						simResult.simError
+					)})`
+				);
+			} else {
+				if (!this.dryRun) {
+					if (this.hasEnoughSolToFill) {
+						// @ts-ignore;
+						simResult.tx.sign([this.driftClient.wallet.payer]);
+						const txSig = bs58.encode(simResult.tx.signatures[0]);
+
+						if (buildForBundle) {
+							await this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
+							this.removeTriggeringNodes(nodeToTrigger);
+						} else if (this.canSendOutsideJito()) {
+							this.driftClient
+								.sendTransaction(simResult.tx)
+								.then((txSig) => {
+									logger.info(
+										`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}, order: ${nodeToTrigger.node.order.orderId.toString()}`
+									);
+									logger.info(`Tx: ${txSig}`);
+								})
+								.catch((error) => {
+									nodeToTrigger.node.haveTrigger = false;
+
+									const errorCode = getErrorCode(error);
+									if (
+										errorCode &&
+										!errorCodesToSuppress.includes(errorCode) &&
+										!(error as Error).message.includes(
+											'Transaction was not confirmed'
+										)
+									) {
+										const user = this.driftClient.getUser();
+										this.txSimErrorCounter?.add(1, {
+											errorCode: errorCode.toString(),
+											...metricAttrFromUserAccount(
+												user.userAccountPublicKey,
+												user.getUserAccount()
+											),
+										});
+										logger.error(
+											`Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} `
+										);
+										logger.error(error);
+										webhookMessage(
+											`[${
+												this.name
+											}]: Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} \n${
+												error.stack ? error.stack : error.message
+											} `
+										);
+									}
+								})
+								.finally(() => {
+									this.removeTriggeringNodes(nodeToTrigger);
+								});
+						}
+					} else {
+						logger.info(`Not enough SOL to fill, not triggering node`);
+					}
+				} else {
+					logger.info(`dry run, not triggering node`);
+				}
+			}
+		}
+
+		const user = this.driftClient.getUser();
+		this.attemptedTriggersCounter?.add(
+			serializedNodesToTrigger.length,
+			metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			)
+		);
+	}
+
+	public async fillNodes(serializedNodesToFill: SerializedNodeToFill[]) {
+		if (!this.hasEnoughSolToFill) {
+			logger.info('Not enough SOL to fill, skipping fillNodes');
+			return;
+		}
+
+		logger.debug(`${logPrefix} filling ${serializeNodeToFill.length} nodes...`);
+
+		const deserializedNodesToFill = serializedNodesToFill.map(
+			deserializeNodeToFill
+		);
+		const seenFillableNodes = new Set<string>();
+		const filteredFillableNodes = deserializedNodesToFill.filter((node) => {
+			const sig = getNodeToFillSignature(node);
+			if (seenFillableNodes.has(sig)) {
+				return false;
+			}
+			seenFillableNodes.add(sig);
+			return true;
+		});
+		logger.debug(
+			`${logPrefix} filtered down to ${filteredFillableNodes.length} nodes...`
+		);
+
+		const slotsUntilJito = this.slotsUntilJitoLeader();
+		const buildForBundle =
+			this.usingJito() &&
+			slotsUntilJito !== undefined &&
+			slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+
+		try {
+			for (const node of filteredFillableNodes) {
+				if (this.seenFillableOrders.has(getNodeToFillSignature(node))) {
+					logger.debug(
+						// @ts-ignore
+						`${logPrefix} already filled order (account: ${
+							node.node.userAccount
+						}, order ${node.node.order?.orderId.toString()}`
+					);
+					continue;
+				}
+				this.seenFillableOrders.add(getNodeToFillSignature(node));
+				if (node.makerNodes.length > 1) {
+					this.tryFillMultiMakerSpotNodes(node, !!buildForBundle);
+				} else {
+					this.tryFillSpotNode(node, !!buildForBundle);
+				}
+			}
+		} catch (e) {
+			if (e instanceof Error) {
+				logger.error(
+					`${logPrefix} Error filling nodes: ${e.stack ? e.stack : e.message}`
+				);
+			}
+		}
+	}
+
+	protected async tryFillMultiMakerSpotNodes(
+		nodeToFill: NodeToFillWithBuffer,
+		buildForBundle: boolean
+	) {
+		let nodeWithMakerSet = nodeToFill;
+		const fillTxId = this.fillTxId++;
+		while (
+			!(await this.fillMultiMakerSpotNodes(
+				fillTxId,
+				nodeWithMakerSet,
+				buildForBundle
+			))
+		) {
+			const newMakerSet = nodeWithMakerSet.makerNodes
+				.sort(() => 0.5 - Math.random())
+				.slice(0, Math.ceil(nodeWithMakerSet.makerNodes.length / 2));
+			nodeWithMakerSet = {
+				node: nodeWithMakerSet.node,
+				makerNodes: newMakerSet,
+				userAccountData: nodeWithMakerSet.userAccountData,
+				makerAccountData: nodeWithMakerSet.makerAccountData,
+			};
+			if (newMakerSet.length === 0) {
+				logger.error(
+					`No makers left to use for multi maker spot node (fillTxId: ${fillTxId})`
+				);
+				return;
+			}
+		}
+	}
+
+	private async fillMultiMakerSpotNodes(
+		fillTxId: number,
+		nodeToFill: NodeToFillWithBuffer,
+		buildForBundle: boolean
+	): Promise<boolean> {
+		const spotPrecision = TEN.pow(
+			new BN(
+				this.driftClient.getSpotMarketAccount(
+					nodeToFill.node.order!.marketIndex
+				)!.decimals
+			)
+		);
+		const ixs: Array<TransactionInstruction> = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000,
+			}),
+		];
+		if (!buildForBundle) {
+			ixs.push(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult()
+					),
+				})
+			);
+		}
+
+		try {
+			const {
+				makerInfos,
+				takerUser,
+				takerUserPubKey,
+				takerUserSlot,
+				marketType,
+			} = await this.getNodeFillInfo(nodeToFill);
+
+			logger.info(
+				logMessageForNodeToFill(
+					nodeToFill,
+					takerUserPubKey,
+					takerUserSlot,
+					makerInfos,
+					this.slotSubscriber.getSlot(),
+					`Filling multi maker spot node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`,
+					spotPrecision,
+					'SHOULD_NOT_HAVE_NO_MAKERS'
+				)
+			);
+
+			if (!isVariant(marketType, 'spot')) {
+				throw new Error('expected spot market type');
+			}
+
+			let makerInfosToUse = makerInfos;
+			const buildTxWithMakerInfos = async (
+				makers: DataAndSlot<MakerInfo>[]
+			): Promise<SimulateAndGetTxWithCUsResponse> => {
+				ixs.push(
+					await this.driftClient.getFillSpotOrderIx(
+						new PublicKey(takerUserPubKey),
+						takerUser,
+						nodeToFill.node.order!,
+						undefined,
+						makers.map((m) => m.data)
+					)
+				);
+
+				if (this.revertOnFailure) {
+					ixs.push(await this.driftClient.getRevertFillIx());
+				}
+				const simResult = await simulateAndGetTxWithCUs(
+					ixs,
+					this.driftClient.connection,
+					this.driftClient.txSender,
+					[this.driftLutAccount!],
+					[],
+					this.driftClient.opts,
+					SIM_CU_ESTIMATE_MULTIPLIER,
+					this.simulateTxForCUEstimate,
+					await this.getBlockhashForTx(),
+					false
+				);
+				const user = this.driftClient.getUser();
+				this.simulateTxHistogram?.record(simResult.simTxDuration, {
+					type: 'multiMakerFill',
+					simError: simResult.simError !== null,
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+				this.estTxCuHistogram?.record(simResult.cuEstimate, {
+					type: 'multiMakerFill',
+					simError: simResult.simError !== null,
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				});
+
+				return simResult;
+			};
+
+			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
+			let txAccounts = simResult.tx.message.getAccountKeys({
+				addressLookupTableAccounts: [this.driftLutAccount!],
+			}).length;
+			let attempt = 0;
+			while (txAccounts > MAX_ACCOUNTS_PER_TX && makerInfosToUse.length > 0) {
+				logger.info(
+					`(fillTxId: ${fillTxId} attempt ${attempt++}) Too many accounts, remove 1 and try again (had ${
+						makerInfosToUse.length
+					} maker and ${txAccounts} accounts)`
+				);
+				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
+				simResult = await buildTxWithMakerInfos(makerInfosToUse);
+				txAccounts = simResult.tx.message.getAccountKeys({
+					addressLookupTableAccounts: [this.driftLutAccount!],
+				}).length;
+			}
+
+			if (makerInfosToUse.length === 0) {
+				logger.error(
+					`No makerInfos left to use for multi maker spot node (fillTxId: ${fillTxId})`
+				);
+				return true;
+			}
+
+			logger.info(
+				`tryFillMultiMakerSpotNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
+			);
+
+			if (simResult.simError) {
+				logger.error(
+					`Error simulating multi maker spot node (fillTxId: ${fillTxId}): ${JSON.stringify(
+						simResult.simError
+					)}\nTaker slot: ${takerUserSlot}\nMaker slots: ${makerInfosToUse
+						.map((m) => `  ${m.data.maker.toBase58()}: ${m.slot}`)
+						.join('\n')}`
+				);
+				handleSimResultError(
+					simResult,
+					errorCodesToSuppress,
+					`${this.name}: (fillTxId: ${fillTxId})`
+				);
+				if (simResult.simTxLogs) {
+					const { exceededCUs } = await this.handleTransactionLogs(
+						nodeToFill,
+						simResult.simTxLogs
+					);
+					if (exceededCUs) {
+						return false;
+					}
+				}
+			} else {
+				if (!this.dryRun) {
+					if (this.hasEnoughSolToFill) {
+						const lutAccounts: Array<AddressLookupTableAccount> = [];
+						this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
+						this.driftSpotLutAccount &&
+							lutAccounts.push(this.driftSpotLutAccount);
+
+						this.sendFillTxAndParseLogs(
+							fillTxId,
+							nodeToFill,
+							simResult.tx,
+							buildForBundle,
+							lutAccounts
+						);
+					} else {
+						logger.info(
+							`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
+						);
+					}
+				} else {
+					logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
+				}
+			}
+		} catch (e) {
+			if (e instanceof Error) {
+				logger.error(
+					`Error filling multi maker spot node (fillTxId: ${fillTxId}): ${
+						e.stack ? e.stack : e.message
+					}`
+				);
+			}
+		}
+
+		return true;
+	}
+
+	protected async tryFillSpotNode(
+		nodeToFill: NodeToFillWithBuffer,
+		buildForBundle: boolean
+	) {
+		const serumSubscriber = this.serumSubscribers.get(
+			nodeToFill.node.order!.marketIndex
+		);
+		const serumBestBid = serumSubscriber?.getBestBid();
+		const serumBestAsk = serumSubscriber?.getBestAsk();
+
+		const phoenixSubscriber = this.phoenixSubscribers.get(
+			nodeToFill.node.order!.marketIndex
+		);
+		const phoenixBestBid = phoenixSubscriber?.getBestBid();
+		const phoenixBestAsk = phoenixSubscriber?.getBestAsk();
+
+		const [_fallbackBidPrice, fallbackBidSource] = this.pickFallbackPrice(
+			serumBestBid,
+			phoenixBestBid,
+			'bid'
+		);
+
+		const [_fallbackAskPrice, fallbackAskSource] = this.pickFallbackPrice(
+			serumBestAsk,
+			phoenixBestAsk,
+			'ask'
+		);
+
+		const fillTxId = this.fillTxId++;
+		const node = nodeToFill.node!;
+		const order = node.order!;
+		const spotMarket = this.driftClient.getSpotMarketAccount(
+			order.marketIndex
+		)!;
+		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
+
+		const fallbackSource = isVariant(order.direction, 'short')
+			? fallbackBidSource
+			: fallbackAskSource;
+
+		const {
+			makerInfos,
+			takerUser,
+			takerUserPubKey,
+			takerUserSlot,
+			marketType,
+		} = await this.getNodeFillInfo(nodeToFill);
+
+		if (!isVariant(marketType, 'spot')) {
+			throw new Error('expected spot market type');
+		}
+
+		const makerInfo = makerInfos.length > 0 ? makerInfos[0].data : undefined;
+		let fulfillmentConfig:
+			| SerumV3FulfillmentConfigAccount
+			| PhoenixV1FulfillmentConfigAccount
+			| undefined = undefined;
+		if (makerInfo === undefined) {
+			if (fallbackSource === 'serum') {
+				fulfillmentConfig = this.serumFulfillmentConfigMap.get(
+					nodeToFill.node.order!.marketIndex
+				);
+			} else if (fallbackSource === 'phoenix') {
+				fulfillmentConfig = this.phoenixFulfillmentConfigMap.get(
+					nodeToFill.node.order!.marketIndex
+				);
+			} else {
+				logger.error(
+					`makerInfo doesnt exist and unknown fallback source: ${fallbackSource} (fillTxId: ${fillTxId})`
+				);
+			}
+		}
+
+		logger.info(
+			logMessageForNodeToFill(
+				nodeToFill,
+				takerUserPubKey,
+				takerUserSlot,
+				makerInfos,
+				this.slotSubscriber.getSlot(),
+				`Filling spot node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`,
+				spotMarketPrecision,
+				fallbackSource as string
+			)
+		);
+
+		const ixs = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000,
+			}),
+		];
+		if (!buildForBundle) {
+			const priorityFee = Math.floor(
+				this.priorityFeeSubscriber.getCustomStrategyResult()
+			);
+			logger.info(`(fillTxId: ${fillTxId}) Using priority fee: ${priorityFee}`);
+			ixs.push(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: priorityFee,
+				})
+			);
+		}
+
+		ixs.push(
+			await this.driftClient.getFillSpotOrderIx(
+				new PublicKey(takerUserPubKey),
+				takerUser,
+				nodeToFill.node.order,
+				fulfillmentConfig,
+				makerInfo
+			)
+		);
+
+		if (this.revertOnFailure) {
+			ixs.push(await this.driftClient.getRevertFillIx());
+		}
+
+		const lutAccounts: Array<AddressLookupTableAccount> = [];
+		this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
+		this.driftSpotLutAccount && lutAccounts.push(this.driftSpotLutAccount);
+		const simResult = await simulateAndGetTxWithCUs(
+			ixs,
+			this.driftClient.connection,
+			this.driftClient.txSender,
+			lutAccounts,
+			[],
+			this.driftClient.opts,
+			SIM_CU_ESTIMATE_MULTIPLIER,
+			this.simulateTxForCUEstimate,
+			undefined,
+			false
+		);
+		const user = this.driftClient.getUser();
+		this.simulateTxHistogram?.record(simResult.simTxDuration, {
+			type: 'spotFill',
+			simError: simResult.simError !== null,
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+		this.estTxCuHistogram?.record(simResult.cuEstimate, {
+			type: 'spotFill',
+			simError: simResult.simError !== null,
+			...metricAttrFromUserAccount(
+				user.userAccountPublicKey,
+				user.getUserAccount()
+			),
+		});
+
+		if (this.simulateTxForCUEstimate && simResult.simError) {
+			logger.error(
+				`simError: ${JSON.stringify(
+					simResult.simError
+				)} (fillTxId: ${fillTxId})`
+			);
+			handleSimResultError(
+				simResult,
+				errorCodesToSuppress,
+				`${this.name}: (fillTxId: ${fillTxId})`
+			);
+			if (simResult.simTxLogs) {
+				await this.handleTransactionLogs(nodeToFill, simResult.simTxLogs);
+			}
+		} else {
+			if (this.dryRun) {
+				logger.info(`dry run, not filling spot order (fillTxId: ${fillTxId})`);
+			} else {
+				if (this.hasEnoughSolToFill) {
+					this.sendFillTxAndParseLogs(
+						fillTxId,
+						nodeToFill,
+						simResult.tx,
+						buildForBundle,
+						lutAccounts
+					);
+				} else {
+					logger.info(
+						`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
+					);
+				}
+			}
+		}
+	}
+
+	private pickFallbackPrice(
+		serumPrice: BN | undefined,
+		phoenixPrice: BN | undefined,
+		side: 'bid' | 'ask'
+	): [BN | undefined, FallbackLiquiditySource | undefined] {
+		if (serumPrice && phoenixPrice) {
+			if (side === 'bid') {
+				return serumPrice.gt(phoenixPrice)
+					? [serumPrice, 'serum']
+					: [phoenixPrice, 'phoenix'];
+			} else {
+				return serumPrice.lt(phoenixPrice)
+					? [serumPrice, 'serum']
+					: [phoenixPrice, 'phoenix'];
+			}
+		}
+
+		if (serumPrice) {
+			return [serumPrice, 'serum'];
+		}
+
+		if (phoenixPrice) {
+			return [phoenixPrice, 'phoenix'];
+		}
+
+		return [undefined, undefined];
+	}
+
+	protected async getNodeFillInfo(nodeToFill: NodeToFillWithBuffer): Promise<{
+		makerInfos: Array<DataAndSlot<MakerInfo>>;
+		takerUser: UserAccount;
+		takerUserSlot: number;
+		takerUserPubKey: string;
+		marketType: MarketType;
+	}> {
+		const makerInfos: Array<DataAndSlot<MakerInfo>> = [];
+
+		if (nodeToFill.makerNodes.length > 0) {
+			let makerNodesMap: MakerNodeMap = new Map<string, DLOBNode[]>();
+			for (const makerNode of nodeToFill.makerNodes) {
+				if (this.isDLOBNodeThrottled(makerNode)) {
+					continue;
+				}
+
+				if (!makerNode.userAccount) {
+					continue;
+				}
+
+				if (makerNodesMap.has(makerNode.userAccount!)) {
+					makerNodesMap.get(makerNode.userAccount!)!.push(makerNode);
+				} else {
+					makerNodesMap.set(makerNode.userAccount!, [makerNode]);
+				}
+			}
+
+			if (makerNodesMap.size > MAX_MAKERS_PER_FILL) {
+				logger.info(`selecting from ${makerNodesMap.size} makers`);
+				makerNodesMap = selectMakers(makerNodesMap);
+				logger.info(`selected: ${Array.from(makerNodesMap.keys()).join(',')}`);
+			}
+
+			const makerInfoMap = new Map(JSON.parse(nodeToFill.makerAccountData));
+			for (const [makerAccount, makerNodes] of makerNodesMap) {
+				const makerNode = makerNodes[0];
+				const makerUserAccount = decodeUser(
+					// @ts-ignore
+					Buffer.from(makerInfoMap.get(makerAccount)!.data)
+				);
+				const makerAuthority = makerUserAccount.authority;
+				const makerUserStats = (
+					await this.userStatsMap!.mustGet(makerAuthority.toString())
+				).userStatsAccountPublicKey;
+				makerInfos.push({
+					slot: this.slotSubscriber.getSlot(),
+					data: {
+						maker: new PublicKey(makerAccount),
+						makerUserAccount: makerUserAccount,
+						order: makerNode.order,
+						makerStats: makerUserStats,
+					},
+				});
+			}
+		}
+
+		const takerUserAccount = decodeUser(
+			// @ts-ignore
+			Buffer.from(nodeToFill.userAccountData.data)
+		);
+
+		return Promise.resolve({
+			makerInfos,
+			takerUser: takerUserAccount,
+			takerUserSlot: this.slotSubscriber.getSlot(),
+			takerUserPubKey: nodeToFill.node.userAccount!,
+			marketType: nodeToFill.node.order!.marketType,
+		});
 	}
 
 	protected isThrottledNodeStillThrottled(throttleKey: string): boolean {
@@ -726,7 +1509,7 @@ export class SpotFillerMultithreaded {
 	private removeTriggeringNodes(node: SerializedNodeToTrigger) {
 		this.triggeringNodes.delete(getNodeToTriggerSignature(node));
 	}
-	
+
 	protected initializeMetrics(metricsPort?: number) {
 		if (this.globalConfig.disableMetrics) {
 			logger.info(
@@ -853,7 +1636,7 @@ export class SpotFillerMultithreaded {
 	}
 
 	protected recordEvictedTxSig(
-		_tsTxSigAdded: { ts: number; nodeFilled?: NodeToFill },
+		_tsTxSigAdded: { ts: number; nodeFilled: Array<NodeToFillWithBuffer> },
 		txSig: string,
 		reason: 'evict' | 'set' | 'delete'
 	) {
@@ -885,6 +1668,10 @@ export class SpotFillerMultithreaded {
 			});
 
 		return recentBlockhash.blockhash;
+	}
+
+	protected slotsUntilJitoLeader(): number | undefined {
+		return this.bundleSender?.slotsUntilNextLeader();
 	}
 
 	protected recordJitoBundleStats() {
@@ -1083,6 +1870,7 @@ export class SpotFillerMultithreaded {
 						this.pendingTxSigsToconfirm.delete(txSig);
 						if (txType === 'fill') {
 							const result = await this.handleTransactionLogs(
+								// @ts-ignore
 								nodeFilled!,
 								txResp.meta?.logMessages
 							);
@@ -1228,10 +2016,10 @@ export class SpotFillerMultithreaded {
 	private async sleep(ms: number) {
 		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
-	
+
 	protected async sendFillTxAndParseLogs(
 		fillTxId: number,
-		nodeSent: Array<NodeToFillWithBuffer>,
+		nodeSent: NodeToFillWithBuffer,
 		tx: VersionedTransaction,
 		buildForBundle: boolean,
 		lutAccounts: Array<AddressLookupTableAccount>
@@ -1239,7 +2027,13 @@ export class SpotFillerMultithreaded {
 		// @ts-ignore;
 		tx.sign([this.driftClient.wallet.payer]);
 		const txSig = bs58.encode(tx.signatures[0]);
-		this.registerTxSigToConfirm(txSig, Date.now(), nodeSent, fillTxId, 'fill');
+		this.registerTxSigToConfirm(
+			txSig,
+			Date.now(),
+			[nodeSent],
+			fillTxId,
+			'fill'
+		);
 
 		const { estTxSize, accountMetas, writeAccs, txAccounts } =
 			getTransactionAccountMetas(tx, lutAccounts);
@@ -1341,7 +2135,7 @@ export class SpotFillerMultithreaded {
 				});
 		}
 	}
-	
+
 	/**
 	 * Iterates through a tx's logs and handles it appropriately e.g. throttling users, updating metrics, etc.)
 	 *

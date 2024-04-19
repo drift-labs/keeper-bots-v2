@@ -1342,7 +1342,7 @@ export class FillerMultithreaded {
 						node.node.userAccount
 					}, order ${node.node.order?.orderId.toString()}`
 				);
-				return;
+				continue;
 			}
 			this.seenFillableOrders.add(getNodeToFillSignature(node));
 			if (node.makerNodes.length > 1) {

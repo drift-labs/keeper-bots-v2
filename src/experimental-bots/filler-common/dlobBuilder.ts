@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
 	DLOB,
 	SlotSubscriber,
@@ -12,8 +13,16 @@ import {
 	NodeToFill,
 	NodeToTrigger,
 	Wallet,
+	SerumSubscriber,
+	PhoenixSubscriber,
+	initialize,
+	DriftEnv,
+	SerumFulfillmentConfigMap,
+	PhoenixFulfillmentConfigMap,
+	BulkAccountLoader,
+	BN,
 } from '@drift-labs/sdk';
-import { Connection } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
 import parseArgs from 'minimist';
 import { logger } from '../../logger';
@@ -37,6 +46,16 @@ class DLOBBuilder {
 	public driftClient: DriftClient;
 	public initialized: boolean = false;
 
+	// only used for spot filler
+	// @ts-ignore
+	private serumSubscribers: Map<number, SerumSubscriber>;
+	// @ts-ignore
+	private phoenixSubscribers: Map<number, PhoenixSubscriber>;
+	// @ts-ignore
+	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
+	// @ts-ignore
+	private phoenixFulfillmentConfigMap: PhoenixFulfillmentConfigMap;
+
 	constructor(
 		driftClient: DriftClient,
 		marketType: MarketType,
@@ -49,10 +68,118 @@ class DLOBBuilder {
 		this.marketTypeString = marketTypeString;
 		this.marketIndexes = marketIndexes;
 		this.driftClient = driftClient;
+
+		if (marketTypeString.toLowerCase() === 'spot') {
+			this.serumSubscribers = new Map();
+			this.phoenixSubscribers = new Map();
+			this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
+				driftClient
+			);
+			this.phoenixFulfillmentConfigMap = new PhoenixFulfillmentConfigMap(
+				driftClient
+			);
+		}
 	}
 
 	public async subscribe() {
 		await this.slotSubscriber.subscribe();
+
+		if (this.marketTypeString.toLowerCase() === 'spot') {
+			await this.initializeSpotMarkets();
+		}
+	}
+
+	private async initializeSpotMarkets() {
+		const config = initialize({ env: 'mainnet-beta' as DriftEnv });
+
+		const marketsOfInterest = config.SPOT_MARKETS.filter((market) => {
+			return this.marketIndexes.includes(market.marketIndex);
+		});
+
+		const marketSetupPromises = marketsOfInterest.map(
+			async (spotMarketConfig) => {
+				const subscribePromises = [];
+
+				const accountSubscription:
+					| {
+							type: 'polling';
+							accountLoader: BulkAccountLoader;
+					  }
+					| {
+							type: 'websocket';
+					  } = {
+					type: 'websocket', // Correctly matching the expected type without any additional properties
+				};
+
+				if (spotMarketConfig.serumMarket) {
+					// set up fulfillment config
+					await this.serumFulfillmentConfigMap.add(
+						spotMarketConfig.marketIndex,
+						spotMarketConfig.serumMarket
+					);
+
+					const serumConfigAccount =
+						await this.driftClient.getSerumV3FulfillmentConfig(
+							spotMarketConfig.serumMarket
+						);
+
+					if (isVariant(serumConfigAccount.status, 'enabled')) {
+						// set up serum price subscriber
+						const serumSubscriber = new SerumSubscriber({
+							connection: this.driftClient.connection,
+							programId: new PublicKey(config.SERUM_V3),
+							marketAddress: spotMarketConfig.serumMarket,
+							accountSubscription: accountSubscription,
+						});
+						logger.info(
+							`${logPrefix} Initializing SerumSubscriber for ${spotMarketConfig.symbol}...`
+						);
+						subscribePromises.push(
+							serumSubscriber.subscribe().then(() => {
+								this.serumSubscribers.set(
+									spotMarketConfig.marketIndex,
+									serumSubscriber
+								);
+							})
+						);
+					}
+				}
+
+				if (spotMarketConfig.phoenixMarket) {
+					// set up fulfillment config
+					await this.phoenixFulfillmentConfigMap.add(
+						spotMarketConfig.marketIndex,
+						spotMarketConfig.phoenixMarket
+					);
+
+					const phoenixConfigAccount = this.phoenixFulfillmentConfigMap.get(
+						spotMarketConfig.marketIndex
+					);
+					if (isVariant(phoenixConfigAccount.status, 'enabled')) {
+						// set up phoenix price subscriber
+						const phoenixSubscriber = new PhoenixSubscriber({
+							connection: this.driftClient.connection,
+							programId: new PublicKey(config.PHOENIX),
+							marketAddress: spotMarketConfig.phoenixMarket,
+							accountSubscription: accountSubscription,
+						});
+						logger.info(
+							`${logPrefix} Initializing PhoenixSubscriber for ${spotMarketConfig.symbol}...`
+						);
+						subscribePromises.push(
+							phoenixSubscriber.subscribe().then(() => {
+								this.phoenixSubscribers.set(
+									spotMarketConfig.marketIndex,
+									phoenixSubscriber
+								);
+							})
+						);
+					}
+				}
+				await Promise.all(subscribePromises);
+			}
+		);
+		await Promise.all(marketSetupPromises);
 	}
 
 	public getUserBuffer(pubkey: string) {
@@ -102,26 +229,72 @@ class DLOBBuilder {
 		const nodesToFill: NodeToFill[] = [];
 		const nodesToTrigger: NodeToTrigger[] = [];
 		for (const marketIndex of this.marketIndexes) {
-			const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex);
-			if (!perpMarket) {
-				throw new Error('PerpMarket not found');
+			let market;
+			let oraclePriceData;
+			let fallbackAsk: BN | undefined = undefined;
+			let fallbackBid: BN | undefined = undefined;
+			if (this.marketTypeString.toLowerCase() === 'perp') {
+				market = this.driftClient.getPerpMarketAccount(marketIndex);
+				if (!market) {
+					throw new Error('PerpMarket not found');
+				}
+				oraclePriceData =
+					this.driftClient.getOracleDataForPerpMarket(marketIndex);
+				fallbackBid = calculateBidPrice(market, oraclePriceData);
+				fallbackAsk = calculateAskPrice(market, oraclePriceData);
+			} else {
+				market = this.driftClient.getSpotMarketAccount(marketIndex);
+				if (!market) {
+					throw new Error('SpotMarket not found');
+				}
+				oraclePriceData =
+					this.driftClient.getOracleDataForSpotMarket(marketIndex);
+
+				const serumSubscriber = this.serumSubscribers.get(marketIndex);
+				const serumBid = serumSubscriber?.getBestBid();
+				const serumAsk = serumSubscriber?.getBestAsk();
+
+				const phoenixSubscriber = this.phoenixSubscribers.get(marketIndex);
+				const phoenixBid = phoenixSubscriber?.getBestBid();
+				const phoenixAsk = phoenixSubscriber?.getBestAsk();
+
+				if (serumBid && phoenixBid) {
+					if (serumBid!.gte(phoenixBid!)) {
+						fallbackBid = serumBid;
+					} else {
+						fallbackBid = phoenixBid;
+					}
+				} else if (serumBid) {
+					fallbackBid = serumBid;
+				} else if (phoenixBid) {
+					fallbackBid = phoenixBid;
+				}
+
+				if (serumAsk && phoenixAsk) {
+					if (serumAsk!.lte(phoenixAsk!)) {
+						fallbackAsk = serumAsk;
+					} else {
+						fallbackAsk = phoenixAsk;
+					}
+				} else if (serumAsk) {
+					fallbackAsk = serumAsk;
+				} else if (phoenixAsk) {
+					fallbackAsk = phoenixAsk;
+				}
 			}
-			const oraclePriceData =
-				this.driftClient.getOracleDataForPerpMarket(marketIndex);
-			const vBid = calculateBidPrice(perpMarket, oraclePriceData);
-			const vAsk = calculateAskPrice(perpMarket, oraclePriceData);
+
 			const stateAccount = this.driftClient.getStateAccount();
 			const slot = this.slotSubscriber.getSlot();
 			const nodesToFillForMarket = dlob.findNodesToFill(
 				marketIndex,
-				vBid,
-				vAsk,
+				fallbackBid,
+				fallbackAsk,
 				slot,
 				Date.now(),
 				this.marketType,
 				oraclePriceData,
 				stateAccount,
-				perpMarket
+				market
 			);
 			const nodesToTriggerForMarket = dlob.findNodesToTrigger(
 				marketIndex,
@@ -313,12 +486,12 @@ const main = async () => {
 		const [nodesToFill, nodesToTrigger] =
 			dlobBuilder.getNodesToTriggerAndNodesToFill();
 		const serializedNodesToFill = dlobBuilder.serializeNodesToFill(nodesToFill);
-		logger.debug(
+		logger.info(
 			`${logPrefix} Serialized ${serializedNodesToFill.length} fillable nodes`
 		);
 		const serializedNodesToTrigger =
 			dlobBuilder.serializeNodesToTrigger(nodesToTrigger);
-		logger.debug(
+		logger.info(
 			`${logPrefix} Serialized ${serializedNodesToTrigger.length} triggerable nodes`
 		);
 		dlobBuilder.trySendNodes(serializedNodesToTrigger, serializedNodesToFill);
