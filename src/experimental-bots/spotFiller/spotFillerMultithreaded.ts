@@ -64,7 +64,7 @@ import {
 	simulateAndGetTxWithCUs,
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
-	validMinimumAmountToFill,
+	validMinimumGasAmount,
 } from '../../utils';
 import {
 	ExplicitBucketHistogramAggregation,
@@ -314,7 +314,7 @@ export class SpotFillerMultithreaded {
 			new PublicKey('6gMq3mRCKf8aP3ttTyYhuijVZ2LGi14oDsBbkgubfLB3'), // Drift USDC market
 		]);
 
-		this.revertOnFailure = config.revertOnFailure ?? true;
+		this.revertOnFailure = true;
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
 		this.rebalanceFiller = config.rebalanceFiller ?? true;
 		logger.info(
@@ -334,7 +334,7 @@ export class SpotFillerMultithreaded {
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
 
-		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
+		if (!validMinimumGasAmount(config.minGasBalanceToFill)) {
 			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
 			// @ts-ignore
