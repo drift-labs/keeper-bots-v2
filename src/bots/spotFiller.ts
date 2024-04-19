@@ -85,7 +85,8 @@ import {
 	SimulateAndGetTxWithCUsResponse,
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
-	validMinimumAmountToFill,
+	validMinimumGasAmount,
+	validRebalanceSettledPnlThreshold,
 } from '../utils';
 import { BundleSender } from '../bundleSender';
 import {
@@ -250,8 +251,6 @@ export class SpotFillerBot implements Bot {
 
 	private periodicTaskMutex = new Mutex();
 
-	protected hasEnoughSolToFill: boolean = true;
-
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
@@ -309,7 +308,9 @@ export class SpotFillerBot implements Bot {
 	protected rebalanceFiller?: boolean;
 	protected jupiterClient?: JupiterClient;
 
-	protected minimumAmountToFill: number;
+	protected hasEnoughSolToFill: boolean = false;
+	protected minGasBalanceToFill: number;
+	protected rebalanceSettledPnlThreshold: BN;
 
 	constructor(
 		driftClient: DriftClient,
@@ -360,30 +361,40 @@ export class SpotFillerBot implements Bot {
 			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
 		);
 
-		if (
-			config.rebalanceFiller &&
-			this.runtimeSpec.driftEnv === 'mainnet-beta'
-		) {
+		if (this.rebalanceFiller && this.runtimeSpec.driftEnv === 'mainnet-beta') {
 			this.jupiterClient = new JupiterClient({
 				connection: this.driftClient.connection,
 			});
 		}
-		this.rebalanceFiller = config.rebalanceFiller ?? false;
+
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
 
 		this.userMap = userMap;
 
-		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
-			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
+		if (!validMinimumGasAmount(config.minGasBalanceToFill)) {
+			this.minGasBalanceToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
-			this.minimumAmountToFill =
-				config.minimumAmountToFill ?? 0 * LAMPORTS_PER_SOL;
+			this.minGasBalanceToFill = config.minGasBalanceToFill! * LAMPORTS_PER_SOL;
+		}
+
+		if (
+			!validRebalanceSettledPnlThreshold(config.rebalanceSettledPnlThreshold)
+		) {
+			this.rebalanceSettledPnlThreshold = new BN(20);
+		} else {
+			this.rebalanceSettledPnlThreshold = new BN(
+				config.rebalanceSettledPnlThreshold!
+			);
 		}
 
 		logger.info(
-			`${this.name}: minimumAmountToFill: ${this.minimumAmountToFill}`
+			`${this.name}: minimumAmountToFill: ${this.minGasBalanceToFill}`
+		);
+
+		logger.info(
+			`${this.name}: minimumAmountToSettle: ${this.rebalanceSettledPnlThreshold}`
 		);
 
 		if (this.driftClient.userAccountSubscriptionConfig.type === 'websocket') {
@@ -590,6 +601,14 @@ export class SpotFillerBot implements Bot {
 
 	public async init() {
 		logger.info(`${this.name} initing`);
+
+		const fillerSolBalance = await this.driftClient.connection.getBalance(
+			this.driftClient.authority
+		);
+		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
+		logger.info(
+			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
+		);
 
 		const orderSubscriberInitStart = Date.now();
 		logger.info(`Initializing OrderSubscriber...`);
@@ -2346,7 +2365,7 @@ export class SpotFillerBot implements Bot {
 		try {
 			// Check hasEnoughSolToFill before trying to fill, we do not want to fill if we don't have enough SOL
 			if (!this.hasEnoughSolToFill) {
-				logger.info(`Not enough SOL to fill, skipping fill`);
+				logger.info(`Not enough SOL to fill, skipping periodic action`);
 				await this.watchdogTimerMutex.runExclusive(async () => {
 					this.watchdogTimerLastPatTime = Date.now();
 				});
@@ -2451,27 +2470,43 @@ export class SpotFillerBot implements Bot {
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
 		);
+		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
 
-		this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
+		const fillerDriftAccountUsdcBalance = this.driftClient.getTokenAmount(0);
+		const usdcSpotMarket = this.driftClient.getSpotMarketAccount(0);
+		const normalizedFillerDriftAccountUsdcBalance =
+			fillerDriftAccountUsdcBalance.divn(10 ** usdcSpotMarket!.decimals);
+		const isUsdcAmountRebalanceable =
+			normalizedFillerDriftAccountUsdcBalance.gte(
+				this.rebalanceSettledPnlThreshold
+			) || !this.hasEnoughSolToFill;
 
-		if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
-			logger.info(`Swapping USDC for SOL to rebalance filler`);
-			swapFillerHardEarnedUSDCForSOL(
-				this.priorityFeeSubscriber,
-				this.driftClient,
-				this.jupiterClient,
-				await this.getBlockhashForTx()
-			).then(async () => {
-				const fillerSolBalanceAfterSwap =
-					await this.driftClient.connection.getBalance(
-						this.driftClient.authority,
-						'processed'
-					);
-				this.hasEnoughSolToFill =
-					fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
-			});
-		} else {
-			this.hasEnoughSolToFill = true;
+		logger.info(
+			`SpotFiller has ${normalizedFillerDriftAccountUsdcBalance.toNumber()} USDC`
+		);
+
+		if (isUsdcAmountRebalanceable) {
+			if (this.jupiterClient !== undefined) {
+				logger.info(`Swapping USDC for SOL to rebalance filler`);
+				swapFillerHardEarnedUSDCForSOL(
+					this.priorityFeeSubscriber,
+					this.driftClient,
+					this.jupiterClient,
+					await this.getBlockhashForTx()
+				).then(async () => {
+					const fillerSolBalanceAfterSwap =
+						await this.driftClient.connection.getBalance(
+							this.driftClient.authority,
+							'processed'
+						);
+					this.hasEnoughSolToFill =
+						fillerSolBalanceAfterSwap >= this.minGasBalanceToFill;
+				});
+			} else {
+				throw new Error(
+					'Jupiter client not initialized but trying to rebalance'
+				);
+			}
 		}
 	}
 }

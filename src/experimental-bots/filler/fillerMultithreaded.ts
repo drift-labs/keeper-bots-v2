@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
 	BlockhashSubscriber,
+	BN,
 	BulkAccountLoader,
 	DataAndSlot,
 	decodeUser,
@@ -18,6 +19,7 @@ import {
 	MarketType,
 	NodeToFill,
 	PriorityFeeSubscriber,
+	QUOTE_PRECISION,
 	ReferrerInfo,
 	SlotSubscriber,
 	TxSigAndSlot,
@@ -49,12 +51,14 @@ import { assert } from 'console';
 import {
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
+	handleSimResultError,
 	logMessageForNodeToFill,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
 	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
-	validMinimumAmountToFill,
+	validMinimumGasAmount,
+	validRebalanceSettledPnlThreshold,
 } from '../../utils';
 import {
 	spawnChildWithRetry,
@@ -102,7 +106,6 @@ const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a n
 export const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
 const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana-labs/solana/issues/27241
 
-const SETTLE_PNL_CHUNKS = 4;
 const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 export const CONFIRM_TX_INTERVAL_MS = 5_000;
@@ -221,9 +224,10 @@ export class FillerMultithreaded {
 	protected jitoLandedTipsGauge?: GaugeValue;
 	protected jitoBundleCount?: GaugeValue;
 
-	protected rebalanceFiller?: boolean;
-	protected hasEnoughSolToFill: boolean = true;
-	protected minimumAmountToFill: number;
+	protected rebalanceFiller: boolean;
+	protected hasEnoughSolToFill: boolean = false;
+	protected minGasBalanceToFill: number;
+	protected rebalanceSettledPnlThreshold: BN;
 
 	protected jupiterClient?: JupiterClient;
 
@@ -273,28 +277,37 @@ export class FillerMultithreaded {
 		this.runtimeSpec = runtimeSpec;
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
-		if (
-			config.rebalanceFiller &&
-			this.runtimeSpec.driftEnv === 'mainnet-beta'
-		) {
+		this.rebalanceFiller = config.rebalanceFiller ?? true;
+		if (this.rebalanceFiller && this.runtimeSpec.driftEnv === 'mainnet-beta') {
 			this.jupiterClient = new JupiterClient({
 				connection: this.driftClient.connection,
 			});
 		}
-		this.rebalanceFiller = config.rebalanceFiller ?? true;
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
-
-		if (!validMinimumAmountToFill(config.minimumAmountToFill)) {
-			this.minimumAmountToFill = 0.2 * LAMPORTS_PER_SOL;
+		if (!validMinimumGasAmount(config.minGasBalanceToFill)) {
+			this.minGasBalanceToFill = 0.2 * LAMPORTS_PER_SOL;
 		} else {
-			this.minimumAmountToFill =
-				config.minimumAmountToFill ?? 0 * LAMPORTS_PER_SOL;
+			this.minGasBalanceToFill = config.minGasBalanceToFill! * LAMPORTS_PER_SOL;
+		}
+
+		if (
+			!validRebalanceSettledPnlThreshold(config.rebalanceSettledPnlThreshold)
+		) {
+			this.rebalanceSettledPnlThreshold = new BN(20);
+		} else {
+			this.rebalanceSettledPnlThreshold = new BN(
+				config.rebalanceSettledPnlThreshold!
+			);
 		}
 
 		logger.info(
-			`${this.name}: minimumAmountToFill: ${this.minimumAmountToFill}`
+			`${this.name}: minimumAmountToFill: ${this.minGasBalanceToFill}`
+		);
+
+		logger.info(
+			`${this.name}: minimumAmountToSettle: ${this.rebalanceSettledPnlThreshold}`
 		);
 
 		this.pendingTxSigsToconfirm = new LRUCache<
@@ -321,6 +334,14 @@ export class FillerMultithreaded {
 
 	async init() {
 		await this.blockhashSubscriber.subscribe();
+
+		const fillerSolBalance = await this.driftClient.connection.getBalance(
+			this.driftClient.authority
+		);
+		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
+		logger.info(
+			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
+		);
 
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
@@ -349,7 +370,7 @@ export class FillerMultithreaded {
 						break;
 					case 'triggerableNodes':
 						if (this.dryRun) {
-							logger.info(`Triggerable node received`);
+							logger.debug(`Triggerable node received`);
 						} else {
 							this.triggerNodes(msg.data);
 						}
@@ -363,7 +384,7 @@ export class FillerMultithreaded {
 						break;
 					case 'fillableNodes':
 						if (this.dryRun) {
-							logger.info(`Fillable node received`);
+							logger.debug(`Fillable node received`);
 						} else {
 							this.fillNodes(msg.data);
 						}
@@ -908,6 +929,18 @@ export class FillerMultithreaded {
 		}
 	}
 
+	protected usingJito(): boolean {
+		return !!this.globalConfig.useJito;
+	}
+
+	protected canSendOutsideJito(): boolean {
+		return (
+			!this.usingJito() ||
+			this.bundleSender?.strategy === 'non-jito-only' ||
+			this.bundleSender?.strategy === 'hybrid'
+		);
+	}
+
 	protected async sendTxThroughJito(
 		tx: VersionedTransaction,
 		metadata: number | string
@@ -1094,39 +1127,45 @@ export class FillerMultithreaded {
 					)})`
 				);
 			} else {
-				if (buildForBundle) {
-					this.sendTxThroughJito(simResult.tx, 'triggerOrder');
-				} else {
-					const blockhash = await this.getBlockhashForTx();
-					simResult.tx.message.recentBlockhash = blockhash;
-					this.driftClient
-						.sendTransaction(simResult.tx)
-						.then((txSig) => {
-							logger.info(
-								`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-							);
-							logger.info(`${logPrefix} Tx: ${txSig}`);
-						})
-						.catch((error) => {
-							nodeToTrigger.node.haveTrigger = false;
-
-							const errorCode = getErrorCode(error);
-							if (
-								errorCode &&
-								!errorCodesToSuppress.includes(errorCode) &&
-								!(error as Error).message.includes(
-									'Transaction was not confirmed'
-								)
-							) {
-								logger.error(
-									`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+				if (this.hasEnoughSolToFill) {
+					if (buildForBundle) {
+						this.sendTxThroughJito(simResult.tx, 'triggerOrder');
+					} else {
+						const blockhash = await this.getBlockhashForTx();
+						simResult.tx.message.recentBlockhash = blockhash;
+						this.driftClient
+							.sendTransaction(simResult.tx)
+							.then((txSig) => {
+								logger.info(
+									`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
 								);
-								logger.error(error);
-							}
-						})
-						.finally(() => {
-							this.removeTriggeringNodes(nodeToTrigger);
-						});
+								logger.info(`${logPrefix} Tx: ${txSig}`);
+							})
+							.catch((error) => {
+								nodeToTrigger.node.haveTrigger = false;
+
+								const errorCode = getErrorCode(error);
+								if (
+									errorCode &&
+									!errorCodesToSuppress.includes(errorCode) &&
+									!(error as Error).message.includes(
+										'Transaction was not confirmed'
+									)
+								) {
+									logger.error(
+										`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+									);
+									logger.error(error);
+								}
+							})
+							.finally(() => {
+								this.removeTriggeringNodes(nodeToTrigger);
+							});
+					}
+				} else {
+					logger.info(
+						`Not enough SOL to fill, skipping executeTriggerablePerpNodes`
+					);
 				}
 			}
 		}
@@ -1463,12 +1502,18 @@ export class FillerMultithreaded {
 						.join('\n')}`
 				);
 			} else {
-				this.sendFillTxAndParseLogs(
-					fillTxId,
-					[nodeToFill],
-					simResult.tx,
-					buildForBundle
-				);
+				if (this.hasEnoughSolToFill) {
+					this.sendFillTxAndParseLogs(
+						fillTxId,
+						[nodeToFill],
+						simResult.tx,
+						buildForBundle
+					);
+				} else {
+					logger.info(
+						`Not enough SOL to fill, skipping executeFillablePerpNodesForMarket`
+					);
+				}
 			}
 		} catch (e) {
 			if (e instanceof Error) {
@@ -1565,12 +1610,18 @@ export class FillerMultithreaded {
 				)} (fillTxId: ${fillTxId})`
 			);
 		} else {
-			this.sendFillTxAndParseLogs(
-				fillTxId,
-				[nodeToFill],
-				simResult.tx,
-				buildForBundle
-			);
+			if (this.hasEnoughSolToFill) {
+				this.sendFillTxAndParseLogs(
+					fillTxId,
+					[nodeToFill],
+					simResult.tx,
+					buildForBundle
+				);
+			} else {
+				logger.info(
+					`Not enough SOL to fill, skipping executeFillablePerpNodesForMarket`
+				);
+			}
 		}
 	}
 
@@ -1658,21 +1709,52 @@ export class FillerMultithreaded {
 	}
 
 	protected async settlePnls() {
+		// Check if we have enough SOL to fill
+		const fillerSolBalance = await this.driftClient.connection.getBalance(
+			this.driftClient.authority
+		);
+		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
+
 		const user = this.driftClient.getUser();
-		const marketIds = user
-			.getActivePerpPositions()
-			.map((pos) => pos.marketIndex);
+		const activePerpPositions = user.getActivePerpPositions().sort((a, b) => {
+			return b.quoteAssetAmount.sub(a.quoteAssetAmount).toNumber();
+		});
+		const marketIds = activePerpPositions.map((pos) => pos.marketIndex);
+		const totalUnsettledPnl = activePerpPositions.reduce(
+			(totalUnsettledPnl, position) => {
+				return totalUnsettledPnl.add(position.quoteAssetAmount);
+			},
+			new BN(0)
+		);
+
 		const now = Date.now();
-		if (marketIds.length === MAX_POSITIONS_PER_USER) {
+		// Settle pnl if:
+		// - we are rebalancing and have enough unsettled pnl to rebalance preemptively
+		// - we are rebalancing and don't have enough SOL to fill
+		// - we have hit max positions to free up slots
+		if (
+			(this.rebalanceFiller &&
+				(totalUnsettledPnl.gte(
+					this.rebalanceSettledPnlThreshold.mul(QUOTE_PRECISION)
+				) ||
+					!this.hasEnoughSolToFill)) ||
+			marketIds.length === MAX_POSITIONS_PER_USER
+		) {
 			logger.info(
 				`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
 			);
 			if (now < this.lastSettlePnl + SETTLE_POSITIVE_PNL_COOLDOWN_MS) {
 				logger.info(`Want to settle positive pnl, but in cooldown...`);
 			} else {
+				let chunk_size;
+				if (marketIds.length < 5) {
+					chunk_size = marketIds.length;
+				} else {
+					chunk_size = marketIds.length / 2;
+				}
 				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
-				for (let i = 0; i < marketIds.length; i += SETTLE_PNL_CHUNKS) {
-					const marketIdChunks = marketIds.slice(i, i + SETTLE_PNL_CHUNKS);
+				for (let i = 0; i < marketIds.length; i += chunk_size) {
+					const marketIdChunks = marketIds.slice(i, i + chunk_size);
 					try {
 						const ixs = [
 							ComputeBudgetProgram.setComputeUnitLimit({
@@ -1728,6 +1810,11 @@ export class FillerMultithreaded {
 							logger.info(
 								`settlePnls simError: ${JSON.stringify(simResult.simError)}`
 							);
+							handleSimResultError(
+								simResult,
+								errorCodesToSuppress,
+								`${this.name}: (settlePnls)`
+							);
 						} else {
 							if (!this.dryRun) {
 								const buildForBundle = this.shouldBuildForBundle();
@@ -1745,12 +1832,13 @@ export class FillerMultithreaded {
 
 								if (buildForBundle) {
 									this.sendTxThroughJito(simResult.tx, 'settlePnl');
-								} else {
+								} else if (this.canSendOutsideJito()) {
 									settlePnlPromises.push(
 										this.driftClient.txSender.sendVersionedTransaction(
 											simResult.tx,
 											[],
-											this.driftClient.opts
+											this.driftClient.opts,
+											true
 										)
 									);
 								}
@@ -1784,33 +1872,49 @@ export class FillerMultithreaded {
 				this.lastSettlePnl = now;
 			}
 		}
+
+		// If we are rebalancing, check if we have enough settled pnl in usdc account to rebalance,
+		// or if we have to go below threshold since we don't have enough sol
 		if (this.rebalanceFiller) {
-			logger.info(`Rebalancing filler`);
-			const fillerSolBalance = await this.driftClient.connection.getBalance(
-				this.driftClient.authority
-			);
+			const fillerDriftAccountUsdcBalance = this.driftClient.getTokenAmount(0);
+			const usdcSpotMarket = this.driftClient.getSpotMarketAccount(0);
+			const normalizedFillerDriftAccountUsdcBalance =
+				fillerDriftAccountUsdcBalance.divn(10 ** usdcSpotMarket!.decimals);
 
-			this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
-
-			if (!this.hasEnoughSolToFill && this.jupiterClient !== undefined) {
-				logger.info(`Swapping USDC for SOL to rebalance filler`);
-				swapFillerHardEarnedUSDCForSOL(
-					this.priorityFeeSubscriber,
-					this.driftClient,
-					this.jupiterClient,
-					await this.getBlockhashForTx()
-				).then(async () => {
-					const fillerSolBalanceAfterSwap =
-						await this.driftClient.connection.getBalance(
-							this.driftClient.authority,
-							'processed'
-						);
-					this.hasEnoughSolToFill =
-						fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
-				});
-			} else {
-				this.hasEnoughSolToFill = true;
+			if (
+				normalizedFillerDriftAccountUsdcBalance.gte(
+					this.rebalanceSettledPnlThreshold
+				) ||
+				!this.hasEnoughSolToFill
+			) {
+				logger.info(
+					`Filler has ${normalizedFillerDriftAccountUsdcBalance.toNumber()} usdc to rebalance`
+				);
+				await this.rebalance();
 			}
+		}
+	}
+
+	protected async rebalance() {
+		logger.info(`Rebalancing filler`);
+		if (this.jupiterClient !== undefined) {
+			logger.info(`Swapping USDC for SOL to rebalance filler`);
+			swapFillerHardEarnedUSDCForSOL(
+				this.priorityFeeSubscriber,
+				this.driftClient,
+				this.jupiterClient,
+				await this.getBlockhashForTx()
+			).then(async () => {
+				const fillerSolBalanceAfterSwap =
+					await this.driftClient.connection.getBalance(
+						this.driftClient.authority,
+						'processed'
+					);
+				this.hasEnoughSolToFill =
+					fillerSolBalanceAfterSwap >= this.minGasBalanceToFill;
+			});
+		} else {
+			throw new Error('Jupiter client not initialized but trying to rebalance');
 		}
 	}
 
