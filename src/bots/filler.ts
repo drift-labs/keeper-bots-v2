@@ -314,7 +314,7 @@ export class FillerBot implements Bot {
 			});
 		}
 
-		this.rebalanceFiller = this.fillerConfig.rebalanceFiller ?? true;
+		this.rebalanceFiller = this.fillerConfig.rebalanceFiller ?? false;
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
