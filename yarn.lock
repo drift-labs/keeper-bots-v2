@@ -114,19 +114,19 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.10.372":
-  version "0.10.372"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.372.tgz#147557d853be70bbffc249a2da27b3f9c101a129"
-  integrity sha512-pe/fJ219gVoXGNkaOSe+qWijpPIXtjpVZk71kOdZsfbpetwskeMdaGKQsmrakRxJVByxVewpqOvYG1DdI1JjPg==
+"@drift-labs/jit-proxy@0.10.373":
+  version "0.10.373"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.373.tgz#68856c9ec73f4b2135be2b670fe25177b351fd0e"
+  integrity sha512-zvo3c4vFQE0AaVz9ME9SkJaUhX8/T4itDt1IGEKPxl69Rfcye05ItDqBa4KKpILpNsKunYiRnqHDuX05Fk8QtA==
   dependencies:
     "@coral-xyz/anchor" "^0.26.0"
-    "@drift-labs/sdk" "2.81.0-beta.0"
+    "@drift-labs/sdk" "2.81.0-beta.1"
     "@solana/web3.js" "1.73.2"
 
-"@drift-labs/sdk@2.81.0-beta.0":
-  version "2.81.0-beta.0"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.81.0-beta.0.tgz#4f73d2ef20bf14aff7f50d5b53145e45e7739215"
-  integrity sha512-ulH60dn0d1SOfk2AZg8c6wrxquvmMcde7v+p8S+rhWiCjmVDmSaVh2KNeLu7SfVhkvdyOg3I5EzgNCCvp9+xpQ==
+"@drift-labs/sdk@2.81.0-beta.1":
+  version "2.81.0-beta.1"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.81.0-beta.1.tgz#d32cdfa263c08f10430dfbdc98a9f77b8b7372bf"
+  integrity sha512-dlOn1alsgYZbkG+hg1P6wTwIxJtk7AwkefXJ1i7lGTIu4nGGuT58jz/5Ml20biHbqiZJI+qWAqbz3WiLxxot/A==
   dependencies:
     "@coral-xyz/anchor" "0.28.1-beta.2"
     "@ellipsis-labs/phoenix-sdk" "^1.4.2"
