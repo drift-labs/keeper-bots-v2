@@ -8,7 +8,8 @@ import {
 	getUserStatsAccountPublicKey,
 	promiseTimeout,
 	isVariant,
-	PriorityFeeSubscriber,
+	PriorityFeeSubscriberMap,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -28,7 +29,7 @@ import {
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
 import {
-	getMarketId,
+	getDriftPriorityFeeEndpoint,
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
 } from '../utils';
@@ -96,7 +97,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private dlob?: DLOB;
 	private latestDlobSlot?: number;
 	private lookupTableAccount?: AddressLookupTableAccount;
-	private priorityFeeSubscribers: Map<string, PriorityFeeSubscriber>;
+	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -107,7 +108,6 @@ export class MakerBidAskTwapCrank implements Bot {
 		userMap: UserMap,
 		config: BaseBotConfig,
 		runOnce: boolean,
-		priorityFeeSubscriberMap: Map<string, PriorityFeeSubscriber>,
 		crankIntervalToMarketIds?: { [key: number]: number[] }
 	) {
 		this.slotSubscriber = slotSubscriber;
@@ -132,13 +132,21 @@ export class MakerBidAskTwapCrank implements Bot {
 			this.crankIntervalInProgress[DEFAULT_INTERVAL_GROUP] = false;
 		}
 
-		this.priorityFeeSubscribers = priorityFeeSubscriberMap;
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
+			driftMarkets: PerpMarkets['mainnet-beta'].map((m) => ({
+				marketType: 'perp',
+				marketIndex: m.marketIndex,
+			})),
+			frequencyMs: 10_000,
+		});
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing, runOnce: ${this.runOnce}`);
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
+		await this.priorityFeeSubscriberMap.subscribe();
 	}
 
 	public async reset() {
@@ -300,12 +308,10 @@ export class MakerBidAskTwapCrank implements Bot {
 
 			logger.info(`Cranking interval group ${intervalGroup}: ${crankMarkets}`);
 			for (const mi of crankMarkets) {
-				const pfs = this.priorityFeeSubscribers.get(
-					getMarketId(MarketType.PERP, mi)
-				);
-				if (pfs === undefined) {
-					logger.warn(`No pfs for market ${mi}`);
-					continue;
+				const pfs = this.priorityFeeSubscriberMap.getPriorityFees('perp', mi);
+				let microLamports = 10_000;
+				if (pfs) {
+					microLamports = pfs.medium;
 				}
 
 				const ixs = [
@@ -313,7 +319,7 @@ export class MakerBidAskTwapCrank implements Bot {
 						units: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
 					}),
 					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: Math.floor(pfs.getCustomStrategyResult()),
+						microLamports,
 					}),
 				];
 
