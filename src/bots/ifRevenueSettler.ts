@@ -5,6 +5,8 @@ import {
 	ZERO,
 	DriftClientConfig,
 	BulkAccountLoader,
+	PriorityFeeSubscriberMap,
+	SpotMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -13,7 +15,15 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
-import { sleepS } from '../utils';
+import {
+	getDriftPriorityFeeEndpoint,
+	simulateAndGetTxWithCUs,
+	sleepS,
+} from '../utils';
+import {
+	AddressLookupTableAccount,
+	ComputeBudgetProgram,
+} from '@solana/web3.js';
 
 const MAX_SETTLE_WAIT_TIME_S = 10 * 60; // 10 minutes
 
@@ -27,12 +37,14 @@ export class IFRevenueSettlerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly runOnce: boolean;
 	public readonly defaultIntervalMs: number = 600000;
+	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
 
 	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
+	private lookupTableAccount?: AddressLookupTableAccount;
 
 	constructor(driftClientConfigs: DriftClientConfig, config: BaseBotConfig) {
 		this.name = config.botId;
@@ -51,19 +63,34 @@ export class IFRevenueSettlerBot implements Bot {
 				},
 			})
 		);
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
+			driftMarkets: SpotMarkets['mainnet-beta'].map((m) => ({
+				marketType: 'spot',
+				marketIndex: m.marketIndex,
+			})),
+			frequencyMs: 10_000,
+		});
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing`);
+		await this.priorityFeeSubscriberMap.subscribe();
 		await this.driftClient.subscribe();
+
 		if (!(await this.driftClient.getUser().exists())) {
 			throw new Error(
 				`User for ${this.driftClient.wallet.publicKey.toString()} does not exist`
 			);
 		}
+
+		this.lookupTableAccount =
+			await this.driftClient.fetchMarketLookupTableAccount();
 	}
 
 	public async reset() {
+		await this.priorityFeeSubscriberMap.unsubscribe();
+		await this.driftClient.unsubscribe();
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId as NodeJS.Timeout);
 		}
@@ -94,12 +121,60 @@ export class IFRevenueSettlerBot implements Bot {
 
 	private async settleIFRevenue(spotMarketIndex: number) {
 		try {
-			const txSig = await this.driftClient.settleRevenueToInsuranceFund(
+			const pfs = this.priorityFeeSubscriberMap.getPriorityFees(
+				'spot',
 				spotMarketIndex
 			);
-			logger.info(
-				`IF revenue settled successfully on marketIndex=${spotMarketIndex}. TxSig: ${txSig}`
+			let microLamports = 10_000;
+			if (pfs) {
+				microLamports = pfs.medium;
+			}
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
+				}),
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports,
+				}),
+			];
+			ixs.push(
+				await this.driftClient.getSettleRevenueToInsuranceFundIx(
+					spotMarketIndex
+				)
 			);
+
+			const simResult = await simulateAndGetTxWithCUs(
+				ixs,
+				this.driftClient.connection,
+				this.driftClient.txSender,
+				[this.lookupTableAccount!],
+				[],
+				undefined,
+				1.1,
+				true
+			);
+			logger.info(
+				`settleRevenueToInsuranceFund on spot market ${spotMarketIndex} estimated to take ${simResult.cuEstimate} CUs.`
+			);
+			if (simResult.simError !== null) {
+				logger.error(
+					`Sim error: ${JSON.stringify(simResult.simError)}\n${
+						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+					}`
+				);
+			} else {
+				const sendTxStart = Date.now();
+				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
+					simResult.tx,
+					[],
+					this.driftClient.opts
+				);
+				logger.info(
+					`Settle IF Revenue for spot market ${spotMarketIndex} tx sent in ${
+						Date.now() - sendTxStart
+					}ms: https://solana.fm/tx/${txSig.txSig}`
+				);
+			}
 		} catch (e: any) {
 			const err = e as Error;
 			const errorCode = getErrorCode(err);

@@ -19,8 +19,6 @@ import {
 	PERCENTAGE_PRECISION,
 	PRICE_PRECISION,
 	PerpMarketAccount,
-	PerpMarketConfig,
-	PriorityFeeMethod,
 	PriorityFeeSubscriber,
 	QUOTE_PRECISION,
 	SpotMarketAccount,
@@ -55,7 +53,6 @@ import {
 	VersionedTransaction,
 } from '@solana/web3.js';
 import { webhookMessage } from './webhook';
-import { DriftPriorityFeeResponse } from '@drift-labs/sdk/lib/priorityFee/driftPriorityFeeMethod';
 
 // devnet only
 export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
@@ -932,96 +929,23 @@ export async function swapFillerHardEarnedUSDCForSOL(
 export function getDriftPriorityFeeEndpoint(driftEnv: DriftEnv): string {
 	switch (driftEnv) {
 		case 'devnet':
-			return 'https://dlob.drift.trade';
 		case 'mainnet-beta':
 			return 'https://dlob.drift.trade';
 	}
 }
 
-export function getMarketId(
-	marketType: MarketType,
-	marketIndex: number
-): string {
-	return `${getVariant(marketType)}-${marketIndex}`;
-}
-
-export async function initializePriorityFeeSubscriberMap({
-	pfsMap,
-	connection,
-	driftPriorityFeeEndpoint,
-	perpMarkets,
-	includeQuoteMarket,
-	maxFeeMicroLamports,
-	priorityFeeMultiplier,
-}: {
-	pfsMap: Map<string, PriorityFeeSubscriber>;
-	connection: Connection;
-	driftPriorityFeeEndpoint: string;
-	perpMarkets: PerpMarketConfig[];
-	includeQuoteMarket: boolean;
-	maxFeeMicroLamports?: number;
-	priorityFeeMultiplier?: number;
-}): Promise<Map<string, PriorityFeeSubscriber>> {
-	const frequencyMs =
-		((perpMarkets.length + 1) * 60_000) /
-		PRIORITY_FEE_SERVER_RATE_LIMIT_PER_MIN;
-
-	logger.info(
-		`Initializing ${perpMarkets.length} PFS subscribers in a staggered fashion to stay below rate limits`
-	);
-
-	for (let i = 0; i < perpMarkets.length; i++) {
-		const market = perpMarkets[i];
-		const marketId = getMarketId(MarketType.PERP, market.marketIndex);
-		if (pfsMap.has(marketId)) {
-			continue;
-		}
-		const driftMarkets = [
-			{
-				marketType: 'perp',
-				marketIndex: market.marketIndex,
-			},
-		];
-		if (includeQuoteMarket) {
-			driftMarkets.push({
-				marketType: 'spot',
-				marketIndex: 0,
-			});
-		}
-		const pfs = new PriorityFeeSubscriber({
-			connection: connection,
-			frequencyMs,
-			priorityFeeMethod: PriorityFeeMethod.DRIFT,
-			driftPriorityFeeEndpoint,
-			driftMarkets,
-			customStrategy: {
-				calculate: (samples: DriftPriorityFeeResponse) => {
-					return Math.max(...samples.map((p) => p[HeliusPriorityLevel.HIGH]));
-				},
-			},
-			maxFeeMicroLamports,
-			priorityFeeMultiplier,
-		});
-		await pfs.subscribe();
-		pfsMap.set(marketId, pfs);
-
-		// stagger pfs subscriptions to avoid rate limit issues, not sure what good method is
-		await sleepMs(10000 / perpMarkets.length);
-		logger.info(
-			`Initialized PFS for market ${market.marketIndex}, ${i + 1}/${
-				perpMarkets.length
-			}`
-		);
-	}
-
-	return pfsMap;
-}
-
-export function validMinimumAmountToFill(
-	amount: number | undefined
-): number | undefined {
+export function validMinimumGasAmount(amount: number | undefined): boolean {
 	if (amount === undefined || amount < 0) {
-		return undefined;
+		return false;
 	}
-	return amount;
+	return true;
+}
+
+export function validRebalanceSettledPnlThreshold(
+	amount: number | undefined
+): boolean {
+	if (amount === undefined || amount < 1 || !Number.isInteger(amount)) {
+		return false;
+	}
+	return true;
 }

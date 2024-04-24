@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
 	BN,
 	convertToNumber,
@@ -206,7 +207,6 @@ export class LiquidatorBot implements Bot {
 	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
 	private jupiterClient?: JupiterClient;
 	private twapExecutionProgresses?: Map<string, TwapExecutionProgress>; // key: this.getTwapProgressKey, value: TwapExecutionProgress
-	private minDepositToLiq: Map<number, number>;
 	private excludedAccounts: Set<string>;
 
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
@@ -324,14 +324,6 @@ export class LiquidatorBot implements Bot {
 			logger.info(
 				`No spotSubAccountconfig provided, will watch all spot markets on subaccount ${this.activeSubAccountId}`
 			);
-		}
-
-		this.minDepositToLiq = new Map<number, number>();
-		if (config.minDepositToLiq != null) {
-			// We might get the keys parsed as strings
-			for (const [k, v] of Object.entries(config.minDepositToLiq)) {
-				this.minDepositToLiq.set(Number.parseInt(k), v);
-			}
 		}
 
 		// Load a list of accounts that we will *not* bother trying to liquidate
@@ -1791,8 +1783,7 @@ export class LiquidatorBot implements Bot {
 		spotPositions: SpotPosition[],
 		isBorrow: boolean,
 		positionTakerOverPctNumerator: BN,
-		positionTakerOverPctDenominator: BN,
-		minDepositToLiq: Map<number, number>
+		positionTakerOverPctDenominator: BN
 	): {
 		bestIndex: number;
 		bestAmount: BN;
@@ -1808,25 +1799,29 @@ export class LiquidatorBot implements Bot {
 		let indexWithOpenOrders = -1;
 
 		for (const position of spotPositions) {
-			if (position.scaledBalance.eq(ZERO)) {
-				continue;
-			}
-
-			// Skip any position that is less than the configured minimum amount
-			// for the specific market
-			const minAmount = new BN(minDepositToLiq.get(position.marketIndex) ?? 0);
-			if (position.scaledBalance.abs().lt(minAmount)) {
-				logger.debug(
-					`findBestSpotPosition: Amount ${position.scaledBalance} below ${minAmount} liquidation threshold`
-				);
-				continue;
-			}
-
 			const market = this.driftClient.getSpotMarketAccount(
 				position.marketIndex
 			);
 			if (!market) {
-				logger.error(`No spot market found for ${position.marketIndex}`);
+				throw new Error('No spot market found, drift client misconfigured');
+				continue;
+			}
+
+			if (position.scaledBalance.eq(ZERO)) {
+				continue;
+			}
+
+			// Check for dust
+			const positionTokenAmount = getTokenAmount(
+				position.scaledBalance,
+				market,
+				position.balanceType
+			);
+			const dustThreshold = market.minOrderSize.mul(new BN(2));
+			if (positionTokenAmount.abs().lt(dustThreshold)) {
+				logger.debug(
+					`findBestSpotPosition: Amount ${position.scaledBalance} below ${dustThreshold} dust liquidation threshold`
+				);
 				continue;
 			}
 
@@ -2480,8 +2475,7 @@ export class LiquidatorBot implements Bot {
 					liquidateeUserAccount.spotPositions,
 					false,
 					this.maxPositionTakeoverPctOfCollateralNum,
-					this.maxPositionTakeoverPctOfCollateralDenom,
-					this.minDepositToLiq
+					this.maxPositionTakeoverPctOfCollateralDenom
 				);
 
 				const {
@@ -2492,8 +2486,7 @@ export class LiquidatorBot implements Bot {
 					liquidateeUserAccount.spotPositions,
 					true,
 					this.maxPositionTakeoverPctOfCollateralNum,
-					this.maxPositionTakeoverPctOfCollateralDenom,
-					this.minDepositToLiq
+					this.maxPositionTakeoverPctOfCollateralDenom
 				);
 
 				let liquidateeHasSpotPos = false;
@@ -2547,7 +2540,7 @@ export class LiquidatorBot implements Bot {
 						liquidateeHasUnsettledPerpPnl &&
 						// call liquidatePerpPnlForDeposit
 						((liquidateePosition.quoteAssetAmount.lt(ZERO) &&
-							depositMarketIndextoLiq > 0) ||
+							depositMarketIndextoLiq > -1) ||
 							// call liquidateBorrowForPerpPnl or settlePnl
 							liquidateePosition.quoteAssetAmount.gt(ZERO));
 					if (tryLiqPerp) {

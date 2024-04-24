@@ -34,16 +34,20 @@ export type FillerMultiThreadedConfig = BaseBotConfig & {
 	marketType: string;
 	marketIndex: number;
 	simulateTxForCUEstimate?: boolean;
+
 	rebalanceFiller?: boolean;
-	minimumAmountToFill?: number;
+	rebalanceSettledPnlThreshold?: number;
+	minGasBalanceToFill?: number;
 };
 
 export type FillerConfig = BaseBotConfig & {
 	fillerPollingInterval?: number;
 	revertOnFailure?: boolean;
 	simulateTxForCUEstimate?: boolean;
+
 	rebalanceFiller?: boolean;
-	minimumAmountToFill?: number;
+	rebalanceSettledPnlThreshold?: number;
+	minGasBalanceToFill?: number;
 };
 
 export type SubaccountConfig = {

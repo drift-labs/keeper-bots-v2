@@ -7,9 +7,9 @@ import {
 	isOperationPaused,
 	PerpOperation,
 	decodeName,
-	PriorityFeeSubscriber,
-	MarketType,
 	PublicKey,
+	PriorityFeeSubscriberMap,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -18,7 +18,11 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
-import { getMarketId, simulateAndGetTxWithCUs, sleepMs } from '../utils';
+import {
+	getDriftPriorityFeeEndpoint,
+	simulateAndGetTxWithCUs,
+	sleepMs,
+} from '../utils';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
@@ -78,29 +82,30 @@ export class FundingRateUpdaterBot implements Bot {
 
 	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private priorityFeeSubscriberMap: Map<string, PriorityFeeSubscriber>;
+	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
 	private lookupTableAccount?: AddressLookupTableAccount;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 	private inProgress: boolean = false;
 
-	constructor(
-		driftClient: DriftClient,
-		config: BaseBotConfig,
-		priorityFeeSubscriberMap: Map<string, PriorityFeeSubscriber>
-	) {
+	constructor(driftClient: DriftClient, config: BaseBotConfig) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
 		this.runOnce = config.runOnce ?? false;
-		this.priorityFeeSubscriberMap = priorityFeeSubscriberMap;
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
+			driftMarkets: PerpMarkets['mainnet-beta'].map((m) => ({
+				marketType: 'perp',
+				marketIndex: m.marketIndex,
+			})),
+			frequencyMs: 10_000,
+		});
 	}
 
 	public async init() {
-		logger.info(
-			`I have ${this.priorityFeeSubscriberMap.size} priority fee subscribers`
-		);
+		await this.priorityFeeSubscriberMap.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 		logger.info(`${this.name} inited`);
@@ -235,7 +240,7 @@ export class FundingRateUpdaterBot implements Bot {
 	}
 
 	private async sendTxs(
-		pfs: PriorityFeeSubscriber,
+		microLamports: number,
 		marketIndex: number,
 		oracle: PublicKey
 	): Promise<{ success: boolean; canRetry: boolean }> {
@@ -244,7 +249,7 @@ export class FundingRateUpdaterBot implements Bot {
 				units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
 			}),
 			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.floor(pfs.getCustomStrategyResult()),
+				microLamports,
 			}),
 			await this.driftClient.getUpdateFundingRateIx(marketIndex, oracle),
 		];
@@ -301,13 +306,13 @@ export class FundingRateUpdaterBot implements Bot {
 	}
 
 	private async sendTxWithRetry(marketIndex: number, oracle: PublicKey) {
-		const pfs = this.priorityFeeSubscriberMap.get(
-			getMarketId(MarketType.PERP, marketIndex)
+		const pfs = this.priorityFeeSubscriberMap.getPriorityFees(
+			'perp',
+			marketIndex
 		);
-		if (!pfs) {
-			throw new Error(
-				`PriorityFeeSubscriber missing for market ${marketIndex}`
-			);
+		let microLamports = 10_000;
+		if (pfs) {
+			microLamports = pfs.medium;
 		}
 
 		const maxRetries = 30;
@@ -319,7 +324,7 @@ export class FundingRateUpdaterBot implements Bot {
 						i + 1
 					}/${maxRetries}`
 				);
-				const result = await this.sendTxs(pfs, marketIndex, oracle);
+				const result = await this.sendTxs(microLamports, marketIndex, oracle);
 				if (result.success) {
 					break;
 				}
