@@ -2540,7 +2540,7 @@ export class LiquidatorBot implements Bot {
 						liquidateeHasUnsettledPerpPnl &&
 						// call liquidatePerpPnlForDeposit
 						((liquidateePosition.quoteAssetAmount.lt(ZERO) &&
-							depositMarketIndextoLiq > 0) ||
+							depositMarketIndextoLiq > -1) ||
 							// call liquidateBorrowForPerpPnl or settlePnl
 							liquidateePosition.quoteAssetAmount.gt(ZERO));
 					if (tryLiqPerp) {
