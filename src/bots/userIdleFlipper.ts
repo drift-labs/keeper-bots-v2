@@ -51,7 +51,6 @@ export class UserIdleFlipperBot implements Bot {
 					type: 'polling',
 					accountLoader: bulkAccountLoader,
 				},
-				txSender: null, // force to default to retry tx send
 			})
 		);
 		this.userMap = new UserMap({
