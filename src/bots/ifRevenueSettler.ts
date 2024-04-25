@@ -127,7 +127,7 @@ export class IFRevenueSettlerBot implements Bot {
 			);
 			let microLamports = 10_000;
 			if (pfs) {
-				microLamports = pfs.medium;
+				microLamports = Math.floor(pfs.medium);
 			}
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({

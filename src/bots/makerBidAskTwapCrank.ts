@@ -317,7 +317,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				const pfs = this.priorityFeeSubscriberMap.getPriorityFees('perp', mi);
 				let microLamports = 10_000;
 				if (pfs) {
-					microLamports = pfs.medium;
+					microLamports = Math.floor(pfs.medium);
 				}
 
 				const ixs = [

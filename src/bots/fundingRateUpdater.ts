@@ -319,7 +319,7 @@ export class FundingRateUpdaterBot implements Bot {
 		);
 		let microLamports = 10_000;
 		if (pfs) {
-			microLamports = pfs.medium;
+			microLamports = Math.floor(pfs.medium);
 		}
 
 		const maxRetries = 30;
