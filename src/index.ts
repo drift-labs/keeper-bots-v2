@@ -748,12 +748,10 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userLpSettler')) {
-		needPriorityFeeSubscriber = true;
 		bots.push(
 			new UserLpSettlerBot(
 				driftClientConfig,
 				config.botConfigs!.userLpSettler!,
-				priorityFeeSubscriber,
 				txSender
 			)
 		);
