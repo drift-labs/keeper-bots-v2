@@ -452,7 +452,7 @@ export class UncrossArbBot implements Bot {
 					const midPrice = (bestBidPrice + bestAskPrice) / 2;
 					if (
 						(bestBidPrice - bestAskPrice) / midPrice >
-						2 * driftUser.getMarketFees(MarketType.PERP, perpIdx).takerFee
+						2 * this.driftClient.getMarketFees(MarketType.PERP, perpIdx, driftUser).takerFee
 					) {
 						let bidMakerInfo: MakerInfo;
 						let askMakerInfo: MakerInfo;
