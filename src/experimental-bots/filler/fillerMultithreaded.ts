@@ -60,11 +60,7 @@ import {
 	validMinimumGasAmount,
 	validRebalanceSettledPnlThreshold,
 } from '../../utils';
-import {
-	spawnChildWithRetry,
-	deserializeNodeToFill,
-	deserializeOrder,
-} from './utils';
+import { deserializeNodeToFill, deserializeOrder } from './utils';
 import {
 	CounterValue,
 	GaugeValue,
@@ -95,6 +91,7 @@ import {
 	isTakerBreachedMaintenanceMarginLog,
 } from '../../bots/common/txLogParse';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import { ChildProcess, fork } from 'child_process';
 
 const logPrefix = '[Filler]';
 
@@ -148,6 +145,12 @@ enum METRIC_TYPES {
 	jito_dropped_bundle = 'jito_dropped_bundle',
 	jito_landed_tips = 'jito_landed_tips',
 	jito_bundle_count = 'jito_bundle_count',
+
+	missed_dlob_builder_heartbeats = 'missed_dlob_builder_heartbeats',
+	missed_order_subscriber_heartbeats = 'missed_order_subscriber_heartbeats',
+
+	dlob_builder_restarts = 'dlob_builder_restarts',
+	order_subscriber_restarts = 'order_subscriber_restarts',
 }
 
 const getNodeToTriggerSignature = (node: SerializedNodeToTrigger): string => {
@@ -223,6 +226,10 @@ export class FillerMultithreaded {
 	protected jitoDroppedBundleGauge?: GaugeValue;
 	protected jitoLandedTipsGauge?: GaugeValue;
 	protected jitoBundleCount?: GaugeValue;
+	protected missedDlobBuilderHeartbeatsCounter?: CounterValue;
+	protected missedOrderSubscriberHeartbeatsCounter?: CounterValue;
+	protected dlobBuilderRestarts?: CounterValue;
+	protected orderSubscriberRestarts?: CounterValue;
 
 	protected rebalanceFiller: boolean;
 	protected hasEnoughSolToFill: boolean = false;
@@ -349,6 +356,42 @@ export class FillerMultithreaded {
 		this.startProcesses();
 	}
 
+	spawnChildWithRetry = (
+		scriptPath: string,
+		childArgs: string[],
+		processName: string,
+		onMessage: (msg: any) => void
+	): ChildProcess => {
+		const child = fork(scriptPath, childArgs);
+
+		child.on('message', onMessage);
+
+		child.on('exit', (code) => {
+			logger.info(
+				`${logPrefix} Child process: ${processName} exited with code ${code}`
+			);
+			logger.info(`${logPrefix} Restarting child process: ${processName}`);
+			switch (processName) {
+				case 'dlobBuilder': {
+					this.dlobBuilderRestarts?.add(1, {
+						marketIndexes: this.config.marketIndex,
+						ts: Date.now(),
+					});
+					break;
+				}
+				case 'orderSubscriber': {
+					this.orderSubscriberRestarts?.add(1, {
+						ts: Date.now(),
+					});
+					break;
+				}
+			}
+			this.spawnChildWithRetry(scriptPath, childArgs, processName, onMessage);
+		});
+
+		return child;
+	};
+
 	private startProcesses() {
 		let dlobBuilderReady = false;
 		const childArgs = [
@@ -356,7 +399,7 @@ export class FillerMultithreaded {
 			`--market-index=${this.config.marketIndex}`,
 		];
 		const user = this.driftClient.getUser();
-		const dlobBuilderProcess = spawnChildWithRetry(
+		const dlobBuilderProcess = this.spawnChildWithRetry(
 			'./src/experimental-bots/filler/dlobBuilder.ts',
 			childArgs,
 			'dlobBuilder',
@@ -400,11 +443,10 @@ export class FillerMultithreaded {
 						this.dlobHealthy = msg.data.healthy;
 						break;
 				}
-			},
-			'[FillerMultithreaded]'
+			}
 		);
 
-		const orderSubscriberProcess = spawnChildWithRetry(
+		const orderSubscriberProcess = this.spawnChildWithRetry(
 			'./src/experimental-bots/filler/orderSubscriberFiltered.ts',
 			childArgs,
 			'orderSubscriber',
@@ -419,8 +461,7 @@ export class FillerMultithreaded {
 						this.orderSubscriberHealthy = msg.data.healthy;
 						break;
 				}
-			},
-			'[FillerMultithreaded]'
+			}
 		);
 
 		process.on('SIGINT', () => {
@@ -588,6 +629,22 @@ export class FillerMultithreaded {
 			METRIC_TYPES.jito_bundle_count,
 			'Count of jito bundles that were sent, and their status'
 		);
+		this.missedDlobBuilderHeartbeatsCounter = this.metrics.addCounter(
+			METRIC_TYPES.missed_dlob_builder_heartbeats,
+			'Count of dlob builder heartbeats that were missed'
+		);
+		this.missedOrderSubscriberHeartbeatsCounter = this.metrics.addCounter(
+			METRIC_TYPES.missed_order_subscriber_heartbeats,
+			'Count of order subscriber heartbeats that were missed'
+		);
+		this.dlobBuilderRestarts = this.metrics.addCounter(
+			METRIC_TYPES.dlob_builder_restarts,
+			'Count of times dlob builder has restarted'
+		);
+		this.orderSubscriberRestarts = this.metrics.addCounter(
+			METRIC_TYPES.order_subscriber_restarts,
+			'Count of times order subscriber has restarted'
+		);
 
 		this.metrics?.finalizeObservables();
 
@@ -598,9 +655,16 @@ export class FillerMultithreaded {
 	public healthCheck(): boolean {
 		if (!this.dlobHealthy) {
 			logger.error(`${logPrefix} DLOB not healthy`);
+			this.missedDlobBuilderHeartbeatsCounter?.add(1, {
+				marketIndexes: this.config.marketIndex,
+				ts: Date.now(),
+			});
 		}
 		if (!this.orderSubscriberHealthy) {
 			logger.error(`${logPrefix} Order subscriber not healthy`);
+			this.missedOrderSubscriberHeartbeatsCounter?.add(1, {
+				ts: Date.now(),
+			});
 		}
 		return this.dlobHealthy && this.orderSubscriberHealthy;
 	}
