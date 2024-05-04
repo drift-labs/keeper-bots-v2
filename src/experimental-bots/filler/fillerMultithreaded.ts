@@ -226,8 +226,8 @@ export class FillerMultithreaded {
 	protected jitoDroppedBundleGauge?: GaugeValue;
 	protected jitoLandedTipsGauge?: GaugeValue;
 	protected jitoBundleCount?: GaugeValue;
-	protected missedDlobBuilderHeartbeatsCounter?: CounterValue;
-	protected missedOrderSubscriberHeartbeatsCounter?: CounterValue;
+	protected dlobBuilderHeartbeats?: CounterValue;
+	protected orderSubscriberHeartbeats?: CounterValue;
 	protected dlobBuilderRestarts?: CounterValue;
 	protected orderSubscriberRestarts?: CounterValue;
 
@@ -375,14 +375,11 @@ export class FillerMultithreaded {
 				case 'dlobBuilder': {
 					this.dlobBuilderRestarts?.add(1, {
 						marketIndexes: this.config.marketIndex,
-						ts: Date.now(),
 					});
 					break;
 				}
 				case 'orderSubscriber': {
-					this.orderSubscriberRestarts?.add(1, {
-						ts: Date.now(),
-					});
+					this.orderSubscriberRestarts?.add(1, {});
 					break;
 				}
 			}
@@ -441,6 +438,10 @@ export class FillerMultithreaded {
 						break;
 					case 'health':
 						this.dlobHealthy = msg.data.healthy;
+						this.dlobBuilderHeartbeats?.add(1, {
+							marketIndexes: this.config.marketIndex,
+							success: 'true',
+						});
 						break;
 				}
 			}
@@ -459,6 +460,9 @@ export class FillerMultithreaded {
 						break;
 					case 'health':
 						this.orderSubscriberHealthy = msg.data.healthy;
+						this.orderSubscriberHeartbeats?.add(1, {
+							success: 'true',
+						});
 						break;
 				}
 			}
@@ -629,11 +633,11 @@ export class FillerMultithreaded {
 			METRIC_TYPES.jito_bundle_count,
 			'Count of jito bundles that were sent, and their status'
 		);
-		this.missedDlobBuilderHeartbeatsCounter = this.metrics.addCounter(
+		this.dlobBuilderHeartbeats = this.metrics.addCounter(
 			METRIC_TYPES.missed_dlob_builder_heartbeats,
 			'Count of dlob builder heartbeats that were missed'
 		);
-		this.missedOrderSubscriberHeartbeatsCounter = this.metrics.addCounter(
+		this.orderSubscriberHeartbeats = this.metrics.addCounter(
 			METRIC_TYPES.missed_order_subscriber_heartbeats,
 			'Count of order subscriber heartbeats that were missed'
 		);
@@ -655,15 +659,15 @@ export class FillerMultithreaded {
 	public healthCheck(): boolean {
 		if (!this.dlobHealthy) {
 			logger.error(`${logPrefix} DLOB not healthy`);
-			this.missedDlobBuilderHeartbeatsCounter?.add(1, {
+			this.dlobBuilderHeartbeats?.add(1, {
 				marketIndexes: this.config.marketIndex,
-				ts: Date.now(),
+				success: 'false',
 			});
 		}
 		if (!this.orderSubscriberHealthy) {
 			logger.error(`${logPrefix} Order subscriber not healthy`);
-			this.missedOrderSubscriberHeartbeatsCounter?.add(1, {
-				ts: Date.now(),
+			this.orderSubscriberHeartbeats?.add(1, {
+				success: 'false',
 			});
 		}
 		return this.dlobHealthy && this.orderSubscriberHealthy;
