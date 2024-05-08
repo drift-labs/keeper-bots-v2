@@ -45,6 +45,8 @@ import {
 	OrderType,
 	getTokenValue,
 	calculateClaimablePnl,
+	isOperationPaused,
+	PerpOperation,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -2528,6 +2530,25 @@ export class LiquidatorBot implements Bot {
 						liquidateePerpIndexWithOpenOrders = liquidateePosition.marketIndex;
 					}
 
+					const perpMarket = this.driftClient.getPerpMarketAccount(
+						liquidateePosition.marketIndex
+					);
+					if (!perpMarket) {
+						throw new Error(
+							`perpMarket not loaded for marketIndex ${liquidateePosition.marketIndex}, misconfigured DriftClient`
+						);
+					}
+
+					// TODO: use enum on new sdk release
+					if (
+						isOperationPaused(perpMarket.pausedOperations, 32 as PerpOperation)
+					) {
+						logger.info(
+							`Skipping liquidation for ${userKey} on market ${perpMarket.marketIndex}, liquidation paused`
+						);
+						continue;
+					}
+
 					liquidateeHasUnsettledPerpPnl =
 						liquidateePosition.baseAssetAmount.isZero() &&
 						!liquidateePosition.quoteAssetAmount.isZero();
@@ -2544,14 +2565,6 @@ export class LiquidatorBot implements Bot {
 							// call liquidateBorrowForPerpPnl or settlePnl
 							liquidateePosition.quoteAssetAmount.gt(ZERO));
 					if (tryLiqPerp) {
-						const perpMarket = this.driftClient.getPerpMarketAccount(
-							liquidateePosition.marketIndex
-						);
-						if (!perpMarket) {
-							throw new Error(
-								`perpMarket not loaded for marketIndex ${liquidateePosition.marketIndex}, misconfigured DriftClient`
-							);
-						}
 						const sent = await this.liqPerpPnl(
 							user,
 							perpMarket,
