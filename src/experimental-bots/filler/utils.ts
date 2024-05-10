@@ -32,8 +32,6 @@ import {
 	SerializedDLOBNode,
 	NodeToFillWithBuffer,
 } from './types';
-import { ChildProcess, fork } from 'child_process';
-import { logger } from '../../logger';
 
 export const serializeUserAccount = (
 	userAccount: UserAccount
@@ -360,26 +358,4 @@ export const getDriftClientFromArgs = ({
 		oracleInfos: [oracleInfo],
 	});
 	return driftClient;
-};
-
-export const spawnChildWithRetry = (
-	scriptPath: string,
-	childArgs: string[],
-	processName: string,
-	onMessage: (msg: any) => void,
-	logPrefix = ''
-): ChildProcess => {
-	const child = fork(scriptPath, childArgs);
-
-	child.on('message', onMessage);
-
-	child.on('exit', (code) => {
-		logger.info(
-			`${logPrefix} Child process: ${processName} exited with code ${code}`
-		);
-		logger.info(`${logPrefix} Restarting child process: ${processName}`);
-		spawnChildWithRetry(scriptPath, childArgs, processName, onMessage);
-	});
-
-	return child;
 };
