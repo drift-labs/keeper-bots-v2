@@ -314,7 +314,7 @@ export class FillerBot implements Bot {
 			});
 		}
 
-		this.rebalanceFiller = this.fillerConfig.rebalanceFiller ?? true;
+		this.rebalanceFiller = this.fillerConfig.rebalanceFiller ?? false;
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
@@ -1041,7 +1041,7 @@ export class FillerBot implements Bot {
 		const oraclePriceData =
 			this.driftClient.getOracleDataForPerpMarket(marketIndex);
 
-		if (isOrderExpired(nodeToFill.node.order, Date.now() / 1000)) {
+		if (isOrderExpired(nodeToFill.node.order, Date.now() / 1000, true)) {
 			if (isOneOfVariant(nodeToFill.node.order.orderType, ['limit'])) {
 				// do not try to fill (expire) limit orders b/c they will auto expire when filled against
 				// or the user places a new order
@@ -1327,12 +1327,15 @@ export class FillerBot implements Bot {
 				if (filledNode) {
 					const isExpired = isOrderExpired(
 						filledNode.node.order!,
-						Date.now() / 1000
+						Date.now() / 1000,
+						true
 					);
 					logger.error(
 						`assoc node (ixIdx: ${ixIdx}): ${filledNode.node.userAccount!.toString()}, ${
 							filledNode.node.order!.orderId
-						}; does not exist (filled by someone else); ${log}, expired: ${isExpired}`
+						}; does not exist (filled by someone else); ${log}, expired: ${isExpired}, orderTs: ${
+							filledNode.node.order!.maxTs
+						}, now: ${Date.now() / 1000}`
 					);
 					if (isExpired) {
 						const sig = getNodeToFillSignature(filledNode);

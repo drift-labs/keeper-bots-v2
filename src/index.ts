@@ -39,7 +39,6 @@ import {
 	AverageOverSlotsStrategy,
 	BlockhashSubscriber,
 	WhileValidTxSender,
-	PerpMarkets,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -62,8 +61,6 @@ import {
 	TOKEN_FAUCET_PROGRAM_ID,
 	getWallet,
 	loadKeypair,
-	initializePriorityFeeSubscriberMap,
-	getDriftPriorityFeeEndpoint,
 } from './utils';
 import {
 	Config,
@@ -509,8 +506,6 @@ const runBot = async () => {
 		`priorityFeeMethod: ${priorityFeeSubscriber.priorityFeeMethod}, maxFeeMicroLamports: ${priorityFeeSubscriber.maxFeeMicroLamports}, method: ${priorityFeeSubscriber.priorityFeeMethod}`
 	);
 
-	let priorityFeeSubscriberMap = new Map<string, PriorityFeeSubscriber>();
-
 	let needBlockhashSubscriber = false;
 	const blockhashSubscriber = new BlockhashSubscriber({
 		connection: driftClient.connection,
@@ -753,12 +748,10 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userLpSettler')) {
-		needPriorityFeeSubscriber = true;
 		bots.push(
 			new UserLpSettlerBot(
 				driftClientConfig,
 				config.botConfigs!.userLpSettler!,
-				priorityFeeSubscriber,
 				txSender
 			)
 		);
@@ -786,23 +779,10 @@ const runBot = async () => {
 	if (configHasBot(config, 'fundingRateUpdater')) {
 		needCheckDriftUser = true;
 
-		priorityFeeSubscriberMap = await initializePriorityFeeSubscriberMap({
-			pfsMap: priorityFeeSubscriberMap,
-			connection: driftClient.connection,
-			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
-				config.global.driftEnv!
-			),
-			perpMarkets: PerpMarkets[config.global.driftEnv!],
-			includeQuoteMarket: false,
-			maxFeeMicroLamports: priorityFeeSubscriber.maxFeeMicroLamports,
-			priorityFeeMultiplier: priorityFeeSubscriber.priorityFeeMultiplier,
-		});
-
 		bots.push(
 			new FundingRateUpdaterBot(
 				driftClient,
-				config.botConfigs!.fundingRateUpdater!,
-				priorityFeeSubscriberMap
+				config.botConfigs!.fundingRateUpdater!
 			)
 		);
 	}
@@ -811,18 +791,6 @@ const runBot = async () => {
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
 
-		priorityFeeSubscriberMap = await initializePriorityFeeSubscriberMap({
-			pfsMap: priorityFeeSubscriberMap,
-			connection: driftClient.connection,
-			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
-				config.global.driftEnv!
-			),
-			perpMarkets: PerpMarkets[config.global.driftEnv!],
-			includeQuoteMarket: false,
-			maxFeeMicroLamports: priorityFeeSubscriber.maxFeeMicroLamports,
-			priorityFeeMultiplier: priorityFeeSubscriber.priorityFeeMultiplier,
-		});
-
 		bots.push(
 			new MakerBidAskTwapCrank(
 				driftClient,
@@ -830,7 +798,6 @@ const runBot = async () => {
 				userMap,
 				config.botConfigs!.markTwapCrank!,
 				config.global.runOnce ?? false,
-				priorityFeeSubscriberMap,
 				config.botConfigs!.markTwapCrank!.crankIntervalToMarketIndicies
 			)
 		);

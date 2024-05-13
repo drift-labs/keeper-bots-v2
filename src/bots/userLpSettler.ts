@@ -4,13 +4,14 @@ import {
 	ZERO,
 	DriftClientConfig,
 	BulkAccountLoader,
-	PriorityFeeSubscriber,
 	BN,
 	timeRemainingUntilUpdate,
 	TxSender,
 	isOperationPaused,
 	PerpOperation,
 	decodeName,
+	PriorityFeeSubscriberMap,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -20,6 +21,7 @@ import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
 import {
+	getDriftPriorityFeeEndpoint,
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
 	sleepMs,
@@ -52,7 +54,7 @@ export class UserLpSettlerBot implements Bot {
 	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
-	private priorityFeeSubscriber: PriorityFeeSubscriber;
+	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
 	private inProgress = false;
 
 	private watchdogTimerMutex = new Mutex();
@@ -61,7 +63,6 @@ export class UserLpSettlerBot implements Bot {
 	constructor(
 		driftClientConfigs: DriftClientConfig,
 		config: BaseBotConfig,
-		priorityFeeSubscriber: PriorityFeeSubscriber,
 		txSender: TxSender
 	) {
 		this.name = config.botId;
@@ -94,7 +95,14 @@ export class UserLpSettlerBot implements Bot {
 			disableSyncOnTotalAccountsChange: true,
 		});
 
-		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
+			driftMarkets: PerpMarkets['mainnet-beta'].map((m) => ({
+				marketType: 'perp',
+				marketIndex: m.marketIndex,
+			})),
+			frequencyMs: 10_000,
+		});
 	}
 
 	public async init() {
@@ -113,7 +121,7 @@ export class UserLpSettlerBot implements Bot {
 			.getPerpMarketAccounts()
 			.map((m) => m.pubkey);
 
-		this.priorityFeeSubscriber.updateAddresses([...perpMarkets]);
+		await this.priorityFeeSubscriberMap.subscribe();
 
 		logger.info(
 			`Lp settler looking at ${perpMarkets.length} perp markets to determine priority fee`
@@ -362,14 +370,20 @@ export class UserLpSettlerBot implements Bot {
 
 		let success = false;
 		try {
+			const pfs = this.priorityFeeSubscriberMap.getPriorityFees(
+				'perp',
+				marketIndex
+			);
+			let microLamports = 10_000;
+			if (pfs) {
+				microLamports = Math.floor(pfs.medium);
+			}
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
 				}),
 				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber!.getCustomStrategyResult()
-					),
+					microLamports,
 				}),
 				...(await Promise.all(
 					users.map((u) => this.driftClient.settleLPIx(u, marketIndex))

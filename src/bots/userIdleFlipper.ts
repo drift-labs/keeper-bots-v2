@@ -17,7 +17,7 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 } from '@solana/web3.js';
-import { sleepMs } from '../utils';
+import { simulateAndGetTxWithCUs, sleepMs } from '../utils';
 
 const USER_IDLE_CHUNKS = 9;
 const SLEEP_MS = 1000;
@@ -51,7 +51,6 @@ export class UserIdleFlipperBot implements Bot {
 					type: 'polling',
 					accountLoader: bulkAccountLoader,
 				},
-				txSender: null, // force to default to retry tx send
 			})
 		);
 		this.userMap = new UserMap({
@@ -171,30 +170,62 @@ export class UserIdleFlipperBot implements Bot {
 		try {
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
-					units: 2_000_000,
+					units: 1_400_000, // simulation will ovewrrite this
+				}),
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: 1000,
 				}),
 			];
-			usersChunk.forEach(async ([userAccountPublicKey, userAccount]) => {
+			for (const [userAccountPublicKey, userAccount] of usersChunk) {
 				ixs.push(
 					await this.driftClient.getUpdateUserIdleIx(
 						userAccountPublicKey,
 						userAccount
 					)
 				);
-			});
-			const txSigAndSlot =
-				await this.driftClient.txSender.sendVersionedTransaction(
-					await this.driftClient.txSender.getVersionedTransaction(
-						ixs,
-						[this.lookupTableAccount!],
+			}
+			if (ixs.length === 2) {
+				throw new Error(
+					`Tried to send a tx with 0 users, chunkSize: ${usersChunk.length}`
+				);
+			}
+
+			const simResult = await simulateAndGetTxWithCUs(
+				ixs,
+				this.driftClient.connection,
+				this.driftClient.txSender,
+				[this.lookupTableAccount!],
+				[],
+				undefined,
+				1.1,
+				true
+			);
+			logger.info(
+				`User idle flipper estimated ${simResult.cuEstimate} CUs for ${usersChunk.length} users.`
+			);
+
+			if (simResult.simError !== null) {
+				logger.error(
+					`Sim error: ${JSON.stringify(simResult.simError)}\n${
+						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+					}`
+				);
+				success = false;
+			} else {
+				const txSigAndSlot =
+					await this.driftClient.txSender.sendVersionedTransaction(
+						await this.driftClient.txSender.getVersionedTransaction(
+							ixs,
+							[this.lookupTableAccount!],
+							[],
+							this.driftClient.opts
+						),
 						[],
 						this.driftClient.opts
-					),
-					[],
-					this.driftClient.opts
-				);
-			this.logTxAndSlotForUsers(txSigAndSlot, usersChunk);
-			success = true;
+					);
+				this.logTxAndSlotForUsers(txSigAndSlot, usersChunk);
+				success = true;
+			}
 		} catch (e) {
 			const userKeys = usersChunk
 				.map(([userAccountPublicKey, _]) => userAccountPublicKey.toBase58())

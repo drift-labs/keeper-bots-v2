@@ -8,7 +8,8 @@ import {
 	getUserStatsAccountPublicKey,
 	promiseTimeout,
 	isVariant,
-	PriorityFeeSubscriber,
+	PriorityFeeSubscriberMap,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -28,7 +29,7 @@ import {
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
 import {
-	getMarketId,
+	getDriftPriorityFeeEndpoint,
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
 } from '../utils';
@@ -96,7 +97,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private dlob?: DLOB;
 	private latestDlobSlot?: number;
 	private lookupTableAccount?: AddressLookupTableAccount;
-	private priorityFeeSubscribers: Map<string, PriorityFeeSubscriber>;
+	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -107,7 +108,6 @@ export class MakerBidAskTwapCrank implements Bot {
 		userMap: UserMap,
 		config: BaseBotConfig,
 		runOnce: boolean,
-		priorityFeeSubscriberMap: Map<string, PriorityFeeSubscriber>,
 		crankIntervalToMarketIds?: { [key: number]: number[] }
 	) {
 		this.slotSubscriber = slotSubscriber;
@@ -132,13 +132,21 @@ export class MakerBidAskTwapCrank implements Bot {
 			this.crankIntervalInProgress[DEFAULT_INTERVAL_GROUP] = false;
 		}
 
-		this.priorityFeeSubscribers = priorityFeeSubscriberMap;
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
+			driftMarkets: PerpMarkets['mainnet-beta'].map((m) => ({
+				marketType: 'perp',
+				marketIndex: m.marketIndex,
+			})),
+			frequencyMs: 10_000,
+		});
 	}
 
 	public async init() {
-		logger.info(`${this.name} initing, runOnce: ${this.runOnce}`);
+		logger.info(`[${this.name}] initing, runOnce: ${this.runOnce}`);
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
+		await this.priorityFeeSubscriberMap.subscribe();
 	}
 
 	public async reset() {
@@ -151,7 +159,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	}
 
 	public async startIntervalLoop(_intervalMs?: number): Promise<void> {
-		logger.info(`${this.name} Bot started!`);
+		logger.info(`[${this.name}] Bot started!`);
 		if (this.runOnce) {
 			await this.tryTwapCrank(null);
 		} else {
@@ -180,7 +188,7 @@ export class MakerBidAskTwapCrank implements Bot {
 			this.latestDlobSlot = this.slotSubscriber.currentSlot;
 			this.dlob = await this.userMap!.getDLOB(this.slotSubscriber.currentSlot);
 		} catch (e) {
-			logger.error(`Error loading dlob: ${e}`);
+			logger.error(`[${this.name}] Error loading dlob: ${e}`);
 		}
 	}
 
@@ -200,7 +208,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				combinedList.push(combinedItem);
 			} else {
 				logger.warn(
-					'skipping maker... cannot find authority for userAccount=',
+					'[${this.name}] skipping maker... cannot find authority for userAccount=',
 					maker.toString()
 				);
 			}
@@ -225,16 +233,16 @@ export class MakerBidAskTwapCrank implements Bot {
 				true
 			);
 			logger.info(
-				`makerBidAskTwapCrank estimated ${simResult.cuEstimate} CUs for market ${marketIndex}`
+				`[${this.name}] estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
 			);
 
 			if (simResult.simError !== null) {
 				logger.error(
-					`Sim error: ${JSON.stringify(simResult.simError)}\n${
-						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
-					}`
+					`[${this.name}] Sim error (market: ${marketIndex}): ${JSON.stringify(
+						simResult.simError
+					)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 				);
-				handleSimResultError(simResult, [], `(makerBidAskTwapCrank)`);
+				handleSimResultError(simResult, [], `[${this.name}]`);
 				return { success: false, canRetry: false };
 			} else {
 				const sendTxStart = Date.now();
@@ -246,16 +254,18 @@ export class MakerBidAskTwapCrank implements Bot {
 					}
 				);
 				logger.info(
-					`makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
+					`[${
+						this.name
+					}] makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
 						Date.now() - sendTxStart
-					}ms tx: https://solana.fm/tx/${txSig}`
+					}ms tx: https://solana.fm/tx/${txSig.txSig}`
 				);
 			}
 		} catch (err: any) {
 			console.error(err);
 			if (err instanceof TransactionExpiredBlockheightExceededError) {
 				logger.info(
-					`Blockheight exceeded error, retrying with market ${marketIndex})`
+					`[${this.name}] Blockheight exceeded error, retrying with market: ${marketIndex})`
 				);
 			} else if (err instanceof Error) {
 				if (isCriticalError(err)) {
@@ -289,7 +299,9 @@ export class MakerBidAskTwapCrank implements Bot {
 
 		const intervalInProgress = this.crankIntervalInProgress[intervalGroup]!;
 		if (intervalInProgress) {
-			logger.info(`Interval ${intervalGroup} already in progress, skipping`);
+			logger.info(
+				`[${this.name}] Interval ${intervalGroup} already in progress, skipping`
+			);
 			return;
 		}
 
@@ -298,14 +310,14 @@ export class MakerBidAskTwapCrank implements Bot {
 			this.crankIntervalInProgress[intervalGroup] = true;
 			await this.initDlob();
 
-			logger.info(`Cranking interval group ${intervalGroup}: ${crankMarkets}`);
+			logger.info(
+				`[${this.name}] Cranking interval group ${intervalGroup}: ${crankMarkets}`
+			);
 			for (const mi of crankMarkets) {
-				const pfs = this.priorityFeeSubscribers.get(
-					getMarketId(MarketType.PERP, mi)
-				);
-				if (pfs === undefined) {
-					logger.warn(`No pfs for market ${mi}`);
-					continue;
+				const pfs = this.priorityFeeSubscriberMap.getPriorityFees('perp', mi);
+				let microLamports = 10_000;
+				if (pfs) {
+					microLamports = Math.floor(pfs.medium);
 				}
 
 				const ixs = [
@@ -313,7 +325,7 @@ export class MakerBidAskTwapCrank implements Bot {
 						units: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
 					}),
 					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: Math.floor(pfs.getCustomStrategyResult()),
+						microLamports,
 					}),
 				];
 
@@ -337,7 +349,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					numMakers: 5,
 				});
 				logger.info(
-					`loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
+					`[${this.name}] loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
 				);
 
 				const concatenatedList = [
@@ -364,13 +376,9 @@ export class MakerBidAskTwapCrank implements Bot {
 				ixs.push(ix);
 
 				const resp = await this.sendTx(mi, ixs);
-				if (resp.success) {
-					break;
-				} else if (resp.canRetry) {
-					continue;
-				} else {
-					break;
-				}
+				logger.info(
+					`[${this.name}] sent tx for market: ${mi}, success: ${resp.success}`
+				);
 			}
 		} catch (e) {
 			console.error(e);
@@ -384,7 +392,9 @@ export class MakerBidAskTwapCrank implements Bot {
 		} finally {
 			this.crankIntervalInProgress[intervalGroup] = false;
 			logger.info(
-				`tryTwapCrank finished for interval group ${intervalGroup}, took ${
+				`[${
+					this.name
+				}] tryTwapCrank finished for interval group ${intervalGroup}, took ${
 					Date.now() - start
 				}ms`
 			);

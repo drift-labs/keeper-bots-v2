@@ -23,12 +23,11 @@ import {
 	QUOTE_SPOT_MARKET_INDEX,
 	DriftClientConfig,
 	BulkAccountLoader,
-	PriorityFeeSubscriber,
 	TxSender,
 	isOperationPaused,
 	PerpOperation,
-	MarketType,
 	PerpMarkets,
+	PriorityFeeSubscriberMap,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -40,9 +39,7 @@ import { BaseBotConfig, GlobalConfig } from '../config';
 import {
 	decodeName,
 	getDriftPriorityFeeEndpoint,
-	getMarketId,
 	handleSimResultError,
-	initializePriorityFeeSubscriberMap,
 	simulateAndGetTxWithCUs,
 	sleepMs,
 } from '../utils';
@@ -77,7 +74,7 @@ export class UserPnlSettlerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private bulkAccountLoader: BulkAccountLoader;
 	private userMap: UserMap;
-	private priorityFeeSubscribers: Map<string, PriorityFeeSubscriber>;
+	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
 	private inProgress = false;
 
 	private watchdogTimerMutex = new Mutex();
@@ -120,26 +117,26 @@ export class UserPnlSettlerBot implements Bot {
 			includeIdle: false,
 		});
 
-		this.priorityFeeSubscribers = new Map<string, PriorityFeeSubscriber>();
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
+				this.globalConfig.driftEnv!
+			),
+			driftMarkets: PerpMarkets[this.globalConfig.driftEnv!].map((m) => ({
+				marketType: 'perp',
+				marketIndex: m.marketIndex,
+			})),
+			frequencyMs: 10_000,
+		});
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing`);
+		await this.priorityFeeSubscriberMap.subscribe();
 		await this.driftClient.subscribe();
 
 		await this.userMap.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
-
-		this.priorityFeeSubscribers = await initializePriorityFeeSubscriberMap({
-			pfsMap: this.priorityFeeSubscribers,
-			connection: this.driftClient.connection,
-			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
-				this.globalConfig.driftEnv!
-			),
-			perpMarkets: PerpMarkets[this.globalConfig.driftEnv!],
-			includeQuoteMarket: true,
-		});
 
 		logger.info(`${this.name} init'd!`);
 	}
@@ -150,6 +147,7 @@ export class UserPnlSettlerBot implements Bot {
 		}
 		this.intervalIds = [];
 
+		await this.priorityFeeSubscriberMap.unsubscribe();
 		await this.userMap?.unsubscribe();
 	}
 
@@ -586,20 +584,20 @@ export class UserPnlSettlerBot implements Bot {
 
 		let success = false;
 		try {
-			const pfs = this.priorityFeeSubscribers.get(
-				getMarketId(MarketType.PERP, marketIndex)
+			const pfs = this.priorityFeeSubscriberMap.getPriorityFees(
+				'perp',
+				marketIndex
 			);
-			if (!pfs) {
-				throw new Error(
-					`PriorityFeeSubscriber missing for market ${marketIndex}`
-				);
+			let microLamports = 10_000;
+			if (pfs) {
+				microLamports = Math.floor(pfs.medium);
 			}
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
 				}),
 				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(pfs.getCustomStrategyResult()),
+					microLamports,
 				}),
 			];
 			ixs.push(

@@ -7,9 +7,9 @@ import {
 	isOperationPaused,
 	PerpOperation,
 	decodeName,
-	PriorityFeeSubscriber,
-	MarketType,
 	PublicKey,
+	PriorityFeeSubscriberMap,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -18,7 +18,11 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { BaseBotConfig } from '../config';
-import { getMarketId, simulateAndGetTxWithCUs, sleepMs } from '../utils';
+import {
+	getDriftPriorityFeeEndpoint,
+	simulateAndGetTxWithCUs,
+	sleepMs,
+} from '../utils';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
@@ -78,32 +82,33 @@ export class FundingRateUpdaterBot implements Bot {
 
 	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private priorityFeeSubscriberMap: Map<string, PriorityFeeSubscriber>;
+	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
 	private lookupTableAccount?: AddressLookupTableAccount;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 	private inProgress: boolean = false;
 
-	constructor(
-		driftClient: DriftClient,
-		config: BaseBotConfig,
-		priorityFeeSubscriberMap: Map<string, PriorityFeeSubscriber>
-	) {
+	constructor(driftClient: DriftClient, config: BaseBotConfig) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
 		this.runOnce = config.runOnce ?? false;
-		this.priorityFeeSubscriberMap = priorityFeeSubscriberMap;
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
+			driftMarkets: PerpMarkets['mainnet-beta'].map((m) => ({
+				marketType: 'perp',
+				marketIndex: m.marketIndex,
+			})),
+			frequencyMs: 10_000,
+		});
 	}
 
 	public async init() {
-		logger.info(
-			`I have ${this.priorityFeeSubscriberMap.size} priority fee subscribers`
-		);
+		await this.priorityFeeSubscriberMap.subscribe();
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
-		logger.info(`${this.name} inited`);
+		logger.info(`[${this.name}] inited`);
 	}
 
 	public async reset() {
@@ -114,7 +119,7 @@ export class FundingRateUpdaterBot implements Bot {
 	}
 
 	public async startIntervalLoop(intervalMs?: number): Promise<void> {
-		logger.info(`${this.name} Bot started! runOnce ${this.runOnce}`);
+		logger.info(`[${this.name}] Bot started! runOnce ${this.runOnce}`);
 
 		if (this.runOnce) {
 			await this.tryUpdateFundingRate();
@@ -140,7 +145,9 @@ export class FundingRateUpdaterBot implements Bot {
 
 	private async tryUpdateFundingRate() {
 		if (this.inProgress) {
-			logger.info(`UpdateFundingRate already in progress, skipping...`);
+			logger.info(
+				`[${this.name}] UpdateFundingRate already in progress, skipping...`
+			);
 			return;
 		}
 		const start = Date.now();
@@ -168,7 +175,7 @@ export class FundingRateUpdaterBot implements Bot {
 				isOneOfVariant;
 				if (isOneOfVariant(perpMarket.status, ['initialized'])) {
 					logger.info(
-						`Skipping perp market ${
+						`[${this.name}] Skipping perp market ${
 							perpMarket.marketIndex
 						} because market status = ${getVariant(perpMarket.status)}`
 					);
@@ -182,7 +189,7 @@ export class FundingRateUpdaterBot implements Bot {
 				if (fundingPaused) {
 					const marketStr = decodeName(perpMarket.name);
 					logger.warn(
-						`Update funding paused for market ${marketStr}, skipping`
+						`[${this.name}] Update funding paused for market: ${perpMarket.marketIndex} ${marketStr}, skipping`
 					);
 					continue;
 				}
@@ -198,20 +205,15 @@ export class FundingRateUpdaterBot implements Bot {
 					perpMarket.amm.fundingPeriod.toNumber()
 				);
 				logger.info(
-					`Perp market ${perpMarket.marketIndex} timeRemainingTilUpdate=${timeRemainingTilUpdate}`
+					`[${this.name}] Perp market ${perpMarket.marketIndex} timeRemainingTilUpdate=${timeRemainingTilUpdate}`
 				);
 				if ((timeRemainingTilUpdate as number) <= 0) {
 					logger.info(
-						perpMarket.amm.lastFundingRateTs.toString() +
-							' and ' +
-							perpMarket.amm.fundingPeriod.toString()
-					);
-					logger.info(
-						perpMarket.amm.lastFundingRateTs
+						`[${this.name}] Perp market ${
+							perpMarket.marketIndex
+						} lastFundingRateTs: ${perpMarket.amm.lastFundingRateTs.toString()}, fundingPeriod: ${perpMarket.amm.fundingPeriod.toString()}, lastFunding+Period: ${perpMarket.amm.lastFundingRateTs
 							.add(perpMarket.amm.fundingPeriod)
-							.toString() +
-							' vs ' +
-							currentTs.toString()
+							.toString()} vs. currTs: ${currentTs.toString()}`
 					);
 					this.sendTxWithRetry(perpMarket.marketIndex, perpMarket.amm.oracle);
 				}
@@ -227,7 +229,11 @@ export class FundingRateUpdaterBot implements Bot {
 			}
 		} finally {
 			this.inProgress = false;
-			logger.info(`Update Funding Rates finished in ${Date.now() - start}ms`);
+			logger.info(
+				`[${this.name}] Update Funding Rates finished in ${
+					Date.now() - start
+				}ms`
+			);
 			await this.watchdogTimerMutex.runExclusive(async () => {
 				this.watchdogTimerLastPatTime = Date.now();
 			});
@@ -235,7 +241,7 @@ export class FundingRateUpdaterBot implements Bot {
 	}
 
 	private async sendTxs(
-		pfs: PriorityFeeSubscriber,
+		microLamports: number,
 		marketIndex: number,
 		oracle: PublicKey
 	): Promise<{ success: boolean; canRetry: boolean }> {
@@ -244,7 +250,7 @@ export class FundingRateUpdaterBot implements Bot {
 				units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
 			}),
 			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.floor(pfs.getCustomStrategyResult()),
+				microLamports,
 			}),
 			await this.driftClient.getUpdateFundingRateIx(marketIndex, oracle),
 		];
@@ -259,20 +265,24 @@ export class FundingRateUpdaterBot implements Bot {
 			true
 		);
 		logger.info(
-			`UpdateFundingRate estimated ${simResult.cuEstimate} CUs for market ${marketIndex}`
+			`[${this.name}] UpdateFundingRate estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
 		);
 
 		if (simResult.simError !== null) {
 			const errorCode = getErrorCodeFromSimError(simResult.simError);
 			if (errorCode && errorCodesToSuppress.includes(errorCode)) {
 				logger.error(
-					`Sim error (suppressed), code: ${errorCode} ${JSON.stringify(
+					`[${
+						this.name
+					}] Sim error (suppressed) on market: ${marketIndex}, code: ${errorCode} ${JSON.stringify(
 						simResult.simError
 					)}`
 				);
 			} else {
 				logger.error(
-					`Sim error (not suppressed), code: ${errorCode}: ${JSON.stringify(
+					`[${
+						this.name
+					}] Sim error (not suppressed) on market: ${marketIndex}, code: ${errorCode}: ${JSON.stringify(
 						simResult.simError
 					)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 				);
@@ -292,7 +302,9 @@ export class FundingRateUpdaterBot implements Bot {
 			this.driftClient.opts
 		);
 		logger.info(
-			`UpdateFundingRate tx sent in ${
+			`[${
+				this.name
+			}] UpdateFundingRate for market: ${marketIndex}, tx sent in ${
 				Date.now() - sendTxStart
 			}ms: https://solana.fm/tx/${txSig.txSig}`
 		);
@@ -301,13 +313,13 @@ export class FundingRateUpdaterBot implements Bot {
 	}
 
 	private async sendTxWithRetry(marketIndex: number, oracle: PublicKey) {
-		const pfs = this.priorityFeeSubscriberMap.get(
-			getMarketId(MarketType.PERP, marketIndex)
+		const pfs = this.priorityFeeSubscriberMap.getPriorityFees(
+			'perp',
+			marketIndex
 		);
-		if (!pfs) {
-			throw new Error(
-				`PriorityFeeSubscriber missing for market ${marketIndex}`
-			);
+		let microLamports = 10_000;
+		if (pfs) {
+			microLamports = Math.floor(pfs.medium);
 		}
 
 		const maxRetries = 30;
@@ -315,16 +327,18 @@ export class FundingRateUpdaterBot implements Bot {
 		for (let i = 0; i < maxRetries; i++) {
 			try {
 				logger.info(
-					`Funding rate update on market ${marketIndex}, attempt: ${
+					`[${
+						this.name
+					}] Funding rate update on market ${marketIndex}, attempt: ${
 						i + 1
 					}/${maxRetries}`
 				);
-				const result = await this.sendTxs(pfs, marketIndex, oracle);
+				const result = await this.sendTxs(microLamports, marketIndex, oracle);
 				if (result.success) {
 					break;
 				}
 				if (result.canRetry) {
-					logger.info(`Retrying in 1s...`);
+					logger.info(`[${this.name}] Retrying market ${marketIndex} in 1s...`);
 					await sleepMs(1000);
 					continue;
 				} else {
@@ -334,14 +348,18 @@ export class FundingRateUpdaterBot implements Bot {
 				const err = e as Error;
 				const errorCode = getErrorCode(err);
 				logger.error(
-					`Error code: ${errorCode} while updating funding rates on perp marketIndex=${marketIndex}: ${err.message}`
+					`[${this.name}] Error code: ${errorCode} while updating funding rates on perp marketIndex=${marketIndex}: ${err.message}`
 				);
 				if (err instanceof TransactionExpiredBlockheightExceededError) {
-					logger.info(`Blockhash expired, retrying in 1s...`);
+					logger.info(
+						`[${this.name}] Blockhash expired for market: ${marketIndex}, retrying in 1s...`
+					);
 					await sleepMs(1000);
 					continue;
 				} else if (errorCode && !errorCodesToSuppress.includes(errorCode)) {
-					logger.error(`Unsuppressed error, not retrying.`);
+					logger.error(
+						`[${this.name}] Unsuppressed error for market: ${marketIndex}, not retrying.`
+					);
 					console.error(err);
 					break;
 				}
