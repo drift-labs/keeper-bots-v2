@@ -363,7 +363,7 @@ export class FillerMultithreaded {
 				`--market-indexes=${marketIndexes.map(String)}`,
 			];
 			const dlobBuilderProcess = spawnChildWithRetry(
-				'./src/experimental-bots/filler/dlobBuilder.ts',
+				'./src/experimental-bots/filler-common/dlobBuilder.ts',
 				dlobBuilderArgs,
 				'dlobBuilder',
 				(msg: any) => {
@@ -450,7 +450,7 @@ export class FillerMultithreaded {
 		};
 
 		const orderSubscriberProcess = spawnChildWithRetry(
-			'./src/experimental-bots/filler/orderSubscriberFiltered.ts',
+			'./src/experimental-bots/filler-common/orderSubscriberFiltered.ts',
 			orderSubscriberArgs,
 			'orderSubscriber',
 			(msg: any) => {
