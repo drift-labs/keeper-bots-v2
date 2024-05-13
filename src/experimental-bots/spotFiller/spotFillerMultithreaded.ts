@@ -2296,7 +2296,7 @@ export class SpotFillerMultithreaded {
 					fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
 			});
 		} else {
-			this.hasEnoughSolToFill = true;
+			throw new Error('Jupiter client not initialized');
 		}
 	}
 }

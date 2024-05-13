@@ -1872,7 +1872,7 @@ export class FillerMultithreaded {
 						fillerSolBalanceAfterSwap >= this.minimumAmountToFill;
 				});
 			} else {
-				this.hasEnoughSolToFill = true;
+				throw new Error("Can't rebalance filler, no Jupiter client");
 			}
 		}
 	}
