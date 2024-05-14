@@ -169,7 +169,6 @@ export type FallbackLiquiditySource = 'serum' | 'phoenix';
 export const TX_TIMEOUT_THRESHOLD_MS = 60_000; // tx considered stale after this time and give up confirming
 export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until trying to confirm tx again if rate limited
 export const CONFIRM_TX_INTERVAL_MS = 5_000;
-const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
 const CONFIRM_TX_ATTEMPTS = 2;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
@@ -703,11 +702,7 @@ export class SpotFillerMultithreaded {
 			`${logPrefix} Filtered down to ${filteredTriggerableNodes.length} triggerable nodes...`
 		);
 
-		const slotsUntilJito = this.slotsUntilJitoLeader();
-		const buildForBundle =
-			this.globalConfig.useJito &&
-			slotsUntilJito !== undefined &&
-			slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+		const buildForBundle = this.shouldBuildForBundle();
 
 		try {
 			await this.executeTriggerableSpotNodes(
@@ -909,11 +904,7 @@ export class SpotFillerMultithreaded {
 			`${logPrefix} filtered down to ${filteredFillableNodes.length} nodes...`
 		);
 
-		const slotsUntilJito = this.slotsUntilJitoLeader();
-		const buildForBundle =
-			this.usingJito() &&
-			slotsUntilJito !== undefined &&
-			slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+		const buildForBundle = this.shouldBuildForBundle();
 
 		try {
 			for (const node of filteredFillableNodes) {
@@ -1488,22 +1479,8 @@ export class SpotFillerMultithreaded {
 		return false;
 	}
 
-	private setThrottleNode(nodeSignature: string) {
-		this.throttledNodes.set(nodeSignature, Date.now());
-	}
-
 	private clearThrottledNode(nodeSignature: string) {
 		this.throttledNodes.delete(nodeSignature);
-	}
-
-	private pruneThrottledNode() {
-		if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
-			for (const [key, value] of this.throttledNodes.entries()) {
-				if (value + 2 * FILL_ORDER_THROTTLE_BACKOFF > Date.now()) {
-					this.throttledNodes.delete(key);
-				}
-			}
-		}
 	}
 
 	private removeTriggeringNodes(node: SerializedNodeToTrigger) {
@@ -1948,6 +1925,19 @@ export class SpotFillerMultithreaded {
 		);
 	}
 
+	private shouldBuildForBundle(): boolean {
+		if (!this.usingJito()) {
+			return false;
+		}
+		if (this.globalConfig.onlySendDuringJitoLeader === true) {
+			const slotsUntilJito = this.slotsUntilJitoLeader();
+			if (slotsUntilJito === undefined) {
+				return false;
+			}
+			return slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
+		}
+		return true;
+	}
 	protected async registerTxSigToConfirm(
 		txSig: TransactionSignature,
 		now: number,
