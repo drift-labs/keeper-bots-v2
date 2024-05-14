@@ -382,6 +382,14 @@ export class SpotFillerMultithreaded {
 		logger.info(`${this.name}: Initializing`);
 		await this.blockhashSubscriber.subscribe();
 
+		const fillerSolBalance = await this.driftClient.connection.getBalance(
+			this.driftClient.authority
+		);
+		this.hasEnoughSolToFill = fillerSolBalance >= this.minimumAmountToFill;
+		logger.info(
+			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
+		);
+
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
 		const marketSetupPromises = config.SPOT_MARKETS.map(
 			async (spotMarketConfig) => {
