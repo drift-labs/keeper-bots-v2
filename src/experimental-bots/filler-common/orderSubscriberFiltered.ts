@@ -214,13 +214,6 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 	): void {
 		const previousMarkets = this.userMarkets[userId] || new Set<number>();
 
-		const newMarkets = new Set<number>();
-		currentMarkets.forEach((marketIndex) => {
-			if (!previousMarkets.has(marketIndex)) {
-				newMarkets.add(marketIndex);
-			}
-		});
-
 		const removedMarkets = new Set<number>();
 		previousMarkets.forEach((marketIndex) => {
 			if (!currentMarkets.has(marketIndex)) {
@@ -247,7 +240,7 @@ const main = async () => {
 	dotenv.config();
 
 	const args = parseArgs(process.argv.slice(2));
-	const marketIndexesStr = args['market-indexes'] as string;
+	const marketIndexesStr = String(args['market-indexes']);
 	const marketIndexes = marketIndexesStr.split(',').map(Number);
 	const marketTypeStr = args['market-type'] as string;
 	if (marketTypeStr !== 'perp' && marketTypeStr !== 'spot') {

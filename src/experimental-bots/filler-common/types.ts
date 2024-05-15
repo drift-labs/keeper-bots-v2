@@ -5,6 +5,7 @@ import {
 	PositionDirection,
 	OrderTriggerCondition,
 	SpotBalanceType,
+	NodeToFill,
 	DLOBNode,
 } from '@drift-labs/sdk';
 
@@ -106,6 +107,8 @@ export type SerializedTriggerOrderNode = {
 };
 
 export type SerializedNodeToFill = {
+	fallbackAskSource?: FallbackLiquiditySource;
+	fallbackBidSource?: FallbackLiquiditySource;
 	node: SerializedDLOBNode;
 	makerNodes: SerializedDLOBNode[];
 };
@@ -118,11 +121,21 @@ export type SerializedDLOBNode = {
 	sortValue: string;
 	haveFilled: boolean;
 	haveTrigger?: boolean;
+	fallbackAskSource?: FallbackLiquiditySource;
+	fallbackBidSource?: FallbackLiquiditySource;
+};
+
+export type FallbackLiquiditySource = 'serum' | 'phoenix';
+export type NodeToFillWithContext = NodeToFill & {
+	fallbackAskSource?: FallbackLiquiditySource;
+	fallbackBidSource?: FallbackLiquiditySource;
 };
 
 export type NodeToFillWithBuffer = {
 	userAccountData: Buffer;
 	makerAccountData: string;
 	node: DLOBNode;
+	fallbackAskSource?: FallbackLiquiditySource;
+	fallbackBidSource?: FallbackLiquiditySource;
 	makerNodes: DLOBNode[];
 };

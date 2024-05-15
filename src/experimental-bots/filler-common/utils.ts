@@ -5,7 +5,6 @@ import {
 	PerpPosition,
 	NodeToTrigger,
 	TriggerOrderNode,
-	NodeToFill,
 	DLOBNode,
 	OrderNode,
 	TakingLimitOrderNode,
@@ -31,6 +30,7 @@ import {
 	SerializedNodeToFill,
 	SerializedDLOBNode,
 	NodeToFillWithBuffer,
+	NodeToFillWithContext,
 } from './types';
 import { ChildProcess, fork } from 'child_process';
 import { logger } from '../../logger';
@@ -228,7 +228,7 @@ const serializeTriggerOrderNode = (
 };
 
 export const serializeNodeToFill = (
-	node: NodeToFill,
+	node: NodeToFillWithContext,
 	userAccountData: Buffer,
 	makerAccountDatas: Map<string, Buffer>
 ): SerializedNodeToFill => {
@@ -238,6 +238,8 @@ export const serializeNodeToFill = (
 			// @ts-ignore
 			return serializeDLOBNode(node, makerAccountDatas.get(node.userAccount));
 		}),
+		fallbackAskSource: node.fallbackAskSource,
+		fallbackBidSource: node.fallbackBidSource,
 	};
 };
 
@@ -279,6 +281,8 @@ export const deserializeNodeToFill = (
 		),
 		node: deserializeDLOBNode(serializedNode.node),
 		makerNodes: serializedNode.makerNodes.map(deserializeDLOBNode),
+		fallbackAskSource: serializedNode.fallbackAskSource,
+		fallbackBidSource: serializedNode.fallbackBidSource,
 	};
 	return node;
 };

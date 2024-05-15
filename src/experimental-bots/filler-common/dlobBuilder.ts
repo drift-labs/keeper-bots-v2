@@ -10,7 +10,6 @@ import {
 	UserAccount,
 	isVariant,
 	decodeUser,
-	NodeToFill,
 	NodeToTrigger,
 	Wallet,
 	SerumSubscriber,
@@ -19,14 +18,19 @@ import {
 	DriftEnv,
 	SerumFulfillmentConfigMap,
 	PhoenixFulfillmentConfigMap,
-	BulkAccountLoader,
 	BN,
+	ClockSubscriber,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
 import parseArgs from 'minimist';
 import { logger } from '../../logger';
-import { SerializedNodeToFill, SerializedNodeToTrigger } from './types';
+import {
+	FallbackLiquiditySource,
+	SerializedNodeToFill,
+	SerializedNodeToTrigger,
+	NodeToFillWithContext,
+} from './types';
 import {
 	getDriftClientFromArgs,
 	serializeNodeToFill,
@@ -56,6 +60,8 @@ class DLOBBuilder {
 	// @ts-ignore
 	private phoenixFulfillmentConfigMap: PhoenixFulfillmentConfigMap;
 
+	private clockSubscriber: ClockSubscriber;
+
 	constructor(
 		driftClient: DriftClient,
 		marketType: MarketType,
@@ -79,10 +85,16 @@ class DLOBBuilder {
 				driftClient
 			);
 		}
+
+		this.clockSubscriber = new ClockSubscriber(driftClient.connection, {
+			commitment: 'finalized',
+			resubTimeoutMs: 5_000,
+		});
 	}
 
 	public async subscribe() {
 		await this.slotSubscriber.subscribe();
+		await this.clockSubscriber.subscribe();
 
 		if (this.marketTypeString.toLowerCase() === 'spot') {
 			await this.initializeSpotMarkets();
@@ -99,16 +111,8 @@ class DLOBBuilder {
 		const marketSetupPromises = marketsOfInterest.map(
 			async (spotMarketConfig) => {
 				const subscribePromises = [];
-
-				const accountSubscription:
-					| {
-							type: 'polling';
-							accountLoader: BulkAccountLoader;
-					  }
-					| {
-							type: 'websocket';
-					  } = {
-					type: 'websocket', // Correctly matching the expected type without any additional properties
+				const accountSubscription = {
+					type: 'websocket' as const,
 				};
 
 				if (spotMarketConfig.serumMarket) {
@@ -224,15 +228,20 @@ class DLOBBuilder {
 		return this.dlob;
 	}
 
-	public getNodesToTriggerAndNodesToFill(): [NodeToFill[], NodeToTrigger[]] {
+	public getNodesToTriggerAndNodesToFill(): [
+		NodeToFillWithContext[],
+		NodeToTrigger[],
+	] {
 		const dlob = this.build();
-		const nodesToFill: NodeToFill[] = [];
+		const nodesToFill: NodeToFillWithContext[] = [];
 		const nodesToTrigger: NodeToTrigger[] = [];
 		for (const marketIndex of this.marketIndexes) {
 			let market;
 			let oraclePriceData;
 			let fallbackAsk: BN | undefined = undefined;
 			let fallbackBid: BN | undefined = undefined;
+			let fallbackAskSource: FallbackLiquiditySource | undefined = undefined;
+			let fallbackBidSource: FallbackLiquiditySource | undefined = undefined;
 			if (this.marketTypeString.toLowerCase() === 'perp') {
 				market = this.driftClient.getPerpMarketAccount(marketIndex);
 				if (!market) {
@@ -261,25 +270,33 @@ class DLOBBuilder {
 				if (serumBid && phoenixBid) {
 					if (serumBid!.gte(phoenixBid!)) {
 						fallbackBid = serumBid;
+						fallbackBidSource = 'serum';
 					} else {
 						fallbackBid = phoenixBid;
+						fallbackBidSource = 'phoenix';
 					}
 				} else if (serumBid) {
 					fallbackBid = serumBid;
+					fallbackBidSource = 'serum';
 				} else if (phoenixBid) {
 					fallbackBid = phoenixBid;
+					fallbackBidSource = 'phoenix';
 				}
 
 				if (serumAsk && phoenixAsk) {
 					if (serumAsk!.lte(phoenixAsk!)) {
 						fallbackAsk = serumAsk;
+						fallbackAskSource = 'serum';
 					} else {
 						fallbackAsk = phoenixAsk;
+						fallbackAskSource = 'phoenix';
 					}
 				} else if (serumAsk) {
 					fallbackAsk = serumAsk;
+					fallbackAskSource = 'serum';
 				} else if (phoenixAsk) {
 					fallbackAsk = phoenixAsk;
+					fallbackAskSource = 'phoenix';
 				}
 			}
 
@@ -290,7 +307,7 @@ class DLOBBuilder {
 				fallbackBid,
 				fallbackAsk,
 				slot,
-				Date.now(),
+				this.clockSubscriber.getUnixTs(),
 				this.marketType,
 				oraclePriceData,
 				stateAccount,
@@ -303,14 +320,18 @@ class DLOBBuilder {
 				this.marketType,
 				stateAccount
 			);
-			nodesToFill.push(...nodesToFillForMarket);
+			nodesToFill.push(
+				...nodesToFillForMarket.map((node) => {
+					return { ...node, fallbackAskSource, fallbackBidSource };
+				})
+			);
 			nodesToTrigger.push(...nodesToTriggerForMarket);
 		}
 		return [nodesToFill, nodesToTrigger];
 	}
 
 	public serializeNodesToFill(
-		nodesToFill: NodeToFill[]
+		nodesToFill: NodeToFillWithContext[]
 	): SerializedNodeToFill[] {
 		return nodesToFill
 			.map((node) => {
@@ -486,12 +507,12 @@ const main = async () => {
 		const [nodesToFill, nodesToTrigger] =
 			dlobBuilder.getNodesToTriggerAndNodesToFill();
 		const serializedNodesToFill = dlobBuilder.serializeNodesToFill(nodesToFill);
-		logger.info(
+		logger.debug(
 			`${logPrefix} Serialized ${serializedNodesToFill.length} fillable nodes`
 		);
 		const serializedNodesToTrigger =
 			dlobBuilder.serializeNodesToTrigger(nodesToTrigger);
-		logger.info(
+		logger.debug(
 			`${logPrefix} Serialized ${serializedNodesToTrigger.length} triggerable nodes`
 		);
 		dlobBuilder.trySendNodes(serializedNodesToTrigger, serializedNodesToFill);

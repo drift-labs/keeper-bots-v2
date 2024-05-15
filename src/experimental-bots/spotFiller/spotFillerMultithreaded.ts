@@ -3,19 +3,12 @@ import {
 	DriftClient,
 	BlockhashSubscriber,
 	UserStatsMap,
-	SerumFulfillmentConfigMap,
-	SerumSubscriber,
-	PhoenixFulfillmentConfigMap,
-	PhoenixSubscriber,
 	PriorityFeeSubscriber,
 	NodeToFill,
 	JupiterClient,
 	BulkAccountLoader,
 	initialize,
 	DriftEnv,
-	PollingDriftClientAccountSubscriber,
-	getVariant,
-	isOneOfVariant,
 	isVariant,
 	DLOBNode,
 	getOrderSignature,
@@ -29,6 +22,10 @@ import {
 	MarketType,
 	UserAccount,
 	decodeUser,
+	getVariant,
+	isOneOfVariant,
+	PhoenixFulfillmentConfigMap,
+	SerumFulfillmentConfigMap,
 } from '@drift-labs/sdk';
 import {
 	Connection,
@@ -85,6 +82,7 @@ import {
 	TX_CONFIRMATION_BATCH_SIZE,
 } from '../filler/fillerMultithreaded';
 import {
+	FallbackLiquiditySource,
 	NodeToFillWithBuffer,
 	SerializedNodeToFill,
 	SerializedNodeToTrigger,
@@ -126,7 +124,7 @@ enum METRIC_TYPES {
 
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
-	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
+	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
 
@@ -164,8 +162,6 @@ type DLOBBuilderWithProcess = {
 };
 
 export type TxType = 'fill' | 'trigger' | 'settlePnl';
-export type FallbackLiquiditySource = 'serum' | 'phoenix';
-
 export const TX_TIMEOUT_THRESHOLD_MS = 60_000; // tx considered stale after this time and give up confirming
 export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until trying to confirm tx again if rate limited
 export const CONFIRM_TX_INTERVAL_MS = 5_000;
@@ -196,14 +192,10 @@ export class SpotFillerMultithreaded {
 	private fillTxId = 0;
 
 	private userStatsMap?: UserStatsMap;
-
-	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
-	private serumSubscribers: Map<number, SerumSubscriber>;
+	protected hasEnoughSolToFill: boolean = true;
 
 	private phoenixFulfillmentConfigMap: PhoenixFulfillmentConfigMap;
-	private phoenixSubscribers: Map<number, PhoenixSubscriber>;
-
-	protected hasEnoughSolToFill: boolean = true;
+	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
@@ -296,28 +288,29 @@ export class SpotFillerMultithreaded {
 		}
 		this.runtimeSpec = runtimeSpec;
 
-		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(driftClient);
-		this.serumSubscribers = new Map<number, SerumSubscriber>();
-
-		this.phoenixFulfillmentConfigMap = new PhoenixFulfillmentConfigMap(
-			driftClient
-		);
-		this.phoenixSubscribers = new Map<number, PhoenixSubscriber>();
-
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
-		this.priorityFeeSubscriber.updateAddresses([
-			new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC
-			new PublicKey('4DoNfFBfF7UokCC2FQzriy7yHK6DY6NVdYpuekQ5pRgg'), // Phoenix SOL/USDC
-			new PublicKey('6gMq3mRCKf8aP3ttTyYhuijVZ2LGi14oDsBbkgubfLB3'), // Drift USDC market
-		]);
+		const driftMarkets = this.marketIndexesFlattened.map((marketIndex) => {
+			return {
+				marketType: this.config.marketType,
+				marketIndex: marketIndex,
+			};
+		});
+		this.priorityFeeSubscriber.updateMarketTypeAndIndex(driftMarkets);
 
 		this.revertOnFailure = true;
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
-		this.rebalanceFiller = config.rebalanceFiller ?? true;
+		if (config.rebalanceFiller) {
+			this.rebalanceFiller = true;
+		}
 		logger.info(
 			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
+		);
+
+		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(driftClient);
+		this.phoenixFulfillmentConfigMap = new PhoenixFulfillmentConfigMap(
+			driftClient
 		);
 
 		if (
@@ -328,7 +321,6 @@ export class SpotFillerMultithreaded {
 				connection: this.driftClient.connection,
 			});
 		}
-		this.rebalanceFiller = config.rebalanceFiller ?? false;
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
@@ -413,66 +405,12 @@ export class SpotFillerMultithreaded {
 					return;
 				}
 
-				let accountSubscription:
-					| {
-							type: 'polling';
-							accountLoader: BulkAccountLoader;
-					  }
-					| {
-							type: 'websocket';
-					  };
-				if (
-					(
-						this.driftClient
-							.accountSubscriber as PollingDriftClientAccountSubscriber
-					).accountLoader
-				) {
-					accountSubscription = {
-						type: 'polling',
-						accountLoader: (
-							this.driftClient
-								.accountSubscriber as PollingDriftClientAccountSubscriber
-						).accountLoader,
-					};
-				} else {
-					accountSubscription = {
-						type: 'websocket',
-					};
-				}
-
-				const subscribePromises = [];
 				if (spotMarketConfig.serumMarket) {
 					// set up fulfillment config
 					await this.serumFulfillmentConfigMap.add(
 						spotMarketConfig.marketIndex,
 						spotMarketConfig.serumMarket
 					);
-
-					const serumConfigAccount =
-						await this.driftClient.getSerumV3FulfillmentConfig(
-							spotMarketConfig.serumMarket
-						);
-
-					if (isVariant(serumConfigAccount.status, 'enabled')) {
-						// set up serum price subscriber
-						const serumSubscriber = new SerumSubscriber({
-							connection: this.driftClient.connection,
-							programId: new PublicKey(config.SERUM_V3),
-							marketAddress: spotMarketConfig.serumMarket,
-							accountSubscription,
-						});
-						logger.info(
-							`Initializing SerumSubscriber for ${spotMarketConfig.symbol}...`
-						);
-						subscribePromises.push(
-							serumSubscriber.subscribe().then(() => {
-								this.serumSubscribers.set(
-									spotMarketConfig.marketIndex,
-									serumSubscriber
-								);
-							})
-						);
-					}
 				}
 
 				if (spotMarketConfig.phoenixMarket) {
@@ -481,36 +419,10 @@ export class SpotFillerMultithreaded {
 						spotMarketConfig.marketIndex,
 						spotMarketConfig.phoenixMarket
 					);
-
-					const phoenixConfigAccount = this.phoenixFulfillmentConfigMap.get(
-						spotMarketConfig.marketIndex
-					);
-					if (isVariant(phoenixConfigAccount.status, 'enabled')) {
-						// set up phoenix price subscriber
-						const phoenixSubscriber = new PhoenixSubscriber({
-							connection: this.driftClient.connection,
-							programId: new PublicKey(config.PHOENIX),
-							marketAddress: spotMarketConfig.phoenixMarket,
-							accountSubscription,
-						});
-						logger.info(
-							`Initializing PhoenixSubscriber for ${spotMarketConfig.symbol}...`
-						);
-						subscribePromises.push(
-							phoenixSubscriber.subscribe().then(() => {
-								this.phoenixSubscribers.set(
-									spotMarketConfig.marketIndex,
-									phoenixSubscriber
-								);
-							})
-						);
-					}
 				}
-				await Promise.all(subscribePromises);
 			}
 		);
 		await Promise.all(marketSetupPromises);
-
 		this.driftLutAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 		if ('SERUM_LOOKUP_TABLE' in config) {
@@ -671,9 +583,11 @@ export class SpotFillerMultithreaded {
 			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
 		);
 
-		this.intervalIds.push(
-			setInterval(this.rebalanceSpotFiller.bind(this), 60_000)
-		);
+		if (this.rebalanceFiller) {
+			this.intervalIds.push(
+				setInterval(this.rebalanceSpotFiller.bind(this), 60_000)
+			);
+		}
 		this.intervalIds.push(
 			setInterval(this.confirmPendingTxSigs.bind(this), CONFIRM_TX_INTERVAL_MS)
 		);
@@ -1167,30 +1081,6 @@ export class SpotFillerMultithreaded {
 		nodeToFill: NodeToFillWithBuffer,
 		buildForBundle: boolean
 	) {
-		const serumSubscriber = this.serumSubscribers.get(
-			nodeToFill.node.order!.marketIndex
-		);
-		const serumBestBid = serumSubscriber?.getBestBid();
-		const serumBestAsk = serumSubscriber?.getBestAsk();
-
-		const phoenixSubscriber = this.phoenixSubscribers.get(
-			nodeToFill.node.order!.marketIndex
-		);
-		const phoenixBestBid = phoenixSubscriber?.getBestBid();
-		const phoenixBestAsk = phoenixSubscriber?.getBestAsk();
-
-		const [_fallbackBidPrice, fallbackBidSource] = this.pickFallbackPrice(
-			serumBestBid,
-			phoenixBestBid,
-			'bid'
-		);
-
-		const [_fallbackAskPrice, fallbackAskSource] = this.pickFallbackPrice(
-			serumBestAsk,
-			phoenixBestAsk,
-			'ask'
-		);
-
 		const fillTxId = this.fillTxId++;
 		const node = nodeToFill.node!;
 		const order = node.order!;
@@ -1198,10 +1088,6 @@ export class SpotFillerMultithreaded {
 			order.marketIndex
 		)!;
 		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
-
-		const fallbackSource = isVariant(order.direction, 'short')
-			? fallbackBidSource
-			: fallbackAskSource;
 
 		const {
 			makerInfos,
@@ -1214,6 +1100,10 @@ export class SpotFillerMultithreaded {
 		if (!isVariant(marketType, 'spot')) {
 			throw new Error('expected spot market type');
 		}
+
+		const fallbackSource = isVariant(order.direction, 'short')
+			? nodeToFill.fallbackBidSource
+			: nodeToFill.fallbackAskSource;
 
 		const makerInfo = makerInfos.length > 0 ? makerInfos[0].data : undefined;
 		let fulfillmentConfig:
