@@ -32,7 +32,7 @@ export type MarkTwapCrankConfig = BaseBotConfig & {
 
 export type FillerMultiThreadedConfig = BaseBotConfig & {
 	marketType: string;
-	marketIndex: number;
+	marketIndexes: Array<number[]>;
 	simulateTxForCUEstimate?: boolean;
 
 	rebalanceFiller?: boolean;
@@ -88,6 +88,7 @@ export type LiquidatorConfig = BaseBotConfig & {
 
 export type BotConfigMap = {
 	fillerMultithreaded?: FillerMultiThreadedConfig;
+	spotFillerMultithreaded?: FillerMultiThreadedConfig;
 	filler?: FillerConfig;
 	fillerLite?: FillerConfig;
 	fillerBulk?: FillerConfig;

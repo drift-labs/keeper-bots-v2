@@ -34,6 +34,7 @@ import { FillerMultithreaded } from './filler/fillerMultithreaded';
 import http from 'http';
 import { promiseTimeout } from '@drift-labs/sdk';
 import { DriftPriorityFeeResponse } from '@drift-labs/sdk/lib/priorityFee/driftPriorityFeeMethod';
+import { SpotFillerMultithreaded } from './spotFiller/spotFillerMultithreaded';
 
 require('dotenv').config();
 
@@ -268,6 +269,21 @@ const runBot = async () => {
 		if (!config.botConfigs?.fillerMultithreaded) {
 			throw new Error('fillerMultithreaded bot config not found');
 		}
+
+		// Ensure that there are no duplicate market indexes in the Array<number[]> marketIndexes config
+		const marketIndexes = new Set<number>();
+		for (const marketIndexList of config.botConfigs.fillerMultithreaded
+			.marketIndexes) {
+			for (const marketIndex of marketIndexList) {
+				if (marketIndexes.has(marketIndex)) {
+					throw new Error(
+						`Market index ${marketIndex} is duplicated in the config`
+					);
+				}
+				marketIndexes.add(marketIndex);
+			}
+		}
+
 		const fillerMultithreaded = new FillerMultithreaded(
 			config.global,
 			config.botConfigs?.fillerMultithreaded,
@@ -284,6 +300,43 @@ const runBot = async () => {
 			bundleSender
 		);
 		bots.push(fillerMultithreaded);
+	}
+
+	if (configHasBot(config, 'spotFillerMultithreaded')) {
+		if (!config.botConfigs?.spotFillerMultithreaded) {
+			throw new Error('spotFillerMultithreaded bot config not found');
+		}
+
+		// Ensure that there are no duplicate market indexes in the Array<number[]> marketIndexes config
+		const marketIndexes = new Set<number>();
+		for (const marketIndexList of config.botConfigs.spotFillerMultithreaded
+			.marketIndexes) {
+			for (const marketIndex of marketIndexList) {
+				if (marketIndexes.has(marketIndex)) {
+					throw new Error(
+						`Market index ${marketIndex} is duplicated in the config`
+					);
+				}
+				marketIndexes.add(marketIndex);
+			}
+		}
+
+		const spotFillerMultithreaded = new SpotFillerMultithreaded(
+			driftClient,
+			slotSubscriber,
+			{
+				rpcEndpoint: endpoint,
+				commit: '',
+				driftEnv: config.global.driftEnv!,
+				driftPid: driftPublicKey.toBase58(),
+				walletAuthority: wallet.publicKey.toBase58(),
+			},
+			config.global,
+			config.botConfigs?.spotFillerMultithreaded,
+			priorityFeeSubscriber,
+			bundleSender
+		);
+		bots.push(spotFillerMultithreaded);
 	}
 	// Initialize bots
 	logger.info(`initializing bots`);
