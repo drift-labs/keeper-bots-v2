@@ -370,7 +370,7 @@ export const getDriftClientFromArgs = ({
 	return driftClient;
 };
 
-export const spawnChildWithRetry = (
+export const spawnChild = (
 	scriptPath: string,
 	childArgs: string[],
 	processName: string,
@@ -386,7 +386,6 @@ export const spawnChildWithRetry = (
 			`${logPrefix} Child process: ${processName} exited with code ${code}`
 		);
 		logger.info(`${logPrefix} Restarting child process: ${processName}`);
-		spawnChildWithRetry(scriptPath, childArgs, processName, onMessage);
 	});
 
 	return child;

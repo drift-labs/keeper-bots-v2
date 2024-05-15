@@ -73,7 +73,7 @@ import {
 	deserializeNodeToFill,
 	deserializeOrder,
 	serializeNodeToFill,
-	spawnChildWithRetry,
+	spawnChild,
 } from '../filler-common/utils';
 import {
 	CACHED_BLOCKHASH_OFFSET,
@@ -466,7 +466,7 @@ export class SpotFillerMultithreaded {
 				`--market-type=${this.config.marketType}`,
 				`--market-indexes=${marketIndexes.map(String)}`,
 			];
-			const dlobBuilderProcess = spawnChildWithRetry(
+			const dlobBuilderProcess = spawnChild(
 				'./src/experimental-bots/filler-common/dlobBuilder.ts',
 				dlobBuilderArgs,
 				'dlobBuilder',
@@ -522,6 +522,11 @@ export class SpotFillerMultithreaded {
 				'[FillerMultithreaded]'
 			);
 
+			dlobBuilderProcess.on('exit', (code) => {
+				logger.error(`dlobBuilder exited with code ${code}`);
+				process.exit(code || 1);
+			});
+
 			for (const marketIndex of marketIndexes) {
 				this.dlobBuilders.set(Number(marketIndex), {
 					process: dlobBuilderProcess,
@@ -553,7 +558,7 @@ export class SpotFillerMultithreaded {
 			}
 		};
 
-		const orderSubscriberProcess = spawnChildWithRetry(
+		const orderSubscriberProcess = spawnChild(
 			'./src/experimental-bots/filler-common/orderSubscriberFiltered.ts',
 			orderSubscriberArgs,
 			'orderSubscriber',
@@ -569,6 +574,10 @@ export class SpotFillerMultithreaded {
 			},
 			'[FillerMultithreaded]'
 		);
+		orderSubscriberProcess.on('exit', (code) => {
+			logger.error(`orderSubscriber exited with code ${code}`);
+			process.exit(code || 1);
+		});
 
 		process.on('SIGINT', () => {
 			logger.info(`${logPrefix} Received SIGINT, killing children`);

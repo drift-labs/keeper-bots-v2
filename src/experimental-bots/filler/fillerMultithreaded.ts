@@ -61,7 +61,7 @@ import {
 	validRebalanceSettledPnlThreshold,
 } from '../../utils';
 import {
-	spawnChildWithRetry,
+	spawnChild,
 	deserializeNodeToFill,
 	deserializeOrder,
 } from '../filler-common/utils';
@@ -381,7 +381,7 @@ export class FillerMultithreaded {
 				`--market-type=${this.config.marketType}`,
 				`--market-indexes=${marketIndexes.map(String)}`,
 			];
-			const dlobBuilderProcess = spawnChildWithRetry(
+			const dlobBuilderProcess = spawnChild(
 				'./src/experimental-bots/filler-common/dlobBuilder.ts',
 				dlobBuilderArgs,
 				'dlobBuilder',
@@ -437,6 +437,11 @@ export class FillerMultithreaded {
 				'[FillerMultithreaded]'
 			);
 
+			dlobBuilderProcess.on('exit', (code) => {
+				logger.error(`dlobBuilder exited with code ${code}`);
+				process.exit(code || 1);
+			});
+
 			for (const marketIndex of marketIndexes) {
 				this.dlobBuilders.set(Number(marketIndex), {
 					process: dlobBuilderProcess,
@@ -468,7 +473,7 @@ export class FillerMultithreaded {
 			}
 		};
 
-		const orderSubscriberProcess = spawnChildWithRetry(
+		const orderSubscriberProcess = spawnChild(
 			'./src/experimental-bots/filler-common/orderSubscriberFiltered.ts',
 			orderSubscriberArgs,
 			'orderSubscriber',
@@ -484,6 +489,11 @@ export class FillerMultithreaded {
 			},
 			'[FillerMultithreaded]'
 		);
+
+		orderSubscriberProcess.on('exit', (code) => {
+			logger.error(`dlobBuilder exited with code ${code}`);
+			process.exit(code || 1);
+		});
 
 		process.on('SIGINT', () => {
 			logger.info(`${logPrefix} Received SIGINT, killing children`);
