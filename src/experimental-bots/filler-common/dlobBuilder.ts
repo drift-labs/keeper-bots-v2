@@ -87,7 +87,7 @@ class DLOBBuilder {
 		}
 
 		this.clockSubscriber = new ClockSubscriber(driftClient.connection, {
-			commitment: 'finalized',
+			commitment: 'confirmed',
 			resubTimeoutMs: 5_000,
 		});
 	}
