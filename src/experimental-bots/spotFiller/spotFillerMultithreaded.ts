@@ -190,6 +190,7 @@ export class SpotFillerMultithreaded {
 	private driftLutAccount?: AddressLookupTableAccount;
 	private driftSpotLutAccount?: AddressLookupTableAccount;
 	private fillTxId = 0;
+	private subaccount: number;
 
 	private userStatsMap?: UserStatsMap;
 	protected hasEnoughSolToFill: boolean = true;
@@ -307,6 +308,11 @@ export class SpotFillerMultithreaded {
 		logger.info(
 			`${this.name}: revertOnFailure: ${this.revertOnFailure}, simulateTxForCUEstimate: ${this.simulateTxForCUEstimate}`
 		);
+
+		this.subaccount = config.subaccount ?? 0;
+		if (!this.driftClient.hasUser(this.subaccount)) {
+			throw new Error(`Subaccount ${this.subaccount} not found in driftClient`);
+		}
 
 		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(driftClient);
 		this.phoenixFulfillmentConfigMap = new PhoenixFulfillmentConfigMap(
@@ -456,7 +462,7 @@ export class SpotFillerMultithreaded {
 			`--market-type=${this.config.marketType}`,
 			`--market-indexes=${this.config.marketIndexes.map(String)}`,
 		];
-		const user = this.driftClient.getUser();
+		const user = this.driftClient.getUser(this.subaccount);
 
 		for (const marketIndexes of this.marketIndexes) {
 			logger.info(
@@ -675,6 +681,7 @@ export class SpotFillerMultithreaded {
 		serializedNodesToTrigger: SerializedNodeToTrigger[],
 		buildForBundle: boolean
 	) {
+		const driftUser = this.driftClient.getUser(this.subaccount);
 		for (const nodeToTrigger of serializedNodesToTrigger) {
 			nodeToTrigger.node.haveTrigger = true;
 			// @ts-ignore
@@ -690,12 +697,15 @@ export class SpotFillerMultithreaded {
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
 					userAccount,
-					deserializeOrder(nodeToTrigger.node.order)
+					deserializeOrder(nodeToTrigger.node.order),
+					driftUser.userAccountPublicKey
 				)
 			);
 
 			if (this.revertOnFailure) {
-				ixs.push(await this.driftClient.getRevertFillIx());
+				ixs.push(
+					await this.driftClient.getRevertFillIx(driftUser.userAccountPublicKey)
+				);
 			}
 
 			const simResult = await simulateAndGetTxWithCUs(
@@ -708,7 +718,6 @@ export class SpotFillerMultithreaded {
 				SIM_CU_ESTIMATE_MULTIPLIER,
 				this.simulateTxForCUEstimate
 			);
-			const driftUser = this.driftClient.getUser();
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',
 				simError: simResult.simError !== null,
@@ -767,7 +776,7 @@ export class SpotFillerMultithreaded {
 											'Transaction was not confirmed'
 										)
 									) {
-										const user = this.driftClient.getUser();
+										const user = this.driftClient.getUser(this.subaccount);
 										this.txSimErrorCounter?.add(1, {
 											errorCode: errorCode.toString(),
 											...metricAttrFromUserAccount(
@@ -801,7 +810,7 @@ export class SpotFillerMultithreaded {
 			}
 		}
 
-		const user = this.driftClient.getUser();
+		const user = this.driftClient.getUser(this.subaccount);
 		this.attemptedTriggersCounter?.add(
 			serializedNodesToTrigger.length,
 			metricAttrFromUserAccount(
@@ -947,6 +956,7 @@ export class SpotFillerMultithreaded {
 			if (!isVariant(marketType, 'spot')) {
 				throw new Error('expected spot market type');
 			}
+			const user = this.driftClient.getUser(this.subaccount);
 
 			let makerInfosToUse = makerInfos;
 			const buildTxWithMakerInfos = async (
@@ -958,12 +968,16 @@ export class SpotFillerMultithreaded {
 						takerUser,
 						nodeToFill.node.order!,
 						undefined,
-						makers.map((m) => m.data)
+						makers.map((m) => m.data),
+						undefined,
+						user.userAccountPublicKey
 					)
 				);
 
 				if (this.revertOnFailure) {
-					ixs.push(await this.driftClient.getRevertFillIx());
+					ixs.push(
+						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
+					);
 				}
 				const simResult = await simulateAndGetTxWithCUs(
 					ixs,
@@ -977,7 +991,6 @@ export class SpotFillerMultithreaded {
 					await this.getBlockhashForTx(),
 					false
 				);
-				const user = this.driftClient.getUser();
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
 					simError: simResult.simError !== null,
@@ -1164,19 +1177,23 @@ export class SpotFillerMultithreaded {
 				})
 			);
 		}
-
+		const user = this.driftClient.getUser(this.subaccount);
 		ixs.push(
 			await this.driftClient.getFillSpotOrderIx(
 				new PublicKey(takerUserPubKey),
 				takerUser,
 				nodeToFill.node.order,
 				fulfillmentConfig,
-				makerInfo
+				makerInfo,
+				undefined,
+				user.userAccountPublicKey
 			)
 		);
 
 		if (this.revertOnFailure) {
-			ixs.push(await this.driftClient.getRevertFillIx());
+			ixs.push(
+				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
+			);
 		}
 
 		const lutAccounts: Array<AddressLookupTableAccount> = [];
@@ -1194,7 +1211,6 @@ export class SpotFillerMultithreaded {
 			undefined,
 			false
 		);
-		const user = this.driftClient.getUser();
 		this.simulateTxHistogram?.record(simResult.simTxDuration, {
 			type: 'spotFill',
 			simError: simResult.simError !== null,
@@ -1528,7 +1544,7 @@ export class SpotFillerMultithreaded {
 			logger.info(
 				`${this.name}: Evicted tx sig ${txSig} from this.txSigsToConfirm`
 			);
-			const user = this.driftClient.getUser();
+			const user = this.driftClient.getUser(this.subaccount);
 			this.evictedPendingTxSigsToConfirmCounter?.add(1, {
 				...metricAttrFromUserAccount(
 					user.userAccountPublicKey,
@@ -1559,7 +1575,7 @@ export class SpotFillerMultithreaded {
 	}
 
 	protected recordJitoBundleStats() {
-		const user = this.driftClient.getUser();
+		const user = this.driftClient.getUser(this.subaccount);
 		const bundleStats = this.bundleSender?.getBundleStats();
 		if (bundleStats) {
 			this.jitoBundlesAcceptedGauge?.setLatestValue(bundleStats.accepted, {
@@ -1685,7 +1701,7 @@ export class SpotFillerMultithreaded {
 	}
 
 	protected async confirmPendingTxSigs() {
-		const user = this.driftClient.getUser();
+		const user = this.driftClient.getUser(this.subaccount);
 		this.pendingTxSigsToConfirmGauge?.setLatestValue(
 			this.pendingTxSigsToconfirm.size,
 			{
@@ -1858,7 +1874,7 @@ export class SpotFillerMultithreaded {
 			fillTxId,
 			txType,
 		});
-		const user = this.driftClient.getUser();
+		const user = this.driftClient.getUser(this.subaccount);
 		this.sentTxsCounter?.add(1, {
 			txType,
 			...metricAttrFromUserAccount(
@@ -2004,7 +2020,7 @@ export class SpotFillerMultithreaded {
 							!errorCodesToSuppress.includes(errorCode) &&
 							!(e as Error).message.includes('Transaction was not confirmed')
 						) {
-							const user = this.driftClient.getUser();
+							const user = this.driftClient.getUser(this.subaccount);
 							this.txSimErrorCounter?.add(1, {
 								errorCode: errorCode.toString(),
 								...metricAttrFromUserAccount(

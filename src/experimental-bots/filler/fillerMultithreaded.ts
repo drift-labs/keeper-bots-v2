@@ -169,6 +169,7 @@ export class FillerMultithreaded {
 	private dryRun: boolean;
 	private globalConfig: GlobalConfig;
 	private config: FillerMultiThreadedConfig;
+	private subaccount: number;
 
 	private fillTxId: number = 0;
 	private userStatsMap: UserStatsMap;
@@ -282,6 +283,12 @@ export class FillerMultithreaded {
 			connection: driftClient.connection,
 		});
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.subaccount = config.subaccount ?? 0;
+		if (!this.driftClient.hasUser(this.subaccount)) {
+			throw new Error(
+				`User account not found for subaccount: ${this.subaccount}`
+			);
+		}
 
 		const driftMarkets = this.marketIndexesFlattened.map((marketIndex) => {
 			return {
@@ -371,7 +378,7 @@ export class FillerMultithreaded {
 			`--market-type=${this.config.marketType}`,
 			`--market-indexes=${this.config.marketIndexes.map(String)}`,
 		];
-		const user = this.driftClient.getUser();
+		const user = this.driftClient.getUser(this.subaccount);
 
 		for (const marketIndexes of this.marketIndexes) {
 			logger.info(
@@ -533,7 +540,7 @@ export class FillerMultithreaded {
 			logger.info(
 				`${this.name}: Evicted tx sig ${txSig} from this.txSigsToConfirm`
 			);
-			const user = this.driftClient.getUser();
+			const user = this.driftClient.getUser(this.subaccount);
 			this.evictedPendingTxSigsToConfirmCounter?.add(1, {
 				...metricAttrFromUserAccount(
 					user.userAccountPublicKey,
@@ -679,7 +686,7 @@ export class FillerMultithreaded {
 	}
 
 	protected recordJitoBundleStats() {
-		const user = this.driftClient.getUser();
+		const user = this.driftClient.getUser(this.subaccount);
 		const bundleStats = this.bundleSender?.getBundleStats();
 		if (bundleStats) {
 			this.jitoBundlesAcceptedGauge?.setLatestValue(bundleStats.accepted, {
@@ -805,7 +812,7 @@ export class FillerMultithreaded {
 	}
 
 	protected async confirmPendingTxSigs() {
-		const user = this.driftClient.getUser();
+		const user = this.driftClient.getUser(this.subaccount);
 		this.pendingTxSigsToConfirmGauge?.setLatestValue(
 			this.pendingTxSigsToconfirm.size,
 			{
@@ -1122,6 +1129,7 @@ export class FillerMultithreaded {
 		nodesToTrigger: SerializedNodeToTrigger[],
 		buildForBundle: boolean
 	) {
+		const user = this.driftClient.getUser(this.subaccount);
 		for (const nodeToTrigger of nodesToTrigger) {
 			nodeToTrigger.node.haveTrigger = true;
 			// @ts-ignore
@@ -1152,12 +1160,15 @@ export class FillerMultithreaded {
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
 					userAccount,
-					deserializeOrder(nodeToTrigger.node.order)
+					deserializeOrder(nodeToTrigger.node.order),
+					user.userAccountPublicKey
 				)
 			);
 
 			if (this.revertOnFailure) {
-				ixs.push(await this.driftClient.getRevertFillIx());
+				ixs.push(
+					await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
+				);
 			}
 
 			const simResult = await simulateAndGetTxWithCUs(
@@ -1171,7 +1182,6 @@ export class FillerMultithreaded {
 				this.simulateTxForCUEstimate,
 				await this.getBlockhashForTx()
 			);
-			const user = this.driftClient.getUser();
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',
 				simError: simResult.simError !== null,
@@ -1242,7 +1252,6 @@ export class FillerMultithreaded {
 				}
 			}
 		}
-		const user = this.driftClient.getUser();
 		this.attemptedTriggersCounter?.add(
 			nodesToTrigger.length,
 			metricAttrFromUserAccount(
@@ -1497,14 +1506,18 @@ export class FillerMultithreaded {
 						takerUser,
 						nodeToFill.node.order!,
 						makers.map((m) => m.data),
-						referrerInfo
+						referrerInfo,
+						this.subaccount
 					)
 				);
 
 				this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
+				const user = this.driftClient.getUser(this.subaccount);
 
 				if (this.revertOnFailure) {
-					ixs.push(await this.driftClient.getRevertFillIx());
+					ixs.push(
+						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
+					);
 				}
 				const simResult = await simulateAndGetTxWithCUs(
 					ixs,
@@ -1517,7 +1530,6 @@ export class FillerMultithreaded {
 					this.simulateTxForCUEstimate,
 					await this.getBlockhashForTx()
 				);
-				const user = this.driftClient.getUser();
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
 					simError: simResult.simError !== null,
@@ -1653,13 +1665,16 @@ export class FillerMultithreaded {
 			takerUser,
 			nodeToFill.node.order!,
 			makerInfos.map((m) => m.data),
-			referrerInfo
+			referrerInfo,
+			this.subaccount
 		);
 
 		ixs.push(ix);
-
+		const user = this.driftClient.getUser(this.subaccount);
 		if (this.revertOnFailure) {
-			ixs.push(await this.driftClient.getRevertFillIx());
+			ixs.push(
+				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
+			);
 		}
 
 		const simResult = await simulateAndGetTxWithCUs(
@@ -1788,7 +1803,7 @@ export class FillerMultithreaded {
 		);
 		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
 
-		const user = this.driftClient.getUser();
+		const user = this.driftClient.getUser(this.subaccount);
 		const activePerpPositions = user.getActivePerpPositions().sort((a, b) => {
 			return b.quoteAssetAmount.sub(a.quoteAssetAmount).toNumber();
 		});
@@ -1851,7 +1866,9 @@ export class FillerMultithreaded {
 								[
 									{
 										settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
-										settleeUserAccount: this.driftClient.getUserAccount()!,
+										settleeUserAccount: this.driftClient.getUserAccount(
+											this.subaccount
+										)!,
 									},
 								],
 								marketIdChunks
@@ -2089,7 +2106,7 @@ export class FillerMultithreaded {
 			fillTxId,
 			txType,
 		});
-		const user = this.driftClient.getUser();
+		const user = this.driftClient.getUser(this.subaccount);
 		this.sentTxsCounter?.add(1, {
 			txType,
 			...metricAttrFromUserAccount(
