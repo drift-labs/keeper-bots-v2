@@ -34,6 +34,7 @@ export type FillerMultiThreadedConfig = BaseBotConfig & {
 	marketType: string;
 	marketIndexes: Array<number[]>;
 	simulateTxForCUEstimate?: boolean;
+	subaccount?: number;
 
 	rebalanceFiller?: boolean;
 	rebalanceSettledPnlThreshold?: number;
