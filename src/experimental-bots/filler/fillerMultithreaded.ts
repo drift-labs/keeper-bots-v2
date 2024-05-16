@@ -1811,7 +1811,7 @@ export class FillerMultithreaded {
 					this.rebalanceSettledPnlThreshold.mul(QUOTE_PRECISION)
 				) ||
 					!this.hasEnoughSolToFill)) ||
-			marketIds.length === MAX_POSITIONS_PER_USER
+			marketIds.length >= MAX_POSITIONS_PER_USER
 		) {
 			logger.info(
 				`Settling positive PNLs for markets: ${JSON.stringify(marketIds)}`
@@ -1826,6 +1826,7 @@ export class FillerMultithreaded {
 					chunk_size = marketIds.length / 2;
 				}
 				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
+				const buildForBundle = this.shouldBuildForBundle();
 				for (let i = 0; i < marketIds.length; i += chunk_size) {
 					const marketIdChunks = marketIds.slice(i, i + chunk_size);
 					try {
@@ -1833,12 +1834,18 @@ export class FillerMultithreaded {
 							ComputeBudgetProgram.setComputeUnitLimit({
 								units: 1_400_000, // will be overridden by simulateTx
 							}),
-							ComputeBudgetProgram.setComputeUnitPrice({
-								microLamports: Math.floor(
-									this.priorityFeeSubscriber.getCustomStrategyResult()
-								),
-							}),
 						];
+
+						if (!buildForBundle) {
+							ixs.push(
+								ComputeBudgetProgram.setComputeUnitPrice({
+									microLamports: Math.floor(
+										this.priorityFeeSubscriber.getCustomStrategyResult()
+									),
+								})
+							);
+						}
+
 						ixs.push(
 							...(await this.driftClient.getSettlePNLsIxs(
 								[
@@ -1890,8 +1897,6 @@ export class FillerMultithreaded {
 							);
 						} else {
 							if (!this.dryRun) {
-								const buildForBundle = this.shouldBuildForBundle();
-
 								// @ts-ignore;
 								simResult.tx.sign([this.driftClient.wallet.payer]);
 								const txSig = bs58.encode(simResult.tx.signatures[0]);
