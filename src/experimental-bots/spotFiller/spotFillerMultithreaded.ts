@@ -2198,7 +2198,8 @@ export class SpotFillerMultithreaded {
 				this.priorityFeeSubscriber,
 				this.driftClient,
 				this.jupiterClient,
-				await this.getBlockhashForTx()
+				await this.getBlockhashForTx(),
+				this.subaccount
 			).then(async () => {
 				const fillerSolBalanceAfterSwap =
 					await this.driftClient.connection.getBalance(

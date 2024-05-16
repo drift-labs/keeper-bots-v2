@@ -723,11 +723,12 @@ export async function swapFillerHardEarnedUSDCForSOL(
 	priorityFeeSubscriber: PriorityFeeSubscriber,
 	driftClient: DriftClient,
 	jupiterClient: JupiterClient,
-	blockhash: string
+	blockhash: string,
+	subaccount?: number
 ) {
 	try {
-		const usdc = driftClient.getUser().getTokenAmount(0);
-		const sol = driftClient.getUser().getTokenAmount(1);
+		const usdc = driftClient.getUser(subaccount).getTokenAmount(0);
+		const sol = driftClient.getUser(subaccount).getTokenAmount(1);
 
 		console.log(
 			`${driftClient.authority.toBase58()} has ${convertToNumber(
@@ -846,7 +847,8 @@ export async function swapFillerHardEarnedUSDCForSOL(
 			usdc.muln(10), // gross overestimate just to get everything out of the account
 			0,
 			withdrawerUsdcAta,
-			true
+			true,
+			subaccount
 		);
 
 		const closeAccountInstruction = createCloseAccountInstruction(
