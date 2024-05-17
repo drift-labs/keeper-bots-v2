@@ -212,7 +212,7 @@ export class SpotFillerMultithreaded {
 		string,
 		{
 			ts: number;
-			nodeFilled: Array<NodeToFillWithBuffer>;
+			nodeFilled: NodeToFillWithBuffer;
 			fillTxId: number;
 			txType: TxType;
 		}
@@ -358,7 +358,7 @@ export class SpotFillerMultithreaded {
 			string,
 			{
 				ts: number;
-				nodeFilled: Array<NodeToFillWithBuffer>;
+				nodeFilled: NodeToFillWithBuffer;
 				fillTxId: number;
 				txType: TxType;
 			}
@@ -1536,10 +1536,15 @@ export class SpotFillerMultithreaded {
 	}
 
 	protected recordEvictedTxSig(
-		_tsTxSigAdded: { ts: number; nodeFilled: Array<NodeToFillWithBuffer> },
+		_tsTxSigAdded: { ts: number; nodeFilled: NodeToFillWithBuffer },
 		txSig: string,
 		reason: 'evict' | 'set' | 'delete'
 	) {
+		if (reason === 'evict' || reason === 'delete') {
+			logger.debug(
+				`Removing tx sig ${txSig} from this.txSigsToConfirm, new size: ${this.pendingTxSigsToconfirm.size}`
+			);
+		}
 		if (reason === 'evict') {
 			logger.info(
 				`${this.name}: Evicted tx sig ${txSig} from this.txSigsToConfirm`
@@ -1745,6 +1750,7 @@ export class SpotFillerMultithreaded {
 					}
 				);
 				for (let j = 0; j < txs.length; j++) {
+					logger.info(`Confirming transactions: ${j}/${txs.length}`);
 					const txResp = txs[j];
 					const txConfirmationInfo = txSigsBatch[j];
 					const txSig = txConfirmationInfo[0];
@@ -1759,6 +1765,9 @@ export class SpotFillerMultithreaded {
 							} s`
 						);
 						if (Math.abs(txAge) > TX_TIMEOUT_THRESHOLD_MS) {
+							logger.debug(
+								`Removing expired txSig ${txSig} from pendingTxSigsToconfirm, new size: ${this.pendingTxSigsToconfirm.size}`
+							);
 							this.pendingTxSigsToconfirm.delete(txSig);
 						}
 					} else {
@@ -1767,11 +1776,18 @@ export class SpotFillerMultithreaded {
 								txAge / 1000
 							} s`
 						);
+						logger.debug(
+							`Removing confirmed txSig ${txSig} from pendingTxSigsToconfirm, new size: ${this.pendingTxSigsToconfirm.size}`
+						);
 						this.pendingTxSigsToconfirm.delete(txSig);
 						if (txType === 'fill') {
+							let node: any = nodeFilled;
+							if (Array.isArray(nodeFilled)) {
+								node = nodeFilled[0];
+							}
 							const result = await this.handleTransactionLogs(
 								// @ts-ignore
-								nodeFilled!,
+								node,
 								txResp.meta?.logMessages
 							);
 							if (result) {
@@ -1809,7 +1825,9 @@ export class SpotFillerMultithreaded {
 					),
 				});
 			} else {
-				logger.error(`Other error confirming tx sigs: ${err.message}`);
+				logger.error(
+					`Other error confirming tx sigs: ${err.message}-${err.stack}`
+				);
 			}
 		} finally {
 			this.confirmLoopRunning = false;
@@ -1864,7 +1882,7 @@ export class SpotFillerMultithreaded {
 	protected async registerTxSigToConfirm(
 		txSig: TransactionSignature,
 		now: number,
-		nodeFilled: Array<NodeToFillWithBuffer>,
+		nodeFilled: NodeToFillWithBuffer,
 		fillTxId: number,
 		txType: TxType
 	) {
@@ -1940,13 +1958,12 @@ export class SpotFillerMultithreaded {
 		// @ts-ignore;
 		tx.sign([this.driftClient.wallet.payer]);
 		const txSig = bs58.encode(tx.signatures[0]);
-		this.registerTxSigToConfirm(
-			txSig,
-			Date.now(),
-			[nodeSent],
-			fillTxId,
-			'fill'
-		);
+		if (Array.isArray(nodeSent)) {
+			throw new Error(
+				'ARRAY ARRAY ARRYA ARRYA ARYARYARYAYRYAYRYRYAYRA SENFDILLTXANDPARSELOGS'
+			);
+		}
+		this.registerTxSigToConfirm(txSig, Date.now(), nodeSent, fillTxId, 'fill');
 
 		const { estTxSize, accountMetas, writeAccs, txAccounts } =
 			getTransactionAccountMetas(tx, lutAccounts);
@@ -2062,6 +2079,18 @@ export class SpotFillerMultithreaded {
 		logs: string[] | null | undefined
 	): Promise<{ filledNodes: number; exceededCUs: boolean }> {
 		if (!logs) {
+			return {
+				filledNodes: 0,
+				exceededCUs: false,
+			};
+		}
+
+		if (Array.isArray(nodeFilled)) {
+			nodeFilled = nodeFilled[0];
+		}
+
+		if (nodeFilled.node === undefined || nodeFilled.node.order === undefined) {
+			logger.error(`nodeFilled.node or nodeFilled.node.order is undefined!`);
 			return {
 				filledNodes: 0,
 				exceededCUs: false,
