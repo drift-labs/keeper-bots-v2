@@ -212,7 +212,7 @@ export class SpotFillerMultithreaded {
 		string,
 		{
 			ts: number;
-			nodeFilled: Array<NodeToFillWithBuffer>;
+			nodeFilled: NodeToFillWithBuffer;
 			fillTxId: number;
 			txType: TxType;
 		}
@@ -358,7 +358,7 @@ export class SpotFillerMultithreaded {
 			string,
 			{
 				ts: number;
-				nodeFilled: Array<NodeToFillWithBuffer>;
+				nodeFilled: NodeToFillWithBuffer;
 				fillTxId: number;
 				txType: TxType;
 			}
@@ -1536,10 +1536,15 @@ export class SpotFillerMultithreaded {
 	}
 
 	protected recordEvictedTxSig(
-		_tsTxSigAdded: { ts: number; nodeFilled: Array<NodeToFillWithBuffer> },
+		_tsTxSigAdded: { ts: number; nodeFilled: NodeToFillWithBuffer },
 		txSig: string,
 		reason: 'evict' | 'set' | 'delete'
 	) {
+		if (reason === 'evict' || reason === 'delete') {
+			logger.debug(
+				`Removing tx sig ${txSig} from this.txSigsToConfirm, new size: ${this.pendingTxSigsToconfirm.size}`
+			);
+		}
 		if (reason === 'evict') {
 			logger.info(
 				`${this.name}: Evicted tx sig ${txSig} from this.txSigsToConfirm`
@@ -1745,6 +1750,7 @@ export class SpotFillerMultithreaded {
 					}
 				);
 				for (let j = 0; j < txs.length; j++) {
+					logger.debug(`Confirming transactions: ${j}/${txs.length}`);
 					const txResp = txs[j];
 					const txConfirmationInfo = txSigsBatch[j];
 					const txSig = txConfirmationInfo[0];
@@ -1759,6 +1765,9 @@ export class SpotFillerMultithreaded {
 							} s`
 						);
 						if (Math.abs(txAge) > TX_TIMEOUT_THRESHOLD_MS) {
+							logger.debug(
+								`Removing expired txSig ${txSig} from pendingTxSigsToconfirm, new size: ${this.pendingTxSigsToconfirm.size}`
+							);
 							this.pendingTxSigsToconfirm.delete(txSig);
 						}
 					} else {
@@ -1767,21 +1776,31 @@ export class SpotFillerMultithreaded {
 								txAge / 1000
 							} s`
 						);
+						logger.debug(
+							`Removing confirmed txSig ${txSig} from pendingTxSigsToconfirm, new size: ${this.pendingTxSigsToconfirm.size}`
+						);
 						this.pendingTxSigsToconfirm.delete(txSig);
 						if (txType === 'fill') {
-							const result = await this.handleTransactionLogs(
-								// @ts-ignore
-								nodeFilled!,
-								txResp.meta?.logMessages
-							);
-							if (result) {
-								this.landedTxsCounter?.add(result.filledNodes, {
-									type: txType,
-									...metricAttrFromUserAccount(
-										user.userAccountPublicKey,
-										user.getUserAccount()
-									),
-								});
+							try {
+								const result = await this.handleTransactionLogs(
+									// @ts-ignore
+									nodeFilled,
+									txResp.meta?.logMessages
+								);
+								if (result) {
+									this.landedTxsCounter?.add(result.filledNodes, {
+										type: txType,
+										...metricAttrFromUserAccount(
+											user.userAccountPublicKey,
+											user.getUserAccount()
+										),
+									});
+								}
+							} catch (e) {
+								const err = e as Error;
+								logger.error(
+									`Error handling transaction logs: ${err.message}-${err.stack}`
+								);
 							}
 						} else {
 							this.landedTxsCounter?.add(1, {
@@ -1809,7 +1828,9 @@ export class SpotFillerMultithreaded {
 					),
 				});
 			} else {
-				logger.error(`Other error confirming tx sigs: ${err.message}`);
+				logger.error(
+					`Other error confirming tx sigs: ${err.message}-${err.stack}`
+				);
 			}
 		} finally {
 			this.confirmLoopRunning = false;
@@ -1864,7 +1885,7 @@ export class SpotFillerMultithreaded {
 	protected async registerTxSigToConfirm(
 		txSig: TransactionSignature,
 		now: number,
-		nodeFilled: Array<NodeToFillWithBuffer>,
+		nodeFilled: NodeToFillWithBuffer,
 		fillTxId: number,
 		txType: TxType
 	) {
@@ -1940,13 +1961,8 @@ export class SpotFillerMultithreaded {
 		// @ts-ignore;
 		tx.sign([this.driftClient.wallet.payer]);
 		const txSig = bs58.encode(tx.signatures[0]);
-		this.registerTxSigToConfirm(
-			txSig,
-			Date.now(),
-			[nodeSent],
-			fillTxId,
-			'fill'
-		);
+
+		this.registerTxSigToConfirm(txSig, Date.now(), nodeSent, fillTxId, 'fill');
 
 		const { estTxSize, accountMetas, writeAccs, txAccounts } =
 			getTransactionAccountMetas(tx, lutAccounts);
@@ -2066,6 +2082,11 @@ export class SpotFillerMultithreaded {
 				filledNodes: 0,
 				exceededCUs: false,
 			};
+		}
+
+		if (nodeFilled.node === undefined || nodeFilled.node.order === undefined) {
+			logger.error(`nodeFilled.node or nodeFilled.node.order is undefined!`);
+			throw new Error(`nodeFilled.node or nodeFilled.node.order is undefined!`);
 		}
 
 		let inFillIx = false;
@@ -2198,7 +2219,8 @@ export class SpotFillerMultithreaded {
 				this.priorityFeeSubscriber,
 				this.driftClient,
 				this.jupiterClient,
-				await this.getBlockhashForTx()
+				await this.getBlockhashForTx(),
+				this.subaccount
 			).then(async () => {
 				const fillerSolBalanceAfterSwap =
 					await this.driftClient.connection.getBalance(
