@@ -1781,19 +1781,26 @@ export class SpotFillerMultithreaded {
 						);
 						this.pendingTxSigsToconfirm.delete(txSig);
 						if (txType === 'fill') {
-							const result = await this.handleTransactionLogs(
-								// @ts-ignore
-								nodeFilled,
-								txResp.meta?.logMessages
-							);
-							if (result) {
-								this.landedTxsCounter?.add(result.filledNodes, {
-									type: txType,
-									...metricAttrFromUserAccount(
-										user.userAccountPublicKey,
-										user.getUserAccount()
-									),
-								});
+							try {
+								const result = await this.handleTransactionLogs(
+									// @ts-ignore
+									nodeFilled,
+									txResp.meta?.logMessages
+								);
+								if (result) {
+									this.landedTxsCounter?.add(result.filledNodes, {
+										type: txType,
+										...metricAttrFromUserAccount(
+											user.userAccountPublicKey,
+											user.getUserAccount()
+										),
+									});
+								}
+							} catch (e) {
+								const err = e as Error;
+								logger.error(
+									`Error handling transaction logs: ${err.message}-${err.stack}`
+								);
 							}
 						} else {
 							this.landedTxsCounter?.add(1, {
@@ -2079,10 +2086,7 @@ export class SpotFillerMultithreaded {
 
 		if (nodeFilled.node === undefined || nodeFilled.node.order === undefined) {
 			logger.error(`nodeFilled.node or nodeFilled.node.order is undefined!`);
-			return {
-				filledNodes: 0,
-				exceededCUs: false,
-			};
+			throw new Error(`nodeFilled.node or nodeFilled.node.order is undefined!`);
 		}
 
 		let inFillIx = false;
