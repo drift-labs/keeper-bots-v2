@@ -1958,11 +1958,7 @@ export class SpotFillerMultithreaded {
 		// @ts-ignore;
 		tx.sign([this.driftClient.wallet.payer]);
 		const txSig = bs58.encode(tx.signatures[0]);
-		if (Array.isArray(nodeSent)) {
-			throw new Error(
-				'ARRAY ARRAY ARRYA ARRYA ARYARYARYAYRYAYRYRYAYRA SENFDILLTXANDPARSELOGS'
-			);
-		}
+
 		this.registerTxSigToConfirm(txSig, Date.now(), nodeSent, fillTxId, 'fill');
 
 		const { estTxSize, accountMetas, writeAccs, txAccounts } =
