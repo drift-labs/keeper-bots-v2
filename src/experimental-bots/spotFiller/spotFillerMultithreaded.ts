@@ -1750,7 +1750,7 @@ export class SpotFillerMultithreaded {
 					}
 				);
 				for (let j = 0; j < txs.length; j++) {
-					logger.info(`Confirming transactions: ${j}/${txs.length}`);
+					logger.debug(`Confirming transactions: ${j}/${txs.length}`);
 					const txResp = txs[j];
 					const txConfirmationInfo = txSigsBatch[j];
 					const txSig = txConfirmationInfo[0];
@@ -1781,13 +1781,12 @@ export class SpotFillerMultithreaded {
 						);
 						this.pendingTxSigsToconfirm.delete(txSig);
 						if (txType === 'fill') {
-							let node: any = nodeFilled;
 							if (Array.isArray(nodeFilled)) {
-								node = nodeFilled[0];
+								throw new Error('nodeFilled is an array, expected a single node');
 							}
 							const result = await this.handleTransactionLogs(
 								// @ts-ignore
-								node,
+								nodeFilled,
 								txResp.meta?.logMessages
 							);
 							if (result) {
@@ -2082,7 +2081,7 @@ export class SpotFillerMultithreaded {
 		}
 
 		if (Array.isArray(nodeFilled)) {
-			nodeFilled = nodeFilled[0];
+			throw new Error('nodeFilled is an array, expected a single node');
 		}
 
 		if (nodeFilled.node === undefined || nodeFilled.node.order === undefined) {
