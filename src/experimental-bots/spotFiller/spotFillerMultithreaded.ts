@@ -1781,9 +1781,6 @@ export class SpotFillerMultithreaded {
 						);
 						this.pendingTxSigsToconfirm.delete(txSig);
 						if (txType === 'fill') {
-							if (Array.isArray(nodeFilled)) {
-								throw new Error('nodeFilled is an array, expected a single node');
-							}
 							const result = await this.handleTransactionLogs(
 								// @ts-ignore
 								nodeFilled,
@@ -2078,10 +2075,6 @@ export class SpotFillerMultithreaded {
 				filledNodes: 0,
 				exceededCUs: false,
 			};
-		}
-
-		if (Array.isArray(nodeFilled)) {
-			throw new Error('nodeFilled is an array, expected a single node');
 		}
 
 		if (nodeFilled.node === undefined || nodeFilled.node.order === undefined) {
