@@ -563,6 +563,8 @@ export class FillerBot implements Bot {
 			} ms`
 		);
 
+		await this.clockSubscriber.subscribe();
+
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 	}
@@ -585,8 +587,6 @@ export class FillerBot implements Bot {
 			driftClient: this.driftClient,
 		});
 		await this.dlobSubscriber.subscribe();
-
-		await this.clockSubscriber.subscribe();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}
