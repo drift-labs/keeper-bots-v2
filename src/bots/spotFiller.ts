@@ -31,6 +31,7 @@ import {
 	JupiterClient,
 	getVariant,
 	isOneOfVariant,
+	ClockSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -141,6 +142,8 @@ enum METRIC_TYPES {
 	jito_dropped_bundle = 'jito_dropped_bundle',
 	jito_landed_tips = 'jito_landed_tips',
 	jito_bundle_count = 'jito_bundle_count',
+	clock_subscriber_ts = 'clock_subscriber_ts',
+	wall_clock_ts = 'wall_clock_ts',
 }
 
 function getMakerNodeFromNodeToFill(
@@ -228,6 +231,7 @@ export class SpotFillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 2000;
 
 	private driftClient: DriftClient;
+	private clockSubscriber: ClockSubscriber;
 	/// Connection to use specifically for confirming transactions
 	private txConfirmationConnection: Connection;
 	private globalConfig: GlobalConfig;
@@ -304,6 +308,8 @@ export class SpotFillerBot implements Bot {
 	protected jitoDroppedBundleGauge?: GaugeValue;
 	protected jitoLandedTipsGauge?: GaugeValue;
 	protected jitoBundleCount?: GaugeValue;
+	protected clockSubscriberTs?: GaugeValue;
+	protected wallClockTs?: GaugeValue;
 
 	protected rebalanceFiller?: boolean;
 	protected jupiterClient?: JupiterClient;
@@ -445,6 +451,10 @@ export class SpotFillerBot implements Bot {
 			ttl: TX_TIMEOUT_THRESHOLD_MS,
 			ttlResolution: 1000,
 		});
+		this.clockSubscriber = new ClockSubscriber(driftClient.connection, {
+			commitment: 'confirmed',
+			resubTimeoutMs: 5_000,
+		});
 	}
 
 	protected initializeMetrics(metricsPort?: number) {
@@ -572,6 +582,14 @@ export class SpotFillerBot implements Bot {
 		this.jitoBundleCount = this.metrics.addGauge(
 			METRIC_TYPES.jito_bundle_count,
 			'Count of jito bundles that were sent, and their status'
+		);
+		this.clockSubscriberTs = this.metrics.addGauge(
+			METRIC_TYPES.clock_subscriber_ts,
+			'Timestamp of the clock subscriber'
+		);
+		this.wallClockTs = this.metrics.addGauge(
+			METRIC_TYPES.wall_clock_ts,
+			'Timestamp of the wall clock'
 		);
 
 		this.metrics?.finalizeObservables();
@@ -777,6 +795,8 @@ export class SpotFillerBot implements Bot {
 				this.driftSpotLutAccount = lutAccount;
 			}
 		}
+
+		await this.clockSubscriber.subscribe();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}
@@ -1137,7 +1157,7 @@ export class SpotFillerBot implements Bot {
 			fallbackBidPrice,
 			fallbackAskPrice,
 			fillSlot,
-			Date.now() / 1000,
+			this.clockSubscriber.getUnixTs(),
 			MarketType.SPOT,
 			oraclePriceData,
 			this.driftClient.getStateAccount(),
@@ -2444,6 +2464,12 @@ export class SpotFillerBot implements Bot {
 				}
 			}
 		} finally {
+			this.clockSubscriberTs?.setLatestValue(
+				this.clockSubscriber.getUnixTs(),
+				{}
+			);
+			this.wallClockTs?.setLatestValue(Date.now() / 1000, {});
+
 			if (ran) {
 				const duration = Date.now() - startTime;
 				const user = this.driftClient.getUser();

@@ -31,6 +31,7 @@ import {
 	JupiterClient,
 	BN,
 	QUOTE_PRECISION,
+	ClockSubscriber,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -150,6 +151,8 @@ enum METRIC_TYPES {
 	jito_dropped_bundle = 'jito_dropped_bundle',
 	jito_landed_tips = 'jito_landed_tips',
 	jito_bundle_count = 'jito_bundle_count',
+	clock_subscriber_ts = 'clock_subscriber_ts',
+	wall_clock_ts = 'wall_clock_ts',
 }
 
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -161,6 +164,7 @@ export class FillerBot implements Bot {
 	public readonly defaultIntervalMs: number = 6000;
 
 	protected slotSubscriber: SlotSubscriber;
+	protected clockSubscriber: ClockSubscriber;
 	protected bulkAccountLoader?: BulkAccountLoader;
 	protected userStatsMapSubscriptionConfig: UserSubscriptionConfig;
 	protected driftClient: DriftClient;
@@ -239,6 +243,8 @@ export class FillerBot implements Bot {
 	protected jitoDroppedBundleGauge?: GaugeValue;
 	protected jitoLandedTipsGauge?: GaugeValue;
 	protected jitoBundleCount?: GaugeValue;
+	protected clockSubscriberTs?: GaugeValue;
+	protected wallClockTs?: GaugeValue;
 
 	protected hasEnoughSolToFill: boolean = false;
 	protected rebalanceFiller: boolean;
@@ -372,6 +378,10 @@ export class FillerBot implements Bot {
 			max: 10_000,
 			ttl: TX_TIMEOUT_THRESHOLD_MS,
 			ttlResolution: 1000,
+		});
+		this.clockSubscriber = new ClockSubscriber(driftClient.connection, {
+			commitment: 'confirmed',
+			resubTimeoutMs: 5_000,
 		});
 	}
 
@@ -520,6 +530,14 @@ export class FillerBot implements Bot {
 			METRIC_TYPES.jito_bundle_count,
 			'Count of jito bundles that were sent, and their status'
 		);
+		this.clockSubscriberTs = this.metrics.addGauge(
+			METRIC_TYPES.clock_subscriber_ts,
+			'Timestamp of the clock subscriber'
+		);
+		this.wallClockTs = this.metrics.addGauge(
+			METRIC_TYPES.wall_clock_ts,
+			'Timestamp of the wall clock'
+		);
 
 		this.metrics?.finalizeObservables();
 
@@ -567,6 +585,8 @@ export class FillerBot implements Bot {
 			driftClient: this.driftClient,
 		});
 		await this.dlobSubscriber.subscribe();
+
+		await this.clockSubscriber.subscribe();
 
 		await webhookMessage(`[${this.name}]: started`);
 	}
@@ -913,7 +933,7 @@ export class FillerBot implements Bot {
 				vBid,
 				vAsk,
 				fillSlot,
-				Date.now() / 1000,
+				this.clockSubscriber.getUnixTs(),
 				MarketType.PERP,
 				oraclePriceData,
 				this.driftClient.getStateAccount(),
@@ -2686,6 +2706,12 @@ export class FillerBot implements Bot {
 				throw e;
 			}
 		} finally {
+			this.clockSubscriberTs?.setLatestValue(
+				this.clockSubscriber.getUnixTs(),
+				{}
+			);
+			this.wallClockTs?.setLatestValue(Date.now() / 1000, {});
+
 			if (ran) {
 				const duration = Date.now() - startTime;
 				const user = this.driftClient.getUser();
