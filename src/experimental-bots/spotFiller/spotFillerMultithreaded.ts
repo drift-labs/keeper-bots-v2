@@ -3,7 +3,6 @@ import {
 	DriftClient,
 	BlockhashSubscriber,
 	UserStatsMap,
-	PriorityFeeSubscriber,
 	NodeToFill,
 	JupiterClient,
 	BulkAccountLoader,
@@ -26,6 +25,7 @@ import {
 	isOneOfVariant,
 	PhoenixFulfillmentConfigMap,
 	SerumFulfillmentConfigMap,
+	PriorityFeeSubscriberMap,
 } from '@drift-labs/sdk';
 import {
 	Connection,
@@ -202,7 +202,7 @@ export class SpotFillerMultithreaded {
 	private throttledNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
 
-	private priorityFeeSubscriber: PriorityFeeSubscriber;
+	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
 	private revertOnFailure: boolean;
 	private simulateTxForCUEstimate?: boolean;
 	private bundleSender?: BundleSender;
@@ -269,7 +269,6 @@ export class SpotFillerMultithreaded {
 		runtimeSpec: RuntimeSpec,
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
-		priorityFeeSubscriber: PriorityFeeSubscriber,
 		bundleSender?: BundleSender
 	) {
 		this.globalConfig = globalConfig;
@@ -291,14 +290,20 @@ export class SpotFillerMultithreaded {
 
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
-		this.priorityFeeSubscriber = priorityFeeSubscriber;
-		const driftMarkets = this.marketIndexesFlattened.map((marketIndex) => {
+		const spotMarkets = this.marketIndexesFlattened.map((m) => {
 			return {
-				marketType: this.config.marketType,
-				marketIndex: marketIndex,
+				marketType: 'spot',
+				marketIndex: m,
 			};
 		});
-		this.priorityFeeSubscriber.updateMarketTypeAndIndex(driftMarkets);
+		spotMarkets.push({
+			marketType: 'spot',
+			marketIndex: 1,
+		}); // For rebalancing
+		this.priorityFeeSubscriber = new PriorityFeeSubscriberMap({
+			driftMarkets: spotMarkets,
+			driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
+		});
 
 		this.revertOnFailure = true;
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
@@ -379,6 +384,7 @@ export class SpotFillerMultithreaded {
 	async init() {
 		logger.info(`${this.name}: Initializing`);
 		await this.blockhashSubscriber.subscribe();
+		await this.priorityFeeSubscriber.subscribe();
 
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
@@ -925,7 +931,10 @@ export class SpotFillerMultithreaded {
 			ixs.push(
 				ComputeBudgetProgram.setComputeUnitPrice({
 					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult()
+						this.priorityFeeSubscriber.getPriorityFees(
+							'spot',
+							nodeToFill.node.order!.marketIndex
+						)!.high
 					),
 				})
 			);
@@ -1168,7 +1177,10 @@ export class SpotFillerMultithreaded {
 		];
 		if (!buildForBundle) {
 			const priorityFee = Math.floor(
-				this.priorityFeeSubscriber.getCustomStrategyResult()
+				this.priorityFeeSubscriber.getPriorityFees(
+					'spot',
+					nodeToFill.node.order!.marketIndex
+				)!.high
 			);
 			logger.info(`(fillTxId: ${fillTxId}) Using priority fee: ${priorityFee}`);
 			ixs.push(

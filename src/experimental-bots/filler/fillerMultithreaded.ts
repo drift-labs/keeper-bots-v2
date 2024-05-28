@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
+	BASE_PRECISION,
 	BlockhashSubscriber,
 	BN,
 	BulkAccountLoader,
@@ -7,6 +8,7 @@ import {
 	decodeUser,
 	DLOBNode,
 	DriftClient,
+	FeeTier,
 	getOrderSignature,
 	getUserAccountPublicKey,
 	isFillableByVAMM,
@@ -18,7 +20,8 @@ import {
 	MakerInfo,
 	MarketType,
 	NodeToFill,
-	PriorityFeeSubscriber,
+	PRICE_PRECISION,
+	PriorityFeeSubscriberMap,
 	QUOTE_PRECISION,
 	ReferrerInfo,
 	SlotSubscriber,
@@ -64,6 +67,8 @@ import {
 	spawnChild,
 	deserializeNodeToFill,
 	deserializeOrder,
+	getUserFeeTier,
+	getPriorityFeeInstruction,
 } from '../filler-common/utils';
 import {
 	CounterValue,
@@ -182,7 +187,7 @@ export class FillerMultithreaded {
 	private seenFillableOrders = new Set<string>();
 	private seenTriggerableOrders = new Set<string>();
 	private blockhashSubscriber: BlockhashSubscriber;
-	private priorityFeeSubscriber: PriorityFeeSubscriber;
+	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
 
 	private dlobHealthy = true;
 	private orderSubscriberHealthy = true;
@@ -249,7 +254,6 @@ export class FillerMultithreaded {
 		config: FillerMultiThreadedConfig,
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
-		priorityFeeSubscriber: PriorityFeeSubscriber,
 		runtimeSpec: RuntimeSpec,
 		bundleSender?: BundleSender
 	) {
@@ -282,7 +286,22 @@ export class FillerMultithreaded {
 		this.blockhashSubscriber = new BlockhashSubscriber({
 			connection: driftClient.connection,
 		});
-		this.priorityFeeSubscriber = priorityFeeSubscriber;
+
+		const perpMarketsToWatchForFees = this.marketIndexesFlattened.map((m) => {
+			return {
+				marketType: 'perp',
+				marketIndex: m,
+			};
+		});
+		perpMarketsToWatchForFees.push({
+			marketType: 'spot',
+			marketIndex: 1,
+		}); // For rebalancing
+		this.priorityFeeSubscriber = new PriorityFeeSubscriberMap({
+			driftMarkets: perpMarketsToWatchForFees,
+			driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
+		});
+
 		this.subaccount = config.subaccount ?? 0;
 		if (!this.driftClient.hasUser(this.subaccount)) {
 			throw new Error(
@@ -290,13 +309,6 @@ export class FillerMultithreaded {
 			);
 		}
 
-		const driftMarkets = this.marketIndexesFlattened.map((marketIndex) => {
-			return {
-				marketType: this.config.marketType,
-				marketIndex: marketIndex,
-			};
-		});
-		this.priorityFeeSubscriber.updateMarketTypeAndIndex(driftMarkets);
 		this.runtimeSpec = runtimeSpec;
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
@@ -357,6 +369,7 @@ export class FillerMultithreaded {
 
 	async init() {
 		await this.blockhashSubscriber.subscribe();
+		await this.priorityFeeSubscriber.subscribe();
 
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
@@ -1071,7 +1084,7 @@ export class FillerMultithreaded {
 			return;
 		}
 
-		logger.info(
+		logger.debug(
 			`${logPrefix} Triggering ${serializedNodesToTrigger.length} nodes...`
 		);
 		const seenTriggerableNodes = new Set<string>();
@@ -1083,7 +1096,7 @@ export class FillerMultithreaded {
 			seenTriggerableNodes.add(sig);
 			return this.filterTriggerableNodes(node);
 		});
-		logger.info(
+		logger.debug(
 			`${logPrefix} Filtered down to ${filteredTriggerableNodes.length} triggerable nodes...`
 		);
 
@@ -1137,7 +1150,7 @@ export class FillerMultithreaded {
 			// @ts-ignore
 			const userAccount = decodeUser(buffer);
 
-			logger.info(
+			logger.debug(
 				`${logPrefix} trying to trigger (account: ${
 					nodeToTrigger.node.userAccount
 				}, order ${nodeToTrigger.node.order.orderId.toString()}`
@@ -1226,7 +1239,7 @@ export class FillerMultithreaded {
 								logger.info(
 									`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
 								);
-								logger.info(`${logPrefix} Tx: ${txSig}`);
+								logger.info(`${logPrefix} Tx: ${txSig.txSig}`);
 							})
 							.catch((error) => {
 								nodeToTrigger.node.haveTrigger = false;
@@ -1277,6 +1290,7 @@ export class FillerMultithreaded {
 		const deserializedNodesToFill = serializedNodesToFill.map(
 			deserializeNodeToFill
 		);
+
 		const seenFillableNodes = new Set<string>();
 		const filteredFillableNodes = deserializedNodesToFill.filter((node) => {
 			const sig = getNodeToFillSignature(node);
@@ -1461,15 +1475,6 @@ export class FillerMultithreaded {
 				units: 1_400_000,
 			}),
 		];
-		if (!buildForBundle) {
-			ixs.push(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult()
-					),
-				})
-			);
-		}
 
 		try {
 			const {
@@ -1479,7 +1484,24 @@ export class FillerMultithreaded {
 				takerUserSlot,
 				referrerInfo,
 				marketType,
+				fillerRewardEstimate,
 			} = await this.getNodeFillInfo(nodeToFill);
+
+			if (!buildForBundle) {
+				ixs.push(
+					getPriorityFeeInstruction(
+						Math.floor(
+							this.priorityFeeSubscriber.getPriorityFees(
+								'perp',
+								nodeToFill.node.order!.marketIndex!
+							)!.high
+						),
+						this.driftClient.getOracleDataForPerpMarket(0).price,
+						fillerRewardEstimate,
+						this.globalConfig.priorityFeeMultiplier
+					)
+				);
+			}
 
 			logger.info(
 				logMessageForNodeToFill(
@@ -1625,16 +1647,6 @@ export class FillerMultithreaded {
 				units: 1_400_000,
 			}),
 		];
-
-		if (!buildForBundle) {
-			ixs.push(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult()
-					),
-				})
-			);
-		}
 		const fillTxId = this.fillTxId++;
 
 		const {
@@ -1644,7 +1656,25 @@ export class FillerMultithreaded {
 			takerUserSlot,
 			referrerInfo,
 			marketType,
+			fillerRewardEstimate,
 		} = await this.getNodeFillInfo(nodeToFill);
+
+		if (!buildForBundle) {
+			ixs.push(
+				getPriorityFeeInstruction(
+					Math.floor(
+						this.priorityFeeSubscriber.getPriorityFees(
+							'perp',
+							nodeToFill.node.order!.marketIndex!
+						)!.high
+					),
+					this.driftClient.getOracleDataForPerpMarket(0).price,
+					fillerRewardEstimate,
+					this.globalConfig.priorityFeeMultiplier
+				)
+			);
+		}
+
 		logger.info(
 			logMessageForNodeToFill(
 				nodeToFill,
@@ -1859,7 +1889,14 @@ export class FillerMultithreaded {
 							ixs.push(
 								ComputeBudgetProgram.setComputeUnitPrice({
 									microLamports: Math.floor(
-										this.priorityFeeSubscriber.getCustomStrategyResult()
+										Math.max(
+											...marketIdChunks.map((marketId) => {
+												return this.priorityFeeSubscriber.getPriorityFees(
+													'perp',
+													marketId
+												)!.medium;
+											})
+										)
 									),
 								})
 							);
@@ -2018,6 +2055,23 @@ export class FillerMultithreaded {
 		}
 	}
 
+	/**
+	 * Gives filler reward estimate
+	 *
+	 * @param taker
+	 * @param quoteAssetAmount
+	 */
+	protected calculateFillerRewardEstimate(
+		feeTier: FeeTier,
+		quoteAssetAmount: BN
+	) {
+		const takerFee = quoteAssetAmount
+			.muln(feeTier.feeNumerator)
+			.divn(feeTier.feeDenominator);
+		const fillerReward = BN.min(new BN(10_000), takerFee.divn(10));
+		return fillerReward;
+	}
+
 	protected async getNodeFillInfo(nodeToFill: NodeToFillWithBuffer): Promise<{
 		makerInfos: Array<DataAndSlot<MakerInfo>>;
 		takerUserPubKey: string;
@@ -2025,6 +2079,7 @@ export class FillerMultithreaded {
 		takerUserSlot: number;
 		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
+		fillerRewardEstimate: BN;
 	}> {
 		const makerInfos: Array<DataAndSlot<MakerInfo>> = [];
 
@@ -2084,6 +2139,23 @@ export class FillerMultithreaded {
 			await this.userStatsMap!.mustGet(takerUserAccount.authority.toString())
 		).getReferrerInfo();
 
+		const fillerReward = this.calculateFillerRewardEstimate(
+			getUserFeeTier(
+				MarketType.PERP,
+				this.driftClient.getStateAccount(),
+				(
+					await this.userStatsMap.mustGet(takerUserAccount.authority.toString())
+				).getAccount()
+			),
+			// eslint-disable-next-line @typescript-eslint/no-non-null-asserted-optional-chain
+			nodeToFill.node
+				.order!.price.mul(nodeToFill.node.order!.baseAssetAmount)
+				.mul(QUOTE_PRECISION)
+				.div(PRICE_PRECISION)
+				.div(BASE_PRECISION)
+				.sub(nodeToFill.node.order!.quoteAssetAmountFilled)
+		);
+
 		return Promise.resolve({
 			makerInfos,
 			takerUserPubKey,
@@ -2091,6 +2163,7 @@ export class FillerMultithreaded {
 			takerUserSlot: this.slotSubscriber.getSlot(),
 			referrerInfo,
 			marketType: nodeToFill.node.order!.marketType,
+			fillerRewardEstimate: fillerReward,
 		});
 	}
 

@@ -18,8 +18,20 @@ import {
 	SpotMarketConfig,
 	Wallet,
 	BN,
+	MarketType,
+	getUser30dRollingVolumeEstimate,
+	QUOTE_PRECISION,
+	UserStatsAccount,
+	isVariant,
+	StateAccount,
+	PRICE_PRECISION,
 } from '@drift-labs/sdk';
-import { Connection, PublicKey } from '@solana/web3.js';
+import {
+	ComputeBudgetProgram,
+	Connection,
+	LAMPORTS_PER_SOL,
+	PublicKey,
+} from '@solana/web3.js';
 import {
 	SerializedUserAccount,
 	SerializedOrder,
@@ -370,6 +382,47 @@ export const getDriftClientFromArgs = ({
 	return driftClient;
 };
 
+export const getUserFeeTier = (
+	marketType: MarketType,
+	state: StateAccount,
+	userStatsAccount: UserStatsAccount
+) => {
+	let feeTierIndex = 0;
+	if (isVariant(marketType, 'perp')) {
+		const total30dVolume = getUser30dRollingVolumeEstimate(userStatsAccount);
+
+		const stakedQuoteAssetAmount = userStatsAccount.ifStakedQuoteAssetAmount;
+		const volumeTiers = [
+			new BN(100_000_000).mul(QUOTE_PRECISION),
+			new BN(50_000_000).mul(QUOTE_PRECISION),
+			new BN(10_000_000).mul(QUOTE_PRECISION),
+			new BN(5_000_000).mul(QUOTE_PRECISION),
+			new BN(1_000_000).mul(QUOTE_PRECISION),
+		];
+		const stakedTiers = [
+			new BN(10000).mul(QUOTE_PRECISION),
+			new BN(5000).mul(QUOTE_PRECISION),
+			new BN(2000).mul(QUOTE_PRECISION),
+			new BN(1000).mul(QUOTE_PRECISION),
+			new BN(500).mul(QUOTE_PRECISION),
+		];
+
+		for (let i = 0; i < volumeTiers.length; i++) {
+			if (
+				total30dVolume.gte(volumeTiers[i]) ||
+				stakedQuoteAssetAmount.gte(stakedTiers[i])
+			) {
+				feeTierIndex = 5 - i;
+				break;
+			}
+		}
+
+		return state.perpFeeStructure.feeTiers[feeTierIndex];
+	}
+
+	return state.spotFeeStructure.feeTiers[feeTierIndex];
+};
+
 export const spawnChild = (
 	scriptPath: string,
 	childArgs: string[],
@@ -389,4 +442,29 @@ export const spawnChild = (
 	});
 
 	return child;
+};
+
+export const getPriorityFeeInstruction = (
+	priorityFeeMicroLamports: number,
+	solPrice: BN,
+	fillerRewardEstimate: BN,
+	feeMultiplier = 1.0
+) => {
+	const fillerRewardMicroLamports = Math.floor(
+		fillerRewardEstimate
+			.mul(PRICE_PRECISION)
+			.mul(new BN(LAMPORTS_PER_SOL))
+			.div(solPrice)
+			.div(QUOTE_PRECISION)
+			.toNumber() * feeMultiplier
+	);
+	logger.info(`
+		fillerRewardEstimate microLamports: ${fillerRewardMicroLamports}
+		priority fee subscriber micro lamports: ${priorityFeeMicroLamports}`);
+	return ComputeBudgetProgram.setComputeUnitPrice({
+		microLamports: Math.max(
+			priorityFeeMicroLamports,
+			fillerRewardMicroLamports
+		),
+	});
 };
