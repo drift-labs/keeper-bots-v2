@@ -430,14 +430,20 @@ function getVersionedTransaction(
 }
 
 export type SimulateAndGetTxWithCUsParams = {
-	/// instructions
-	ixs: Array<TransactionInstruction>;
 	connection: Connection;
 	payerPublicKey: PublicKey;
 	lookupTableAccounts: AddressLookupTableAccount[];
+	/// instructions to simulate and create transaction from
+	ixs: Array<TransactionInstruction>;
+	/// multiplier to apply to the estimated CU usage, default: 1.0
 	cuLimitMultiplier?: number;
+	/// set false to only create a tx without simulating for CU estimate
 	doSimulation?: boolean;
+	/// recentBlockhash to use in the final tx. If undefined, PLACEHOLDER_BLOCKHASH
+	/// will be used for simulation, the final tx will have an empty blockhash so
+	/// attempts to sign it will throw.
 	recentBlockhash?: string;
+	/// set true to dump base64 transaction before and after simulating for CUs
 	dumpTx?: boolean;
 };
 
@@ -449,6 +455,18 @@ export type SimulateAndGetTxWithCUsResponse = {
 	tx: VersionedTransaction;
 };
 
+/**
+ * Simulates the instructions in order to determine how many CUs it needs,
+ * applies `cuLimitMulitplier` to the estimate and inserts or modifies
+ * the CU limit request ix.
+ *
+ * If `recentBlockhash` is provided, it is used as is to generate the final
+ * tx. If it is undefined, uses `PLACEHOLDER_BLOCKHASH` which is a valid
+ * blockhash to perform simulation and removes it from the final tx. Signing
+ * a tx without a valid blockhash will throw.
+ * @param params
+ * @returns
+ */
 export async function simulateAndGetTxWithCUs(
 	params: SimulateAndGetTxWithCUsParams
 ): Promise<SimulateAndGetTxWithCUsResponse> {
