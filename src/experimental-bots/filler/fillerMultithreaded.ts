@@ -2068,7 +2068,7 @@ export class FillerMultithreaded {
 		const takerFee = quoteAssetAmount
 			.muln(feeTier.feeNumerator)
 			.divn(feeTier.feeDenominator);
-		const fillerReward = BN.min(new BN(10_000), takerFee.muln(10).divn(100));
+		const fillerReward = BN.min(new BN(10_000), takerFee.divn(10));
 		return fillerReward;
 	}
 
