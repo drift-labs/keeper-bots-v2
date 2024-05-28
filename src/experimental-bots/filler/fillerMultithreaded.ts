@@ -68,6 +68,7 @@ import {
 	deserializeNodeToFill,
 	deserializeOrder,
 	getUserFeeTier,
+	getPriorityFeeInstruction,
 } from '../filler-common/utils';
 import {
 	CounterValue,
@@ -286,18 +287,18 @@ export class FillerMultithreaded {
 			connection: driftClient.connection,
 		});
 
-		const perpMarkets = this.marketIndexesFlattened.map((m) => {
+		const perpMarketsToWatchForFees = this.marketIndexesFlattened.map((m) => {
 			return {
 				marketType: 'perp',
 				marketIndex: m,
 			};
 		});
-		perpMarkets.push({
+		perpMarketsToWatchForFees.push({
 			marketType: 'spot',
 			marketIndex: 1,
 		}); // For rebalancing
 		this.priorityFeeSubscriber = new PriorityFeeSubscriberMap({
-			driftMarkets: perpMarkets,
+			driftMarkets: perpMarketsToWatchForFees,
 			driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
 		});
 
@@ -1487,32 +1488,18 @@ export class FillerMultithreaded {
 			} = await this.getNodeFillInfo(nodeToFill);
 
 			if (!buildForBundle) {
-				const solPrice = this.driftClient.getOracleDataForPerpMarket(0).price;
-				const fillerRewardMicroLamports = Math.floor(
-					fillerRewardEstimate
-						.mul(PRICE_PRECISION)
-						.mul(new BN(LAMPORTS_PER_SOL))
-						.div(solPrice)
-						.div(QUOTE_PRECISION)
-						.toNumber() *
-						(this.globalConfig.priorityFeeMultiplier ?? 1)
-				);
-				const priorityFeeMicroLamports = Math.floor(
-					this.priorityFeeSubscriber.getPriorityFees(
-						'perp',
-						nodeToFill.node.order!.marketIndex!
-					)!.high
-				);
-				logger.info(`
-					fillerRewardEstimate microLamports: ${fillerRewardMicroLamports}
-					priority fee subscriber micro lamports: ${priorityFeeMicroLamports}`);
 				ixs.push(
-					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: Math.max(
-							priorityFeeMicroLamports,
-							fillerRewardMicroLamports
+					getPriorityFeeInstruction(
+						Math.floor(
+							this.priorityFeeSubscriber.getPriorityFees(
+								'perp',
+								nodeToFill.node.order!.marketIndex!
+							)!.high
 						),
-					})
+						this.driftClient.getOracleDataForPerpMarket(0).price,
+						fillerRewardEstimate,
+						this.globalConfig.priorityFeeMultiplier
+					)
 				);
 			}
 
@@ -1673,32 +1660,18 @@ export class FillerMultithreaded {
 		} = await this.getNodeFillInfo(nodeToFill);
 
 		if (!buildForBundle) {
-			const solPrice = this.driftClient.getOracleDataForPerpMarket(0).price;
-			const fillerRewardMicroLamports = Math.floor(
-				fillerRewardEstimate
-					.mul(PRICE_PRECISION)
-					.mul(new BN(LAMPORTS_PER_SOL))
-					.div(solPrice)
-					.div(QUOTE_PRECISION)
-					.toNumber() *
-					(this.globalConfig.priorityFeeMultiplier ?? 1)
-			);
-			const priorityFeeMicroLamports = Math.floor(
-				this.priorityFeeSubscriber.getPriorityFees(
-					'perp',
-					nodeToFill.node.order!.marketIndex!
-				)!.high
-			);
-			logger.info(`
-				fillerRewardEstimate microLamports: ${fillerRewardMicroLamports}
-				priority fee subscriber micro lamports: ${priorityFeeMicroLamports}`);
 			ixs.push(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.max(
-						priorityFeeMicroLamports,
-						fillerRewardMicroLamports
+				getPriorityFeeInstruction(
+					Math.floor(
+						this.priorityFeeSubscriber.getPriorityFees(
+							'perp',
+							nodeToFill.node.order!.marketIndex!
+						)!.high
 					),
-				})
+					this.driftClient.getOracleDataForPerpMarket(0).price,
+					fillerRewardEstimate,
+					this.globalConfig.priorityFeeMultiplier
+				)
 			);
 		}
 
@@ -2177,7 +2150,6 @@ export class FillerMultithreaded {
 			// eslint-disable-next-line @typescript-eslint/no-non-null-asserted-optional-chain
 			nodeToFill.node
 				.order!.price.mul(nodeToFill.node.order!.baseAssetAmount)
-				.mul(QUOTE_PRECISION)
 				.mul(QUOTE_PRECISION)
 				.div(PRICE_PRECISION)
 				.div(BASE_PRECISION)

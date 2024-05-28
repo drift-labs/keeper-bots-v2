@@ -24,8 +24,14 @@ import {
 	UserStatsAccount,
 	isVariant,
 	StateAccount,
+	PRICE_PRECISION,
 } from '@drift-labs/sdk';
-import { Connection, PublicKey } from '@solana/web3.js';
+import {
+	ComputeBudgetProgram,
+	Connection,
+	LAMPORTS_PER_SOL,
+	PublicKey,
+} from '@solana/web3.js';
 import {
 	SerializedUserAccount,
 	SerializedOrder,
@@ -436,4 +442,29 @@ export const spawnChild = (
 	});
 
 	return child;
+};
+
+export const getPriorityFeeInstruction = (
+	priorityFeeMicroLamports: number,
+	solPrice: BN,
+	fillerRewardEstimate: BN,
+	feeMultiplier = 1.0
+) => {
+	const fillerRewardMicroLamports = Math.floor(
+		fillerRewardEstimate
+			.mul(PRICE_PRECISION)
+			.mul(new BN(LAMPORTS_PER_SOL))
+			.div(solPrice)
+			.div(QUOTE_PRECISION)
+			.toNumber() * feeMultiplier
+	);
+	logger.info(`
+		fillerRewardEstimate microLamports: ${fillerRewardMicroLamports}
+		priority fee subscriber micro lamports: ${priorityFeeMicroLamports}`);
+	return ComputeBudgetProgram.setComputeUnitPrice({
+		microLamports: Math.max(
+			priorityFeeMicroLamports,
+			fillerRewardMicroLamports
+		),
+	});
 };
