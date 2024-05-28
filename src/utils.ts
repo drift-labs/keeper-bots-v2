@@ -22,8 +22,6 @@ import {
 	PriorityFeeSubscriber,
 	QUOTE_PRECISION,
 	SpotMarketAccount,
-	// TEN,
-	TxSender,
 	User,
 	Wallet,
 	convertToNumber,
@@ -42,11 +40,9 @@ import {
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
-	ConfirmOptions,
 	Connection,
 	Keypair,
 	PublicKey,
-	Signer,
 	Transaction,
 	TransactionError,
 	TransactionInstruction,
@@ -417,14 +413,6 @@ export function isSetComputeUnitsIx(ix: TransactionInstruction): boolean {
 	return false;
 }
 
-export type SimulateAndGetTxWithCUsResponse = {
-	cuEstimate: number;
-	simTxLogs: Array<string> | null;
-	simError: TransactionError | string | null;
-	simTxDuration: number;
-	tx: VersionedTransaction;
-};
-
 const PLACEHOLDER_BLOCKHASH = 'Fdum64WVeej6DeL85REV9NvfSxEJNPZ74DBk7A8kTrKP';
 function getVersionedTransaction(
 	payerKey: PublicKey,
@@ -441,25 +429,36 @@ function getVersionedTransaction(
 	return new VersionedTransaction(message);
 }
 
+export type SimulateAndGetTxWithCUsParams = {
+	/// instructions
+	ixs: Array<TransactionInstruction>;
+	connection: Connection;
+	payerPublicKey: PublicKey;
+	lookupTableAccounts: AddressLookupTableAccount[];
+	cuLimitMultiplier?: number;
+	doSimulation?: boolean;
+	recentBlockhash?: string;
+	dumpTx?: boolean;
+};
+
+export type SimulateAndGetTxWithCUsResponse = {
+	cuEstimate: number;
+	simTxLogs: Array<string> | null;
+	simError: TransactionError | string | null;
+	simTxDuration: number;
+	tx: VersionedTransaction;
+};
+
 export async function simulateAndGetTxWithCUs(
-	ixs: Array<TransactionInstruction>,
-	connection: Connection,
-	txSender: TxSender,
-	lookupTableAccounts: AddressLookupTableAccount[],
-	additionalSigners: Array<Signer>,
-	opts?: ConfirmOptions,
-	cuLimitMultiplier = 1.0,
-	doSimulation = true,
-	recentBlockhash?: string,
-	dumpTx = false
+	params: SimulateAndGetTxWithCUsParams
 ): Promise<SimulateAndGetTxWithCUsResponse> {
-	if (ixs.length === 0) {
+	if (params.ixs.length === 0) {
 		throw new Error('cannot simulate empty tx');
 	}
 
 	let setCULimitIxIdx = -1;
-	for (let idx = 0; idx < ixs.length; idx++) {
-		if (isSetComputeUnitsIx(ixs[idx])) {
+	for (let idx = 0; idx < params.ixs.length; idx++) {
+		if (isSetComputeUnitsIx(params.ixs[idx])) {
 			setCULimitIxIdx = idx;
 			break;
 		}
@@ -468,7 +467,7 @@ export async function simulateAndGetTxWithCUs(
 	// if we don't have a set CU limit ix, add one to the beginning
 	// otherwise the default CU limit for sim is 400k, which may be too low
 	if (setCULimitIxIdx === -1) {
-		ixs.unshift(
+		params.ixs.unshift(
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,
 			})
@@ -478,12 +477,12 @@ export async function simulateAndGetTxWithCUs(
 
 	let simTxDuration = 0;
 	const tx = getVersionedTransaction(
-		txSender.wallet.publicKey,
-		ixs,
-		lookupTableAccounts,
-		recentBlockhash ?? PLACEHOLDER_BLOCKHASH
+		params.payerPublicKey,
+		params.ixs,
+		params.lookupTableAccounts,
+		params.recentBlockhash ?? PLACEHOLDER_BLOCKHASH
 	);
-	if (!doSimulation) {
+	if (!params.doSimulation) {
 		return {
 			cuEstimate: -1,
 			simTxLogs: null,
@@ -492,7 +491,7 @@ export async function simulateAndGetTxWithCUs(
 			tx,
 		};
 	}
-	if (dumpTx) {
+	if (params.dumpTx) {
 		console.log(`===== Simulating The following transaction =====`);
 		const serializedTx = base64.encode(Buffer.from(tx.serialize()));
 		console.log(serializedTx);
@@ -502,7 +501,7 @@ export async function simulateAndGetTxWithCUs(
 	let resp;
 	try {
 		const start = Date.now();
-		resp = await connection.simulateTransaction(tx, {
+		resp = await params.connection.simulateTransaction(tx, {
 			sigVerify: false,
 			replaceRecentBlockhash: true,
 			commitment: 'processed',
@@ -521,16 +520,33 @@ export async function simulateAndGetTxWithCUs(
 
 	const simTxLogs = resp.value.logs;
 	const cuEstimate = resp.value.unitsConsumed!;
-	ixs[setCULimitIxIdx] = ComputeBudgetProgram.setComputeUnitLimit({
-		units: cuEstimate * cuLimitMultiplier,
+	const cusToUse = cuEstimate * (params.cuLimitMultiplier ?? 1.0);
+	params.ixs[setCULimitIxIdx] = ComputeBudgetProgram.setComputeUnitLimit({
+		units: cusToUse,
 	});
 
 	const txWithCUs = getVersionedTransaction(
-		txSender.wallet.publicKey,
-		ixs,
-		lookupTableAccounts,
-		recentBlockhash ?? PLACEHOLDER_BLOCKHASH
+		params.payerPublicKey,
+		params.ixs,
+		params.lookupTableAccounts,
+		params.recentBlockhash ?? PLACEHOLDER_BLOCKHASH
 	);
+
+	if (params.dumpTx) {
+		console.log(
+			`== Simulation result, cuEstimate: ${cuEstimate}, using: ${cusToUse}, blockhash: ${params.recentBlockhash} ==`
+		);
+		const serializedTx = base64.encode(Buffer.from(txWithCUs.serialize()));
+		console.log(serializedTx);
+		console.log(`================================================`);
+	}
+
+	// strip out the placeholder blockhash so user doesn't try to send the tx.
+	// sending a tx with placeholder blockhash will cause `blockhash not found error`
+	// which is suppressed if flight checks are skipped.
+	if (!params.recentBlockhash) {
+		txWithCUs.message.recentBlockhash = '';
+	}
 
 	return {
 		cuEstimate,

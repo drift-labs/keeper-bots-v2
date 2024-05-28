@@ -190,16 +190,17 @@ export class UserIdleFlipperBot implements Bot {
 				);
 			}
 
-			const simResult = await simulateAndGetTxWithCUs(
+			const recentBlockhash =
+				await this.driftClient.connection.getLatestBlockhash('confirmed');
+			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
-				this.driftClient.connection,
-				this.driftClient.txSender,
-				[this.lookupTableAccount!],
-				[],
-				undefined,
-				1.1,
-				true
-			);
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: [this.lookupTableAccount!],
+				cuLimitMultiplier: 1.1,
+				doSimulation: true,
+				recentBlockhash: recentBlockhash.blockhash,
+			});
 			logger.info(
 				`User idle flipper estimated ${simResult.cuEstimate} CUs for ${usersChunk.length} users.`
 			);

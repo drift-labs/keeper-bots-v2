@@ -491,18 +491,18 @@ export class LiquidatorBot implements Bot {
 
 		let resp: SimulateAndGetTxWithCUsResponse;
 		try {
-			resp = await simulateAndGetTxWithCUs(
-				fullIxs,
-				this.driftClient.connection,
-				this.driftClient.txSender,
-				luts,
-				[],
-				this.driftClient.opts,
-				1.2,
-				true,
-				undefined,
-				false
-			);
+			const recentBlockhash =
+				await this.driftClient.connection.getLatestBlockhash('confirmed');
+			resp = await simulateAndGetTxWithCUs({
+				ixs: fullIxs,
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: luts,
+				cuLimitMultiplier: 1.2,
+				doSimulation: true,
+				dumpTx: false,
+				recentBlockhash: recentBlockhash.blockhash,
+			});
 		} catch (e) {
 			const err = e as Error;
 			logger.error(

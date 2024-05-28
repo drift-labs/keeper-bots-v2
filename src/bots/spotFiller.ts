@@ -112,6 +112,8 @@ const CONFIRM_TX_ATTEMPTS = 2;
 const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
 const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana-labs/solana/issues/27241
 
+const DUMP_TXS_IN_SIM = false;
+
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
 	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
@@ -1862,18 +1864,16 @@ export class SpotFillerBot implements Bot {
 				if (this.revertOnFailure) {
 					ixs.push(await this.driftClient.getRevertFillIx());
 				}
-				const simResult = await simulateAndGetTxWithCUs(
+				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
-					this.driftClient.connection,
-					this.driftClient.txSender,
-					[this.driftLutAccount!],
-					[],
-					this.driftClient.opts,
-					SIM_CU_ESTIMATE_MULTIPLIER,
-					this.simulateTxForCUEstimate,
-					await this.getBlockhashForTx(),
-					false
-				);
+					connection: this.driftClient.connection,
+					payerPublicKey: this.driftClient.wallet.publicKey,
+					lookupTableAccounts: [this.driftLutAccount!],
+					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+					doSimulation: this.simulateTxForCUEstimate,
+					recentBlockhash: await this.getBlockhashForTx(),
+					dumpTx: DUMP_TXS_IN_SIM,
+				});
 				const user = this.driftClient.getUser();
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
@@ -2127,18 +2127,16 @@ export class SpotFillerBot implements Bot {
 		const lutAccounts: Array<AddressLookupTableAccount> = [];
 		this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
 		this.driftSpotLutAccount && lutAccounts.push(this.driftSpotLutAccount);
-		const simResult = await simulateAndGetTxWithCUs(
+		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
-			this.driftClient.connection,
-			this.driftClient.txSender,
-			lutAccounts,
-			[],
-			this.driftClient.opts,
-			SIM_CU_ESTIMATE_MULTIPLIER,
-			this.simulateTxForCUEstimate,
-			undefined,
-			false
-		);
+			connection: this.driftClient.connection,
+			payerPublicKey: this.driftClient.wallet.publicKey,
+			lookupTableAccounts: lutAccounts,
+			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+			doSimulation: this.simulateTxForCUEstimate,
+			recentBlockhash: await this.getBlockhashForTx(),
+			dumpTx: DUMP_TXS_IN_SIM,
+		});
 		const user = this.driftClient.getUser();
 		this.simulateTxHistogram?.record(simResult.simTxDuration, {
 			type: 'spotFill',
@@ -2243,29 +2241,36 @@ export class SpotFillerBot implements Bot {
 			);
 			const userAccount = user.data.getUserAccount();
 
-			const ixs = [];
-			ixs.push(
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000,
+				}),
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult()
+					),
+				}),
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
 					userAccount,
 					nodeToTrigger.node.order
-				)
-			);
+				),
+			];
 
 			if (this.revertOnFailure) {
 				ixs.push(await this.driftClient.getRevertFillIx());
 			}
 
-			const simResult = await simulateAndGetTxWithCUs(
+			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
-				this.driftClient.connection,
-				this.driftClient.txSender,
-				[this.driftLutAccount!],
-				[],
-				this.driftClient.opts,
-				SIM_CU_ESTIMATE_MULTIPLIER,
-				this.simulateTxForCUEstimate
-			);
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: [this.driftLutAccount!],
+				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+				doSimulation: this.simulateTxForCUEstimate,
+				recentBlockhash: await this.getBlockhashForTx(),
+				dumpTx: DUMP_TXS_IN_SIM,
+			});
 			const driftUser = this.driftClient.getUser();
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',

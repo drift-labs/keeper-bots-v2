@@ -254,16 +254,17 @@ export class FundingRateUpdaterBot implements Bot {
 			}),
 			await this.driftClient.getUpdateFundingRateIx(marketIndex, oracle),
 		];
-		const simResult = await simulateAndGetTxWithCUs(
+		const recentBlockhash =
+			await this.driftClient.connection.getLatestBlockhash('confirmed');
+		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
-			this.driftClient.connection,
-			this.driftClient.txSender,
-			[this.lookupTableAccount!],
-			[],
-			undefined,
-			CU_EST_MULTIPLIER,
-			true
-		);
+			connection: this.driftClient.connection,
+			payerPublicKey: this.driftClient.wallet.publicKey,
+			lookupTableAccounts: [this.lookupTableAccount!],
+			cuLimitMultiplier: CU_EST_MULTIPLIER,
+			doSimulation: true,
+			recentBlockhash: recentBlockhash.blockhash,
+		});
 		logger.info(
 			`[${this.name}] UpdateFundingRate estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
 		);

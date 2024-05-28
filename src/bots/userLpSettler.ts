@@ -390,16 +390,17 @@ export class UserLpSettlerBot implements Bot {
 				)),
 			];
 
-			const simResult = await simulateAndGetTxWithCUs(
+			const recentBlockhash =
+				await this.driftClient.connection.getLatestBlockhash('confirmed');
+			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
-				this.driftClient.connection,
-				this.driftClient.txSender,
-				[this.lookupTableAccount!],
-				[],
-				undefined,
-				CU_EST_MULTIPLIER,
-				true
-			);
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: [this.lookupTableAccount!],
+				cuLimitMultiplier: CU_EST_MULTIPLIER,
+				doSimulation: true,
+				recentBlockhash: recentBlockhash.blockhash,
+			});
 			logger.info(
 				`Settle LP estimated ${simResult.cuEstimate} CUs for ${ixs.length} settle LPs.`
 			);

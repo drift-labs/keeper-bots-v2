@@ -115,6 +115,7 @@ export const TX_CONFIRMATION_BATCH_SIZE = 100;
 export const TX_TIMEOUT_THRESHOLD_MS = 60_000; // tx considered stale after this time and give up confirming
 export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until trying to confirm tx again if rate limited
 export const CACHED_BLOCKHASH_OFFSET = 5;
+const DUMP_TXS_IN_SIM = false;
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
@@ -1315,7 +1316,7 @@ export class FillerBot implements Bot {
 			}
 
 			if (isEndIxLog(this.driftClient.program.programId.toBase58(), log)) {
-				if (!errorThisFillIx) {
+				if (inFillIx && !errorThisFillIx) {
 					successCount++;
 				}
 
@@ -1786,17 +1787,16 @@ export class FillerBot implements Bot {
 				if (this.revertOnFailure) {
 					ixs.push(await this.driftClient.getRevertFillIx());
 				}
-				const simResult = await simulateAndGetTxWithCUs(
+				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
-					this.driftClient.connection,
-					this.driftClient.txSender,
-					[this.lookupTableAccount!],
-					[],
-					this.driftClient.opts,
-					SIM_CU_ESTIMATE_MULTIPLIER,
-					this.simulateTxForCUEstimate,
-					await this.getBlockhashForTx()
-				);
+					connection: this.driftClient.connection,
+					payerPublicKey: this.driftClient.wallet.publicKey,
+					lookupTableAccounts: [this.lookupTableAccount!],
+					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+					doSimulation: this.simulateTxForCUEstimate,
+					recentBlockhash: await this.getBlockhashForTx(),
+					dumpTx: DUMP_TXS_IN_SIM,
+				});
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
 					simError: simResult.simError !== null,
@@ -2131,17 +2131,16 @@ export class FillerBot implements Bot {
 		}
 
 		const user = this.driftClient.getUser();
-		const simResult = await simulateAndGetTxWithCUs(
+		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
-			this.driftClient.connection,
-			this.driftClient.txSender,
-			[this.lookupTableAccount!],
-			[],
-			this.driftClient.opts,
-			SIM_CU_ESTIMATE_MULTIPLIER,
-			this.simulateTxForCUEstimate,
-			await this.getBlockhashForTx()
-		);
+			connection: this.driftClient.connection,
+			payerPublicKey: this.driftClient.wallet.publicKey,
+			lookupTableAccounts: [this.lookupTableAccount!],
+			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+			doSimulation: this.simulateTxForCUEstimate,
+			recentBlockhash: await this.getBlockhashForTx(),
+			dumpTx: DUMP_TXS_IN_SIM,
+		});
 		this.simulateTxHistogram?.record(simResult.simTxDuration, {
 			type: 'bulkFill',
 			simError: simResult.simError !== null,
@@ -2257,31 +2256,33 @@ export class FillerBot implements Bot {
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000,
 				}),
-			];
-			ixs.push(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult()
+					),
+				}),
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
 					user.data,
 					nodeToTrigger.node.order
-				)
-			);
+				),
+			];
 
 			if (this.revertOnFailure) {
 				ixs.push(await this.driftClient.getRevertFillIx());
 			}
 
 			const driftUser = this.driftClient.getUser();
-			const simResult = await simulateAndGetTxWithCUs(
+			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
-				this.driftClient.connection,
-				this.driftClient.txSender,
-				[this.lookupTableAccount!],
-				[],
-				this.driftClient.opts,
-				SIM_CU_ESTIMATE_MULTIPLIER,
-				this.simulateTxForCUEstimate,
-				await this.getBlockhashForTx()
-			);
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: [this.lookupTableAccount!],
+				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+				doSimulation: this.simulateTxForCUEstimate,
+				recentBlockhash: await this.getBlockhashForTx(),
+				dumpTx: DUMP_TXS_IN_SIM,
+			});
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',
 				simError: simResult.simError !== null,
@@ -2441,17 +2442,16 @@ export class FillerBot implements Bot {
 							))
 						);
 
-						const simResult = await simulateAndGetTxWithCUs(
+						const simResult = await simulateAndGetTxWithCUs({
 							ixs,
-							this.driftClient.connection,
-							this.driftClient.txSender,
-							[this.lookupTableAccount!],
-							[],
-							this.driftClient.opts,
-							SIM_CU_ESTIMATE_MULTIPLIER,
-							this.simulateTxForCUEstimate,
-							await this.getBlockhashForTx()
-						);
+							connection: this.driftClient.connection,
+							payerPublicKey: this.driftClient.wallet.publicKey,
+							lookupTableAccounts: [this.lookupTableAccount!],
+							cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+							doSimulation: this.simulateTxForCUEstimate,
+							recentBlockhash: await this.getBlockhashForTx(),
+							dumpTx: DUMP_TXS_IN_SIM,
+						});
 						this.simulateTxHistogram?.record(simResult.simTxDuration, {
 							type: 'settlePnl',
 							simError: simResult.simError !== null,
