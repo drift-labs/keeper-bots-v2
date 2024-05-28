@@ -1495,7 +1495,6 @@ export class FillerMultithreaded {
 						.div(solPrice)
 						.div(QUOTE_PRECISION)
 						.toNumber() *
-						0.9 *
 						(this.globalConfig.priorityFeeMultiplier ?? 1)
 				);
 				const priorityFeeMicroLamports = Math.floor(
@@ -1682,7 +1681,6 @@ export class FillerMultithreaded {
 					.div(solPrice)
 					.div(QUOTE_PRECISION)
 					.toNumber() *
-					0.9 *
 					(this.globalConfig.priorityFeeMultiplier ?? 1)
 			);
 			const priorityFeeMicroLamports = Math.floor(
