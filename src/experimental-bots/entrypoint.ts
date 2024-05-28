@@ -18,9 +18,6 @@ import {
 	RetryTxSender,
 	SlotSubscriber,
 	initialize,
-	PriorityFeeMethod,
-	PriorityFeeSubscriber,
-	HeliusPriorityLevel,
 } from '@drift-labs/sdk';
 import {
 	Commitment,
@@ -33,7 +30,6 @@ import { BundleSender } from '../bundleSender';
 import { FillerMultithreaded } from './filler/fillerMultithreaded';
 import http from 'http';
 import { promiseTimeout } from '@drift-labs/sdk';
-import { DriftPriorityFeeResponse } from '@drift-labs/sdk/lib/priorityFee/driftPriorityFeeMethod';
 import { SpotFillerMultithreaded } from './spotFiller/spotFillerMultithreaded';
 
 require('dotenv').config();
@@ -171,7 +167,9 @@ const runBot = async () => {
 			additionalConnections,
 		});
 	} else {
-		const skipConfirmation = configHasBot(config, 'fillerMultithreaded');
+		const skipConfirmation =
+			configHasBot(config, 'fillerMultithreaded') ||
+			configHasBot(config, 'spotFillerMultithreaded');
 		txSender = new FastSingleTxSender({
 			connection: sendTxConnection,
 			blockhashRefreshInterval: 500,
@@ -212,19 +210,6 @@ const runBot = async () => {
 		resubTimeoutMs: 10_000,
 	});
 	await slotSubscriber.subscribe();
-
-	const priorityFeeSubscriber = new PriorityFeeSubscriber({
-		frequencyMs: 1000,
-		priorityFeeMethod: PriorityFeeMethod.DRIFT,
-		driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
-		customStrategy: {
-			calculate: (samples: DriftPriorityFeeResponse) => {
-				return Math.max(...samples.map((p) => p[HeliusPriorityLevel.HIGH]));
-			},
-		},
-		priorityFeeMultiplier: config.global.priorityFeeMultiplier,
-	});
-	await priorityFeeSubscriber.subscribe();
 
 	const lamportsBalance = await connection.getBalance(wallet.publicKey);
 	logger.info(
@@ -289,7 +274,6 @@ const runBot = async () => {
 			config.botConfigs?.fillerMultithreaded,
 			driftClient,
 			slotSubscriber,
-			priorityFeeSubscriber,
 			{
 				rpcEndpoint: endpoint,
 				commit: '',
@@ -333,7 +317,6 @@ const runBot = async () => {
 			},
 			config.global,
 			config.botConfigs?.spotFillerMultithreaded,
-			priorityFeeSubscriber,
 			bundleSender
 		);
 		bots.push(spotFillerMultithreaded);

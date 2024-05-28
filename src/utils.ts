@@ -30,6 +30,7 @@ import {
 	getOrderSignature,
 	getVariant,
 	WhileValidTxSender,
+	PriorityFeeSubscriberMap,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -722,7 +723,7 @@ export function getTransactionAccountMetas(
 }
 
 export async function swapFillerHardEarnedUSDCForSOL(
-	priorityFeeSubscriber: PriorityFeeSubscriber,
+	priorityFeeSubscriber: PriorityFeeSubscriber | PriorityFeeSubscriberMap,
 	driftClient: DriftClient,
 	jupiterClient: JupiterClient,
 	blockhash: string,
@@ -874,11 +875,16 @@ export async function swapFillerHardEarnedUSDCForSOL(
 						units: cu,
 					}),
 					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: Math.floor(
-							priorityFeeSubscriber.getHeliusPriorityFeeLevel(
-								HeliusPriorityLevel.LOW
-							) * 1.1
-						),
+						microLamports:
+							priorityFeeSubscriber instanceof PriorityFeeSubscriberMap
+								? Math.floor(
+										priorityFeeSubscriber.getPriorityFees('spot', 0)!.low * 1.1
+								  )
+								: Math.floor(
+										priorityFeeSubscriber.getHeliusPriorityFeeLevel(
+											HeliusPriorityLevel.LOW
+										) * 1.1
+								  ),
 					}),
 					...ixs,
 				],
