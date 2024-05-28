@@ -546,6 +546,14 @@ export class FillerBot implements Bot {
 	}
 
 	protected async baseInit() {
+		const fillerSolBalance = await this.driftClient.connection.getBalance(
+			this.driftClient.authority
+		);
+		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
+		logger.info(
+			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
+		);
+
 		const startInitUserStatsMap = Date.now();
 		logger.info(`Initializing userStatsMap`);
 
@@ -571,14 +579,6 @@ export class FillerBot implements Bot {
 
 	public async init() {
 		await this.baseInit();
-
-		const fillerSolBalance = await this.driftClient.connection.getBalance(
-			this.driftClient.authority
-		);
-		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
-		logger.info(
-			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
-		);
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap!,
@@ -2253,7 +2253,11 @@ export class FillerBot implements Bot {
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
 			this.triggeringNodes.set(nodeSignature, Date.now());
 
-			const ixs = [];
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000,
+				}),
+			];
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),

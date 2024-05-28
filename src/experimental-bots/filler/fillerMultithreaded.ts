@@ -1155,7 +1155,11 @@ export class FillerMultithreaded {
 			this.seenTriggerableOrders.add(nodeSignature);
 			this.triggeringNodes.set(nodeSignature, Date.now());
 
-			const ixs = [];
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000,
+				}),
+			];
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),

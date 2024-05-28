@@ -521,12 +521,11 @@ export async function simulateAndGetTxWithCUs(
 		});
 	}
 
-	const txWithCUs = await txSender.getVersionedTransaction(
+	const txWithCUs = getVersionedTransaction(
+		txSender.wallet.publicKey,
 		ixs,
 		lookupTableAccounts,
-		additionalSigners,
-		opts,
-		recentBlockhash
+		recentBlockhash ?? PLACEHOLDER_BLOCKHASH
 	);
 
 	return {
@@ -864,8 +863,9 @@ export async function swapFillerHardEarnedUSDCForSOL(
 			closeAccountInstruction,
 		];
 
-		const buildTx = async (cu: number): Promise<VersionedTransaction> => {
-			return await driftClient.txSender.getVersionedTransaction(
+		const buildTx = (cu: number): VersionedTransaction => {
+			return getVersionedTransaction(
+				driftClient.txSender.wallet.publicKey,
 				[
 					ComputeBudgetProgram.setComputeUnitLimit({
 						units: cu,
@@ -880,16 +880,12 @@ export async function swapFillerHardEarnedUSDCForSOL(
 					...ixs,
 				],
 				[...lookupTables, driftLut],
-				[],
-				driftClient.opts
+				blockhash
 			);
 		};
 
-		const tx = await buildTx(1_000_000);
-		tx.message.recentBlockhash = blockhash;
-
 		const simTxResult = await driftClient.connection.simulateTransaction(
-			await buildTx(1_000_000),
+			buildTx(1_400_000),
 			{
 				replaceRecentBlockhash: true,
 				commitment: 'confirmed',
@@ -919,7 +915,7 @@ export async function swapFillerHardEarnedUSDCForSOL(
 
 		const txSigAndSlot = await txSender.sendVersionedTransaction(
 			// @ts-ignore
-			await buildTx(Math.floor(simTxResult.value.unitsConsumed * 1.2)),
+			buildTx(Math.floor(simTxResult.value.unitsConsumed * 1.2)),
 			[],
 			driftClient.opts
 		);
