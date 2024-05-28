@@ -222,16 +222,17 @@ export class MakerBidAskTwapCrank implements Bot {
 		ixs: TransactionInstruction[]
 	): Promise<{ success: boolean; canRetry: boolean }> {
 		try {
-			const simResult = await simulateAndGetTxWithCUs(
+			const recentBlockhash =
+				await this.driftClient.connection.getLatestBlockhash('confirmed');
+			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
-				this.driftClient.connection,
-				this.driftClient.txSender,
-				[this.lookupTableAccount!],
-				[],
-				undefined,
-				CU_EST_MULTIPLIER,
-				true
-			);
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: [this.lookupTableAccount!],
+				cuLimitMultiplier: CU_EST_MULTIPLIER,
+				doSimulation: true,
+				recentBlockhash: recentBlockhash.blockhash,
+			});
 			logger.info(
 				`[${this.name}] estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
 			);

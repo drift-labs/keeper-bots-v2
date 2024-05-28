@@ -604,16 +604,17 @@ export class UserPnlSettlerBot implements Bot {
 				...(await this.driftClient.getSettlePNLsIxs(users, [marketIndex]))
 			);
 
-			const simResult = await simulateAndGetTxWithCUs(
+			const recentBlockhash =
+				await this.driftClient.connection.getLatestBlockhash('confirmed');
+			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
-				this.driftClient.connection,
-				this.driftClient.txSender,
-				[this.lookupTableAccount!],
-				[],
-				undefined,
-				CU_EST_MULTIPLIER,
-				true
-			);
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: [this.lookupTableAccount!],
+				cuLimitMultiplier: CU_EST_MULTIPLIER,
+				doSimulation: true,
+				recentBlockhash: recentBlockhash.blockhash,
+			});
 			logger.info(
 				`Settle Pnl estimated ${simResult.cuEstimate} CUs for ${ixs.length} ixs, ${users.length} users.`
 			);

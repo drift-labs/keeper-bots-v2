@@ -714,16 +714,15 @@ export class SpotFillerMultithreaded {
 				);
 			}
 
-			const simResult = await simulateAndGetTxWithCUs(
+			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
-				this.driftClient.connection,
-				this.driftClient.txSender,
-				[this.driftLutAccount!],
-				[],
-				this.driftClient.opts,
-				SIM_CU_ESTIMATE_MULTIPLIER,
-				this.simulateTxForCUEstimate
-			);
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: [this.driftLutAccount!],
+				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+				doSimulation: this.simulateTxForCUEstimate,
+				recentBlockhash: await this.getBlockhashForTx(),
+			});
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',
 				simError: simResult.simError !== null,
@@ -988,18 +987,16 @@ export class SpotFillerMultithreaded {
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
 				}
-				const simResult = await simulateAndGetTxWithCUs(
+				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
-					this.driftClient.connection,
-					this.driftClient.txSender,
-					[this.driftLutAccount!],
-					[],
-					this.driftClient.opts,
-					SIM_CU_ESTIMATE_MULTIPLIER,
-					this.simulateTxForCUEstimate,
-					await this.getBlockhashForTx(),
-					false
-				);
+					connection: this.driftClient.connection,
+					payerPublicKey: this.driftClient.wallet.publicKey,
+					lookupTableAccounts: [this.driftLutAccount!],
+					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+					doSimulation: this.simulateTxForCUEstimate,
+					recentBlockhash: await this.getBlockhashForTx(),
+					dumpTx: false,
+				});
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
 					simError: simResult.simError !== null,
@@ -1211,18 +1208,16 @@ export class SpotFillerMultithreaded {
 		const lutAccounts: Array<AddressLookupTableAccount> = [];
 		this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
 		this.driftSpotLutAccount && lutAccounts.push(this.driftSpotLutAccount);
-		const simResult = await simulateAndGetTxWithCUs(
+		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
-			this.driftClient.connection,
-			this.driftClient.txSender,
-			lutAccounts,
-			[],
-			this.driftClient.opts,
-			SIM_CU_ESTIMATE_MULTIPLIER,
-			this.simulateTxForCUEstimate,
-			undefined,
-			false
-		);
+			connection: this.driftClient.connection,
+			payerPublicKey: this.driftClient.wallet.publicKey,
+			lookupTableAccounts: lutAccounts,
+			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+			doSimulation: this.simulateTxForCUEstimate,
+			recentBlockhash: await this.getBlockhashForTx(),
+			dumpTx: false,
+		});
 		this.simulateTxHistogram?.record(simResult.simTxDuration, {
 			type: 'spotFill',
 			simError: simResult.simError !== null,
