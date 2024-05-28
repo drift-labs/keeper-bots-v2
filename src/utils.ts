@@ -464,6 +464,17 @@ export async function simulateAndGetTxWithCUs(
 		}
 	}
 
+	// if we don't have a set CU limit ix, add one to the beginning
+	// otherwise the default CU limit for sim is 400k, which may be too low
+	if (setCULimitIxIdx === -1) {
+		ixs.unshift(
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000,
+			})
+		);
+		setCULimitIxIdx = 0;
+	}
+
 	let simTxDuration = 0;
 	const tx = getVersionedTransaction(
 		txSender.wallet.publicKey,
@@ -509,17 +520,9 @@ export async function simulateAndGetTxWithCUs(
 
 	const simTxLogs = resp.value.logs;
 	const cuEstimate = resp.value.unitsConsumed!;
-	if (setCULimitIxIdx === -1) {
-		ixs.unshift(
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: cuEstimate * cuLimitMultiplier,
-			})
-		);
-	} else {
-		ixs[setCULimitIxIdx] = ComputeBudgetProgram.setComputeUnitLimit({
-			units: cuEstimate * cuLimitMultiplier,
-		});
-	}
+	ixs[setCULimitIxIdx] = ComputeBudgetProgram.setComputeUnitLimit({
+		units: cuEstimate * cuLimitMultiplier,
+	});
 
 	const txWithCUs = getVersionedTransaction(
 		txSender.wallet.publicKey,
