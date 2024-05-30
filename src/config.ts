@@ -26,6 +26,14 @@ export type JitMakerConfig = BaseBotConfig & {
 	jitCULimit?: number;
 };
 
+export type UserPnlSettlerConfig = BaseBotConfig & {
+	/// perp market indexes to filter for settling pnl
+	perpMarketIndicies?: Array<number>;
+	/// min abs. USDC threshold before settling pnl
+	/// in USDC human terms (100 for 100 USDC)
+	settlePnlThresholdUsdc?: number;
+};
+
 export type MarkTwapCrankConfig = BaseBotConfig & {
 	crankIntervalToMarketIndicies?: { [key: number]: number[] };
 };
@@ -100,7 +108,7 @@ export type BotConfigMap = {
 	jitMaker?: JitMakerConfig;
 	ifRevenueSettler?: BaseBotConfig;
 	fundingRateUpdater?: BaseBotConfig;
-	userPnlSettler?: BaseBotConfig;
+	userPnlSettler?: UserPnlSettlerConfig;
 	userLpSettler?: BaseBotConfig;
 	userIdleFlipper?: BaseBotConfig;
 	markTwapCrank?: MarkTwapCrankConfig;
@@ -447,6 +455,8 @@ export function loadConfigFromOpts(opts: any): Config {
 			botId: process.env.BOT_ID ?? 'userPnlSettler',
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
+			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
+			settlePnlThresholdUsdc: opts.settlePnlThresholdUsdc ?? 10,
 		};
 	}
 	if (opts.userLpSettler) {

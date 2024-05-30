@@ -193,6 +193,11 @@ program
 	)
 	.option('--metrics-port <number>', 'Port for the Prometheus exporter', '9464')
 	.option('--disable-metrics', 'Set to disable Prometheus metrics')
+	.option(
+		'--settle-pnl-threshold-usdc <number>',
+		'Settle PnL if above this threshold (USDC)',
+		'100'
+	)
 	.parse();
 
 const opts = program.opts();

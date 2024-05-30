@@ -35,7 +35,7 @@ import { getErrorCode } from '../error';
 import { logger } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
-import { BaseBotConfig, GlobalConfig } from '../config';
+import { GlobalConfig, UserPnlSettlerConfig } from '../config';
 import {
 	decodeName,
 	getDriftPriorityFeeEndpoint,
@@ -50,7 +50,6 @@ import {
 	TransactionExpiredBlockheightExceededError,
 } from '@solana/web3.js';
 
-const MIN_PNL_TO_SETTLE = new BN(-10).mul(QUOTE_PRECISION);
 const SETTLE_USER_CHUNKS = 4;
 const SLEEP_MS = 500;
 const CU_EST_MULTIPLIER = 1.25;
@@ -76,19 +75,25 @@ export class UserPnlSettlerBot implements Bot {
 	private userMap: UserMap;
 	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
 	private inProgress = false;
+	private marketIndexes: Array<number>;
+	private minPnlToSettle: BN;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
 		driftClientConfigs: DriftClientConfig,
-		config: BaseBotConfig,
+		config: UserPnlSettlerConfig,
 		globalConfig: GlobalConfig,
 		txSender: TxSender
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
+		this.marketIndexes = config.perpMarketIndicies ?? [];
+		this.minPnlToSettle = new BN(
+			Math.abs(Number(config.settlePnlThresholdUsdc) ?? 10) * -1
+		).mul(QUOTE_PRECISION);
 		this.globalConfig = globalConfig;
 
 		const bulkAccountLoader = new BulkAccountLoader(
@@ -248,6 +253,20 @@ export class UserPnlSettlerBot implements Bot {
 						`Checking user ${userAccKeyStr} position in market ${settleePosition.marketIndex}`
 					);
 
+					if (
+						this.marketIndexes.length > 0 &&
+						!this.marketIndexes.includes(settleePosition.marketIndex)
+					) {
+						logger.info(
+							`Skipping user ${userAccKeyStr} in market ${
+								settleePosition.marketIndex
+							} because it's not in the market indexes to settle (${this.marketIndexes.join(
+								', '
+							)})`
+						);
+						continue;
+					}
+
 					// only settle active positions (base amount) or negative quote
 					if (
 						settleePosition.quoteAssetAmount.gte(ZERO) &&
@@ -345,7 +364,7 @@ export class UserPnlSettlerBot implements Bot {
 					if (
 						(userUnsettledPnl.eq(ZERO) &&
 							settleePositionWithLp.lpShares.eq(ZERO)) ||
-						(userUnsettledPnl.gt(MIN_PNL_TO_SETTLE) &&
+						(userUnsettledPnl.gt(this.minPnlToSettle) &&
 							!settleePositionWithLp.baseAssetAmount.eq(ZERO) &&
 							!isUsdcBorrow &&
 							settleePositionWithLp.lpShares.eq(ZERO))
@@ -359,7 +378,7 @@ export class UserPnlSettlerBot implements Bot {
 					// if user has usdc borrow, only settle if magnitude of pnl is material ($10 and 1% of borrow)
 					if (
 						isUsdcBorrow &&
-						(userUnsettledPnl.abs().lt(MIN_PNL_TO_SETTLE.abs()) ||
+						(userUnsettledPnl.abs().lt(this.minPnlToSettle.abs()) ||
 							userUnsettledPnl.abs().lt(usdcAmount.abs().div(new BN(100))))
 					) {
 						logger.debug(
