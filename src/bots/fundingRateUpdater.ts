@@ -37,7 +37,7 @@ const errorCodesToSuppress = [
 const errorCodesCanRetry = [
 	6096, // AMMNotUpdatedInSameSlot
 ];
-const CU_EST_MULTIPLIER = 1.1;
+const CU_EST_MULTIPLIER = 1.4;
 
 function onTheHourUpdate(
 	now: number,
