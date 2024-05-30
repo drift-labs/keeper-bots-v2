@@ -34,7 +34,7 @@ import {
 	simulateAndGetTxWithCUs,
 } from '../utils';
 
-const CU_EST_MULTIPLIER = 1.1;
+const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
 
 function isCriticalError(e: Error): boolean {
