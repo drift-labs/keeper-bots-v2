@@ -381,7 +381,7 @@ export class FillerBot implements Bot {
 			ttlResolution: 1000,
 		});
 		this.clockSubscriber = new ClockSubscriber(driftClient.connection, {
-			commitment: 'confirmed',
+			commitment: 'finalized',
 			resubTimeoutMs: 5_000,
 		});
 	}
