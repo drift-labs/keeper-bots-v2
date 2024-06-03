@@ -312,7 +312,7 @@ export class UserPnlSettlerBot implements Bot {
 						!perpMarketAndOracleData[perpMarketIdx] ||
 						!spotMarketAndOracleData[spotMarketIdx]
 					) {
-						logger.debug(
+						logger.error(
 							`Skipping user ${userAccKeyStr}-${settleePosition.marketIndex} because no spot market or oracle data`
 						);
 						continue;
