@@ -77,6 +77,7 @@ export class UserPnlSettlerBot implements Bot {
 	private inProgress = false;
 	private marketIndexes: Array<number>;
 	private minPnlToSettle: BN;
+	private maxUsersToConsider: number;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -94,6 +95,7 @@ export class UserPnlSettlerBot implements Bot {
 		this.minPnlToSettle = new BN(
 			Math.abs(Number(config.settlePnlThresholdUsdc) ?? 10) * -1
 		).mul(QUOTE_PRECISION);
+		this.maxUsersToConsider = config.maxUsersToConsider ?? 50;
 		this.globalConfig = globalConfig;
 
 		const bulkAccountLoader = new BulkAccountLoader(
@@ -500,7 +502,7 @@ export class UserPnlSettlerBot implements Bot {
 
 				const sortedParams = params
 					.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))
-					.slice(0, 100);
+					.slice(0, this.maxUsersToConsider);
 
 				logger.info(
 					`Settling ${sortedParams.length} users in ${

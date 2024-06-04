@@ -198,6 +198,11 @@ program
 		'Settle PnL if above this threshold (USDC)',
 		'100'
 	)
+	.option(
+		'--max-users-to-consider <number>',
+		'Max number of users to consider for settling pnl in each iteration',
+		'50'
+	)
 	.parse();
 
 const opts = program.opts();

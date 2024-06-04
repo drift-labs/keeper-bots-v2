@@ -32,6 +32,8 @@ export type UserPnlSettlerConfig = BaseBotConfig & {
 	/// min abs. USDC threshold before settling pnl
 	/// in USDC human terms (100 for 100 USDC)
 	settlePnlThresholdUsdc?: number;
+	/// max number of users to consider for settling pnl on each iteration
+	maxUsersToConsider?: number;
 };
 
 export type MarkTwapCrankConfig = BaseBotConfig & {
@@ -457,6 +459,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			runOnce: opts.runOnce ?? false,
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
 			settlePnlThresholdUsdc: opts.settlePnlThresholdUsdc ?? 10,
+			maxUsersToConsider: opts.maxUsersToConsider ?? 50,
 		};
 	}
 	if (opts.userLpSettler) {
