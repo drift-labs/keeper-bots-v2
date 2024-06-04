@@ -458,8 +458,8 @@ export function loadConfigFromOpts(opts: any): Config {
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
-			settlePnlThresholdUsdc: opts.settlePnlThresholdUsdc ?? 10,
-			maxUsersToConsider: opts.maxUsersToConsider ?? 50,
+			settlePnlThresholdUsdc: Number(opts.settlePnlThresholdUsdc) ?? 10,
+			maxUsersToConsider: Number(opts.maxUsersToConsider) ?? 50,
 		};
 	}
 	if (opts.userLpSettler) {
