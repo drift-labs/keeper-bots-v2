@@ -117,6 +117,8 @@ export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until t
 export const CACHED_BLOCKHASH_OFFSET = 5;
 const DUMP_TXS_IN_SIM = false;
 
+const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
+
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
 	6010, // 0x177a Error Number: 6010. Error Message: User Has No Position In Market.
@@ -934,7 +936,7 @@ export class FillerBot implements Bot {
 				vBid,
 				vAsk,
 				fillSlot,
-				this.clockSubscriber.getUnixTs(),
+				this.clockSubscriber.getUnixTs() - EXPIRE_ORDER_BUFFER_SEC,
 				MarketType.PERP,
 				oraclePriceData,
 				this.driftClient.getStateAccount(),

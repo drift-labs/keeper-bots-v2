@@ -38,6 +38,8 @@ import {
 } from './utils';
 import { sleepMs } from '../../utils';
 
+const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
+
 const logPrefix = '[DLOBBuilder]';
 class DLOBBuilder {
 	private userAccountData = new Map<string, UserAccount>();
@@ -307,7 +309,7 @@ class DLOBBuilder {
 				fallbackBid,
 				fallbackAsk,
 				slot,
-				this.clockSubscriber.getUnixTs(),
+				this.clockSubscriber.getUnixTs() - EXPIRE_ORDER_BUFFER_SEC,
 				this.marketType,
 				oraclePriceData,
 				stateAccount,

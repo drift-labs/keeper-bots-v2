@@ -114,6 +114,8 @@ const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana
 
 const DUMP_TXS_IN_SIM = false;
 
+const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
+
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
 	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
@@ -1159,7 +1161,7 @@ export class SpotFillerBot implements Bot {
 			fallbackBidPrice,
 			fallbackAskPrice,
 			fillSlot,
-			this.clockSubscriber.getUnixTs(),
+			this.clockSubscriber.getUnixTs() - EXPIRE_ORDER_BUFFER_SEC,
 			MarketType.SPOT,
 			oraclePriceData,
 			this.driftClient.getStateAccount(),
