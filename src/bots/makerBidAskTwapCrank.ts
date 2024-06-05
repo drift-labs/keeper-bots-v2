@@ -363,6 +363,8 @@ export class MakerBidAskTwapCrank implements Bot {
 					concatenatedList as [PublicKey, PublicKey][]
 				);
 
+				ixs.push(ix);
+
 				if (
 					isVariant(
 						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
@@ -373,8 +375,6 @@ export class MakerBidAskTwapCrank implements Bot {
 						await this.driftClient.getUpdatePrelaunchOracleIx(mi);
 					ixs.push(updatePrelaunchOracleIx);
 				}
-
-				ixs.push(ix);
 
 				const resp = await this.sendTx(mi, ixs);
 				logger.info(
