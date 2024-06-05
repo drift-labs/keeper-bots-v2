@@ -519,7 +519,11 @@ export class UserPnlSettlerBot implements Bot {
 				logger.info(`Waiting for ${allTxPromises.length} txs to settle...`);
 				const settleStart = Date.now();
 				await Promise.all(allTxPromises);
-				logger.info(`Settled in ${Date.now() - settleStart}ms`);
+				logger.info(
+					`Settled ${sortedParams.length} users in market ${marketIndex} in ${
+						Date.now() - settleStart
+					}ms`
+				);
 			}
 		} catch (err) {
 			console.error(err);
