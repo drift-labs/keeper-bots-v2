@@ -769,10 +769,12 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'userIdleFlipper')) {
 		needUserMapSubscribe = true;
+		needBlockhashSubscriber = true;
 		bots.push(
 			new UserIdleFlipperBot(
 				driftClientConfig,
-				config.botConfigs!.userIdleFlipper!
+				config.botConfigs!.userIdleFlipper!,
+				blockhashSubscriber
 			)
 		);
 	}

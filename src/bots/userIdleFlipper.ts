@@ -7,6 +7,7 @@ import {
 	TxSigAndSlot,
 	DriftClientConfig,
 	BulkAccountLoader,
+	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -21,6 +22,7 @@ import { simulateAndGetTxWithCUs, sleepMs } from '../utils';
 
 const USER_IDLE_CHUNKS = 9;
 const SLEEP_MS = 1000;
+const CACHED_BLOCKHASH_OFFSET = 5;
 
 export class UserIdleFlipperBot implements Bot {
 	public readonly name: string;
@@ -32,11 +34,16 @@ export class UserIdleFlipperBot implements Bot {
 	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
+	private blockhashSubscriber: BlockhashSubscriber;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(driftClientConfigs: DriftClientConfig, config: BaseBotConfig) {
+	constructor(
+		driftClientConfigs: DriftClientConfig,
+		config: BaseBotConfig,
+		blockhashSubscriber: BlockhashSubscriber
+	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
@@ -63,6 +70,7 @@ export class UserIdleFlipperBot implements Bot {
 			skipInitialLoad: false,
 			includeIdle: false,
 		});
+		this.blockhashSubscriber = blockhashSubscriber;
 	}
 
 	public async init() {
@@ -159,6 +167,25 @@ export class UserIdleFlipperBot implements Bot {
 		await sleepMs(SLEEP_MS);
 	}
 
+	private async getBlockhashForTx(): Promise<string> {
+		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(
+			CACHED_BLOCKHASH_OFFSET
+		);
+		if (cachedBlockhash) {
+			return cachedBlockhash.blockhash as string;
+		}
+
+		const recentBlockhash =
+			await this.driftClient.connection.getLatestBlockhash({
+				commitment: 'finalized',
+			});
+		if (!recentBlockhash) {
+			throw new Error('No recent blockhash found??');
+		}
+
+		return recentBlockhash.blockhash;
+	}
+
 	private async sendTxforChunk(
 		usersChunk: Array<[PublicKey, UserAccount]>
 	): Promise<boolean> {
@@ -190,8 +217,6 @@ export class UserIdleFlipperBot implements Bot {
 				);
 			}
 
-			const recentBlockhash =
-				await this.driftClient.connection.getLatestBlockhash('confirmed');
 			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
 				connection: this.driftClient.connection,
@@ -199,7 +224,7 @@ export class UserIdleFlipperBot implements Bot {
 				lookupTableAccounts: [this.lookupTableAccount!],
 				cuLimitMultiplier: 1.1,
 				doSimulation: true,
-				recentBlockhash: recentBlockhash.blockhash,
+				recentBlockhash: await this.getBlockhashForTx(),
 			});
 			logger.info(
 				`User idle flipper estimated ${simResult.cuEstimate} CUs for ${usersChunk.length} users.`
