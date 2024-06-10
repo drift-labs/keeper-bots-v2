@@ -117,7 +117,7 @@ export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until t
 export const CACHED_BLOCKHASH_OFFSET = 5;
 const DUMP_TXS_IN_SIM = false;
 
-const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
+const EXPIRE_ORDER_BUFFER_SEC = 60; // add extra time before trying to expire orders (want to avoid 6252 error due to clock drift)
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
