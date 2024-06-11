@@ -501,7 +501,7 @@ export class UserPnlSettlerBot implements Bot {
 				);
 
 				const sortedParams = params
-					.sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl))
+					.sort((a, b) => a.pnl - b.pnl)
 					.slice(0, this.maxUsersToConsider);
 
 				logger.info(
