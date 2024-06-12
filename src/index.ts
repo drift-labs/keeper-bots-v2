@@ -370,10 +370,12 @@ const runBot = async () => {
 	 * Creating and subscribing to the drift client
 	 */
 
+	// keeping these arrays undefined will prompt DriftClient to call `findAllMarketAndOracles`
+	// and load all markets and oracle accounts from on-chain
 	let perpMarketIndexes: number[] | undefined;
 	let spotMarketIndexes: number[] | undefined;
 	let oracleInfos: OracleInfo[] | undefined;
-	if (configHasBot(config, 'fillerLite') || configHasBot(config, 'jitMaker')) {
+	if (configHasBot(config, 'jitMaker')) {
 		({ perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 			getMarketsAndOraclesForSubscription(config.global.driftEnv!));
 	}
@@ -809,8 +811,7 @@ const runBot = async () => {
 				slotSubscriber,
 				userMap,
 				config.botConfigs!.markTwapCrank!,
-				config.global.runOnce ?? false,
-				config.botConfigs!.markTwapCrank!.crankIntervalToMarketIndicies
+				config.global.runOnce ?? false
 			)
 		);
 	}

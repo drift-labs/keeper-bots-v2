@@ -36,10 +36,6 @@ export type UserPnlSettlerConfig = BaseBotConfig & {
 	maxUsersToConsider?: number;
 };
 
-export type MarkTwapCrankConfig = BaseBotConfig & {
-	crankIntervalToMarketIndicies?: { [key: number]: number[] };
-};
-
 export type FillerMultiThreadedConfig = BaseBotConfig & {
 	marketType: string;
 	marketIndexes: Array<number[]>;
@@ -113,7 +109,7 @@ export type BotConfigMap = {
 	userPnlSettler?: UserPnlSettlerConfig;
 	userLpSettler?: BaseBotConfig;
 	userIdleFlipper?: BaseBotConfig;
-	markTwapCrank?: MarkTwapCrankConfig;
+	markTwapCrank?: BaseBotConfig;
 	uncrossArb?: BaseBotConfig;
 };
 
