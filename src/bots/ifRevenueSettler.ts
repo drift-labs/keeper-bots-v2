@@ -6,7 +6,7 @@ import {
 	DriftClientConfig,
 	BulkAccountLoader,
 	PriorityFeeSubscriberMap,
-	SpotMarkets,
+	DriftMarketInfo,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -37,7 +37,7 @@ export class IFRevenueSettlerBot implements Bot {
 	public readonly dryRun: boolean;
 	public readonly runOnce: boolean;
 	public readonly defaultIntervalMs: number = 600000;
-	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
+	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
 
 	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
@@ -63,20 +63,27 @@ export class IFRevenueSettlerBot implements Bot {
 				},
 			})
 		);
-		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
-			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
-			driftMarkets: SpotMarkets['mainnet-beta'].map((m) => ({
-				marketType: 'spot',
-				marketIndex: m.marketIndex,
-			})),
-			frequencyMs: 10_000,
-		});
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing`);
-		await this.priorityFeeSubscriberMap.subscribe();
+
 		await this.driftClient.subscribe();
+
+		const driftMarkets: DriftMarketInfo[] = [];
+		for (const spotMarket of this.driftClient.getSpotMarketAccounts()) {
+			driftMarkets.push({
+				marketType: 'spot',
+				marketIndex: spotMarket.marketIndex,
+			});
+		}
+
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
+			driftMarkets,
+			frequencyMs: 10_000,
+		});
+		await this.priorityFeeSubscriberMap!.subscribe();
 
 		if (!(await this.driftClient.getUser().exists())) {
 			throw new Error(
@@ -89,7 +96,7 @@ export class IFRevenueSettlerBot implements Bot {
 	}
 
 	public async reset() {
-		await this.priorityFeeSubscriberMap.unsubscribe();
+		await this.priorityFeeSubscriberMap!.unsubscribe();
 		await this.driftClient.unsubscribe();
 		for (const intervalId of this.intervalIds) {
 			clearInterval(intervalId as NodeJS.Timeout);
@@ -121,7 +128,7 @@ export class IFRevenueSettlerBot implements Bot {
 
 	private async settleIFRevenue(spotMarketIndex: number) {
 		try {
-			const pfs = this.priorityFeeSubscriberMap.getPriorityFees(
+			const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
 				'spot',
 				spotMarketIndex
 			);
