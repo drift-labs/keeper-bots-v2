@@ -9,7 +9,7 @@ import {
 	decodeName,
 	PublicKey,
 	PriorityFeeSubscriberMap,
-	PerpMarkets,
+	DriftMarketInfo,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -82,7 +82,7 @@ export class FundingRateUpdaterBot implements Bot {
 
 	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
+	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
 	private lookupTableAccount?: AddressLookupTableAccount;
 
 	private watchdogTimerMutex = new Mutex();
@@ -94,18 +94,23 @@ export class FundingRateUpdaterBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
 		this.runOnce = config.runOnce ?? false;
-		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
-			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
-			driftMarkets: PerpMarkets['mainnet-beta'].map((m) => ({
-				marketType: 'perp',
-				marketIndex: m.marketIndex,
-			})),
-			frequencyMs: 10_000,
-		});
 	}
 
 	public async init() {
-		await this.priorityFeeSubscriberMap.subscribe();
+		const driftMarkets: DriftMarketInfo[] = [];
+		for (const perpMarket of this.driftClient.getPerpMarketAccounts()) {
+			driftMarkets.push({
+				marketType: 'perp',
+				marketIndex: perpMarket.marketIndex,
+			});
+		}
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
+			driftMarkets,
+			frequencyMs: 10_000,
+		});
+		await this.priorityFeeSubscriberMap!.subscribe();
+
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 		logger.info(`[${this.name}] inited`);
@@ -314,7 +319,7 @@ export class FundingRateUpdaterBot implements Bot {
 	}
 
 	private async sendTxWithRetry(marketIndex: number, oracle: PublicKey) {
-		const pfs = this.priorityFeeSubscriberMap.getPriorityFees(
+		const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
 			'perp',
 			marketIndex
 		);

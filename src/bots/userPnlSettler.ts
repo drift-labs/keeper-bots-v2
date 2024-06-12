@@ -26,8 +26,8 @@ import {
 	TxSender,
 	isOperationPaused,
 	PerpOperation,
-	PerpMarkets,
 	PriorityFeeSubscriberMap,
+	DriftMarketInfo,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -73,7 +73,7 @@ export class UserPnlSettlerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private bulkAccountLoader: BulkAccountLoader;
 	private userMap: UserMap;
-	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
+	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
 	private inProgress = false;
 	private marketIndexes: Array<number>;
 	private minPnlToSettle: BN;
@@ -123,22 +123,26 @@ export class UserPnlSettlerBot implements Bot {
 			skipInitialLoad: false,
 			includeIdle: false,
 		});
-
-		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
-			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
-				this.globalConfig.driftEnv!
-			),
-			driftMarkets: PerpMarkets[this.globalConfig.driftEnv!].map((m) => ({
-				marketType: 'perp',
-				marketIndex: m.marketIndex,
-			})),
-			frequencyMs: 10_000,
-		});
 	}
 
 	public async init() {
 		logger.info(`${this.name} initing`);
-		await this.priorityFeeSubscriberMap.subscribe();
+
+		const driftMarkets: DriftMarketInfo[] = [];
+		for (const perpMarket of this.driftClient.getPerpMarketAccounts()) {
+			driftMarkets.push({
+				marketType: 'perp',
+				marketIndex: perpMarket.marketIndex,
+			});
+		}
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
+				this.globalConfig.driftEnv!
+			),
+			driftMarkets,
+			frequencyMs: 10_000,
+		});
+		await this.priorityFeeSubscriberMap!.subscribe();
 		await this.driftClient.subscribe();
 
 		await this.userMap.subscribe();
@@ -154,7 +158,7 @@ export class UserPnlSettlerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		await this.priorityFeeSubscriberMap.unsubscribe();
+		await this.priorityFeeSubscriberMap!.unsubscribe();
 		await this.userMap?.unsubscribe();
 	}
 
@@ -609,7 +613,7 @@ export class UserPnlSettlerBot implements Bot {
 
 		let success = false;
 		try {
-			const pfs = this.priorityFeeSubscriberMap.getPriorityFees(
+			const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
 				'perp',
 				marketIndex
 			);

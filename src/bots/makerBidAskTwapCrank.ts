@@ -9,7 +9,9 @@ import {
 	promiseTimeout,
 	isVariant,
 	PriorityFeeSubscriberMap,
-	PerpMarkets,
+	DriftMarketInfo,
+	isOneOfVariant,
+	getVariant,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -78,6 +80,48 @@ export async function sendVersionedTransaction(
 	return txid;
 }
 
+/**
+ * Builds a mapping from crank interval (ms) to perp market indexes
+ * @param driftClient
+ * @returns
+ */
+function buildCrankIntervalToMarketIds(driftClient: DriftClient): {
+	crankIntervals: { [key: number]: number[] };
+	driftMarkets: DriftMarketInfo[];
+} {
+	const crankIntervals: { [key: number]: number[] } = {};
+	const driftMarkets: DriftMarketInfo[] = [];
+
+	for (const perpMarket of driftClient.getPerpMarketAccounts()) {
+		driftMarkets.push({
+			marketType: 'perp',
+			marketIndex: perpMarket.marketIndex,
+		});
+		let crankPeriodMs = 30_000;
+		const isPreLaunch = false;
+		if (isOneOfVariant(perpMarket.contractTier, ['a', 'b'])) {
+			crankPeriodMs = 15_000;
+		} else if (isVariant(perpMarket.amm.oracleSource, 'prelaunch')) {
+			crankPeriodMs = 15_000;
+		}
+		logger.info(
+			`Perp market ${perpMarket.marketIndex} contractTier: ${getVariant(
+				perpMarket.contractTier
+			)} isPrelaunch: ${isPreLaunch}, crankPeriodMs: ${crankPeriodMs}`
+		);
+		if (crankIntervals[crankPeriodMs] === undefined) {
+			crankIntervals[crankPeriodMs] = [perpMarket.marketIndex];
+		} else {
+			crankIntervals[crankPeriodMs].push(perpMarket.marketIndex);
+		}
+	}
+
+	return {
+		crankIntervals,
+		driftMarkets,
+	};
+}
+
 export class MakerBidAskTwapCrank implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
@@ -85,7 +129,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	public readonly defaultIntervalMs?: number = undefined;
 
 	private crankIntervalToMarketIds?: { [key: number]: number[] }; // Object from number to array of numbers
-	private crankIntervalInProgress: { [key: number]: boolean };
+	private crankIntervalInProgress?: { [key: number]: boolean };
 	private allCrankIntervalGroups?: number[];
 	private maxIntervalGroup?: number; // tracks the max interval group for health checking
 
@@ -97,7 +141,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private dlob?: DLOB;
 	private latestDlobSlot?: number;
 	private lookupTableAccount?: AddressLookupTableAccount;
-	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
+	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -107,8 +151,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		slotSubscriber: SlotSubscriber,
 		userMap: UserMap,
 		config: BaseBotConfig,
-		runOnce: boolean,
-		crankIntervalToMarketIds?: { [key: number]: number[] }
+		runOnce: boolean
 	) {
 		this.slotSubscriber = slotSubscriber;
 		this.name = config.botId;
@@ -116,7 +159,24 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.runOnce = runOnce;
 		this.driftClient = driftClient;
 		this.userMap = userMap;
-		this.crankIntervalToMarketIds = crankIntervalToMarketIds;
+	}
+
+	public async init() {
+		logger.info(`[${this.name}] initing, runOnce: ${this.runOnce}`);
+		this.lookupTableAccount =
+			await this.driftClient.fetchMarketLookupTableAccount();
+
+		let driftMarkets: DriftMarketInfo[] = [];
+		({ crankIntervals: this.crankIntervalToMarketIds, driftMarkets } =
+			buildCrankIntervalToMarketIds(this.driftClient));
+		logger.info(
+			`[${this.name}] crankIntervals:\n${JSON.stringify(
+				this.crankIntervalToMarketIds,
+				null,
+				2
+			)}`
+		);
+
 		this.crankIntervalInProgress = {};
 		if (this.crankIntervalToMarketIds) {
 			this.allCrankIntervalGroups = Object.keys(
@@ -134,18 +194,9 @@ export class MakerBidAskTwapCrank implements Bot {
 
 		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
 			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
-			driftMarkets: PerpMarkets['mainnet-beta'].map((m) => ({
-				marketType: 'perp',
-				marketIndex: m.marketIndex,
-			})),
+			driftMarkets,
 			frequencyMs: 10_000,
 		});
-	}
-
-	public async init() {
-		logger.info(`[${this.name}] initing, runOnce: ${this.runOnce}`);
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
 		await this.priorityFeeSubscriberMap.subscribe();
 	}
 
@@ -298,7 +349,7 @@ export class MakerBidAskTwapCrank implements Bot {
 			crankMarkets = this.crankIntervalToMarketIds![intervalGroup]!;
 		}
 
-		const intervalInProgress = this.crankIntervalInProgress[intervalGroup]!;
+		const intervalInProgress = this.crankIntervalInProgress![intervalGroup]!;
 		if (intervalInProgress) {
 			logger.info(
 				`[${this.name}] Interval ${intervalGroup} already in progress, skipping`
@@ -308,14 +359,14 @@ export class MakerBidAskTwapCrank implements Bot {
 
 		const start = Date.now();
 		try {
-			this.crankIntervalInProgress[intervalGroup] = true;
+			this.crankIntervalInProgress![intervalGroup] = true;
 			await this.initDlob();
 
 			logger.info(
 				`[${this.name}] Cranking interval group ${intervalGroup}: ${crankMarkets}`
 			);
 			for (const mi of crankMarkets) {
-				const pfs = this.priorityFeeSubscriberMap.getPriorityFees('perp', mi);
+				const pfs = this.priorityFeeSubscriberMap!.getPriorityFees('perp', mi);
 				let microLamports = 10_000;
 				if (pfs) {
 					microLamports = Math.floor(pfs.medium);
@@ -391,7 +442,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				);
 			}
 		} finally {
-			this.crankIntervalInProgress[intervalGroup] = false;
+			this.crankIntervalInProgress![intervalGroup] = false;
 			logger.info(
 				`[${
 					this.name
