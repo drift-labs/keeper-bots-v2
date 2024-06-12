@@ -11,7 +11,7 @@ import {
 	PerpOperation,
 	decodeName,
 	PriorityFeeSubscriberMap,
-	PerpMarkets,
+	DriftMarketInfo,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -54,7 +54,7 @@ export class UserLpSettlerBot implements Bot {
 	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
-	private priorityFeeSubscriberMap: PriorityFeeSubscriberMap;
+	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
 	private inProgress = false;
 
 	private watchdogTimerMutex = new Mutex();
@@ -94,15 +94,6 @@ export class UserLpSettlerBot implements Bot {
 			includeIdle: false,
 			disableSyncOnTotalAccountsChange: true,
 		});
-
-		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
-			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
-			driftMarkets: PerpMarkets['mainnet-beta'].map((m) => ({
-				marketType: 'perp',
-				marketIndex: m.marketIndex,
-			})),
-			frequencyMs: 10_000,
-		});
 	}
 
 	public async init() {
@@ -117,10 +108,20 @@ export class UserLpSettlerBot implements Bot {
 		this.lookupTableAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 
-		const perpMarkets = this.driftClient
-			.getPerpMarketAccounts()
-			.map((m) => m.pubkey);
-
+		const perpMarkets: PublicKey[] = [];
+		const driftMarkets: DriftMarketInfo[] = [];
+		for (const perpMarket of this.driftClient.getPerpMarketAccounts()) {
+			perpMarkets.push(perpMarket.pubkey);
+			driftMarkets.push({
+				marketType: 'perp',
+				marketIndex: perpMarket.marketIndex,
+			});
+		}
+		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
+			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint('mainnet-beta'),
+			driftMarkets,
+			frequencyMs: 10_000,
+		});
 		await this.priorityFeeSubscriberMap.subscribe();
 
 		logger.info(
@@ -370,7 +371,7 @@ export class UserLpSettlerBot implements Bot {
 
 		let success = false;
 		try {
-			const pfs = this.priorityFeeSubscriberMap.getPriorityFees(
+			const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
 				'perp',
 				marketIndex
 			);
