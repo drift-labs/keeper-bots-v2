@@ -200,7 +200,7 @@ export class UserIdleFlipperBot implements Bot {
 					units: 1_400_000, // simulation will ovewrrite this
 				}),
 				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: 1000,
+					microLamports: 50000,
 				}),
 			];
 			for (const [userAccountPublicKey, userAccount] of usersChunk) {
@@ -217,6 +217,7 @@ export class UserIdleFlipperBot implements Bot {
 				);
 			}
 
+			const recentBlockhash = await this.getBlockhashForTx();
 			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
 				connection: this.driftClient.connection,
@@ -224,7 +225,7 @@ export class UserIdleFlipperBot implements Bot {
 				lookupTableAccounts: [this.lookupTableAccount!],
 				cuLimitMultiplier: 1.1,
 				doSimulation: true,
-				recentBlockhash: await this.getBlockhashForTx(),
+				recentBlockhash,
 			});
 			logger.info(
 				`User idle flipper estimated ${simResult.cuEstimate} CUs for ${usersChunk.length} users.`
@@ -240,12 +241,7 @@ export class UserIdleFlipperBot implements Bot {
 			} else {
 				const txSigAndSlot =
 					await this.driftClient.txSender.sendVersionedTransaction(
-						await this.driftClient.txSender.getVersionedTransaction(
-							ixs,
-							[this.lookupTableAccount!],
-							[],
-							this.driftClient.opts
-						),
+						simResult.tx,
 						[],
 						this.driftClient.opts
 					);
