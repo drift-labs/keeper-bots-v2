@@ -21,10 +21,6 @@ import {
 	MarketType,
 	UserAccount,
 	decodeUser,
-	getVariant,
-	isOneOfVariant,
-	PhoenixFulfillmentConfigMap,
-	SerumFulfillmentConfigMap,
 	PriorityFeeSubscriberMap,
 } from '@drift-labs/sdk';
 import {
@@ -57,6 +53,7 @@ import {
 	getNodeToFillSignature,
 	getTransactionAccountMetas,
 	handleSimResultError,
+	initializeSpotFulfillmentAccounts,
 	logMessageForNodeToFill,
 	simulateAndGetTxWithCUs,
 	sleepMs,
@@ -195,8 +192,14 @@ export class SpotFillerMultithreaded {
 	private userStatsMap?: UserStatsMap;
 	protected hasEnoughSolToFill: boolean = true;
 
-	private phoenixFulfillmentConfigMap: PhoenixFulfillmentConfigMap;
-	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
+	private phoenixFulfillmentConfigMap: Map<
+		number,
+		PhoenixV1FulfillmentConfigAccount
+	>;
+	private serumFulfillmentConfigMap: Map<
+		number,
+		SerumV3FulfillmentConfigAccount
+	>;
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
@@ -319,10 +322,14 @@ export class SpotFillerMultithreaded {
 			throw new Error(`Subaccount ${this.subaccount} not found in driftClient`);
 		}
 
-		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(driftClient);
-		this.phoenixFulfillmentConfigMap = new PhoenixFulfillmentConfigMap(
-			driftClient
-		);
+		this.serumFulfillmentConfigMap = new Map<
+			number,
+			SerumV3FulfillmentConfigAccount
+		>();
+		this.phoenixFulfillmentConfigMap = new Map<
+			number,
+			PhoenixV1FulfillmentConfigAccount
+		>();
 
 		if (
 			config.rebalanceFiller &&
@@ -394,47 +401,12 @@ export class SpotFillerMultithreaded {
 			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
 		);
 
+		({
+			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
+			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
+		} = await initializeSpotFulfillmentAccounts(this.driftClient, false));
+
 		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
-		const marketSetupPromises = config.SPOT_MARKETS.map(
-			async (spotMarketConfig) => {
-				const spotMarket = this.driftClient.getSpotMarketAccount(
-					spotMarketConfig.marketIndex
-				);
-				if (
-					isOneOfVariant(spotMarket?.status, [
-						'initialized',
-						'fillPaused',
-						'delisted',
-					])
-				) {
-					logger.info(
-						`Skipping market ${
-							spotMarketConfig.symbol
-						} because its SpotMarket.status is ${getVariant(
-							spotMarket?.status
-						)}`
-					);
-					return;
-				}
-
-				if (spotMarketConfig.serumMarket) {
-					// set up fulfillment config
-					await this.serumFulfillmentConfigMap.add(
-						spotMarketConfig.marketIndex,
-						spotMarketConfig.serumMarket
-					);
-				}
-
-				if (spotMarketConfig.phoenixMarket) {
-					// set up fulfillment config
-					await this.phoenixFulfillmentConfigMap.add(
-						spotMarketConfig.marketIndex,
-						spotMarketConfig.phoenixMarket
-					);
-				}
-			}
-		);
-		await Promise.all(marketSetupPromises);
 		this.driftLutAccount =
 			await this.driftClient.fetchMarketLookupTableAccount();
 		if ('SERUM_LOOKUP_TABLE' in config) {
