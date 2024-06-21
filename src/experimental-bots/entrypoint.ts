@@ -31,6 +31,14 @@ import { FillerMultithreaded } from './filler/fillerMultithreaded';
 import http from 'http';
 import { promiseTimeout } from '@drift-labs/sdk';
 import { SpotFillerMultithreaded } from './spotFiller/spotFillerMultithreaded';
+import { PriceServiceConnection } from '@pythnetwork/price-service-client';
+import { setGlobalDispatcher, Agent } from 'undici';
+
+setGlobalDispatcher(
+	new Agent({
+		connections: 200,
+	})
+);
 
 require('dotenv').config();
 
@@ -185,6 +193,16 @@ const runBot = async () => {
 		resubTimeoutMs: config.global.resubTimeoutMs,
 	};
 
+	// Send unsubscribed subscription to the bot
+	let pythConnection: PriceServiceConnection | undefined;
+	if (config.global.hermesEndpoint) {
+		pythConnection = new PriceServiceConnection(config.global.hermesEndpoint, {
+			priceFeedRequestConfig: {
+				binary: true,
+			},
+		});
+	}
+
 	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 		getMarketsAndOraclesForSubscription(
 			config.global.driftEnv || 'mainnet-beta'
@@ -281,7 +299,8 @@ const runBot = async () => {
 				driftPid: driftPublicKey.toBase58(),
 				walletAuthority: wallet.publicKey.toBase58(),
 			},
-			bundleSender
+			bundleSender,
+			pythConnection
 		);
 		bots.push(fillerMultithreaded);
 	}

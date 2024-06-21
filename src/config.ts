@@ -115,8 +115,9 @@ export type BotConfigMap = {
 
 export interface GlobalConfig {
 	driftEnv?: DriftEnv;
-	endpoint?: string;
+	endpoint: string;
 	wsEndpoint?: string;
+	hermesEndpoint?: string;
 	/// helius endpoint to use helius priority fee strategy
 	heliusEndpoint?: string;
 	/// additional rpc endpoints to send transactions to
@@ -188,7 +189,8 @@ const defaultConfig: Partial<Config> = {
 		eventSubscriberPollingInterval: 5000,
 		bulkAccountLoaderPollingInterval: 5000,
 
-		endpoint: process.env.ENDPOINT,
+		endpoint: process.env.ENDPOINT!,
+		hermesEndpoint: process.env.HERMES_ENDPOINT!,
 		wsEndpoint: process.env.WS_ENDPOINT,
 		heliusEndpoint: process.env.HELIUS_ENDPOINT,
 		additionalSendTxEndpoints: [],
@@ -291,6 +293,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			driftEnv: (process.env.ENV ?? 'devnet') as DriftEnv,
 			endpoint: opts.endpoint ?? process.env.ENDPOINT,
 			wsEndpoint: opts.wsEndpoint ?? process.env.WS_ENDPOINT,
+			hermesEndpoint: opts.hermesEndpoint ?? process.env.HERMES_ENDPOINT,
 			heliusEndpoint: opts.heliusEndpoint ?? process.env.HELIUS_ENDPOINT,
 			additionalSendTxEndpoints: loadCommaDelimitToStringArray(
 				opts.additionalSendTxEndpoints

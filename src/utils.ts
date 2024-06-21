@@ -492,14 +492,15 @@ export async function simulateAndGetTxWithCUs(
 		);
 		setCULimitIxIdx = 0;
 	}
-
 	let simTxDuration = 0;
+
 	const tx = getVersionedTransaction(
 		params.payerPublicKey,
 		params.ixs,
 		params.lookupTableAccounts,
 		params.recentBlockhash ?? PLACEHOLDER_BLOCKHASH
 	);
+
 	if (!params.doSimulation) {
 		return {
 			cuEstimate: -1,
