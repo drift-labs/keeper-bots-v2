@@ -14,14 +14,12 @@ import {
 	Wallet,
 	SerumSubscriber,
 	PhoenixSubscriber,
-	initialize,
-	DriftEnv,
-	SerumFulfillmentConfigMap,
-	PhoenixFulfillmentConfigMap,
 	BN,
 	ClockSubscriber,
+	SerumV3FulfillmentConfigAccount,
+	PhoenixV1FulfillmentConfigAccount,
 } from '@drift-labs/sdk';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { Connection } from '@solana/web3.js';
 import dotenv from 'dotenv';
 import parseArgs from 'minimist';
 import { logger } from '../../logger';
@@ -36,7 +34,7 @@ import {
 	serializeNodeToFill,
 	serializeNodeToTrigger,
 } from './utils';
-import { sleepMs } from '../../utils';
+import { initializeSpotFulfillmentAccounts, sleepMs } from '../../utils';
 
 const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
 
@@ -53,14 +51,16 @@ class DLOBBuilder {
 	public initialized: boolean = false;
 
 	// only used for spot filler
-	// @ts-ignore
-	private serumSubscribers: Map<number, SerumSubscriber>;
-	// @ts-ignore
-	private phoenixSubscribers: Map<number, PhoenixSubscriber>;
-	// @ts-ignore
-	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
-	// @ts-ignore
-	private phoenixFulfillmentConfigMap: PhoenixFulfillmentConfigMap;
+	private serumSubscribers?: Map<number, SerumSubscriber>;
+	private phoenixSubscribers?: Map<number, PhoenixSubscriber>;
+	private serumFulfillmentConfigMap?: Map<
+		number,
+		SerumV3FulfillmentConfigAccount
+	>;
+	private phoenixFulfillmentConfigMap?: Map<
+		number,
+		PhoenixV1FulfillmentConfigAccount
+	>;
 
 	private clockSubscriber: ClockSubscriber;
 
@@ -78,14 +78,16 @@ class DLOBBuilder {
 		this.driftClient = driftClient;
 
 		if (marketTypeString.toLowerCase() === 'spot') {
-			this.serumSubscribers = new Map();
-			this.phoenixSubscribers = new Map();
-			this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
-				driftClient
-			);
-			this.phoenixFulfillmentConfigMap = new PhoenixFulfillmentConfigMap(
-				driftClient
-			);
+			this.serumSubscribers = new Map<number, SerumSubscriber>();
+			this.phoenixSubscribers = new Map<number, PhoenixSubscriber>();
+			this.serumFulfillmentConfigMap = new Map<
+				number,
+				SerumV3FulfillmentConfigAccount
+			>();
+			this.phoenixFulfillmentConfigMap = new Map<
+				number,
+				PhoenixV1FulfillmentConfigAccount
+			>();
 		}
 
 		this.clockSubscriber = new ClockSubscriber(driftClient.connection, {
@@ -104,88 +106,23 @@ class DLOBBuilder {
 	}
 
 	private async initializeSpotMarkets() {
-		const config = initialize({ env: 'mainnet-beta' as DriftEnv });
+		({
+			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
+			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
+			serumSubscribers: this.serumSubscribers,
+			phoenixSubscribers: this.phoenixSubscribers,
+		} = await initializeSpotFulfillmentAccounts(
+			this.driftClient,
+			true,
+			this.marketIndexes
+		));
 
-		const marketsOfInterest = config.SPOT_MARKETS.filter((market) => {
-			return this.marketIndexes.includes(market.marketIndex);
-		});
-
-		const marketSetupPromises = marketsOfInterest.map(
-			async (spotMarketConfig) => {
-				const subscribePromises = [];
-				const accountSubscription = {
-					type: 'websocket' as const,
-				};
-
-				if (spotMarketConfig.serumMarket) {
-					// set up fulfillment config
-					await this.serumFulfillmentConfigMap.add(
-						spotMarketConfig.marketIndex,
-						spotMarketConfig.serumMarket
-					);
-
-					const serumConfigAccount =
-						await this.driftClient.getSerumV3FulfillmentConfig(
-							spotMarketConfig.serumMarket
-						);
-
-					if (isVariant(serumConfigAccount.status, 'enabled')) {
-						// set up serum price subscriber
-						const serumSubscriber = new SerumSubscriber({
-							connection: this.driftClient.connection,
-							programId: new PublicKey(config.SERUM_V3),
-							marketAddress: spotMarketConfig.serumMarket,
-							accountSubscription: accountSubscription,
-						});
-						logger.info(
-							`${logPrefix} Initializing SerumSubscriber for ${spotMarketConfig.symbol}...`
-						);
-						subscribePromises.push(
-							serumSubscriber.subscribe().then(() => {
-								this.serumSubscribers.set(
-									spotMarketConfig.marketIndex,
-									serumSubscriber
-								);
-							})
-						);
-					}
-				}
-
-				if (spotMarketConfig.phoenixMarket) {
-					// set up fulfillment config
-					await this.phoenixFulfillmentConfigMap.add(
-						spotMarketConfig.marketIndex,
-						spotMarketConfig.phoenixMarket
-					);
-
-					const phoenixConfigAccount = this.phoenixFulfillmentConfigMap.get(
-						spotMarketConfig.marketIndex
-					);
-					if (isVariant(phoenixConfigAccount.status, 'enabled')) {
-						// set up phoenix price subscriber
-						const phoenixSubscriber = new PhoenixSubscriber({
-							connection: this.driftClient.connection,
-							programId: new PublicKey(config.PHOENIX),
-							marketAddress: spotMarketConfig.phoenixMarket,
-							accountSubscription: accountSubscription,
-						});
-						logger.info(
-							`${logPrefix} Initializing PhoenixSubscriber for ${spotMarketConfig.symbol}...`
-						);
-						subscribePromises.push(
-							phoenixSubscriber.subscribe().then(() => {
-								this.phoenixSubscribers.set(
-									spotMarketConfig.marketIndex,
-									phoenixSubscriber
-								);
-							})
-						);
-					}
-				}
-				await Promise.all(subscribePromises);
-			}
-		);
-		await Promise.all(marketSetupPromises);
+		if (!this.serumSubscribers) {
+			throw new Error('serumSubscribers not initialized');
+		}
+		if (!this.phoenixSubscribers) {
+			throw new Error('phoenixSubscribers not initialized');
+		}
 	}
 
 	public getUserBuffer(pubkey: string) {
@@ -261,11 +198,11 @@ class DLOBBuilder {
 				oraclePriceData =
 					this.driftClient.getOracleDataForSpotMarket(marketIndex);
 
-				const serumSubscriber = this.serumSubscribers.get(marketIndex);
+				const serumSubscriber = this.serumSubscribers!.get(marketIndex);
 				const serumBid = serumSubscriber?.getBestBid();
 				const serumAsk = serumSubscriber?.getBestAsk();
 
-				const phoenixSubscriber = this.phoenixSubscribers.get(marketIndex);
+				const phoenixSubscriber = this.phoenixSubscribers!.get(marketIndex);
 				const phoenixBid = phoenixSubscriber?.getBestBid();
 				const phoenixAsk = phoenixSubscriber?.getBestAsk();
 
