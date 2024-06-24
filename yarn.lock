@@ -149,10 +149,10 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.10.422":
-  version "0.10.422"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.422.tgz#b5767f7fc6df28251780256c68ca96e11859d6df"
-  integrity sha512-psC/RUtpcEiGwZjEy+ewV1Tdl/260l7JCnd4Btv8+wnaW1aR6qkVr2TR36YUcI4ZsytTk4iZLdj6epKJTFZ+bQ==
+"@drift-labs/jit-proxy@0.10.423":
+  version "0.10.423"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.423.tgz#98cedde8df1e1c3f30007b3a8e326c920033259b"
+  integrity sha512-hx3WZ9so9Hj9l5sMKTdXO5Bkn4PVS5spw36RmFaG7DiF0FXpBnHMIkbMuMW3YeyMWeNZvObMCgstwRgNimNw+w==
   dependencies:
     "@coral-xyz/anchor" "^0.26.0"
     "@drift-labs/sdk" "2.85.0-beta.0"
