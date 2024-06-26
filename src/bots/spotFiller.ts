@@ -1972,13 +1972,19 @@ export class SpotFillerBot implements Bot {
 			| undefined = undefined;
 		if (makerInfo === undefined) {
 			if (fallbackSource === 'serum') {
-				fulfillmentConfig = this.serumFulfillmentConfigMap.get(
+				const cfg = this.serumFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);
+				if (cfg && isVariant(cfg.status, 'enabled')) {
+					fulfillmentConfig = cfg;
+				}
 			} else if (fallbackSource === 'phoenix') {
-				fulfillmentConfig = this.phoenixFulfillmentConfigMap.get(
+				const cfg = this.phoenixFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);
+				if (cfg && isVariant(cfg.status, 'enabled')) {
+					fulfillmentConfig = cfg;
+				}
 			} else {
 				logger.error(
 					`makerInfo doesnt exist and unknown fallback source: ${fallbackSource} (fillTxId: ${fillTxId})`
