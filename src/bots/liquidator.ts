@@ -17,9 +17,6 @@ import {
 	SpotMarketAccount,
 	QUOTE_SPOT_MARKET_INDEX,
 	calculateMarketAvailablePNL,
-	SerumFulfillmentConfigMap,
-	initialize,
-	DriftEnv,
 	findDirectionToClose,
 	getSignedTokenAmount,
 	standardizeBaseAssetAmount,
@@ -206,7 +203,6 @@ export class LiquidatorBot implements Bot {
 	private deriskMutex = new Uint8Array(new SharedArrayBuffer(1));
 	private liquidateMutex = new Uint8Array(new SharedArrayBuffer(1));
 	private runtimeSpecs: RuntimeSpec;
-	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
 	private jupiterClient?: JupiterClient;
 	private twapExecutionProgresses?: Map<string, TwapExecutionProgress>; // key: this.getTwapProgressKey, value: TwapExecutionProgress
 	private excludedAccounts: Set<string>;
@@ -257,9 +253,6 @@ export class LiquidatorBot implements Bot {
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
 		this.runtimeSpecs = runtimeSpec;
-		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(
-			this.driftClient
-		);
 		this.userMap = userMap;
 
 		this.metricsPort = config.metricsPort;
@@ -565,17 +558,6 @@ export class LiquidatorBot implements Bot {
 			);
 		} else {
 			this.driftSpotLookupTables = serumLut!;
-		}
-
-		const config = initialize({ env: this.runtimeSpecs.driftEnv as DriftEnv });
-		for (const spotMarketConfig of config.SPOT_MARKETS) {
-			if (spotMarketConfig.serumMarket) {
-				// set up fulfillment config
-				await this.serumFulfillmentConfigMap.add(
-					spotMarketConfig.marketIndex,
-					spotMarketConfig.serumMarket
-				);
-			}
 		}
 
 		const subAccount = this.driftClient.activeSubAccountId;
