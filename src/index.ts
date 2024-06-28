@@ -75,7 +75,7 @@ import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 import { UncrossArbBot } from './bots/uncrossArbBot';
 import { FillerBulkBot } from './bots/fillerBulk';
 import { BundleSender } from './bundleSender';
-import { DriftStateWatcher } from './DriftStateWatcher';
+import { DriftStateWatcher, StateChecks } from './driftStateWatcher';
 import { webhookMessage } from './webhook';
 
 require('dotenv').config();
@@ -950,7 +950,7 @@ const runBot = async () => {
 				spotMarketStatus: true,
 				newPerpMarkets: true,
 				newSpotMarkets: true,
-				onStateChange: async (message, changes) => {
+				onStateChange: async (message: string, changes: StateChecks) => {
 					const msg = `DriftStateWatcher triggered: ${message}]\nactive bots: ${JSON.stringify(
 						activeBots
 					)}\nstate changes: ${JSON.stringify(changes)}`;
