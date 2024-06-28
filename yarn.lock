@@ -1076,17 +1076,6 @@
     "@pythnetwork/solana-utils" "*"
     "@solana/web3.js" "^1.90.0"
 
-"@pythnetwork/pyth-solana-receiver@^0.8.0":
-  version "0.8.0"
-  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-solana-receiver/-/pyth-solana-receiver-0.8.0.tgz#d7bf3c5c97a0f0eab8ac19f53b11664117e1152d"
-  integrity sha512-5lhLtggAqsiHtffTPM8vcKJmhBdxzidBmiNNUlqPyg9XmhZ4Z+roY0dfzluEoX5xer9rEA1ThsBpX0bG1DRIGA==
-  dependencies:
-    "@coral-xyz/anchor" "^0.29.0"
-    "@noble/hashes" "^1.4.0"
-    "@pythnetwork/price-service-sdk" ">=1.6.0"
-    "@pythnetwork/solana-utils" "*"
-    "@solana/web3.js" "^1.90.0"
-
 "@pythnetwork/solana-utils@*":
   version "0.4.1"
   resolved "https://registry.yarnpkg.com/@pythnetwork/solana-utils/-/solana-utils-0.4.1.tgz#8be6792f42bf4e7b4377126107686ed7c06ad8fa"

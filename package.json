@@ -14,7 +14,6 @@
 		"@project-serum/anchor": "^0.19.1-beta.1",
 		"@project-serum/serum": "^0.13.65",
 		"@pythnetwork/price-service-client": "^1.9.0",
-		"@pythnetwork/pyth-solana-receiver": "^0.8.0",
 		"@solana/web3.js": "1.87.6",
 		"@types/bn.js": "^5.1.0",
 		"@types/minimist": "^1.2.5",
