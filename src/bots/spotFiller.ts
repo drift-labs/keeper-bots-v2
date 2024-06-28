@@ -11,26 +11,20 @@ import {
 	MarketType,
 	initialize,
 	SerumSubscriber,
-	SerumFulfillmentConfigMap,
 	SerumV3FulfillmentConfigAccount,
 	DLOBNode,
 	DLOBSubscriber,
-	PhoenixFulfillmentConfigMap,
 	PhoenixSubscriber,
 	BN,
 	PhoenixV1FulfillmentConfigAccount,
 	TEN,
 	NodeToTrigger,
-	BulkAccountLoader,
-	PollingDriftClientAccountSubscriber,
 	OrderSubscriber,
 	UserAccount,
 	PriorityFeeSubscriber,
 	DataAndSlot,
 	BlockhashSubscriber,
 	JupiterClient,
-	getVariant,
-	isOneOfVariant,
 	ClockSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -82,6 +76,7 @@ import {
 	getNodeToTriggerSignature,
 	getTransactionAccountMetas,
 	handleSimResultError,
+	initializeSpotFulfillmentAccounts,
 	logMessageForNodeToFill,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
@@ -253,11 +248,17 @@ export class SpotFillerBot implements Bot {
 	private orderSubscriber: OrderSubscriber;
 	private userStatsMap?: UserStatsMap;
 
-	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
-	private serumSubscribers: Map<number, SerumSubscriber>;
+	private serumFulfillmentConfigMap: Map<
+		number,
+		SerumV3FulfillmentConfigAccount
+	>;
+	private serumSubscribers?: Map<number, SerumSubscriber>;
 
-	private phoenixFulfillmentConfigMap: PhoenixFulfillmentConfigMap;
-	private phoenixSubscribers: Map<number, PhoenixSubscriber>;
+	private phoenixFulfillmentConfigMap: Map<
+		number,
+		PhoenixV1FulfillmentConfigAccount
+	>;
+	private phoenixSubscribers?: Map<number, PhoenixSubscriber>;
 
 	private periodicTaskMutex = new Mutex();
 
@@ -354,12 +355,16 @@ export class SpotFillerBot implements Bot {
 		this.pollingIntervalMs =
 			config.fillerPollingInterval ?? this.defaultIntervalMs;
 
-		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(driftClient);
+		this.serumFulfillmentConfigMap = new Map<
+			number,
+			SerumV3FulfillmentConfigAccount
+		>();
 		this.serumSubscribers = new Map<number, SerumSubscriber>();
 
-		this.phoenixFulfillmentConfigMap = new PhoenixFulfillmentConfigMap(
-			driftClient
-		);
+		this.phoenixFulfillmentConfigMap = new Map<
+			number,
+			PhoenixV1FulfillmentConfigAccount
+		>();
 		this.phoenixSubscribers = new Map<number, PhoenixSubscriber>();
 
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
@@ -676,134 +681,31 @@ export class SpotFillerBot implements Bot {
 			`Initialized DLOBSubscriber in ${Date.now() - dlobSubscriberStart}`
 		);
 
-		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
-		const marketSetupPromises = config.SPOT_MARKETS.map(
-			async (spotMarketConfig) => {
-				const spotMarket = this.driftClient.getSpotMarketAccount(
-					spotMarketConfig.marketIndex
-				);
-				if (
-					isOneOfVariant(spotMarket?.status, [
-						'initialized',
-						'fillPaused',
-						'delisted',
-					])
-				) {
-					logger.info(
-						`Skipping market ${
-							spotMarketConfig.symbol
-						} because its SpotMarket.status is ${getVariant(
-							spotMarket?.status
-						)}`
-					);
-					return;
-				}
+		const initConfig = initialize({
+			env: this.runtimeSpec.driftEnv as DriftEnv,
+		});
 
-				let accountSubscription:
-					| {
-							type: 'polling';
-							accountLoader: BulkAccountLoader;
-					  }
-					| {
-							type: 'websocket';
-					  };
-				if (
-					(
-						this.driftClient
-							.accountSubscriber as PollingDriftClientAccountSubscriber
-					).accountLoader
-				) {
-					accountSubscription = {
-						type: 'polling',
-						accountLoader: (
-							this.driftClient
-								.accountSubscriber as PollingDriftClientAccountSubscriber
-						).accountLoader,
-					};
-				} else {
-					accountSubscription = {
-						type: 'websocket',
-					};
-				}
+		({
+			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
+			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
+			serumSubscribers: this.serumSubscribers,
+			phoenixSubscribers: this.phoenixSubscribers,
+		} = await initializeSpotFulfillmentAccounts(this.driftClient, true));
 
-				const subscribePromises = [];
-				if (spotMarketConfig.serumMarket) {
-					// set up fulfillment config
-					await this.serumFulfillmentConfigMap.add(
-						spotMarketConfig.marketIndex,
-						spotMarketConfig.serumMarket
-					);
-
-					const serumConfigAccount =
-						await this.driftClient.getSerumV3FulfillmentConfig(
-							spotMarketConfig.serumMarket
-						);
-
-					if (isVariant(serumConfigAccount.status, 'enabled')) {
-						// set up serum price subscriber
-						const serumSubscriber = new SerumSubscriber({
-							connection: this.driftClient.connection,
-							programId: new PublicKey(config.SERUM_V3),
-							marketAddress: spotMarketConfig.serumMarket,
-							accountSubscription,
-						});
-						logger.info(
-							`Initializing SerumSubscriber for ${spotMarketConfig.symbol}...`
-						);
-						subscribePromises.push(
-							serumSubscriber.subscribe().then(() => {
-								this.serumSubscribers.set(
-									spotMarketConfig.marketIndex,
-									serumSubscriber
-								);
-							})
-						);
-					}
-				}
-
-				if (spotMarketConfig.phoenixMarket) {
-					// set up fulfillment config
-					await this.phoenixFulfillmentConfigMap.add(
-						spotMarketConfig.marketIndex,
-						spotMarketConfig.phoenixMarket
-					);
-
-					const phoenixConfigAccount = this.phoenixFulfillmentConfigMap.get(
-						spotMarketConfig.marketIndex
-					);
-					if (isVariant(phoenixConfigAccount.status, 'enabled')) {
-						// set up phoenix price subscriber
-						const phoenixSubscriber = new PhoenixSubscriber({
-							connection: this.driftClient.connection,
-							programId: new PublicKey(config.PHOENIX),
-							marketAddress: spotMarketConfig.phoenixMarket,
-							accountSubscription,
-						});
-						logger.info(
-							`Initializing PhoenixSubscriber for ${spotMarketConfig.symbol}...`
-						);
-						subscribePromises.push(
-							phoenixSubscriber.subscribe().then(() => {
-								this.phoenixSubscribers.set(
-									spotMarketConfig.marketIndex,
-									phoenixSubscriber
-								);
-							})
-						);
-					}
-				}
-				await Promise.all(subscribePromises);
-			}
-		);
-		await Promise.all(marketSetupPromises);
+		if (!this.serumSubscribers) {
+			throw new Error('serumSubscribers not initialized');
+		}
+		if (!this.phoenixSubscribers) {
+			throw new Error('phoenixSubscribers not initialized');
+		}
 
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
-		if ('SERUM_LOOKUP_TABLE' in config) {
+		if ('SERUM_LOOKUP_TABLE' in initConfig) {
 			const lutAccount = (
 				await this.driftClient.connection.getAddressLookupTable(
-					new PublicKey(config.SERUM_LOOKUP_TABLE as string)
+					new PublicKey(initConfig.SERUM_LOOKUP_TABLE as string)
 				)
 			).value;
 			if (lutAccount) {
@@ -826,11 +728,11 @@ export class SpotFillerBot implements Bot {
 		await this.userStatsMap!.unsubscribe();
 		await this.orderSubscriber.unsubscribe();
 
-		for (const serumSubscriber of this.serumSubscribers.values()) {
+		for (const serumSubscriber of this.serumSubscribers!.values()) {
 			await serumSubscriber.unsubscribe();
 		}
 
-		for (const phoenixSubscriber of this.phoenixSubscribers.values()) {
+		for (const phoenixSubscriber of this.phoenixSubscribers!.values()) {
 			await phoenixSubscriber.unsubscribe();
 		}
 	}
@@ -1145,11 +1047,11 @@ export class SpotFillerBot implements Bot {
 			market.marketIndex
 		);
 
-		const serumSubscriber = this.serumSubscribers.get(market.marketIndex);
+		const serumSubscriber = this.serumSubscribers!.get(market.marketIndex);
 		const serumBestBid = serumSubscriber?.getBestBid();
 		const serumBestAsk = serumSubscriber?.getBestAsk();
 
-		const phoenixSubscriber = this.phoenixSubscribers.get(market.marketIndex);
+		const phoenixSubscriber = this.phoenixSubscribers!.get(market.marketIndex);
 		const phoenixBestBid = phoenixSubscriber?.getBestBid();
 		const phoenixBestAsk = phoenixSubscriber?.getBestAsk();
 
@@ -1796,7 +1698,8 @@ export class SpotFillerBot implements Bot {
 							webhookMessage(
 								`[${this.name}]: :x: error simulating tx:\n${
 									simError.logs ? simError.logs.join('\n') : ''
-								}\n${e.stack || e}`
+								}\n${e.stack || e}`,
+								process.env.TX_LOG_WEBHOOK_URL
 							);
 						}
 					}
@@ -2095,13 +1998,19 @@ export class SpotFillerBot implements Bot {
 			| undefined = undefined;
 		if (makerInfo === undefined) {
 			if (fallbackSource === 'serum') {
-				fulfillmentConfig = this.serumFulfillmentConfigMap.get(
+				const cfg = this.serumFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);
+				if (cfg && isVariant(cfg.status, 'enabled')) {
+					fulfillmentConfig = cfg;
+				}
 			} else if (fallbackSource === 'phoenix') {
-				fulfillmentConfig = this.phoenixFulfillmentConfigMap.get(
+				const cfg = this.phoenixFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);
+				if (cfg && isVariant(cfg.status, 'enabled')) {
+					fulfillmentConfig = cfg;
+				}
 			} else {
 				logger.error(
 					`makerInfo doesnt exist and unknown fallback source: ${fallbackSource} (fillTxId: ${fillTxId})`

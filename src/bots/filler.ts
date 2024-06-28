@@ -1700,7 +1700,8 @@ export class FillerBot implements Bot {
 							webhookMessage(
 								`[${this.name}]: :x: error simulating tx:\n${
 									simError.logs ? simError.logs.join('\n') : ''
-								}\n${e.stack || e}`
+								}\n${e.stack || e}`,
+								process.env.TX_LOG_WEBHOOK_URL
 							);
 						}
 					}

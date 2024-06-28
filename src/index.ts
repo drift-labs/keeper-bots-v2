@@ -77,6 +77,8 @@ import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 import { UncrossArbBot } from './bots/uncrossArbBot';
 import { FillerBulkBot } from './bots/fillerBulk';
 import { BundleSender } from './bundleSender';
+import { DriftStateWatcher, StateChecks } from './driftStateWatcher';
+import { webhookMessage } from './webhook';
 import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 
 require('dotenv').config();
@@ -556,12 +558,16 @@ const runBot = async () => {
 		updateIntervalMs: 2000,
 	});
 
+	let needDriftStateWatcher = false;
+
 	if (configHasBot(config, 'filler')) {
 		needPythPriceSubscriber = true;
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
 		needPriorityFeeSubscriber = true;
 		needBlockhashSubscriber = true;
+		needDriftStateWatcher = true;
+
 		bots.push(
 			new FillerBot(
 				slotSubscriber,
@@ -590,6 +596,7 @@ const runBot = async () => {
 		needCheckDriftUser = true;
 		needPriorityFeeSubscriber = true;
 		needBlockhashSubscriber = true;
+		needDriftStateWatcher = true;
 
 		logger.info(`Starting filler lite bot`);
 		bots.push(
@@ -618,6 +625,7 @@ const runBot = async () => {
 		needCheckDriftUser = true;
 		needPriorityFeeSubscriber = true;
 		needBlockhashSubscriber = true;
+		needDriftStateWatcher = true;
 
 		logger.info(`Starting filler bulk bot`);
 
@@ -649,6 +657,7 @@ const runBot = async () => {
 		needUserMapSubscribe = false;
 		needPriorityFeeSubscriber = true;
 		needBlockhashSubscriber = true;
+		needDriftStateWatcher = true;
 
 		bots.push(
 			new SpotFillerBot(
@@ -673,6 +682,7 @@ const runBot = async () => {
 	if (configHasBot(config, 'trigger')) {
 		needPythPriceSubscriber = true;
 		needUserMapSubscribe = true;
+		needDriftStateWatcher = true;
 		bots.push(
 			new TriggerBot(
 				driftClient,
@@ -749,6 +759,8 @@ const runBot = async () => {
 		needUserMapSubscribe = true;
 		needForceCollateral = true;
 		needPriorityFeeSubscriber = true;
+		needDriftStateWatcher = true;
+
 		bots.push(
 			new LiquidatorBot(
 				driftClient,
@@ -789,6 +801,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userPnlSettler')) {
+		needDriftStateWatcher = true;
 		bots.push(
 			new UserPnlSettlerBot(
 				driftClientConfig,
@@ -800,6 +813,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'userLpSettler')) {
+		needDriftStateWatcher = true;
 		bots.push(
 			new UserLpSettlerBot(
 				driftClientConfig,
@@ -812,6 +826,8 @@ const runBot = async () => {
 	if (configHasBot(config, 'userIdleFlipper')) {
 		needUserMapSubscribe = true;
 		needBlockhashSubscriber = true;
+		needDriftStateWatcher = true;
+
 		bots.push(
 			new UserIdleFlipperBot(
 				driftClientConfig,
@@ -822,6 +838,8 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'ifRevenueSettler')) {
+		needDriftStateWatcher = true;
+
 		bots.push(
 			new IFRevenueSettlerBot(
 				driftClientConfig,
@@ -832,6 +850,7 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'fundingRateUpdater')) {
 		needCheckDriftUser = true;
+		needDriftStateWatcher = true;
 
 		bots.push(
 			new FundingRateUpdaterBot(
@@ -845,6 +864,7 @@ const runBot = async () => {
 		needPythPriceSubscriber = true;
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
+		needDriftStateWatcher = true;
 
 		bots.push(
 			new MakerBidAskTwapCrank(
@@ -975,6 +995,30 @@ const runBot = async () => {
 		await blockhashSubscriber.subscribe();
 	}
 
+	const activeBots = bots.map((bot) => bot.name);
+
+	let driftStateWatcher: DriftStateWatcher | undefined;
+	if (needDriftStateWatcher) {
+		driftStateWatcher = new DriftStateWatcher({
+			driftClient,
+			intervalMs: 10_000,
+			stateChecks: {
+				perpMarketStatus: true,
+				spotMarketStatus: true,
+				newPerpMarkets: true,
+				newSpotMarkets: true,
+				onStateChange: async (message: string, changes: StateChecks) => {
+					const msg = `DriftStateWatcher triggered: ${message}]\nactive bots: ${JSON.stringify(
+						activeBots
+					)}\nstate changes: ${JSON.stringify(changes)}`;
+					logger.info(msg);
+					await webhookMessage(msg);
+				},
+			},
+		});
+		driftStateWatcher.subscribe();
+	}
+
 	if (bots.length === 0) {
 		throw new Error(
 			`No active bot specified. You must specify a bot through --config-file, or a cli arg. Check the README.md for more information`
@@ -985,7 +1029,11 @@ const runBot = async () => {
 	logger.info(`initializing bots`);
 	await Promise.all(bots.map((bot) => bot.init()));
 
-	logger.info(`starting bots (runOnce: ${config.global.runOnce})`);
+	logger.info(
+		`starting bots (runOnce: ${
+			config.global.runOnce
+		}), active bots: ${JSON.stringify(activeBots)}`
+	);
 	await Promise.all(
 		bots.map((bot) => bot.startIntervalLoop(bot.defaultIntervalMs))
 	);
@@ -1037,6 +1085,22 @@ const runBot = async () => {
 						res.end(`Bot ${bot.name} is not healthy`);
 						return;
 					}
+				}
+
+				if (driftStateWatcher && driftStateWatcher.triggered) {
+					const triggeredStates = JSON.stringify(
+						driftStateWatcher.triggeredStates
+					);
+					logger.error(
+						`Health check failed for DriftStateWatcher, bot names: ${JSON.stringify(
+							activeBots
+						)}, state changes: ${triggeredStates}`
+					);
+					res.writeHead(503);
+					res.end(
+						`DriftStateWatcher is not healthy, triggeredStates: ${triggeredStates}`
+					);
+					return;
 				}
 
 				// liveness check passed

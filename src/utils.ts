@@ -29,6 +29,13 @@ import {
 	getVariant,
 	WhileValidTxSender,
 	PriorityFeeSubscriberMap,
+	isOneOfVariant,
+	SerumV3FulfillmentConfigAccount,
+	PhoenixV1FulfillmentConfigAccount,
+	SerumSubscriber,
+	PhoenixSubscriber,
+	BulkAccountLoader,
+	PollingDriftClientAccountSubscriber,
 	isVariant,
 	SpotMarketConfig,
 	PerpMarketConfig,
@@ -621,7 +628,7 @@ export function handleSimResultError(
 			)}, cuEstimate: ${simResult.cuEstimate}, sim logs:\n${
 				simResult.simTxLogs ? simResult.simTxLogs.join('\n') : 'none'
 			}`;
-			webhookMessage(msg);
+			webhookMessage(msg, process.env.TX_LOG_WEBHOOK_URL);
 			logger.error(msg);
 		}
 	} else {
@@ -643,7 +650,7 @@ export function handleSimResultError(
 			return errorCode;
 		}
 
-		webhookMessage(msg);
+		webhookMessage(msg, process.env.TX_LOG_WEBHOOK_URL);
 	}
 
 	return errorCode;
@@ -1100,3 +1107,195 @@ export const getAllPythOracleUpdateIxs = async (
 	const postOracleUpdateIxs = await Promise.all(postOracleUpdateIxsPromises);
 	return postOracleUpdateIxs.flat();
 };
+
+export function canFillSpotMarket(spotMarket: SpotMarketAccount): boolean {
+	if (
+		isOneOfVariant(spotMarket.status, ['initialized', 'fillPaused', 'delisted'])
+	) {
+		logger.info(
+			`Skipping market ${decodeName(
+				spotMarket.name
+			)} because its SpotMarket.status is ${getVariant(spotMarket.status)}`
+		);
+		return false;
+	}
+	return true;
+}
+
+export async function initializeSpotFulfillmentAccounts(
+	driftClient: DriftClient,
+	includeSubscribers = true,
+	marketsOfInterest?: number[]
+): Promise<{
+	serumFulfillmentConfigs: Map<number, SerumV3FulfillmentConfigAccount>;
+	phoenixFulfillmentConfigs: Map<number, PhoenixV1FulfillmentConfigAccount>;
+	serumSubscribers?: Map<number, SerumSubscriber>;
+	phoenixSubscribers?: Map<number, PhoenixSubscriber>;
+}> {
+	const serumFulfillmentConfigs = new Map<
+		number,
+		SerumV3FulfillmentConfigAccount
+	>();
+	const phoenixFulfillmentConfigs = new Map<
+		number,
+		PhoenixV1FulfillmentConfigAccount
+	>();
+	const serumSubscribers = includeSubscribers
+		? new Map<number, SerumSubscriber>()
+		: undefined;
+	const phoenixSubscribers = includeSubscribers
+		? new Map<number, PhoenixSubscriber>()
+		: undefined;
+
+	let accountSubscription:
+		| {
+				type: 'polling';
+				accountLoader: BulkAccountLoader;
+		  }
+		| {
+				type: 'websocket';
+		  };
+	if (
+		(driftClient.accountSubscriber as PollingDriftClientAccountSubscriber)
+			.accountLoader
+	) {
+		accountSubscription = {
+			type: 'polling',
+			accountLoader: (
+				driftClient.accountSubscriber as PollingDriftClientAccountSubscriber
+			).accountLoader,
+		};
+	} else {
+		accountSubscription = {
+			type: 'websocket',
+		};
+	}
+	const marketSetupPromises: Promise<void>[] = [];
+	const subscribePromises: Promise<void>[] = [];
+
+	marketSetupPromises.push(
+		new Promise((resolve) => {
+			(async () => {
+				const serumMarketConfigs =
+					await driftClient.getSerumV3FulfillmentConfigs();
+				for (const config of serumMarketConfigs) {
+					if (
+						marketsOfInterest &&
+						!marketsOfInterest.includes(config.marketIndex)
+					) {
+						continue;
+					}
+					const spotMarket = driftClient.getSpotMarketAccount(
+						config.marketIndex
+					);
+					if (!spotMarket) {
+						logger.warn(
+							`SpotMarket not found for SerumV3FulfillmentConfig for marketIndex: ${config.marketIndex}`
+						);
+						continue;
+					}
+					const symbol = decodeName(spotMarket.name);
+
+					if (
+						isOneOfVariant(spotMarket?.status, [
+							'initialized',
+							'fillPaused',
+							'delisted',
+						])
+					) {
+						logger.info(
+							`Skipping market ${symbol} (index: ${
+								config.marketIndex
+							}) because its SpotMarket.status is ${getVariant(
+								spotMarket.status
+							)}`
+						);
+						continue;
+					}
+
+					serumFulfillmentConfigs.set(config.marketIndex, config);
+
+					if (includeSubscribers && isVariant(config.status, 'enabled')) {
+						// set up serum price subscriber
+						const serumSubscriber = new SerumSubscriber({
+							connection: driftClient.connection,
+							programId: config.serumProgramId,
+							marketAddress: config.serumMarket,
+							accountSubscription,
+						});
+						logger.info(`Initializing SerumSubscriber for ${symbol}...`);
+						subscribePromises.push(
+							serumSubscriber.subscribe().then(() => {
+								serumSubscribers!.set(config.marketIndex, serumSubscriber);
+							})
+						);
+					}
+				}
+				resolve();
+			})();
+		})
+	);
+
+	marketSetupPromises.push(
+		new Promise((resolve) => {
+			(async () => {
+				const phoenixMarketConfigs =
+					await driftClient.getPhoenixV1FulfillmentConfigs();
+				for (const config of phoenixMarketConfigs) {
+					if (
+						marketsOfInterest &&
+						!marketsOfInterest.includes(config.marketIndex)
+					) {
+						continue;
+					}
+					const spotMarket = driftClient.getSpotMarketAccount(
+						config.marketIndex
+					);
+					if (!spotMarket) {
+						logger.warn(
+							`SpotMarket not found for PhoenixV1FulfillmentConfig for marketIndex: ${config.marketIndex}`
+						);
+						continue;
+					}
+					const symbol = decodeName(spotMarket.name);
+
+					phoenixFulfillmentConfigs.set(config.marketIndex, config);
+
+					if (includeSubscribers && isVariant(config.status, 'enabled')) {
+						// set up phoenix price subscriber
+						const phoenixSubscriber = new PhoenixSubscriber({
+							connection: driftClient.connection,
+							programId: config.phoenixProgramId,
+							marketAddress: config.phoenixMarket,
+							accountSubscription,
+						});
+						logger.info(`Initializing PhoenixSubscriber for ${symbol}...`);
+						subscribePromises.push(
+							phoenixSubscriber.subscribe().then(() => {
+								phoenixSubscribers!.set(config.marketIndex, phoenixSubscriber);
+							})
+						);
+					}
+				}
+				resolve();
+			})();
+		})
+	);
+
+	const marketSetupStart = Date.now();
+	logger.info(`Waiting for spot market startup...`);
+	await Promise.all(marketSetupPromises);
+	logger.info(`Market setup finished in ${Date.now() - marketSetupStart}ms`);
+
+	const subscribeStart = Date.now();
+	logger.info(`Waiting for spot markets to subscribe...`);
+	await Promise.all(subscribePromises);
+	logger.info(`Subscribed to spot markets in ${Date.now() - subscribeStart}ms`);
+
+	return {
+		serumFulfillmentConfigs,
+		phoenixFulfillmentConfigs,
+		serumSubscribers,
+		phoenixSubscribers,
+	};
+}

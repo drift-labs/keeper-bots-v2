@@ -21,10 +21,6 @@ import {
 	MarketType,
 	UserAccount,
 	decodeUser,
-	getVariant,
-	isOneOfVariant,
-	PhoenixFulfillmentConfigMap,
-	SerumFulfillmentConfigMap,
 	PriorityFeeSubscriberMap,
 } from '@drift-labs/sdk';
 import {
@@ -58,6 +54,7 @@ import {
 	getNodeToFillSignature,
 	getTransactionAccountMetas,
 	handleSimResultError,
+	initializeSpotFulfillmentAccounts,
 	logMessageForNodeToFill,
 	simulateAndGetTxWithCUs,
 	sleepMs,
@@ -194,8 +191,14 @@ export class SpotFillerMultithreaded {
 	private userStatsMap?: UserStatsMap;
 	protected hasEnoughSolToFill: boolean = true;
 
-	private phoenixFulfillmentConfigMap: PhoenixFulfillmentConfigMap;
-	private serumFulfillmentConfigMap: SerumFulfillmentConfigMap;
+	private phoenixFulfillmentConfigMap: Map<
+		number,
+		PhoenixV1FulfillmentConfigAccount
+	>;
+	private serumFulfillmentConfigMap: Map<
+		number,
+		SerumV3FulfillmentConfigAccount
+	>;
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
@@ -325,10 +328,14 @@ export class SpotFillerMultithreaded {
 			throw new Error(`Subaccount ${this.subaccount} not found in driftClient`);
 		}
 
-		this.serumFulfillmentConfigMap = new SerumFulfillmentConfigMap(driftClient);
-		this.phoenixFulfillmentConfigMap = new PhoenixFulfillmentConfigMap(
-			driftClient
-		);
+		this.serumFulfillmentConfigMap = new Map<
+			number,
+			SerumV3FulfillmentConfigAccount
+		>();
+		this.phoenixFulfillmentConfigMap = new Map<
+			number,
+			PhoenixV1FulfillmentConfigAccount
+		>();
 
 		if (
 			config.rebalanceFiller &&
@@ -415,46 +422,11 @@ export class SpotFillerMultithreaded {
 			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
 		);
 
-		const marketSetupPromises = config.SPOT_MARKETS.map(
-			async (spotMarketConfig) => {
-				const spotMarket = this.driftClient.getSpotMarketAccount(
-					spotMarketConfig.marketIndex
-				);
-				if (
-					isOneOfVariant(spotMarket?.status, [
-						'initialized',
-						'fillPaused',
-						'delisted',
-					])
-				) {
-					logger.info(
-						`Skipping market ${
-							spotMarketConfig.symbol
-						} because its SpotMarket.status is ${getVariant(
-							spotMarket?.status
-						)}`
-					);
-					return;
-				}
+		({
+			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
+			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
+		} = await initializeSpotFulfillmentAccounts(this.driftClient, false));
 
-				if (spotMarketConfig.serumMarket) {
-					// set up fulfillment config
-					await this.serumFulfillmentConfigMap.add(
-						spotMarketConfig.marketIndex,
-						spotMarketConfig.serumMarket
-					);
-				}
-
-				if (spotMarketConfig.phoenixMarket) {
-					// set up fulfillment config
-					await this.phoenixFulfillmentConfigMap.add(
-						spotMarketConfig.marketIndex,
-						spotMarketConfig.phoenixMarket
-					);
-				}
-			}
-		);
-		await Promise.all(marketSetupPromises);
 
 		this.startProcesses();
 		logger.info(`${this.name}: Initialized`);
@@ -1170,13 +1142,19 @@ export class SpotFillerMultithreaded {
 			| undefined = undefined;
 		if (makerInfo === undefined) {
 			if (fallbackSource === 'serum') {
-				fulfillmentConfig = this.serumFulfillmentConfigMap.get(
+				const cfg = this.serumFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);
+				if (cfg && isVariant(cfg.status, 'enabled')) {
+					fulfillmentConfig = cfg;
+				}
 			} else if (fallbackSource === 'phoenix') {
-				fulfillmentConfig = this.phoenixFulfillmentConfigMap.get(
+				const cfg = this.phoenixFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);
+				if (cfg && isVariant(cfg.status, 'enabled')) {
+					fulfillmentConfig = cfg;
+				}
 			} else {
 				logger.error(
 					`makerInfo doesnt exist and unknown fallback source: ${fallbackSource} (fillTxId: ${fillTxId})`
@@ -2092,7 +2070,8 @@ export class SpotFillerMultithreaded {
 							webhookMessage(
 								`[${this.name}]: :x: error simulating tx:\n${
 									simError.logs ? simError.logs.join('\n') : ''
-								}\n${e.stack || e}`
+								}\n${e.stack || e}`,
+								process.env.TX_LOG_WEBHOOK_URL
 							);
 						}
 					}
