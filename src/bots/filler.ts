@@ -32,6 +32,7 @@ import {
 	BN,
 	QUOTE_PRECISION,
 	ClockSubscriber,
+	DriftEnv,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -77,6 +78,7 @@ import {
 import { getErrorCode } from '../error';
 import {
 	SimulateAndGetTxWithCUsResponse,
+	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
@@ -94,6 +96,7 @@ import { BundleSender } from '../bundleSender';
 import { Metrics } from '../metrics';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
@@ -178,7 +181,7 @@ export class FillerBot implements Bot {
 	protected pollingIntervalMs: number;
 	protected revertOnFailure?: boolean;
 	protected simulateTxForCUEstimate?: boolean;
-	protected lookupTableAccount?: AddressLookupTableAccount;
+	protected lookupTableAccounts: AddressLookupTableAccount[];
 	protected bundleSender?: BundleSender;
 
 	private fillerConfig: FillerConfig;
@@ -256,6 +259,8 @@ export class FillerBot implements Bot {
 	protected minGasBalanceToFill: number;
 	protected rebalanceSettledPnlThreshold: BN;
 
+	pythPriceSubscriber?: PythPriceFeedSubscriber;
+
 	constructor(
 		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
@@ -266,7 +271,9 @@ export class FillerBot implements Bot {
 		fillerConfig: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
-		bundleSender?: BundleSender
+		bundleSender?: BundleSender,
+		pythPriceSubscriber?: PythPriceFeedSubscriber,
+		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
 		this.fillerConfig = fillerConfig;
@@ -315,6 +322,9 @@ export class FillerBot implements Bot {
 		logger.info(
 			`${this.name}: jito enabled: ${this.bundleSender !== undefined}`
 		);
+
+		this.pythPriceSubscriber = pythPriceSubscriber;
+		this.lookupTableAccounts = lookupTableAccounts;
 
 		if (
 			this.fillerConfig.rebalanceFiller &&
@@ -578,8 +588,9 @@ export class FillerBot implements Bot {
 
 		await this.clockSubscriber.subscribe();
 
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts.push(
+			await this.driftClient.fetchMarketLookupTableAccount()
+		);
 	}
 
 	public async init() {
@@ -1605,7 +1616,7 @@ export class FillerBot implements Bot {
 	) {
 		let txResp: Promise<TxSigAndSlot> | undefined = undefined;
 		const { estTxSize, accountMetas, writeAccs, txAccounts } =
-			getTransactionAccountMetas(tx, [this.lookupTableAccount!]);
+			getTransactionAccountMetas(tx, this.lookupTableAccounts);
 
 		const txStart = Date.now();
 		// @ts-ignore;
@@ -1717,6 +1728,27 @@ export class FillerBot implements Bot {
 		return recentBlockhash.blockhash;
 	}
 
+	private async getPythIxsFromNode(
+		node: NodeToFill | NodeToTrigger
+	): Promise<TransactionInstruction[]> {
+		const marketIndex = node.node.order?.marketIndex;
+		if (marketIndex === undefined) {
+			throw new Error('Market index not found on node');
+		}
+		if (!this.pythPriceSubscriber) {
+			throw new Error('Pyth price subscriber not initialized');
+		}
+		const pythIxs = await getAllPythOracleUpdateIxs(
+			this.runtimeSpec.driftEnv as DriftEnv,
+			marketIndex,
+			MarketType.PERP,
+			this.pythPriceSubscriber!,
+			this.driftClient,
+			this.globalConfig.numNonActiveOraclesToPush ?? 0
+		);
+		return pythIxs;
+	}
+
 	/**
 	 *
 	 * @param fillTxId id of current fill
@@ -1741,6 +1773,10 @@ export class FillerBot implements Bot {
 					),
 				})
 			);
+		}
+
+		if (this.pythPriceSubscriber) {
+			ixs.push(...(await this.getPythIxsFromNode(nodeToFill)));
 		}
 
 		try {
@@ -1796,7 +1832,7 @@ export class FillerBot implements Bot {
 					ixs,
 					connection: this.driftClient.connection,
 					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: [this.lookupTableAccount!],
+					lookupTableAccounts: this.lookupTableAccounts,
 					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
@@ -1824,7 +1860,7 @@ export class FillerBot implements Bot {
 
 			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
 			let txAccounts = simResult.tx.message.getAccountKeys({
-				addressLookupTableAccounts: [this.lookupTableAccount!],
+				addressLookupTableAccounts: this.lookupTableAccounts,
 			}).length;
 			let attempt = 0;
 			while (txAccounts > MAX_ACCOUNTS_PER_TX && makerInfosToUse.length > 0) {
@@ -1836,7 +1872,7 @@ export class FillerBot implements Bot {
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
 				simResult = await buildTxWithMakerInfos(makerInfosToUse);
 				txAccounts = simResult.tx.message.getAccountKeys({
-					addressLookupTableAccounts: [this.lookupTableAccount!],
+					addressLookupTableAccounts: this.lookupTableAccounts,
 				}).length;
 			}
 
@@ -2140,7 +2176,7 @@ export class FillerBot implements Bot {
 			ixs,
 			connection: this.driftClient.connection,
 			payerPublicKey: this.driftClient.wallet.publicKey,
-			lookupTableAccounts: [this.lookupTableAccount!],
+			lookupTableAccounts: this.lookupTableAccounts,
 			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 			doSimulation: this.simulateTxForCUEstimate,
 			recentBlockhash: await this.getBlockhashForTx(),
@@ -2282,7 +2318,7 @@ export class FillerBot implements Bot {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.lookupTableAccount!],
+				lookupTableAccounts: this.lookupTableAccounts,
 				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),
@@ -2451,7 +2487,7 @@ export class FillerBot implements Bot {
 							ixs,
 							connection: this.driftClient.connection,
 							payerPublicKey: this.driftClient.wallet.publicKey,
-							lookupTableAccounts: [this.lookupTableAccount!],
+							lookupTableAccounts: this.lookupTableAccounts,
 							cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 							doSimulation: this.simulateTxForCUEstimate,
 							recentBlockhash: await this.getBlockhashForTx(),

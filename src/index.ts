@@ -9,6 +9,7 @@ import {
 	PublicKey,
 	TransactionVersion,
 	ConfirmOptions,
+	AddressLookupTableAccount,
 } from '@solana/web3.js';
 
 import { getAssociatedTokenAddress } from '@solana/spl-token';
@@ -39,6 +40,7 @@ import {
 	AverageOverSlotsStrategy,
 	BlockhashSubscriber,
 	WhileValidTxSender,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
 
@@ -77,6 +79,7 @@ import { FillerBulkBot } from './bots/fillerBulk';
 import { BundleSender } from './bundleSender';
 import { DriftStateWatcher, StateChecks } from './driftStateWatcher';
 import { webhookMessage } from './webhook';
+import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -439,6 +442,34 @@ const runBot = async () => {
 		logger.info(`Failed to load USDC token account: ${e}`);
 	}
 
+	let pythPriceSubscriber: PythPriceFeedSubscriber | undefined;
+	let pythLookupTable: AddressLookupTableAccount | null;
+	if (config.global.hermesEndpoint) {
+		const PYTH_LOOKUP_TABLE = 'CGhVSa9f2jMaeaQrksqBkTEPZNV7eahgYoTCzGTTpi9p';
+		const DEVNET_PYTH_LOOKUP_TABLE =
+			'2LyVSFvPkoPSsbkjDesshLsWd4Zk5NbvP3xBbqAPLJ55';
+		pythPriceSubscriber = new PythPriceFeedSubscriber(
+			config.global.hermesEndpoint,
+			{
+				priceFeedRequestConfig: {
+					binary: true,
+				},
+			}
+		);
+		pythLookupTable = (
+			await connection.getAddressLookupTable(
+				new PublicKey(
+					config.global.driftEnv === 'devnet'
+						? DEVNET_PYTH_LOOKUP_TABLE
+						: PYTH_LOOKUP_TABLE
+				)
+			)
+		).value;
+		if (!pythLookupTable) {
+			throw new Error('Failed to load Pyth lookup table');
+		}
+	}
+
 	/**
 	 * Jito info here
 	 */
@@ -478,6 +509,7 @@ const runBot = async () => {
 	/*
 	 * Start bots depending on flags enabled
 	 */
+	let needPythPriceSubscriber = false;
 	let needCheckDriftUser = false;
 	let needForceCollateral = !!config.global.forceDeposit;
 	let needUserMapSubscribe = false;
@@ -529,6 +561,7 @@ const runBot = async () => {
 	let needDriftStateWatcher = false;
 
 	if (configHasBot(config, 'filler')) {
+		needPythPriceSubscriber = true;
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
 		needPriorityFeeSubscriber = true;
@@ -552,12 +585,14 @@ const runBot = async () => {
 				config.botConfigs!.filler!,
 				priorityFeeSubscriber,
 				blockhashSubscriber,
-				bundleSender
+				bundleSender,
+				pythPriceSubscriber
 			)
 		);
 	}
 
 	if (configHasBot(config, 'fillerLite')) {
+		needPythPriceSubscriber = true;
 		needCheckDriftUser = true;
 		needPriorityFeeSubscriber = true;
 		needBlockhashSubscriber = true;
@@ -579,12 +614,14 @@ const runBot = async () => {
 				config.botConfigs!.fillerLite!,
 				priorityFeeSubscriber,
 				blockhashSubscriber,
-				bundleSender
+				bundleSender,
+				pythPriceSubscriber
 			)
 		);
 	}
 
 	if (configHasBot(config, 'fillerBulk')) {
+		needPythPriceSubscriber = true;
 		needCheckDriftUser = true;
 		needPriorityFeeSubscriber = true;
 		needBlockhashSubscriber = true;
@@ -607,12 +644,14 @@ const runBot = async () => {
 				config.botConfigs!.fillerBulk!,
 				priorityFeeSubscriber,
 				blockhashSubscriber,
-				bundleSender
+				bundleSender,
+				pythPriceSubscriber
 			)
 		);
 	}
 
 	if (configHasBot(config, 'spotFiller')) {
+		needPythPriceSubscriber = true;
 		needCheckDriftUser = true;
 		// to avoid long startup, spotFiller will fetch userAccounts as needed and build the map over time
 		needUserMapSubscribe = false;
@@ -641,6 +680,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'trigger')) {
+		needPythPriceSubscriber = true;
 		needUserMapSubscribe = true;
 		needDriftStateWatcher = true;
 		bots.push(
@@ -821,6 +861,7 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'markTwapCrank')) {
+		needPythPriceSubscriber = true;
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
 		needDriftStateWatcher = true;
@@ -831,7 +872,9 @@ const runBot = async () => {
 				slotSubscriber,
 				userMap,
 				config.botConfigs!.markTwapCrank!,
-				config.global.runOnce ?? false
+				config.global,
+				config.global.runOnce ?? false,
+				pythPriceSubscriber
 			)
 		);
 	}
@@ -863,7 +906,8 @@ const runBot = async () => {
 		eventSubscriber ||
 		auctionSubscriber ||
 		jitter ||
-		needUserMapSubscribe
+		needUserMapSubscribe ||
+		needPythPriceSubscriber
 	) {
 		const hrStart = process.hrtime();
 		while (!(await driftClient.subscribe())) {
@@ -915,6 +959,19 @@ const runBot = async () => {
 			throw new Error(
 				`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
 			);
+		}
+
+		logger.info(`Checking if need pythConnection: ${needPythPriceSubscriber}`);
+		if (needPythPriceSubscriber) {
+			if (!pythPriceSubscriber) {
+				throw new Error(
+					`Pyth connection required for this bot, but not hermesEndpoint not supplied in config`
+				);
+			}
+			const feedIds: string[] = PerpMarkets[config.global.driftEnv!]
+				.map((m) => m.pythFeedId)
+				.filter((id) => id !== undefined) as string[];
+			await pythPriceSubscriber!.subscribe(feedIds);
 		}
 
 		const hrStart = process.hrtime();

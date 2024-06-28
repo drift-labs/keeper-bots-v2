@@ -37,6 +37,10 @@ import {
 	BulkAccountLoader,
 	PollingDriftClientAccountSubscriber,
 	isVariant,
+	SpotMarketConfig,
+	PerpMarketConfig,
+	PerpMarkets,
+	SpotMarkets,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -58,6 +62,7 @@ import {
 	VersionedTransaction,
 } from '@solana/web3.js';
 import { webhookMessage } from './webhook';
+import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 
 // devnet only
 export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
@@ -500,14 +505,15 @@ export async function simulateAndGetTxWithCUs(
 		);
 		setCULimitIxIdx = 0;
 	}
-
 	let simTxDuration = 0;
+
 	const tx = getVersionedTransaction(
 		params.payerPublicKey,
 		params.ixs,
 		params.lookupTableAccounts,
 		params.recentBlockhash ?? PLACEHOLDER_BLOCKHASH
 	);
+
 	if (!params.doSimulation) {
 		return {
 			cuEstimate: -1,
@@ -998,6 +1004,109 @@ export function validRebalanceSettledPnlThreshold(
 	}
 	return true;
 }
+
+export const getPythPriceFeedIdForMarket = (
+	marketIndex: number,
+	markets: Array<SpotMarketConfig | PerpMarketConfig>
+) => {
+	const market = markets.find((market) => market.marketIndex === marketIndex);
+	if (!market) {
+		throw new Error(`Market ${marketIndex} not found`);
+	}
+	return market.pythFeedId;
+};
+
+export const getPythUpdateIxsForVaa = async (
+	vaa: string,
+	feedId: string,
+	driftClient: DriftClient
+) => {
+	return await driftClient.getPostPythPullOracleUpdateAtomicIxs(vaa, feedId);
+};
+
+export const getStaleOracleMarketIndexes = (
+	driftClient: DriftClient,
+	markets: (PerpMarketConfig | SpotMarketConfig)[],
+	marketType: MarketType,
+	numFeeds = 2
+) => {
+	let oracleInfos: { oracleInfo: OraclePriceData; marketIndex: number }[] =
+		markets.map((market) => {
+			if (isVariant(marketType, 'perp')) {
+				return {
+					oracleInfo: driftClient.getOracleDataForPerpMarket(
+						market.marketIndex
+					),
+					marketIndex: market.marketIndex,
+				};
+			} else {
+				return {
+					oracleInfo: driftClient.getOracleDataForSpotMarket(
+						market.marketIndex
+					),
+					marketIndex: market.marketIndex,
+				};
+			}
+		});
+	oracleInfos = oracleInfos.sort(
+		(a, b) => a.oracleInfo.slot.toNumber() - b.oracleInfo.slot.toNumber()
+	);
+	return oracleInfos
+		.slice(0, numFeeds)
+		.map((oracleInfo) => oracleInfo.marketIndex);
+};
+
+export const getAllPythOracleUpdateIxs = async (
+	driftEnv: DriftEnv,
+	activeMarketIndex: number,
+	marketType: MarketType,
+	pythPriceSubscriber: PythPriceFeedSubscriber,
+	driftClient: DriftClient,
+	numNonActiveOraclesToTryAndPush: number,
+	marketIndexesToConsider: number[] = []
+) => {
+	let markets: (PerpMarketConfig | SpotMarketConfig)[];
+	if (isVariant(marketType, 'perp')) {
+		markets =
+			driftEnv === 'mainnet-beta'
+				? PerpMarkets['mainnet-beta']
+				: PerpMarkets['devnet'];
+	} else {
+		markets =
+			driftEnv === 'mainnet-beta'
+				? SpotMarkets['mainnet-beta']
+				: SpotMarkets['devnet'];
+	}
+	if (marketIndexesToConsider.length > 0) {
+		markets = markets.filter((market) =>
+			marketIndexesToConsider.includes(market.marketIndex)
+		);
+	}
+
+	const primaryFeedId = getPythPriceFeedIdForMarket(activeMarketIndex, markets);
+	marketIndexesToConsider =
+		marketIndexesToConsider ?? markets.map((market) => market.marketIndex);
+	const staleFeedIds = getStaleOracleMarketIndexes(
+		driftClient,
+		markets,
+		marketType,
+		numNonActiveOraclesToTryAndPush
+	).map((index) => getPythPriceFeedIdForMarket(index, markets));
+
+	const postOracleUpdateIxsPromises = [primaryFeedId, ...staleFeedIds]
+		.map((feedId) => {
+			if (!feedId) return;
+			const vaa = pythPriceSubscriber.getLatestCachedVaa(feedId);
+			if (!vaa) {
+				logger.debug('No VAA found for feedId', feedId);
+				return;
+			}
+			return driftClient.getPostPythPullOracleUpdateAtomicIxs(vaa, feedId);
+		})
+		.filter((ix) => ix !== undefined) as Promise<TransactionInstruction[]>[];
+	const postOracleUpdateIxs = await Promise.all(postOracleUpdateIxsPromises);
+	return postOracleUpdateIxs.flat();
+};
 
 export function canFillSpotMarket(spotMarket: SpotMarketAccount): boolean {
 	if (

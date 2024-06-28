@@ -8,6 +8,7 @@ import {
 	decodeUser,
 	DLOBNode,
 	DriftClient,
+	DriftEnv,
 	FeeTier,
 	getOrderSignature,
 	getUserAccountPublicKey,
@@ -38,6 +39,7 @@ import {
 	LAMPORTS_PER_SOL,
 	PublicKey,
 	SendTransactionError,
+	Signer,
 	TransactionInstruction,
 	TransactionSignature,
 	VersionedTransaction,
@@ -52,6 +54,7 @@ import {
 } from '../filler-common/types';
 import { assert } from 'console';
 import {
+	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	handleSimResultError,
@@ -101,9 +104,9 @@ import {
 } from '../../bots/common/txLogParse';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { ChildProcess } from 'child_process';
+import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 
 const logPrefix = '[Filler]';
-
 export type MakerNodeMap = Map<string, DLOBNode[]>;
 
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
@@ -182,7 +185,7 @@ export class FillerMultithreaded {
 	private fillingNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
 	private revertOnFailure: boolean = true;
-	private lookupTableAccount?: AddressLookupTableAccount;
+	private lookupTableAccounts: AddressLookupTableAccount[];
 	private lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 	private seenFillableOrders = new Set<string>();
 	private seenTriggerableOrders = new Set<string>();
@@ -249,13 +252,19 @@ export class FillerMultithreaded {
 	protected marketIndexes: Array<number[]>;
 	protected marketIndexesFlattened: number[];
 
+	protected pythPriceSubscriber?: PythPriceFeedSubscriber;
+	protected latestPythVaas?: Map<string, string>; // priceFeedId -> vaa
+	protected marketIndexesToPriceIds = new Map<number, string>();
+
 	constructor(
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		runtimeSpec: RuntimeSpec,
-		bundleSender?: BundleSender
+		bundleSender?: BundleSender,
+		pythPriceSubscriber?: PythPriceFeedSubscriber,
+		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
 		this.name = config.botId;
@@ -274,6 +283,10 @@ export class FillerMultithreaded {
 		} else {
 			this.txConfirmationConnection = this.driftClient.connection;
 		}
+		if (pythPriceSubscriber) {
+			this.pythPriceSubscriber = pythPriceSubscriber;
+		}
+		this.lookupTableAccounts = lookupTableAccounts;
 
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
@@ -379,9 +392,10 @@ export class FillerMultithreaded {
 			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
 		);
 
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
-		assert(this.lookupTableAccount, 'Lookup table account not found');
+		this.lookupTableAccounts.push(
+			await this.driftClient.fetchMarketLookupTableAccount()
+		);
+		assert(this.lookupTableAccounts, 'Lookup table account not found');
 		this.startProcesses();
 	}
 
@@ -939,6 +953,28 @@ export class FillerMultithreaded {
 		}
 	}
 
+	private async getPythIxsFromNode(
+		node: NodeToFillWithBuffer | SerializedNodeToTrigger
+	): Promise<TransactionInstruction[]> {
+		const marketIndex = node.node.order?.marketIndex;
+		if (marketIndex === undefined) {
+			throw new Error('Market index not found on node');
+		}
+		if (!this.pythPriceSubscriber) {
+			throw new Error('Pyth price subscriber not initialized');
+		}
+		const pythIxs = await getAllPythOracleUpdateIxs(
+			this.runtimeSpec.driftEnv as DriftEnv,
+			marketIndex,
+			MarketType.PERP,
+			this.pythPriceSubscriber!,
+			this.driftClient,
+			this.globalConfig.numNonActiveOraclesToPush ?? 0,
+			this.marketIndexesFlattened
+		);
+		return pythIxs;
+	}
+
 	private async getBlockhashForTx(): Promise<string> {
 		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(10);
 		if (cachedBlockhash) {
@@ -1144,6 +1180,12 @@ export class FillerMultithreaded {
 	) {
 		const user = this.driftClient.getUser(this.subaccount);
 		for (const nodeToTrigger of nodesToTrigger) {
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000,
+				}),
+			];
+
 			nodeToTrigger.node.haveTrigger = true;
 			// @ts-ignore
 			const buffer = Buffer.from(nodeToTrigger.node.userAccountData.data);
@@ -1161,38 +1203,34 @@ export class FillerMultithreaded {
 				logger.debug(
 					`${logPrefix} already triggered order (account: ${
 						nodeToTrigger.node.userAccount
-					}, order ${nodeToTrigger.node.order.orderId.toString()}`
+					}, order ${nodeToTrigger.node.order.orderId.toString()}. 
+					Just going to pull oracles`
 				);
-				continue;
-			}
-			this.seenTriggerableOrders.add(nodeSignature);
-			this.triggeringNodes.set(nodeSignature, Date.now());
+			} else {
+				this.seenTriggerableOrders.add(nodeSignature);
+				this.triggeringNodes.set(nodeSignature, Date.now());
 
-			const ixs = [
-				ComputeBudgetProgram.setComputeUnitLimit({
-					units: 1_400_000,
-				}),
-			];
-			ixs.push(
-				await this.driftClient.getTriggerOrderIx(
-					new PublicKey(nodeToTrigger.node.userAccount),
-					userAccount,
-					deserializeOrder(nodeToTrigger.node.order),
-					user.userAccountPublicKey
-				)
-			);
-
-			if (this.revertOnFailure) {
 				ixs.push(
-					await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
+					await this.driftClient.getTriggerOrderIx(
+						new PublicKey(nodeToTrigger.node.userAccount),
+						userAccount,
+						deserializeOrder(nodeToTrigger.node.order),
+						user.userAccountPublicKey
+					)
 				);
+
+				if (this.revertOnFailure) {
+					ixs.push(
+						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
+					);
+				}
 			}
 
 			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.lookupTableAccount!],
+				lookupTableAccounts: this.lookupTableAccounts,
 				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),
@@ -1474,6 +1512,12 @@ export class FillerMultithreaded {
 			}),
 		];
 
+		const extraSigners: Signer[] = [];
+		if (this.pythPriceSubscriber) {
+			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+			ixs.push(...pythIxs);
+		}
+
 		try {
 			const {
 				makerInfos,
@@ -1547,7 +1591,7 @@ export class FillerMultithreaded {
 					ixs,
 					connection: this.driftClient.connection,
 					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: [this.lookupTableAccount!],
+					lookupTableAccounts: this.lookupTableAccounts!,
 					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
@@ -1573,7 +1617,7 @@ export class FillerMultithreaded {
 
 			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
 			let txAccounts = simResult.tx.message.getAccountKeys({
-				addressLookupTableAccounts: [this.lookupTableAccount!],
+				addressLookupTableAccounts: this.lookupTableAccounts,
 			}).length;
 			let attempt = 0;
 			while (txAccounts > MAX_ACCOUNTS_PER_TX && makerInfosToUse.length > 0) {
@@ -1585,7 +1629,7 @@ export class FillerMultithreaded {
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
 				simResult = await buildTxWithMakerInfos(makerInfosToUse);
 				txAccounts = simResult.tx.message.getAccountKeys({
-					addressLookupTableAccounts: [this.lookupTableAccount!],
+					addressLookupTableAccounts: this.lookupTableAccounts!,
 				}).length;
 			}
 
@@ -1614,7 +1658,8 @@ export class FillerMultithreaded {
 						fillTxId,
 						[nodeToFill],
 						simResult.tx,
-						buildForBundle
+						buildForBundle,
+						extraSigners
 					);
 				} else {
 					logger.info(
@@ -1644,6 +1689,12 @@ export class FillerMultithreaded {
 			}),
 		];
 		const fillTxId = this.fillTxId++;
+
+		const extraSigners: Signer[] = [];
+		if (this.pythPriceSubscriber) {
+			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+			ixs.push(...pythIxs);
+		}
 
 		const {
 			makerInfos,
@@ -1711,7 +1762,7 @@ export class FillerMultithreaded {
 			ixs,
 			connection: this.driftClient.connection,
 			payerPublicKey: this.driftClient.wallet.publicKey,
-			lookupTableAccounts: [this.lookupTableAccount!],
+			lookupTableAccounts: this.lookupTableAccounts!,
 			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 			doSimulation: this.simulateTxForCUEstimate,
 			recentBlockhash: await this.getBlockhashForTx(),
@@ -1732,7 +1783,8 @@ export class FillerMultithreaded {
 					fillTxId,
 					[nodeToFill],
 					simResult.tx,
-					buildForBundle
+					buildForBundle,
+					extraSigners
 				);
 			} else {
 				logger.info(
@@ -1746,7 +1798,8 @@ export class FillerMultithreaded {
 		fillTxId: number,
 		nodesSent: Array<NodeToFillWithBuffer>,
 		tx: VersionedTransaction,
-		buildForBundle: boolean
+		buildForBundle: boolean,
+		extraSigners?: Signer[]
 	) {
 		let txResp: Promise<TxSigAndSlot> | undefined = undefined;
 		let estTxSize: number | undefined = undefined;
@@ -1755,7 +1808,7 @@ export class FillerMultithreaded {
 		const accountMetas: any[] = [];
 		const txStart = Date.now();
 		// @ts-ignore;
-		tx.sign([this.driftClient.wallet.payer]);
+		tx.sign([this.driftClient.wallet.payer, ...extraSigners]);
 		const txSig = bs58.encode(tx.signatures[0]);
 
 		if (buildForBundle) {
@@ -1764,7 +1817,7 @@ export class FillerMultithreaded {
 		} else {
 			estTxSize = tx.message.serialize().length;
 			const acc = tx.message.getAccountKeys({
-				addressLookupTableAccounts: [this.lookupTableAccount!],
+				addressLookupTableAccounts: this.lookupTableAccounts!,
 			});
 			txAccounts = acc.length;
 			for (let i = 0; i < txAccounts; i++) {
@@ -1915,7 +1968,7 @@ export class FillerMultithreaded {
 							ixs,
 							connection: this.driftClient.connection,
 							payerPublicKey: this.driftClient.wallet.publicKey,
-							lookupTableAccounts: [this.lookupTableAccount!],
+							lookupTableAccounts: this.lookupTableAccounts!,
 							cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 							doSimulation: this.simulateTxForCUEstimate,
 							recentBlockhash: await this.getBlockhashForTx(),

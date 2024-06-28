@@ -20,6 +20,7 @@ import {
 	initialize,
 } from '@drift-labs/sdk';
 import {
+	AddressLookupTableAccount,
 	Commitment,
 	ConfirmOptions,
 	Connection,
@@ -31,6 +32,14 @@ import { FillerMultithreaded } from './filler/fillerMultithreaded';
 import http from 'http';
 import { promiseTimeout } from '@drift-labs/sdk';
 import { SpotFillerMultithreaded } from './spotFiller/spotFillerMultithreaded';
+import { setGlobalDispatcher, Agent } from 'undici';
+import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+
+setGlobalDispatcher(
+	new Agent({
+		connections: 200,
+	})
+);
 
 require('dotenv').config();
 
@@ -185,6 +194,35 @@ const runBot = async () => {
 		resubTimeoutMs: config.global.resubTimeoutMs,
 	};
 
+	// Send unsubscribed subscription to the bot
+	let pythPriceSubscriber: PythPriceFeedSubscriber | undefined;
+	let pythLookupTable: AddressLookupTableAccount | null;
+	if (config.global.hermesEndpoint) {
+		const PYTH_LOOKUP_TABLE = 'CGhVSa9f2jMaeaQrksqBkTEPZNV7eahgYoTCzGTTpi9p';
+		const DEVNET_PYTH_LOOKUP_TABLE =
+			'2LyVSFvPkoPSsbkjDesshLsWd4Zk5NbvP3xBbqAPLJ55';
+		pythPriceSubscriber = new PythPriceFeedSubscriber(
+			config.global.hermesEndpoint,
+			{
+				priceFeedRequestConfig: {
+					binary: true,
+				},
+			}
+		);
+		pythLookupTable = (
+			await connection.getAddressLookupTable(
+				new PublicKey(
+					config.global.driftEnv === 'devnet'
+						? DEVNET_PYTH_LOOKUP_TABLE
+						: PYTH_LOOKUP_TABLE
+				)
+			)
+		).value;
+		if (!pythLookupTable) {
+			throw new Error('Failed to load Pyth lookup table');
+		}
+	}
+
 	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 		getMarketsAndOraclesForSubscription(
 			config.global.driftEnv || 'mainnet-beta'
@@ -281,7 +319,9 @@ const runBot = async () => {
 				driftPid: driftPublicKey.toBase58(),
 				walletAuthority: wallet.publicKey.toBase58(),
 			},
-			bundleSender
+			bundleSender,
+			pythPriceSubscriber,
+			[pythLookupTable!]
 		);
 		bots.push(fillerMultithreaded);
 	}
@@ -317,7 +357,9 @@ const runBot = async () => {
 			},
 			config.global,
 			config.botConfigs?.spotFillerMultithreaded,
-			bundleSender
+			bundleSender,
+			pythPriceSubscriber,
+			[pythLookupTable!]
 		);
 		bots.push(spotFillerMultithreaded);
 	}
