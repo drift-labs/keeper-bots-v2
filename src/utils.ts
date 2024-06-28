@@ -622,7 +622,7 @@ export function handleSimResultError(
 			)}, cuEstimate: ${simResult.cuEstimate}, sim logs:\n${
 				simResult.simTxLogs ? simResult.simTxLogs.join('\n') : 'none'
 			}`;
-			webhookMessage(msg);
+			webhookMessage(msg, process.env.TX_LOG_WEBHOOK_URL);
 			logger.error(msg);
 		}
 	} else {
@@ -644,7 +644,7 @@ export function handleSimResultError(
 			return errorCode;
 		}
 
-		webhookMessage(msg);
+		webhookMessage(msg, process.env.TX_LOG_WEBHOOK_URL);
 	}
 
 	return errorCode;
