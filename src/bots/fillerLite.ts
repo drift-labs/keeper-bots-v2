@@ -10,7 +10,7 @@ import {
 	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 
-import { PublicKey } from '@solana/web3.js';
+import { AddressLookupTableAccount, PublicKey } from '@solana/web3.js';
 
 import { logger } from '../logger';
 import { FillerConfig, GlobalConfig } from '../config';
