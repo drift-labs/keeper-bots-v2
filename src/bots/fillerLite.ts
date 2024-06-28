@@ -20,6 +20,7 @@ import { FillerBot } from './filler';
 
 import { sleepMs } from '../utils';
 import { BundleSender } from '../bundleSender';
+import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 
 export class FillerLiteBot extends FillerBot {
 	protected orderSubscriber: OrderSubscriber;
@@ -32,7 +33,8 @@ export class FillerLiteBot extends FillerBot {
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
-		bundleSender?: BundleSender
+		bundleSender?: BundleSender,
+		pythPriceFeedSubscriber?: PythPriceFeedSubscriber
 	) {
 		super(
 			slotSubscriber,
@@ -44,7 +46,8 @@ export class FillerLiteBot extends FillerBot {
 			config,
 			priorityFeeSubscriber,
 			blockhashSubscriber,
-			bundleSender
+			bundleSender,
+			pythPriceFeedSubscriber
 		);
 
 		this.userStatsMapSubscriptionConfig = {

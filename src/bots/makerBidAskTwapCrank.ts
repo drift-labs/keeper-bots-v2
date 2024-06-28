@@ -17,7 +17,7 @@ import { Mutex } from 'async-mutex';
 
 import { logger } from '../logger';
 import { Bot } from '../types';
-import { BaseBotConfig } from '../config';
+import { BaseBotConfig, GlobalConfig } from '../config';
 import {
 	TransactionSignature,
 	VersionedTransaction,
@@ -31,10 +31,12 @@ import {
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
 import {
+	getAllPythOracleUpdateIxs,
 	getDriftPriorityFeeEndpoint,
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
 } from '../utils';
+import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 
 const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
@@ -128,6 +130,8 @@ export class MakerBidAskTwapCrank implements Bot {
 	public readonly runOnce: boolean;
 	public readonly defaultIntervalMs?: number = undefined;
 
+	public readonly globalConfig: GlobalConfig;
+
 	private crankIntervalToMarketIds?: { [key: number]: number[] }; // Object from number to array of numbers
 	private crankIntervalInProgress?: { [key: number]: boolean };
 	private allCrankIntervalGroups?: number[];
@@ -145,20 +149,25 @@ export class MakerBidAskTwapCrank implements Bot {
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
+	private pythPriceSubscriber?: PythPriceFeedSubscriber;
 
 	constructor(
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		userMap: UserMap,
 		config: BaseBotConfig,
-		runOnce: boolean
+		globalConfig: GlobalConfig,
+		runOnce: boolean,
+		pythPriceSubscriber?: PythPriceFeedSubscriber
 	) {
 		this.slotSubscriber = slotSubscriber;
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = runOnce;
+		this.globalConfig = globalConfig;
 		this.driftClient = driftClient;
 		this.userMap = userMap;
+		this.pythPriceSubscriber = pythPriceSubscriber;
 	}
 
 	public async init() {
@@ -336,6 +345,26 @@ export class MakerBidAskTwapCrank implements Bot {
 		return { success: true, canRetry: false };
 	}
 
+	private async getPythIxsFromTwapCrankInfo(
+		crankMarketIndex: number
+	): Promise<TransactionInstruction[]> {
+		if (crankMarketIndex === undefined) {
+			throw new Error('Market index not found on node');
+		}
+		if (!this.pythPriceSubscriber) {
+			throw new Error('Pyth price subscriber not initialized');
+		}
+		const pythIxs = await getAllPythOracleUpdateIxs(
+			this.globalConfig.driftEnv,
+			crankMarketIndex,
+			MarketType.PERP,
+			this.pythPriceSubscriber!,
+			this.driftClient,
+			this.globalConfig.numNonActiveOraclesToPush ?? 0
+		);
+		return pythIxs;
+	}
+
 	private async tryTwapCrank(intervalGroup: number | null) {
 		const state = this.driftClient.getStateAccount();
 		let crankMarkets: number[] = [];
@@ -380,6 +409,11 @@ export class MakerBidAskTwapCrank implements Bot {
 						microLamports,
 					}),
 				];
+
+				if (this.pythPriceSubscriber) {
+					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
+					ixs.push(...pythIxs);
+				}
 
 				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
 

@@ -53,6 +53,7 @@ import {
 } from '../../metrics';
 import {
 	SimulateAndGetTxWithCUsResponse,
+	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getTransactionAccountMetas,
@@ -99,6 +100,7 @@ import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { getErrorCode } from '../../error';
 import { webhookMessage } from '../../webhook';
 import { selectMakers } from '../../makerSelection';
+import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 
 enum METRIC_TYPES {
 	try_fill_duration_histogram = 'try_fill_duration_histogram',
@@ -263,13 +265,16 @@ export class SpotFillerMultithreaded {
 	private dlobHealthy = true;
 	private orderSubscriberHealthy = true;
 
+	private pythPriceSubscriber?: PythPriceFeedSubscriber;
+
 	constructor(
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		runtimeSpec: RuntimeSpec,
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
-		bundleSender?: BundleSender
+		bundleSender?: BundleSender,
+		pythPriceSubscriber?: PythPriceFeedSubscriber
 	) {
 		this.globalConfig = globalConfig;
 		this.config = config;
@@ -287,6 +292,7 @@ export class SpotFillerMultithreaded {
 			this.txConfirmationConnection = this.driftClient.connection;
 		}
 		this.runtimeSpec = runtimeSpec;
+		this.pythPriceSubscriber = pythPriceSubscriber;
 
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
@@ -619,6 +625,28 @@ export class SpotFillerMultithreaded {
 		}
 	}
 
+	private async getPythIxsFromNode(
+		node: NodeToFillWithBuffer | SerializedNodeToTrigger
+	): Promise<TransactionInstruction[]> {
+		const marketIndex = node.node.order?.marketIndex;
+		if (marketIndex === undefined) {
+			throw new Error('Market index not found on node');
+		}
+		if (!this.pythPriceSubscriber) {
+			throw new Error('Pyth price subscriber not initialized');
+		}
+		const pythIxs = await getAllPythOracleUpdateIxs(
+			this.runtimeSpec.driftEnv as DriftEnv,
+			marketIndex,
+			MarketType.SPOT,
+			this.pythPriceSubscriber!,
+			this.driftClient,
+			this.globalConfig.numNonActiveOraclesToPush ?? 0,
+			this.marketIndexesFlattened
+		);
+		return pythIxs;
+	}
+
 	public async triggerNodes(
 		serializedNodesToTrigger: SerializedNodeToTrigger[]
 	) {
@@ -699,6 +727,11 @@ export class SpotFillerMultithreaded {
 			this.triggeringNodes.set(nodeSignature, Date.now());
 
 			const ixs = [];
+
+			if (this.pythPriceSubscriber) {
+				ixs.push(...(await this.getPythIxsFromNode(nodeToTrigger)));
+			}
+
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
@@ -1186,6 +1219,11 @@ export class SpotFillerMultithreaded {
 				})
 			);
 		}
+
+		if (this.pythPriceSubscriber) {
+			ixs.push(...(await this.getPythIxsFromNode(nodeToFill)));
+		}
+
 		const user = this.driftClient.getUser(this.subaccount);
 		ixs.push(
 			await this.driftClient.getFillSpotOrderIx(

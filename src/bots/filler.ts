@@ -32,6 +32,7 @@ import {
 	BN,
 	QUOTE_PRECISION,
 	ClockSubscriber,
+	DriftEnv,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -77,6 +78,7 @@ import {
 import { getErrorCode } from '../error';
 import {
 	SimulateAndGetTxWithCUsResponse,
+	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
@@ -94,6 +96,7 @@ import { BundleSender } from '../bundleSender';
 import { Metrics } from '../metrics';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 
 const MAX_TX_PACK_SIZE = 1230; //1232;
 const CU_PER_FILL = 260_000; // CU cost for a successful fill
@@ -256,6 +259,8 @@ export class FillerBot implements Bot {
 	protected minGasBalanceToFill: number;
 	protected rebalanceSettledPnlThreshold: BN;
 
+	pythPriceSubscriber?: PythPriceFeedSubscriber;
+
 	constructor(
 		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
@@ -266,7 +271,8 @@ export class FillerBot implements Bot {
 		fillerConfig: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
-		bundleSender?: BundleSender
+		bundleSender?: BundleSender,
+		pythPriceSubscriber?: PythPriceFeedSubscriber
 	) {
 		this.globalConfig = globalConfig;
 		this.fillerConfig = fillerConfig;
@@ -315,6 +321,8 @@ export class FillerBot implements Bot {
 		logger.info(
 			`${this.name}: jito enabled: ${this.bundleSender !== undefined}`
 		);
+
+		this.pythPriceSubscriber = pythPriceSubscriber;
 
 		if (
 			this.fillerConfig.rebalanceFiller &&
@@ -1716,6 +1724,27 @@ export class FillerBot implements Bot {
 		return recentBlockhash.blockhash;
 	}
 
+	private async getPythIxsFromNode(
+		node: NodeToFill | NodeToTrigger
+	): Promise<TransactionInstruction[]> {
+		const marketIndex = node.node.order?.marketIndex;
+		if (marketIndex === undefined) {
+			throw new Error('Market index not found on node');
+		}
+		if (!this.pythPriceSubscriber) {
+			throw new Error('Pyth price subscriber not initialized');
+		}
+		const pythIxs = await getAllPythOracleUpdateIxs(
+			this.runtimeSpec.driftEnv as DriftEnv,
+			marketIndex,
+			MarketType.PERP,
+			this.pythPriceSubscriber!,
+			this.driftClient,
+			this.globalConfig.numNonActiveOraclesToPush ?? 0
+		);
+		return pythIxs;
+	}
+
 	/**
 	 *
 	 * @param fillTxId id of current fill
@@ -1740,6 +1769,10 @@ export class FillerBot implements Bot {
 					),
 				})
 			);
+		}
+
+		if (this.pythPriceSubscriber) {
+			ixs.push(...(await this.getPythIxsFromNode(nodeToFill)));
 		}
 
 		try {

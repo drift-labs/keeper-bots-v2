@@ -25,7 +25,6 @@ import {
 	isVariant,
 	StateAccount,
 	PRICE_PRECISION,
-	OraclePriceData,
 } from '@drift-labs/sdk';
 import {
 	ComputeBudgetProgram,
@@ -47,7 +46,6 @@ import {
 } from './types';
 import { ChildProcess, fork } from 'child_process';
 import { logger } from '../../logger';
-import { PythSolanaReceiver } from '@pythnetwork/pyth-solana-receiver';
 
 export const serializeUserAccount = (
 	userAccount: UserAccount
@@ -469,40 +467,4 @@ export const getPriorityFeeInstruction = (
 			fillerRewardMicroLamports
 		),
 	});
-};
-
-export const getPythUpdateIxsForVaas = async (
-	vaas: string[],
-	pythSolanaReceiver: PythSolanaReceiver
-) => {
-	return await pythSolanaReceiver.buildUpdatePriceFeedInstructions(vaas, 1515);
-};
-
-export const getStaleOracleMarketIndexes = (
-	driftClient: DriftClient,
-	marketIndexesToConsider: number[],
-	marketType: MarketType = MarketType.PERP,
-	numFeeds = 2
-) => {
-	let oracleInfos: { oracleInfo: OraclePriceData; marketIndex: number }[] =
-		isVariant(marketType, 'perp')
-			? marketIndexesToConsider.map((marketIndex) => {
-					return {
-						oracleInfo: driftClient.getOracleDataForPerpMarket(marketIndex),
-						marketIndex,
-					};
-			  })
-			: marketIndexesToConsider.map((marketIndex) => {
-					return {
-						oracleInfo: driftClient.getOracleDataForSpotMarket(marketIndex),
-						marketIndex,
-					};
-			  });
-
-	oracleInfos = oracleInfos.sort(
-		(a, b) => a.oracleInfo.slot.toNumber() - b.oracleInfo.slot.toNumber()
-	);
-	return oracleInfos
-		.slice(0, numFeeds)
-		.map((oracleInfo) => oracleInfo.marketIndex);
 };

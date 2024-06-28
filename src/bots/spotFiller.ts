@@ -76,6 +76,7 @@ import {
 } from './common/txLogParse';
 import { FillerConfig, GlobalConfig } from '../config';
 import {
+	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
@@ -102,6 +103,7 @@ import {
 import { selectMakers } from '../makerSelection';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
@@ -324,6 +326,8 @@ export class SpotFillerBot implements Bot {
 	protected minGasBalanceToFill: number;
 	protected rebalanceSettledPnlThreshold: BN;
 
+	protected pythPriceSubscriber?: PythPriceFeedSubscriber;
+
 	constructor(
 		driftClient: DriftClient,
 		userMap: UserMap,
@@ -332,7 +336,8 @@ export class SpotFillerBot implements Bot {
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
-		bundleSender?: BundleSender
+		bundleSender?: BundleSender,
+		pythPriceSubscriber?: PythPriceFeedSubscriber
 	) {
 		this.globalConfig = globalConfig;
 		this.name = config.botId;
@@ -382,6 +387,8 @@ export class SpotFillerBot implements Bot {
 		logger.info(
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
+
+		this.pythPriceSubscriber = pythPriceSubscriber;
 
 		this.userMap = userMap;
 
@@ -1798,6 +1805,27 @@ export class SpotFillerBot implements Bot {
 		}
 	}
 
+	private async getPythIxsFromNode(
+		node: NodeToFill | NodeToTrigger
+	): Promise<TransactionInstruction[]> {
+		const marketIndex = node.node.order?.marketIndex;
+		if (marketIndex === undefined) {
+			throw new Error('Market index not found on node');
+		}
+		if (!this.pythPriceSubscriber) {
+			throw new Error('Pyth price subscriber not initialized');
+		}
+		const pythIxs = await getAllPythOracleUpdateIxs(
+			this.runtimeSpec.driftEnv as DriftEnv,
+			marketIndex,
+			MarketType.SPOT,
+			this.pythPriceSubscriber!,
+			this.driftClient,
+			this.globalConfig.numNonActiveOraclesToPush ?? 0
+		);
+		return pythIxs;
+	}
+
 	/**
 	 *
 	 * @param fillTxId id of current fill
@@ -2112,6 +2140,10 @@ export class SpotFillerBot implements Bot {
 					microLamports: priorityFee,
 				})
 			);
+		}
+
+		if (this.pythPriceSubscriber) {
+			ixs.push(...(await this.getPythIxsFromNode(nodeToFill)));
 		}
 
 		ixs.push(

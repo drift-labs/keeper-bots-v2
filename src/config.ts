@@ -114,10 +114,12 @@ export type BotConfigMap = {
 };
 
 export interface GlobalConfig {
-	driftEnv?: DriftEnv;
+	driftEnv: DriftEnv;
 	endpoint: string;
 	wsEndpoint?: string;
 	hermesEndpoint?: string;
+	numNonActiveOraclesToPush?: number;
+
 	/// helius endpoint to use helius priority fee strategy
 	heliusEndpoint?: string;
 	/// additional rpc endpoints to send transactions to
@@ -190,7 +192,9 @@ const defaultConfig: Partial<Config> = {
 		bulkAccountLoaderPollingInterval: 5000,
 
 		endpoint: process.env.ENDPOINT!,
-		hermesEndpoint: process.env.HERMES_ENDPOINT!,
+		hermesEndpoint:
+			process.env.HERMES_ENDPOINT ?? 'https://hermes.pyth.network',
+		numNonActiveOraclesToPush: 0,
 		wsEndpoint: process.env.WS_ENDPOINT,
 		heliusEndpoint: process.env.HELIUS_ENDPOINT,
 		additionalSendTxEndpoints: [],

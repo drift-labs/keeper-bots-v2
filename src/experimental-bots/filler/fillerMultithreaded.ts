@@ -8,6 +8,7 @@ import {
 	decodeUser,
 	DLOBNode,
 	DriftClient,
+	DriftEnv,
 	FeeTier,
 	getOrderSignature,
 	getUserAccountPublicKey,
@@ -20,7 +21,6 @@ import {
 	MakerInfo,
 	MarketType,
 	NodeToFill,
-	PerpMarkets,
 	PRICE_PRECISION,
 	PriorityFeeSubscriberMap,
 	QUOTE_PRECISION,
@@ -54,6 +54,7 @@ import {
 } from '../filler-common/types';
 import { assert } from 'console';
 import {
+	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	handleSimResultError,
@@ -71,8 +72,6 @@ import {
 	deserializeOrder,
 	getUserFeeTier,
 	getPriorityFeeInstruction,
-	getStaleOracleMarketIndexes,
-	getPythUpdateIxsForVaas,
 } from '../filler-common/utils';
 import {
 	CounterValue,
@@ -105,14 +104,10 @@ import {
 } from '../../bots/common/txLogParse';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { ChildProcess } from 'child_process';
-import {
-	PriceFeed,
-	PriceServiceConnection,
-} from '@pythnetwork/price-service-client';
-import { PythSolanaReceiver } from '@pythnetwork/pyth-solana-receiver';
+import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 
 const logPrefix = '[Filler]';
-const PYTH_LOOKUP_TABLE = 'CGhVSa9f2jMaeaQrksqBkTEPZNV7eahgYoTCzGTTpi9p';
+const PYTH_LOOKUP_TABLE = '2LyVSFvPkoPSsbkjDesshLsWd4Zk5NbvP3xBbqAPLJ55';
 
 export type MakerNodeMap = Map<string, DLOBNode[]>;
 
@@ -259,8 +254,7 @@ export class FillerMultithreaded {
 	protected marketIndexes: Array<number[]>;
 	protected marketIndexesFlattened: number[];
 
-	protected pythConnection?: PriceServiceConnection;
-	protected pythSolanaReceiver?: PythSolanaReceiver;
+	protected pythPriceSubscriber?: PythPriceFeedSubscriber;
 	protected latestPythVaas?: Map<string, string>; // priceFeedId -> vaa
 	protected marketIndexesToPriceIds = new Map<number, string>();
 
@@ -271,7 +265,7 @@ export class FillerMultithreaded {
 		slotSubscriber: SlotSubscriber,
 		runtimeSpec: RuntimeSpec,
 		bundleSender?: BundleSender,
-		pythConnection?: PriceServiceConnection
+		pythPriceSubscriber?: PythPriceFeedSubscriber
 	) {
 		this.globalConfig = globalConfig;
 		this.name = config.botId;
@@ -290,14 +284,8 @@ export class FillerMultithreaded {
 		} else {
 			this.txConfirmationConnection = this.driftClient.connection;
 		}
-		if (pythConnection) {
-			this.pythConnection = pythConnection;
-			this.latestPythVaas = new Map();
-			this.pythSolanaReceiver = new PythSolanaReceiver({
-				connection: this.driftClient.connection,
-				//@ts-ignore
-				wallet: this.driftClient.wallet,
-			});
+		if (pythPriceSubscriber) {
+			this.pythPriceSubscriber = pythPriceSubscriber;
 		}
 
 		this.userStatsMap = new UserStatsMap(
@@ -395,30 +383,6 @@ export class FillerMultithreaded {
 	async init() {
 		await this.blockhashSubscriber.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
-
-		if (this.pythConnection) {
-			const feedIds: string[] = PerpMarkets['mainnet-beta']
-				.filter((m) => this.marketIndexesFlattened.includes(m.marketIndex))
-				.map((m) => m.pythFeedId)
-				.filter((id) => id !== undefined) as string[];
-
-			await this.pythConnection?.subscribePriceFeedUpdates(
-				feedIds,
-				(priceFeed: PriceFeed) => {
-					if (priceFeed.vaa) {
-						const priceFeedId = '0x' + priceFeed.id;
-						this.latestPythVaas!.set(priceFeedId, priceFeed.vaa);
-					}
-				}
-			);
-
-			for (const feedId of feedIds) {
-				const marketIndex = PerpMarkets['mainnet-beta'].find(
-					(m) => m.pythFeedId === feedId
-				)!.marketIndex;
-				this.marketIndexesToPriceIds.set(marketIndex, feedId);
-			}
-		}
 
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
@@ -996,42 +960,24 @@ export class FillerMultithreaded {
 
 	private async getPythIxsFromNode(
 		node: NodeToFillWithBuffer | SerializedNodeToTrigger
-	): Promise<[TransactionInstruction[], Signer[]]> {
-		if (!this.pythSolanaReceiver) {
-			throw new Error('PythSolanaReceiver not initialized');
-		}
-		const ixs = [];
-		const signers = [];
+	): Promise<TransactionInstruction[]> {
 		const marketIndex = node.node.order?.marketIndex;
 		if (marketIndex === undefined) {
 			throw new Error('Market index not found on node');
 		}
-		const primaryFeedId = this.marketIndexesToPriceIds.get(marketIndex)!;
-		const staleFeedIds: string[] = [];
-		// const staleFeedIds = getStaleOracleMarketIndexes(
-		// 	this.driftClient,
-		// 	this.marketIndexesFlattened.filter((x) => x != marketIndex),
-		// 	MarketType.PERP,
-		// ).map((index) => this.marketIndexesToPriceIds.get(index)!);
-
-		const vaas = [primaryFeedId, ...staleFeedIds]
-			.map((feedId) => {
-				const vaa = this.latestPythVaas!.get(feedId);
-				if (!vaa) {
-					logger.debug('No VAA found for feedId', feedId);
-					return;
-				}
-				return vaa;
-			})
-			.filter((vaa) => vaa !== undefined) as string[];
-		const pythIxs = await getPythUpdateIxsForVaas(
-			vaas,
-			this.pythSolanaReceiver
+		if (!this.pythPriceSubscriber) {
+			throw new Error('Pyth price subscriber not initialized');
+		}
+		const pythIxs = await getAllPythOracleUpdateIxs(
+			this.runtimeSpec.driftEnv as DriftEnv,
+			marketIndex,
+			MarketType.PERP,
+			this.pythPriceSubscriber!,
+			this.driftClient,
+			this.globalConfig.numNonActiveOraclesToPush ?? 0,
+			this.marketIndexesFlattened
 		);
-		ixs.push(...pythIxs.postInstructions.map((x) => x.instruction));
-		ixs.push(...pythIxs.closeInstructions.map((x) => x.instruction));
-		signers.push(...pythIxs.postInstructions.map((x) => x.signers));
-		return [ixs, signers.flat()];
+		return pythIxs;
 	}
 
 	private async getBlockhashForTx(): Promise<string> {
@@ -1572,11 +1518,9 @@ export class FillerMultithreaded {
 		];
 
 		const extraSigners: Signer[] = [];
-		if (this.pythConnection) {
-			logger.info('Getting pyth ixs');
+		if (this.pythPriceSubscriber) {
 			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
-			ixs.push(...pythIxs[0]);
-			extraSigners.push(...pythIxs[1]);
+			ixs.push(...pythIxs);
 		}
 
 		try {
@@ -1752,10 +1696,9 @@ export class FillerMultithreaded {
 		const fillTxId = this.fillTxId++;
 
 		const extraSigners: Signer[] = [];
-		if (this.pythConnection) {
+		if (this.pythPriceSubscriber) {
 			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
-			ixs.push(...pythIxs[0]);
-			extraSigners.push(...pythIxs[1]);
+			ixs.push(...pythIxs);
 		}
 
 		const {
