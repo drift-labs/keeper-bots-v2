@@ -245,8 +245,6 @@ export class SpotFillerBot implements Bot {
 	private globalConfig: GlobalConfig;
 	private blockhashSubscriber: BlockhashSubscriber;
 	private pollingIntervalMs: number;
-	private driftLutAccount?: AddressLookupTableAccount;
-	private driftSpotLutAccount?: AddressLookupTableAccount;
 	private fillTxId = 0;
 
 	private dlobSubscriber?: DLOBSubscriber;
@@ -327,6 +325,7 @@ export class SpotFillerBot implements Bot {
 	protected rebalanceSettledPnlThreshold: BN;
 
 	protected pythPriceSubscriber?: PythPriceFeedSubscriber;
+	protected lookupTableAccounts: AddressLookupTableAccount[];
 
 	constructor(
 		driftClient: DriftClient,
@@ -337,7 +336,8 @@ export class SpotFillerBot implements Bot {
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
 		bundleSender?: BundleSender,
-		pythPriceSubscriber?: PythPriceFeedSubscriber
+		pythPriceSubscriber?: PythPriceFeedSubscriber,
+		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
 		this.name = config.botId;
@@ -389,6 +389,7 @@ export class SpotFillerBot implements Bot {
 		);
 
 		this.pythPriceSubscriber = pythPriceSubscriber;
+		this.lookupTableAccounts = lookupTableAccounts;
 
 		this.userMap = userMap;
 
@@ -796,8 +797,9 @@ export class SpotFillerBot implements Bot {
 		);
 		await Promise.all(marketSetupPromises);
 
-		this.driftLutAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts.push(
+			await this.driftClient.fetchMarketLookupTableAccount()
+		);
 		if ('SERUM_LOOKUP_TABLE' in config) {
 			const lutAccount = (
 				await this.driftClient.connection.getAddressLookupTable(
@@ -805,7 +807,7 @@ export class SpotFillerBot implements Bot {
 				)
 			).value;
 			if (lutAccount) {
-				this.driftSpotLutAccount = lutAccount;
+				this.lookupTableAccounts.push(lutAccount);
 			}
 		}
 
@@ -1900,7 +1902,7 @@ export class SpotFillerBot implements Bot {
 					ixs,
 					connection: this.driftClient.connection,
 					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: [this.driftLutAccount!],
+					lookupTableAccounts: this.lookupTableAccounts,
 					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
@@ -1929,7 +1931,7 @@ export class SpotFillerBot implements Bot {
 
 			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
 			let txAccounts = simResult.tx.message.getAccountKeys({
-				addressLookupTableAccounts: [this.driftLutAccount!],
+				addressLookupTableAccounts: this.lookupTableAccounts,
 			}).length;
 			let attempt = 0;
 			while (txAccounts > MAX_ACCOUNTS_PER_TX && makerInfosToUse.length > 0) {
@@ -1941,7 +1943,7 @@ export class SpotFillerBot implements Bot {
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
 				simResult = await buildTxWithMakerInfos(makerInfosToUse);
 				txAccounts = simResult.tx.message.getAccountKeys({
-					addressLookupTableAccounts: [this.driftLutAccount!],
+					addressLookupTableAccounts: this.lookupTableAccounts,
 				}).length;
 			}
 
@@ -1981,17 +1983,12 @@ export class SpotFillerBot implements Bot {
 			} else {
 				if (!this.dryRun) {
 					if (this.hasEnoughSolToFill) {
-						const lutAccounts: Array<AddressLookupTableAccount> = [];
-						this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
-						this.driftSpotLutAccount &&
-							lutAccounts.push(this.driftSpotLutAccount);
-
 						this.sendFillTxAndParseLogs(
 							fillTxId,
 							nodeToFill,
 							simResult.tx,
 							buildForBundle,
-							lutAccounts
+							this.lookupTableAccounts
 						);
 					} else {
 						logger.info(
@@ -2160,14 +2157,11 @@ export class SpotFillerBot implements Bot {
 			ixs.push(await this.driftClient.getRevertFillIx());
 		}
 
-		const lutAccounts: Array<AddressLookupTableAccount> = [];
-		this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
-		this.driftSpotLutAccount && lutAccounts.push(this.driftSpotLutAccount);
 		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
 			connection: this.driftClient.connection,
 			payerPublicKey: this.driftClient.wallet.publicKey,
-			lookupTableAccounts: lutAccounts,
+			lookupTableAccounts: this.lookupTableAccounts,
 			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 			doSimulation: this.simulateTxForCUEstimate,
 			recentBlockhash: await this.getBlockhashForTx(),
@@ -2215,7 +2209,7 @@ export class SpotFillerBot implements Bot {
 						nodeToFill,
 						simResult.tx,
 						buildForBundle,
-						lutAccounts
+						this.lookupTableAccounts
 					);
 				} else {
 					logger.info(
@@ -2301,7 +2295,7 @@ export class SpotFillerBot implements Bot {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.driftLutAccount!],
+				lookupTableAccounts: this.lookupTableAccounts,
 				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),

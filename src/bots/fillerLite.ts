@@ -34,7 +34,8 @@ export class FillerLiteBot extends FillerBot {
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
 		bundleSender?: BundleSender,
-		pythPriceFeedSubscriber?: PythPriceFeedSubscriber
+		pythPriceFeedSubscriber?: PythPriceFeedSubscriber,
+		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		super(
 			slotSubscriber,
@@ -47,7 +48,8 @@ export class FillerLiteBot extends FillerBot {
 			priorityFeeSubscriber,
 			blockhashSubscriber,
 			bundleSender,
-			pythPriceFeedSubscriber
+			pythPriceFeedSubscriber,
+			lookupTableAccounts
 		);
 
 		this.userStatsMapSubscriptionConfig = {

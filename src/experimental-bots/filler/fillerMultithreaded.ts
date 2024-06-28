@@ -107,8 +107,6 @@ import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 
 const logPrefix = '[Filler]';
-const PYTH_LOOKUP_TABLE = '2LyVSFvPkoPSsbkjDesshLsWd4Zk5NbvP3xBbqAPLJ55';
-
 export type MakerNodeMap = Map<string, DLOBNode[]>;
 
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
@@ -187,7 +185,7 @@ export class FillerMultithreaded {
 	private fillingNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
 	private revertOnFailure: boolean = true;
-	private lookupTableAccounts?: AddressLookupTableAccount[];
+	private lookupTableAccounts: AddressLookupTableAccount[];
 	private lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 	private seenFillableOrders = new Set<string>();
 	private seenTriggerableOrders = new Set<string>();
@@ -265,7 +263,8 @@ export class FillerMultithreaded {
 		slotSubscriber: SlotSubscriber,
 		runtimeSpec: RuntimeSpec,
 		bundleSender?: BundleSender,
-		pythPriceSubscriber?: PythPriceFeedSubscriber
+		pythPriceSubscriber?: PythPriceFeedSubscriber,
+		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
 		this.name = config.botId;
@@ -287,6 +286,7 @@ export class FillerMultithreaded {
 		if (pythPriceSubscriber) {
 			this.pythPriceSubscriber = pythPriceSubscriber;
 		}
+		this.lookupTableAccounts = lookupTableAccounts;
 
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
@@ -392,14 +392,9 @@ export class FillerMultithreaded {
 			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
 		);
 
-		this.lookupTableAccounts = [
-			await this.driftClient.fetchMarketLookupTableAccount(),
-			(
-				await this.driftClient.connection.getAddressLookupTable(
-					new PublicKey(PYTH_LOOKUP_TABLE)
-				)
-			).value!,
-		];
+		this.lookupTableAccounts.push(
+			await this.driftClient.fetchMarketLookupTableAccount()
+		);
 		assert(this.lookupTableAccounts, 'Lookup table account not found');
 		this.startProcesses();
 	}
@@ -1235,7 +1230,7 @@ export class FillerMultithreaded {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.lookupTableAccounts![0]],
+				lookupTableAccounts: this.lookupTableAccounts,
 				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),

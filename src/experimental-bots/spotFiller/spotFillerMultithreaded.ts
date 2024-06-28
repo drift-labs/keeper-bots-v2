@@ -187,10 +187,7 @@ export class SpotFillerMultithreaded {
 	private slotSubscriber: SlotSubscriber;
 	private globalConfig: GlobalConfig;
 	private seenFillableOrders = new Set<string>();
-	private seenTriggerableOrders = new Set<string>();
 	private blockhashSubscriber: BlockhashSubscriber;
-	private driftLutAccount?: AddressLookupTableAccount;
-	private driftSpotLutAccount?: AddressLookupTableAccount;
 	private fillTxId = 0;
 	private subaccount: number;
 
@@ -266,6 +263,7 @@ export class SpotFillerMultithreaded {
 	private orderSubscriberHealthy = true;
 
 	private pythPriceSubscriber?: PythPriceFeedSubscriber;
+	private lookupTableAccounts: AddressLookupTableAccount[];
 
 	constructor(
 		driftClient: DriftClient,
@@ -274,7 +272,8 @@ export class SpotFillerMultithreaded {
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
 		bundleSender?: BundleSender,
-		pythPriceSubscriber?: PythPriceFeedSubscriber
+		pythPriceSubscriber?: PythPriceFeedSubscriber,
+		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
 		this.config = config;
@@ -293,6 +292,7 @@ export class SpotFillerMultithreaded {
 		}
 		this.runtimeSpec = runtimeSpec;
 		this.pythPriceSubscriber = pythPriceSubscriber;
+		this.lookupTableAccounts = lookupTableAccounts;
 
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
@@ -392,6 +392,21 @@ export class SpotFillerMultithreaded {
 		await this.blockhashSubscriber.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
 
+		this.lookupTableAccounts.push(
+			await this.driftClient.fetchMarketLookupTableAccount()
+		);
+		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
+		if ('SERUM_LOOKUP_TABLE' in config) {
+			const lutAccount = (
+				await this.driftClient.connection.getAddressLookupTable(
+					new PublicKey(config.SERUM_LOOKUP_TABLE as string)
+				)
+			).value;
+			if (lutAccount) {
+				this.lookupTableAccounts.push(lutAccount);
+			}
+		}
+
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
 		);
@@ -400,7 +415,6 @@ export class SpotFillerMultithreaded {
 			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
 		);
 
-		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
 		const marketSetupPromises = config.SPOT_MARKETS.map(
 			async (spotMarketConfig) => {
 				const spotMarket = this.driftClient.getSpotMarketAccount(
@@ -441,18 +455,6 @@ export class SpotFillerMultithreaded {
 			}
 		);
 		await Promise.all(marketSetupPromises);
-		this.driftLutAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
-		if ('SERUM_LOOKUP_TABLE' in config) {
-			const lutAccount = (
-				await this.driftClient.connection.getAddressLookupTable(
-					new PublicKey(config.SERUM_LOOKUP_TABLE as string)
-				)
-			).value;
-			if (lutAccount) {
-				this.driftSpotLutAccount = lutAccount;
-			}
-		}
 
 		this.startProcesses();
 		logger.info(`${this.name}: Initialized`);
@@ -751,7 +753,7 @@ export class SpotFillerMultithreaded {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.driftLutAccount!],
+				lookupTableAccounts: this.lookupTableAccounts,
 				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),
@@ -1024,7 +1026,7 @@ export class SpotFillerMultithreaded {
 					ixs,
 					connection: this.driftClient.connection,
 					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: [this.driftLutAccount!],
+					lookupTableAccounts: this.lookupTableAccounts,
 					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
@@ -1052,7 +1054,7 @@ export class SpotFillerMultithreaded {
 
 			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
 			let txAccounts = simResult.tx.message.getAccountKeys({
-				addressLookupTableAccounts: [this.driftLutAccount!],
+				addressLookupTableAccounts: this.lookupTableAccounts,
 			}).length;
 			let attempt = 0;
 			while (txAccounts > MAX_ACCOUNTS_PER_TX && makerInfosToUse.length > 0) {
@@ -1064,7 +1066,7 @@ export class SpotFillerMultithreaded {
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
 				simResult = await buildTxWithMakerInfos(makerInfosToUse);
 				txAccounts = simResult.tx.message.getAccountKeys({
-					addressLookupTableAccounts: [this.driftLutAccount!],
+					addressLookupTableAccounts: this.lookupTableAccounts,
 				}).length;
 			}
 
@@ -1104,17 +1106,12 @@ export class SpotFillerMultithreaded {
 			} else {
 				if (!this.dryRun) {
 					if (this.hasEnoughSolToFill) {
-						const lutAccounts: Array<AddressLookupTableAccount> = [];
-						this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
-						this.driftSpotLutAccount &&
-							lutAccounts.push(this.driftSpotLutAccount);
-
 						this.sendFillTxAndParseLogs(
 							fillTxId,
 							nodeToFill,
 							simResult.tx,
 							buildForBundle,
-							lutAccounts
+							this.lookupTableAccounts
 						);
 					} else {
 						logger.info(
@@ -1242,15 +1239,11 @@ export class SpotFillerMultithreaded {
 				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 			);
 		}
-
-		const lutAccounts: Array<AddressLookupTableAccount> = [];
-		this.driftLutAccount && lutAccounts.push(this.driftLutAccount);
-		this.driftSpotLutAccount && lutAccounts.push(this.driftSpotLutAccount);
 		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
 			connection: this.driftClient.connection,
 			payerPublicKey: this.driftClient.wallet.publicKey,
-			lookupTableAccounts: lutAccounts,
+			lookupTableAccounts: this.lookupTableAccounts,
 			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 			doSimulation: this.simulateTxForCUEstimate,
 			recentBlockhash: await this.getBlockhashForTx(),
@@ -1297,7 +1290,7 @@ export class SpotFillerMultithreaded {
 						nodeToFill,
 						simResult.tx,
 						buildForBundle,
-						lutAccounts
+						this.lookupTableAccounts
 					);
 				} else {
 					logger.info(

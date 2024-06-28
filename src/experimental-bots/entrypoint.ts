@@ -20,6 +20,7 @@ import {
 	initialize,
 } from '@drift-labs/sdk';
 import {
+	AddressLookupTableAccount,
 	Commitment,
 	ConfirmOptions,
 	Connection,
@@ -195,7 +196,11 @@ const runBot = async () => {
 
 	// Send unsubscribed subscription to the bot
 	let pythPriceSubscriber: PythPriceFeedSubscriber | undefined;
+	let pythLookupTable: AddressLookupTableAccount | null;
 	if (config.global.hermesEndpoint) {
+		const PYTH_LOOKUP_TABLE = 'CGhVSa9f2jMaeaQrksqBkTEPZNV7eahgYoTCzGTTpi9p';
+		const DEVNET_PYTH_LOOKUP_TABLE =
+			'2LyVSFvPkoPSsbkjDesshLsWd4Zk5NbvP3xBbqAPLJ55';
 		pythPriceSubscriber = new PythPriceFeedSubscriber(
 			config.global.hermesEndpoint,
 			{
@@ -204,6 +209,18 @@ const runBot = async () => {
 				},
 			}
 		);
+		pythLookupTable = (
+			await connection.getAddressLookupTable(
+				new PublicKey(
+					config.global.driftEnv === 'devnet'
+						? DEVNET_PYTH_LOOKUP_TABLE
+						: PYTH_LOOKUP_TABLE
+				)
+			)
+		).value;
+		if (!pythLookupTable) {
+			throw new Error('Failed to load Pyth lookup table');
+		}
 	}
 
 	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
@@ -303,7 +320,8 @@ const runBot = async () => {
 				walletAuthority: wallet.publicKey.toBase58(),
 			},
 			bundleSender,
-			pythPriceSubscriber
+			pythPriceSubscriber,
+			[pythLookupTable!]
 		);
 		bots.push(fillerMultithreaded);
 	}
@@ -339,7 +357,9 @@ const runBot = async () => {
 			},
 			config.global,
 			config.botConfigs?.spotFillerMultithreaded,
-			bundleSender
+			bundleSender,
+			pythPriceSubscriber,
+			[pythLookupTable!]
 		);
 		bots.push(spotFillerMultithreaded);
 	}

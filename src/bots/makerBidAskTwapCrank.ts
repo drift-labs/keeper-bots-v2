@@ -144,12 +144,12 @@ export class MakerBidAskTwapCrank implements Bot {
 
 	private dlob?: DLOB;
 	private latestDlobSlot?: number;
-	private lookupTableAccount?: AddressLookupTableAccount;
 	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 	private pythPriceSubscriber?: PythPriceFeedSubscriber;
+	private lookupTableAccounts: AddressLookupTableAccount[];
 
 	constructor(
 		driftClient: DriftClient,
@@ -158,7 +158,8 @@ export class MakerBidAskTwapCrank implements Bot {
 		config: BaseBotConfig,
 		globalConfig: GlobalConfig,
 		runOnce: boolean,
-		pythPriceSubscriber?: PythPriceFeedSubscriber
+		pythPriceSubscriber?: PythPriceFeedSubscriber,
+		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.slotSubscriber = slotSubscriber;
 		this.name = config.botId;
@@ -168,12 +169,14 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.driftClient = driftClient;
 		this.userMap = userMap;
 		this.pythPriceSubscriber = pythPriceSubscriber;
+		this.lookupTableAccounts = lookupTableAccounts;
 	}
 
 	public async init() {
 		logger.info(`[${this.name}] initing, runOnce: ${this.runOnce}`);
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts.push(
+			await this.driftClient.fetchMarketLookupTableAccount()
+		);
 
 		let driftMarkets: DriftMarketInfo[] = [];
 		({ crankIntervals: this.crankIntervalToMarketIds, driftMarkets } =
@@ -288,7 +291,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.lookupTableAccount!],
+				lookupTableAccounts: this.lookupTableAccounts,
 				cuLimitMultiplier: CU_EST_MULTIPLIER,
 				doSimulation: true,
 				recentBlockhash: recentBlockhash.blockhash,
