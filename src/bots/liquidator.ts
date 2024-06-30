@@ -44,6 +44,7 @@ import {
 	calculateClaimablePnl,
 	isOperationPaused,
 	PerpOperation,
+	WRAPPED_SOL_MINT,
 } from '@drift-labs/sdk';
 
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
@@ -75,7 +76,10 @@ import {
 	AddressLookupTableAccount,
 	TransactionInstruction,
 } from '@solana/web3.js';
-import { getAssociatedTokenAddress } from '@solana/spl-token';
+import {
+	createCloseAccountInstruction,
+	getAssociatedTokenAddress,
+} from '@solana/spl-token';
 import {
 	calculateAccountValueUsd,
 	handleSimResultError,
@@ -1413,19 +1417,43 @@ export class LiquidatorBot implements Bot {
 			oracle
 		);
 		if (spotPositionValue.lte(this.liquidatorConfig.spotDustValueThresholdBN)) {
-			const ata = await getAssociatedTokenAddress(
+			let userTokenAccount = await getAssociatedTokenAddress(
 				spotMarket.mint,
 				userAccount.authority
 			);
-			const withdrawIx = await this.driftClient.getWithdrawIx(
-				tokenAmount,
-				position.marketIndex,
-				ata,
-				undefined,
-				userAccount.subAccountId
+			const ixs: TransactionInstruction[] = [];
+			const isSolWithdraw = spotMarket.mint.equals(WRAPPED_SOL_MINT);
+			if (isSolWithdraw) {
+				const { ixs: startIxs, pubkey } =
+					await this.driftClient.getWrappedSolAccountCreationIxs(
+						tokenAmount,
+						true
+					);
+				ixs.push(...startIxs);
+				userTokenAccount = pubkey;
+			}
+			ixs.push(
+				await this.driftClient.getWithdrawIx(
+					tokenAmount,
+					position.marketIndex,
+					userTokenAccount,
+					undefined,
+					userAccount.subAccountId
+				)
 			);
+			if (isSolWithdraw) {
+				ixs.push(
+					createCloseAccountInstruction(
+						userTokenAccount,
+						userAccount.authority,
+						userAccount.authority,
+						[]
+					)
+				);
+			}
+
 			const simResult = await this.buildVersionedTransactionWithSimulatedCus(
-				[withdrawIx],
+				ixs,
 				[this.driftLookupTables!],
 				Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 			);
