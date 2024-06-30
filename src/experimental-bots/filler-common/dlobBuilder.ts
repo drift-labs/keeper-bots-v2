@@ -48,7 +48,7 @@ class DLOBBuilder {
 	public readonly marketType: MarketType;
 	public readonly marketIndexes: number[];
 	public driftClient: DriftClient;
-	public initialized: boolean = false;
+	public initialized = false;
 
 	// only used for spot filler
 	private serumSubscribers?: Map<number, SerumSubscriber>;

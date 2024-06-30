@@ -651,7 +651,7 @@ export function handleSimResultError(
 }
 
 export interface ExtendedTransactionError {
-	InstructionError?: [number, string | object];
+	InstructionError?: [number, string];
 }
 
 export interface CustomError {

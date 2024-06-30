@@ -176,12 +176,12 @@ export class FillerMultithreaded {
 	private config: FillerMultiThreadedConfig;
 	private subaccount: number;
 
-	private fillTxId: number = 0;
+	private fillTxId = 0;
 	private userStatsMap: UserStatsMap;
 	private throttledNodes = new Map<string, number>();
 	private fillingNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
-	private revertOnFailure: boolean = true;
+	private revertOnFailure = true;
 	private lookupTableAccount?: AddressLookupTableAccount;
 	private lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 	private seenFillableOrders = new Set<string>();
@@ -238,7 +238,7 @@ export class FillerMultithreaded {
 	protected jitoBundleCount?: GaugeValue;
 
 	protected rebalanceFiller?: boolean;
-	protected hasEnoughSolToFill: boolean = true;
+	protected hasEnoughSolToFill = true;
 	protected minGasBalanceToFill: number;
 	protected rebalanceSettledPnlThreshold: BN;
 

@@ -251,7 +251,7 @@ export class FillerBot implements Bot {
 	protected clockSubscriberTs?: GaugeValue;
 	protected wallClockTs?: GaugeValue;
 
-	protected hasEnoughSolToFill: boolean = false;
+	protected hasEnoughSolToFill = false;
 	protected rebalanceFiller: boolean;
 	protected minGasBalanceToFill: number;
 	protected rebalanceSettledPnlThreshold: BN;
@@ -1547,8 +1547,12 @@ export class FillerBot implements Bot {
 	/**
 	 * Queues up the txSig to be confirmed in a slower loop, and have tx logs handled
 	 * @param txSig
+	 * @param number
+	 * @param nodeFilled
+	 * @param fillTxId
+	 * @param txType
 	 */
-	protected async registerTxSigToConfirm(
+	protected registerTxSigToConfirm(
 		txSig: TransactionSignature,
 		now: number,
 		nodeFilled: Array<NodeToFill>,

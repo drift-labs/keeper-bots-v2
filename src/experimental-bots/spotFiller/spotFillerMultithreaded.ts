@@ -190,7 +190,7 @@ export class SpotFillerMultithreaded {
 	private subaccount: number;
 
 	private userStatsMap?: UserStatsMap;
-	protected hasEnoughSolToFill: boolean = true;
+	protected hasEnoughSolToFill = true;
 
 	private phoenixFulfillmentConfigMap: Map<
 		number,
