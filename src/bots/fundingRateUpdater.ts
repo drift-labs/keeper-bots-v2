@@ -87,7 +87,7 @@ export class FundingRateUpdaterBot implements Bot {
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
-	private inProgress: boolean = false;
+	private inProgress = false;
 
 	constructor(driftClient: DriftClient, config: BaseBotConfig) {
 		this.name = config.botId;
