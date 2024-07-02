@@ -1386,14 +1386,25 @@ export class LiquidatorBot implements Bot {
 		};
 	}
 
-	private async withdrawDust(userAccount: UserAccount, position: SpotPosition) {
+	/**
+	 * Withdraws dust for a spot position
+	 *
+	 * @param userAccount
+	 * @param position
+	 * @returns true if tx was sent to withdraw dust, otherwise false
+	 */
+	private async withdrawDust(
+		userAccount: UserAccount,
+		position: SpotPosition
+	): Promise<boolean> {
 		if (this.liquidatorConfig.spotDustValueThresholdBN === undefined) {
-			return;
+			return false;
 		}
 
 		// can only withdraw dust for now
+		// TODO: deposit to close dust borrows
 		if (isVariant(position.balanceType, 'borrow')) {
-			return;
+			return false;
 		}
 		const spotMarket = this.driftClient.getSpotMarketAccount(
 			position.marketIndex
@@ -1475,12 +1486,21 @@ export class LiquidatorBot implements Bot {
 					`Sent withdraw dust on market ${position.marketIndex} tx: ${resp.txSig} `
 				);
 			}
+
+			return true;
 		}
+
+		return false;
 	}
 
 	private async deriskSpotPositions(userAccount: UserAccount) {
 		for (const position of userAccount.spotPositions) {
 			if (position.scaledBalance.eq(ZERO) || position.marketIndex === 0) {
+				continue;
+			}
+
+			const dustWithdrawn = await this.withdrawDust(userAccount, position);
+			if (dustWithdrawn) {
 				continue;
 			}
 
@@ -1516,8 +1536,6 @@ export class LiquidatorBot implements Bot {
 					userAccount.subAccountId
 				);
 			}
-
-			await this.withdrawDust(userAccount, position);
 		}
 	}
 
