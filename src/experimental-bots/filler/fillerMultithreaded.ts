@@ -14,13 +14,13 @@ import {
 	getUserAccountPublicKey,
 	isFillableByVAMM,
 	isOneOfVariant,
-	isOracleValid,
 	isOrderExpired,
 	isVariant,
 	JupiterClient,
 	MakerInfo,
 	MarketType,
 	NodeToFill,
+	PerpMarkets,
 	PRICE_PRECISION,
 	PriorityFeeSubscriberMap,
 	QUOTE_PRECISION,
@@ -384,6 +384,11 @@ export class FillerMultithreaded {
 		await this.blockhashSubscriber.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
 
+		const feedIds: string[] = PerpMarkets[this.globalConfig.driftEnv!]
+			.map((m) => m.pythFeedId)
+			.filter((id) => id !== undefined) as string[];
+		await this.pythPriceSubscriber!.subscribe(feedIds);
+
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
 		);
@@ -402,6 +407,7 @@ export class FillerMultithreaded {
 	private startProcesses() {
 		logger.info(`${this.name}: Starting processes`);
 		const orderSubscriberArgs = [
+			`--drift-env=${this.runtimeSpec.driftEnv}`,
 			`--market-type=${this.config.marketType}`,
 			`--market-indexes=${this.config.marketIndexes.map(String)}`,
 		];
@@ -412,6 +418,7 @@ export class FillerMultithreaded {
 				`${this.name}: Spawning dlobBuilder for marketIndexes: ${marketIndexes}`
 			);
 			const dlobBuilderArgs = [
+				`--drift-env=${this.runtimeSpec.driftEnv}`,
 				`--market-type=${this.config.marketType}`,
 				`--market-indexes=${marketIndexes.map(String)}`,
 			];
@@ -1198,6 +1205,11 @@ export class FillerMultithreaded {
 				}, order ${nodeToTrigger.node.order.orderId.toString()}`
 			);
 
+			if (this.pythPriceSubscriber) {
+				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
+				ixs.push(...pythIxs);
+			}
+
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
 			if (this.seenTriggerableOrders.has(nodeSignature)) {
 				logger.debug(
@@ -1421,28 +1433,6 @@ export class FillerMultithreaded {
 			return false;
 		}
 
-		const perpMarket = this.driftClient.getPerpMarketAccount(
-			nodeToFill.node.order.marketIndex
-		)!;
-		// if making with vAMM, ensure valid oracle
-		if (
-			nodeToFill.makerNodes.length === 0 &&
-			!isVariant(perpMarket.amm.oracleSource, 'prelaunch')
-		) {
-			const oracleIsValid = isOracleValid(
-				perpMarket,
-				oraclePriceData,
-				this.driftClient.getStateAccount().oracleGuardRails,
-				this.slotSubscriber.getSlot()
-			);
-			if (!oracleIsValid) {
-				logger.error(
-					`${logPrefix} Oracle is not valid for market ${marketIndex}`
-				);
-				return false;
-			}
-		}
-
 		return true;
 	}
 
@@ -1512,12 +1502,6 @@ export class FillerMultithreaded {
 			}),
 		];
 
-		const extraSigners: Signer[] = [];
-		if (this.pythPriceSubscriber) {
-			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
-			ixs.push(...pythIxs);
-		}
-
 		try {
 			const {
 				makerInfos,
@@ -1528,6 +1512,11 @@ export class FillerMultithreaded {
 				marketType,
 				fillerRewardEstimate,
 			} = await this.getNodeFillInfo(nodeToFill);
+
+			if (this.pythPriceSubscriber && makerInfos.length <= 2) {
+				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+				ixs.push(...pythIxs);
+			}
 
 			if (!buildForBundle) {
 				ixs.push(
@@ -1658,8 +1647,7 @@ export class FillerMultithreaded {
 						fillTxId,
 						[nodeToFill],
 						simResult.tx,
-						buildForBundle,
-						extraSigners
+						buildForBundle
 					);
 				} else {
 					logger.info(
@@ -1690,12 +1678,6 @@ export class FillerMultithreaded {
 		];
 		const fillTxId = this.fillTxId++;
 
-		const extraSigners: Signer[] = [];
-		if (this.pythPriceSubscriber) {
-			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
-			ixs.push(...pythIxs);
-		}
-
 		const {
 			makerInfos,
 			takerUser,
@@ -1705,6 +1687,11 @@ export class FillerMultithreaded {
 			marketType,
 			fillerRewardEstimate,
 		} = await this.getNodeFillInfo(nodeToFill);
+
+		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
+			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+			ixs.push(...pythIxs);
+		}
 
 		if (!buildForBundle) {
 			ixs.push(
@@ -1783,8 +1770,7 @@ export class FillerMultithreaded {
 					fillTxId,
 					[nodeToFill],
 					simResult.tx,
-					buildForBundle,
-					extraSigners
+					buildForBundle
 				);
 			} else {
 				logger.info(
@@ -1808,7 +1794,11 @@ export class FillerMultithreaded {
 		const accountMetas: any[] = [];
 		const txStart = Date.now();
 		// @ts-ignore;
-		tx.sign([this.driftClient.wallet.payer, ...extraSigners]);
+		const signers = [this.driftClient.wallet.payer];
+		if (extraSigners) {
+			signers.push(...extraSigners);
+		}
+		tx.sign(signers);
 		const txSig = bs58.encode(tx.signatures[0]);
 
 		if (buildForBundle) {

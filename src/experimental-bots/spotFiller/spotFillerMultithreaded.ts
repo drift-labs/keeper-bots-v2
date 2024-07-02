@@ -22,6 +22,7 @@ import {
 	UserAccount,
 	decodeUser,
 	PriorityFeeSubscriberMap,
+	SpotMarkets,
 } from '@drift-labs/sdk';
 import {
 	Connection,
@@ -399,6 +400,11 @@ export class SpotFillerMultithreaded {
 		await this.blockhashSubscriber.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
 
+		const feedIds: string[] = SpotMarkets[this.globalConfig.driftEnv!]
+			.map((m) => m.pythFeedId)
+			.filter((id) => id !== undefined) as string[];
+		await this.pythPriceSubscriber!.subscribe(feedIds);
+
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
@@ -427,7 +433,6 @@ export class SpotFillerMultithreaded {
 			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
 		} = await initializeSpotFulfillmentAccounts(this.driftClient, false));
 
-
 		this.startProcesses();
 		logger.info(`${this.name}: Initialized`);
 	}
@@ -445,6 +450,7 @@ export class SpotFillerMultithreaded {
 	private startProcesses() {
 		logger.info(`${this.name}: Starting processes`);
 		const orderSubscriberArgs = [
+			`--drift-env=${this.runtimeSpec.driftEnv}`,
 			`--market-type=${this.config.marketType}`,
 			`--market-indexes=${this.config.marketIndexes.map(String)}`,
 		];
@@ -455,6 +461,7 @@ export class SpotFillerMultithreaded {
 				`${this.name}: Spawning dlobBuilder for marketIndexes: ${marketIndexes}`
 			);
 			const dlobBuilderArgs = [
+				`--drift-env=${this.runtimeSpec.driftEnv}`,
 				`--market-type=${this.config.marketType}`,
 				`--market-indexes=${marketIndexes.map(String)}`,
 			];
@@ -955,6 +962,11 @@ export class SpotFillerMultithreaded {
 				marketType,
 			} = await this.getNodeFillInfo(nodeToFill);
 
+			if (this.pythPriceSubscriber && makerInfos.length <= 2) {
+				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+				ixs.push(...pythIxs);
+			}
+
 			logger.info(
 				logMessageForNodeToFill(
 					nodeToFill,
@@ -1195,7 +1207,7 @@ export class SpotFillerMultithreaded {
 			);
 		}
 
-		if (this.pythPriceSubscriber) {
+		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
 			ixs.push(...(await this.getPythIxsFromNode(nodeToFill)));
 		}
 

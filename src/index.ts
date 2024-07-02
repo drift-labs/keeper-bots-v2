@@ -447,7 +447,7 @@ const runBot = async () => {
 	if (config.global.hermesEndpoint) {
 		const PYTH_LOOKUP_TABLE = 'CGhVSa9f2jMaeaQrksqBkTEPZNV7eahgYoTCzGTTpi9p';
 		const DEVNET_PYTH_LOOKUP_TABLE =
-			'2LyVSFvPkoPSsbkjDesshLsWd4Zk5NbvP3xBbqAPLJ55';
+			'HSmbo85ueThzvgYvAVy1JtjANTooqHafoorBNFA9vk9M';
 		pythPriceSubscriber = new PythPriceFeedSubscriber(
 			config.global.hermesEndpoint,
 			{
@@ -874,7 +874,8 @@ const runBot = async () => {
 				config.botConfigs!.markTwapCrank!,
 				config.global,
 				config.global.runOnce ?? false,
-				pythPriceSubscriber
+				pythPriceSubscriber,
+				[pythLookupTable!]
 			)
 		);
 	}
@@ -960,24 +961,23 @@ const runBot = async () => {
 				`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
 			);
 		}
-
-		logger.info(`Checking if need pythConnection: ${needPythPriceSubscriber}`);
-		if (needPythPriceSubscriber) {
-			if (!pythPriceSubscriber) {
-				throw new Error(
-					`Pyth connection required for this bot, but not hermesEndpoint not supplied in config`
-				);
-			}
-			const feedIds: string[] = PerpMarkets[config.global.driftEnv!]
-				.map((m) => m.pythFeedId)
-				.filter((id) => id !== undefined) as string[];
-			await pythPriceSubscriber!.subscribe(feedIds);
-		}
-
 		const hrStart = process.hrtime();
 		await jitter.subscribe();
 		const hrEnd = process.hrtime(hrStart);
 		logger.info(`jitter.subscribe took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`);
+	}
+
+	logger.info(`Checking if need pythConnection: ${needPythPriceSubscriber}`);
+	if (needPythPriceSubscriber) {
+		if (!pythPriceSubscriber) {
+			throw new Error(
+				`Pyth connection required for this bot, but not hermesEndpoint not supplied in config`
+			);
+		}
+		const feedIds: string[] = PerpMarkets[config.global.driftEnv!]
+			.map((m) => m.pythFeedId)
+			.filter((id) => id !== undefined) as string[];
+		await pythPriceSubscriber!.subscribe(feedIds);
 	}
 
 	logger.info(

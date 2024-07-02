@@ -198,9 +198,8 @@ const runBot = async () => {
 	let pythPriceSubscriber: PythPriceFeedSubscriber | undefined;
 	let pythLookupTable: AddressLookupTableAccount | null;
 	if (config.global.hermesEndpoint) {
-		const PYTH_LOOKUP_TABLE = 'CGhVSa9f2jMaeaQrksqBkTEPZNV7eahgYoTCzGTTpi9p';
 		const DEVNET_PYTH_LOOKUP_TABLE =
-			'2LyVSFvPkoPSsbkjDesshLsWd4Zk5NbvP3xBbqAPLJ55';
+			'HSmbo85ueThzvgYvAVy1JtjANTooqHafoorBNFA9vk9M';
 		pythPriceSubscriber = new PythPriceFeedSubscriber(
 			config.global.hermesEndpoint,
 			{
@@ -212,9 +211,7 @@ const runBot = async () => {
 		pythLookupTable = (
 			await connection.getAddressLookupTable(
 				new PublicKey(
-					config.global.driftEnv === 'devnet'
-						? DEVNET_PYTH_LOOKUP_TABLE
-						: PYTH_LOOKUP_TABLE
+					sdkConfig.PYTH_PULL_ORACLE_LOOKUP_TABLE ?? DEVNET_PYTH_LOOKUP_TABLE
 				)
 			)
 		).value;

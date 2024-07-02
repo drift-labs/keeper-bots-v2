@@ -240,6 +240,7 @@ const main = async () => {
 	dotenv.config();
 
 	const args = parseArgs(process.argv.slice(2));
+	const driftEnv = args['drift-env'] ?? 'devnet';
 	const marketIndexesStr = String(args['market-indexes']);
 	const marketIndexes = marketIndexesStr.split(',').map(Number);
 	const marketTypeStr = args['market-type'] as string;
@@ -275,6 +276,7 @@ const main = async () => {
 		wallet,
 		marketIndexes,
 		marketTypeStr,
+		env: driftEnv,
 	});
 	await driftClient.subscribe();
 

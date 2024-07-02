@@ -12,7 +12,7 @@ export class PythPriceFeedSubscriber extends PriceServiceConnection {
 	}
 
 	async subscribe(feedIds: string[]) {
-		await this.subscribePriceFeedUpdates(feedIds, (priceFeed: PriceFeed) => {
+		await super.subscribePriceFeedUpdates(feedIds, (priceFeed: PriceFeed) => {
 			if (priceFeed.vaa) {
 				const priceFeedId = '0x' + priceFeed.id;
 				this.latestPythVaas.set(priceFeedId, priceFeed.vaa);

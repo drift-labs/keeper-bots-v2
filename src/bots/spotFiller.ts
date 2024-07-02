@@ -2048,7 +2048,7 @@ export class SpotFillerBot implements Bot {
 			);
 		}
 
-		if (this.pythPriceSubscriber) {
+		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
 			ixs.push(...(await this.getPythIxsFromNode(nodeToFill)));
 		}
 

@@ -322,7 +322,7 @@ export class MakerBidAskTwapCrank implements Bot {
 						this.name
 					}] makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
 						Date.now() - sendTxStart
-					}ms tx: https://solana.fm/tx/${txSig.txSig}`
+					}ms tx: https://solana.fm/tx/${txSig.txSig}, txSig: ${txSig.txSig}`
 				);
 			}
 		} catch (err: any) {
@@ -413,7 +413,13 @@ export class MakerBidAskTwapCrank implements Bot {
 					}),
 				];
 
-				if (this.pythPriceSubscriber) {
+				if (
+					this.pythPriceSubscriber &&
+					!isVariant(
+						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+						'prelaunch'
+					)
+				) {
 					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
 					ixs.push(...pythIxs);
 				}
@@ -426,7 +432,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					direction: PositionDirection.LONG,
 					slot: this.latestDlobSlot!,
 					oraclePriceData,
-					numMakers: 5,
+					numMakers: 2,
 				});
 
 				const askMakers = this.dlob!.getBestMakers({
@@ -435,7 +441,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					direction: PositionDirection.SHORT,
 					slot: this.latestDlobSlot!,
 					oraclePriceData,
-					numMakers: 5,
+					numMakers: 2,
 				});
 				logger.info(
 					`[${this.name}] loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`

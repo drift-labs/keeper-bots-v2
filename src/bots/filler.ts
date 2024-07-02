@@ -1775,10 +1775,6 @@ export class FillerBot implements Bot {
 			);
 		}
 
-		if (this.pythPriceSubscriber) {
-			ixs.push(...(await this.getPythIxsFromNode(nodeToFill)));
-		}
-
 		try {
 			const {
 				makerInfos,
@@ -1788,6 +1784,11 @@ export class FillerBot implements Bot {
 				referrerInfo,
 				marketType,
 			} = await this.getNodeFillInfo(nodeToFill);
+
+			if (this.pythPriceSubscriber && makerInfos.length <= 2) {
+				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+				ixs.push(...pythIxs);
+			}
 
 			logger.info(
 				logMessageForNodeToFill(
@@ -2087,6 +2088,11 @@ export class FillerBot implements Bot {
 				throw new Error('expected perp market type');
 			}
 
+			if (this.pythPriceSubscriber && makerInfos.length <= 2) {
+				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+				ixs.push(...pythIxs);
+			}
+
 			const ix = await this.driftClient.getFillPerpOrderIx(
 				await getUserAccountPublicKey(
 					this.driftClient.program.programId,
@@ -2302,12 +2308,20 @@ export class FillerBot implements Bot {
 						this.priorityFeeSubscriber.getCustomStrategyResult()
 					),
 				}),
+			];
+
+			if (this.pythPriceSubscriber) {
+				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
+				ixs.push(...pythIxs);
+			}
+
+			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
 					user.data,
 					nodeToTrigger.node.order
-				),
-			];
+				)
+			);
 
 			if (this.revertOnFailure) {
 				ixs.push(await this.driftClient.getRevertFillIx());
