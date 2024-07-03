@@ -321,7 +321,7 @@ export class SpotFillerBot implements Bot {
 	protected rebalanceFiller?: boolean;
 	protected jupiterClient?: JupiterClient;
 
-	protected hasEnoughSolToFill: boolean = false;
+	protected hasEnoughSolToFill = false;
 	protected minGasBalanceToFill: number;
 	protected rebalanceSettledPnlThreshold: BN;
 
