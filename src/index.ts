@@ -668,7 +668,6 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'trigger')) {
-		needPythPriceSubscriber = true;
 		needUserMapSubscribe = true;
 		needDriftStateWatcher = true;
 		bots.push(
