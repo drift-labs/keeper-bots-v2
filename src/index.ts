@@ -9,7 +9,6 @@ import {
 	PublicKey,
 	TransactionVersion,
 	ConfirmOptions,
-	AddressLookupTableAccount,
 } from '@solana/web3.js';
 
 import { getAssociatedTokenAddress } from '@solana/spl-token';
@@ -443,11 +442,7 @@ const runBot = async () => {
 	}
 
 	let pythPriceSubscriber: PythPriceFeedSubscriber | undefined;
-	let pythLookupTable: AddressLookupTableAccount | null;
 	if (config.global.hermesEndpoint) {
-		const PYTH_LOOKUP_TABLE = 'CGhVSa9f2jMaeaQrksqBkTEPZNV7eahgYoTCzGTTpi9p';
-		const DEVNET_PYTH_LOOKUP_TABLE =
-			'HSmbo85ueThzvgYvAVy1JtjANTooqHafoorBNFA9vk9M';
 		pythPriceSubscriber = new PythPriceFeedSubscriber(
 			config.global.hermesEndpoint,
 			{
@@ -456,18 +451,6 @@ const runBot = async () => {
 				},
 			}
 		);
-		pythLookupTable = (
-			await connection.getAddressLookupTable(
-				new PublicKey(
-					config.global.driftEnv === 'devnet'
-						? DEVNET_PYTH_LOOKUP_TABLE
-						: PYTH_LOOKUP_TABLE
-				)
-			)
-		).value;
-		if (!pythLookupTable) {
-			throw new Error('Failed to load Pyth lookup table');
-		}
 	}
 
 	/**
@@ -586,7 +569,8 @@ const runBot = async () => {
 				priorityFeeSubscriber,
 				blockhashSubscriber,
 				bundleSender,
-				pythPriceSubscriber
+				pythPriceSubscriber,
+				[]
 			)
 		);
 	}
@@ -674,7 +658,9 @@ const runBot = async () => {
 				config.botConfigs!.spotFiller!,
 				priorityFeeSubscriber,
 				blockhashSubscriber,
-				bundleSender
+				bundleSender,
+				pythPriceSubscriber,
+				[]
 			)
 		);
 	}
@@ -875,7 +861,7 @@ const runBot = async () => {
 				config.global,
 				config.global.runOnce ?? false,
 				pythPriceSubscriber,
-				[pythLookupTable!]
+				[]
 			)
 		);
 	}
