@@ -894,7 +894,8 @@ const runBot = async () => {
 		auctionSubscriber ||
 		jitter ||
 		needUserMapSubscribe ||
-		needPythPriceSubscriber
+		needPythPriceSubscriber ||
+		needDriftStateWatcher
 	) {
 		const hrStart = process.hrtime();
 		while (!(await driftClient.subscribe())) {
