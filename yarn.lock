@@ -149,24 +149,25 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.10.434":
-  version "0.10.434"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.434.tgz#b4848bc0e5f71c8b66a9a5fcbd342e9f834588cd"
-  integrity sha512-14gjNTa8cALO8IKTZLfDZArkLgxQVu6gleYhu7utqaOK0YwVIVIkSJ7kasJNDTtdNtjfFMV8RwCbSn02OENPkQ==
+"@drift-labs/jit-proxy@0.10.435":
+  version "0.10.435"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.435.tgz#457a9d6c46230de0d98faaca447c4407d1a274b3"
+  integrity sha512-XprCKobE2sIJ58kbVEQzRXZoY4d2D2nWmzRE59zY3OsxMC/I4CrGJaclmd/7H6J679JIG9VIeOO8VQYeKZ+x0w==
   dependencies:
     "@coral-xyz/anchor" "^0.26.0"
-    "@drift-labs/sdk" "2.85.0-beta.11"
+    "@drift-labs/sdk" "2.85.0-beta.12"
     "@solana/web3.js" "1.91.7"
 
-"@drift-labs/sdk@2.85.0-beta.11":
-  version "2.85.0-beta.11"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.85.0-beta.11.tgz#5a644ee0289d711c5406a8edb3da04c1230ae20d"
-  integrity sha512-f6eFE5yBVVe+ah6cqnnxAh9qe60oQ6Wb/LVy6yzaQ4hoHh7dPOr/2xUfTWxRDAEKsot4SY1KyYPaCqgepOmzfg==
+"@drift-labs/sdk@2.85.0-beta.12":
+  version "2.85.0-beta.12"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.85.0-beta.12.tgz#f9b35f186ce19ce752bfa508ac19e56021f0610b"
+  integrity sha512-sXl3lyrjlPdQv2NBGA9GEZ+fGTjuQWZraOi7+BTdw9XB5fcTI41wdcDux+0NleEiotamOLp9UP5JHVU/DK3DeA==
   dependencies:
     "@coral-xyz/anchor" "0.28.0"
     "@ellipsis-labs/phoenix-sdk" "^1.4.2"
     "@project-serum/serum" "^0.13.38"
     "@pythnetwork/client" "2.5.3"
+    "@pythnetwork/price-service-sdk" "^1.7.1"
     "@pythnetwork/pyth-solana-receiver" "^0.7.0"
     "@solana/spl-token" "0.3.7"
     "@solana/web3.js" "1.92.3"
@@ -1048,7 +1049,7 @@
     assert "^2.0.0"
     buffer "^6.0.1"
 
-"@pythnetwork/price-service-sdk@>=1.6.0":
+"@pythnetwork/price-service-sdk@>=1.6.0", "@pythnetwork/price-service-sdk@^1.7.1":
   version "1.7.1"
   resolved "https://registry.yarnpkg.com/@pythnetwork/price-service-sdk/-/price-service-sdk-1.7.1.tgz#dbfc8a8c2189f526346c1f79ec3995e89b690700"
   integrity sha512-xr2boVXTyv1KUt/c6llUTfbv2jpud99pWlMJbFaHGUBoygQsByuy7WbjIJKZ+0Blg1itLZl0Lp/pJGGg8SdJoQ==
