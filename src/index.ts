@@ -962,11 +962,16 @@ const runBot = async () => {
 				`Pyth connection required for this bot, but not hermesEndpoint not supplied in config`
 			);
 		}
-		const feedIds: string[] = Array.from(new Set([...PerpMarkets[config.global.driftEnv!]
-			.map((m) => m.pythFeedId)
-			.filter((id) => id !== undefined), ...SpotMarkets[config.global.driftEnv!]
-			.map((m) => m.pythFeedId)
-			.filter((id) => id !== undefined)])) as string[];
+		const feedIds: string[] = Array.from(
+			new Set([
+				...PerpMarkets[config.global.driftEnv!]
+					.map((m) => m.pythFeedId)
+					.filter((id) => id !== undefined),
+				...SpotMarkets[config.global.driftEnv!]
+					.map((m) => m.pythFeedId)
+					.filter((id) => id !== undefined),
+			])
+		) as string[];
 		await pythPriceSubscriber!.subscribe(feedIds);
 	}
 
