@@ -12,6 +12,8 @@ import {
 	DriftMarketInfo,
 	isOneOfVariant,
 	getVariant,
+	PerpMarketConfig,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -33,10 +35,12 @@ import { ConfirmOptions, Signer } from '@solana/web3.js';
 import {
 	getAllPythOracleUpdateIxs,
 	getDriftPriorityFeeEndpoint,
+	// getStaleOracleMarketIndexes,
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+import { PULL_ORACLE_WHITELIST } from '../config';
 
 const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
@@ -150,6 +154,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 	private pythPriceSubscriber?: PythPriceFeedSubscriber;
 	private lookupTableAccounts: AddressLookupTableAccount[];
+	protected pullOraclePerpMarketWhitelist: PerpMarketConfig[];
 
 	constructor(
 		driftClient: DriftClient,
@@ -170,6 +175,16 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.userMap = userMap;
 		this.pythPriceSubscriber = pythPriceSubscriber;
 		this.lookupTableAccounts = lookupTableAccounts;
+
+		const peprMarketPullOracleWhitelist: number[] =
+			PULL_ORACLE_WHITELIST.filter((market) =>
+				isVariant(market.marketType, 'perp')
+			).map((market) => market.marketIndex);
+		this.pullOraclePerpMarketWhitelist = PerpMarkets[
+			this.globalConfig.driftEnv
+		].filter((market) =>
+			peprMarketPullOracleWhitelist.includes(market.marketIndex)
+		);
 	}
 
 	public async init() {
@@ -415,10 +430,9 @@ export class MakerBidAskTwapCrank implements Bot {
 
 				if (
 					this.pythPriceSubscriber &&
-					!isVariant(
-						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-						'prelaunch'
-					)
+					this.pullOraclePerpMarketWhitelist.findIndex(
+						(x) => x.marketIndex === mi
+					) !== -1
 				) {
 					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
 					ixs.push(...pythIxs);

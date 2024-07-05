@@ -637,7 +637,6 @@ const runBot = async () => {
 	}
 
 	if (configHasBot(config, 'spotFiller')) {
-		needPythPriceSubscriber = true;
 		needCheckDriftUser = true;
 		// to avoid long startup, spotFiller will fetch userAccounts as needed and build the map over time
 		needUserMapSubscribe = false;

@@ -5,7 +5,17 @@ import {
 	loadCommaDelimitToStringArray,
 } from './utils';
 import { OrderExecutionAlgoType } from './types';
-import { BN, DriftEnv } from '@drift-labs/sdk';
+import { BN, DriftEnv, MarketType } from '@drift-labs/sdk';
+
+export const PULL_ORACLE_WHITELIST: {
+	marketType: MarketType;
+	marketIndex: number;
+}[] = [
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 17,
+	},
+];
 
 export type BaseBotConfig = {
 	botId: string;
@@ -192,8 +202,7 @@ const defaultConfig: Partial<Config> = {
 		bulkAccountLoaderPollingInterval: 5000,
 
 		endpoint: process.env.ENDPOINT!,
-		hermesEndpoint:
-			process.env.HERMES_ENDPOINT ?? 'https://hermes.pyth.network',
+		hermesEndpoint: process.env.HERMES_ENDPOINT,
 		numNonActiveOraclesToPush: 0,
 		wsEndpoint: process.env.WS_ENDPOINT,
 		heliusEndpoint: process.env.HELIUS_ENDPOINT,

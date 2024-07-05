@@ -20,6 +20,7 @@ import {
 	MakerInfo,
 	MarketType,
 	NodeToFill,
+	PerpMarketConfig,
 	PerpMarkets,
 	PRICE_PRECISION,
 	PriorityFeeSubscriberMap,
@@ -57,6 +58,7 @@ import {
 	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
+	// getStaleOracleMarketIndexes,
 	handleSimResultError,
 	logMessageForNodeToFill,
 	simulateAndGetTxWithCUs,
@@ -105,6 +107,7 @@ import {
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
+import { PULL_ORACLE_WHITELIST } from '../../config';
 
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -255,6 +258,7 @@ export class FillerMultithreaded {
 	protected pythPriceSubscriber?: PythPriceFeedSubscriber;
 	protected latestPythVaas?: Map<string, string>; // priceFeedId -> vaa
 	protected marketIndexesToPriceIds = new Map<number, string>();
+	protected pullOraclePerpMarketWhitelist: PerpMarketConfig[];
 
 	constructor(
 		globalConfig: GlobalConfig,
@@ -314,6 +318,16 @@ export class FillerMultithreaded {
 			driftMarkets: perpMarketsToWatchForFees,
 			driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
 		});
+
+		const peprMarketPullOracleWhitelist: number[] =
+			PULL_ORACLE_WHITELIST.filter((market) =>
+				isVariant(market.marketType, 'perp')
+			).map((market) => market.marketIndex);
+		this.pullOraclePerpMarketWhitelist = PerpMarkets[
+			this.globalConfig.driftEnv
+		].filter((market) =>
+			peprMarketPullOracleWhitelist.includes(market.marketIndex)
+		);
 
 		this.subaccount = config.subaccount ?? 0;
 		if (!this.driftClient.hasUser(this.subaccount)) {
@@ -387,7 +401,7 @@ export class FillerMultithreaded {
 		const feedIds: string[] = PerpMarkets[this.globalConfig.driftEnv!]
 			.map((m) => m.pythFeedId)
 			.filter((id) => id !== undefined) as string[];
-		await this.pythPriceSubscriber!.subscribe(feedIds);
+		await this.pythPriceSubscriber?.subscribe(feedIds);
 
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
@@ -967,6 +981,19 @@ export class FillerMultithreaded {
 		if (marketIndex === undefined) {
 			throw new Error('Market index not found on node');
 		}
+
+		const marketIndexIndex = this.pullOraclePerpMarketWhitelist.findIndex(
+			(x) => x.marketIndex === marketIndex
+		);
+		if (marketIndexIndex === -1) {
+			// marketIndex = getStaleOracleMarketIndexes(this.driftClient,
+			// 	this.pullOraclePerpMarketWhitelist,
+			// 	MarketType.PERP,
+			// 	1
+			// )[0];
+			return [];
+		}
+
 		if (!this.pythPriceSubscriber) {
 			throw new Error('Pyth price subscriber not initialized');
 		}

@@ -403,7 +403,7 @@ export class SpotFillerMultithreaded {
 		const feedIds: string[] = SpotMarkets[this.globalConfig.driftEnv!]
 			.map((m) => m.pythFeedId)
 			.filter((id) => id !== undefined) as string[];
-		await this.pythPriceSubscriber!.subscribe(feedIds);
+		await this.pythPriceSubscriber?.subscribe(feedIds);
 
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()

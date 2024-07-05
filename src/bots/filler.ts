@@ -32,6 +32,8 @@ import {
 	QUOTE_PRECISION,
 	ClockSubscriber,
 	DriftEnv,
+	PerpMarketConfig,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -96,6 +98,7 @@ import { Metrics } from '../metrics';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+import { PULL_ORACLE_WHITELIST } from '../config';
 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
@@ -255,6 +258,7 @@ export class FillerBot implements Bot {
 	protected rebalanceSettledPnlThreshold: BN;
 
 	pythPriceSubscriber?: PythPriceFeedSubscriber;
+	protected pullOraclePerpMarketWhitelist: PerpMarketConfig[];
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -393,6 +397,16 @@ export class FillerBot implements Bot {
 			commitment: 'finalized',
 			resubTimeoutMs: 5_000,
 		});
+
+		const peprMarketPullOracleWhitelist: number[] =
+			PULL_ORACLE_WHITELIST.filter((market) =>
+				isVariant(market.marketType, 'perp')
+			).map((market) => market.marketIndex);
+		this.pullOraclePerpMarketWhitelist = PerpMarkets[
+			this.globalConfig.driftEnv
+		].filter((market) =>
+			peprMarketPullOracleWhitelist.includes(market.marketIndex)
+		);
 	}
 
 	protected recordEvictedTxSig(
@@ -1708,6 +1722,18 @@ export class FillerBot implements Bot {
 		if (marketIndex === undefined) {
 			throw new Error('Market index not found on node');
 		}
+		const marketIndexIndex = this.pullOraclePerpMarketWhitelist.findIndex(
+			(x) => x.marketIndex === marketIndex
+		);
+		if (marketIndexIndex === -1) {
+			// crankMarketIndex = getStaleOracleMarketIndexes(this.driftClient,
+			// 	this.pullOraclePerpMarketWhitelist,
+			// 	MarketType.PERP,
+			// 	1
+			// )[0];
+			return [];
+		}
+
 		if (!this.pythPriceSubscriber) {
 			throw new Error('Pyth price subscriber not initialized');
 		}
