@@ -10,7 +10,7 @@ import {
 	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 
-import { PublicKey } from '@solana/web3.js';
+import { AddressLookupTableAccount, PublicKey } from '@solana/web3.js';
 
 import { logger } from '../logger';
 import { FillerConfig, GlobalConfig } from '../config';
@@ -20,6 +20,7 @@ import { FillerBot } from './filler';
 
 import { sleepMs } from '../utils';
 import { BundleSender } from '../bundleSender';
+import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 
 export class FillerLiteBot extends FillerBot {
 	protected orderSubscriber: OrderSubscriber;
@@ -32,7 +33,9 @@ export class FillerLiteBot extends FillerBot {
 		config: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
-		bundleSender?: BundleSender
+		bundleSender?: BundleSender,
+		pythPriceFeedSubscriber?: PythPriceFeedSubscriber,
+		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		super(
 			slotSubscriber,
@@ -44,7 +47,9 @@ export class FillerLiteBot extends FillerBot {
 			config,
 			priorityFeeSubscriber,
 			blockhashSubscriber,
-			bundleSender
+			bundleSender,
+			pythPriceFeedSubscriber,
+			lookupTableAccounts
 		);
 
 		this.userStatsMapSubscriptionConfig = {

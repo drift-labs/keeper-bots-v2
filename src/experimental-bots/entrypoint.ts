@@ -31,6 +31,14 @@ import { FillerMultithreaded } from './filler/fillerMultithreaded';
 import http from 'http';
 import { promiseTimeout } from '@drift-labs/sdk';
 import { SpotFillerMultithreaded } from './spotFiller/spotFillerMultithreaded';
+import { setGlobalDispatcher, Agent } from 'undici';
+import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+
+setGlobalDispatcher(
+	new Agent({
+		connections: 200,
+	})
+);
 
 require('dotenv').config();
 
@@ -185,6 +193,19 @@ const runBot = async () => {
 		resubTimeoutMs: config.global.resubTimeoutMs,
 	};
 
+	// Send unsubscribed subscription to the bot
+	let pythPriceSubscriber: PythPriceFeedSubscriber | undefined;
+	if (config.global.hermesEndpoint) {
+		pythPriceSubscriber = new PythPriceFeedSubscriber(
+			config.global.hermesEndpoint,
+			{
+				priceFeedRequestConfig: {
+					binary: true,
+				},
+			}
+		);
+	}
+
 	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 		getMarketsAndOraclesForSubscription(
 			config.global.driftEnv || 'mainnet-beta'
@@ -281,7 +302,9 @@ const runBot = async () => {
 				driftPid: driftPublicKey.toBase58(),
 				walletAuthority: wallet.publicKey.toBase58(),
 			},
-			bundleSender
+			bundleSender,
+			pythPriceSubscriber,
+			[]
 		);
 		bots.push(fillerMultithreaded);
 	}
@@ -317,7 +340,9 @@ const runBot = async () => {
 			},
 			config.global,
 			config.botConfigs?.spotFillerMultithreaded,
-			bundleSender
+			bundleSender,
+			pythPriceSubscriber,
+			[]
 		);
 		bots.push(spotFillerMultithreaded);
 	}
