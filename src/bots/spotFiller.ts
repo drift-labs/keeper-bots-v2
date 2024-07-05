@@ -2048,10 +2048,6 @@ export class SpotFillerBot implements Bot {
 			);
 		}
 
-		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
-			ixs.push(...(await this.getPythIxsFromNode(nodeToFill)));
-		}
-
 		ixs.push(
 			await this.driftClient.getFillSpotOrderIx(
 				new PublicKey(takerUserPubKey),

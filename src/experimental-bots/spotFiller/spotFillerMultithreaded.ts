@@ -709,10 +709,6 @@ export class SpotFillerMultithreaded {
 
 			const ixs = [];
 
-			if (this.pythPriceSubscriber) {
-				ixs.push(...(await this.getPythIxsFromNode(nodeToTrigger)));
-			}
-
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
@@ -962,11 +958,6 @@ export class SpotFillerMultithreaded {
 				marketType,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			if (this.pythPriceSubscriber && makerInfos.length <= 2) {
-				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
-				ixs.push(...pythIxs);
-			}
-
 			logger.info(
 				logMessageForNodeToFill(
 					nodeToFill,
@@ -1205,10 +1196,6 @@ export class SpotFillerMultithreaded {
 					microLamports: priorityFee,
 				})
 			);
-		}
-
-		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
-			ixs.push(...(await this.getPythIxsFromNode(nodeToFill)));
 		}
 
 		const user = this.driftClient.getUser(this.subaccount);
