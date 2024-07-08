@@ -1,4 +1,5 @@
 import { BN, PositionDirection } from '@drift-labs/sdk';
+import { PriceServiceConnection } from '@pythnetwork/price-service-client';
 
 export const constants = {
 	devnet: {
@@ -115,6 +116,7 @@ export interface Bot {
 	readonly name: string;
 	readonly dryRun: boolean;
 	readonly defaultIntervalMs?: number;
+	readonly pythConnection?: PriceServiceConnection;
 
 	/**
 	 * Initialize the bot

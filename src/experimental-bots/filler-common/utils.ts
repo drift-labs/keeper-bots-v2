@@ -25,6 +25,7 @@ import {
 	isVariant,
 	StateAccount,
 	PRICE_PRECISION,
+	DriftEnv,
 } from '@drift-labs/sdk';
 import {
 	ComputeBudgetProgram,
@@ -344,11 +345,13 @@ export const getDriftClientFromArgs = ({
 	wallet,
 	marketIndexes,
 	marketTypeStr,
+	env,
 }: {
 	connection: Connection;
 	wallet: Wallet;
 	marketIndexes: number[];
 	marketTypeStr: 'spot' | 'perp';
+	env: DriftEnv;
 }) => {
 	let perpMarketIndexes: number[] = [];
 	const spotMarketIndexes: number[] = [0];
@@ -359,7 +362,7 @@ export const getDriftClientFromArgs = ({
 	} else {
 		throw new Error('Invalid market type provided: ' + marketTypeStr);
 	}
-	const sdkConfig = initialize({ env: 'mainnet-beta' });
+	const sdkConfig = initialize({ env });
 	const oracleInfos = [];
 	for (const marketIndex of marketIndexes) {
 		const oracleInfo = getOracleInfoForMarket(
@@ -372,12 +375,11 @@ export const getDriftClientFromArgs = ({
 	const driftClient = new DriftClient({
 		connection,
 		wallet: wallet,
-		marketLookupTable: new PublicKey(
-			'D9cnvzswDikQDf53k4HpQ3KJ9y1Fv3HGGDFYMXnK5T6c'
-		),
+		marketLookupTable: new PublicKey(sdkConfig.MARKET_LOOKUP_TABLE),
 		perpMarketIndexes,
 		spotMarketIndexes,
 		oracleInfos,
+		env,
 	});
 	return driftClient;
 };

@@ -5,7 +5,17 @@ import {
 	loadCommaDelimitToStringArray,
 } from './utils';
 import { OrderExecutionAlgoType } from './types';
-import { BN, DriftEnv } from '@drift-labs/sdk';
+import { BN, DriftEnv, MarketType } from '@drift-labs/sdk';
+
+export const PULL_ORACLE_WHITELIST: {
+	marketType: MarketType;
+	marketIndex: number;
+}[] = [
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 17,
+	},
+];
 
 export type BaseBotConfig = {
 	botId: string;
@@ -114,9 +124,12 @@ export type BotConfigMap = {
 };
 
 export interface GlobalConfig {
-	driftEnv?: DriftEnv;
-	endpoint?: string;
+	driftEnv: DriftEnv;
+	endpoint: string;
 	wsEndpoint?: string;
+	hermesEndpoint?: string;
+	numNonActiveOraclesToPush?: number;
+
 	/// helius endpoint to use helius priority fee strategy
 	heliusEndpoint?: string;
 	/// additional rpc endpoints to send transactions to
@@ -188,7 +201,9 @@ const defaultConfig: Partial<Config> = {
 		eventSubscriberPollingInterval: 5000,
 		bulkAccountLoaderPollingInterval: 5000,
 
-		endpoint: process.env.ENDPOINT,
+		endpoint: process.env.ENDPOINT!,
+		hermesEndpoint: process.env.HERMES_ENDPOINT,
+		numNonActiveOraclesToPush: 0,
 		wsEndpoint: process.env.WS_ENDPOINT,
 		heliusEndpoint: process.env.HELIUS_ENDPOINT,
 		additionalSendTxEndpoints: [],
@@ -291,6 +306,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			driftEnv: (process.env.ENV ?? 'devnet') as DriftEnv,
 			endpoint: opts.endpoint ?? process.env.ENDPOINT,
 			wsEndpoint: opts.wsEndpoint ?? process.env.WS_ENDPOINT,
+			hermesEndpoint: opts.hermesEndpoint ?? process.env.HERMES_ENDPOINT,
 			heliusEndpoint: opts.heliusEndpoint ?? process.env.HELIUS_ENDPOINT,
 			additionalSendTxEndpoints: loadCommaDelimitToStringArray(
 				opts.additionalSendTxEndpoints

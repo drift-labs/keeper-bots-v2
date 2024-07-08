@@ -1,6 +1,5 @@
 import {
 	ReferrerInfo,
-	isOracleValid,
 	DriftClient,
 	PerpMarketAccount,
 	calculateAskPrice,
@@ -32,6 +31,9 @@ import {
 	BN,
 	QUOTE_PRECISION,
 	ClockSubscriber,
+	DriftEnv,
+	PerpMarketConfig,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -77,6 +79,7 @@ import {
 import { getErrorCode } from '../error';
 import {
 	SimulateAndGetTxWithCUsResponse,
+	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
@@ -94,11 +97,9 @@ import { BundleSender } from '../bundleSender';
 import { Metrics } from '../metrics';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+import { PULL_ORACLE_WHITELIST } from '../config';
 
-const MAX_TX_PACK_SIZE = 1230; //1232;
-const CU_PER_FILL = 260_000; // CU cost for a successful fill
-const BURST_CU_PER_FILL = 350_000; // CU cost for a successful fill
-const MAX_CU_PER_TX = 1_400_000; // seems like this is all budget program gives us...on devnet
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
@@ -178,7 +179,7 @@ export class FillerBot implements Bot {
 	protected pollingIntervalMs: number;
 	protected revertOnFailure?: boolean;
 	protected simulateTxForCUEstimate?: boolean;
-	protected lookupTableAccount?: AddressLookupTableAccount;
+	protected lookupTableAccounts: AddressLookupTableAccount[];
 	protected bundleSender?: BundleSender;
 
 	private fillerConfig: FillerConfig;
@@ -256,6 +257,9 @@ export class FillerBot implements Bot {
 	protected minGasBalanceToFill: number;
 	protected rebalanceSettledPnlThreshold: BN;
 
+	pythPriceSubscriber?: PythPriceFeedSubscriber;
+	protected pullOraclePerpMarketWhitelist: PerpMarketConfig[];
+
 	constructor(
 		slotSubscriber: SlotSubscriber,
 		bulkAccountLoader: BulkAccountLoader | undefined,
@@ -266,7 +270,9 @@ export class FillerBot implements Bot {
 		fillerConfig: FillerConfig,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
-		bundleSender?: BundleSender
+		bundleSender?: BundleSender,
+		pythPriceSubscriber?: PythPriceFeedSubscriber,
+		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
 		this.fillerConfig = fillerConfig;
@@ -315,6 +321,9 @@ export class FillerBot implements Bot {
 		logger.info(
 			`${this.name}: jito enabled: ${this.bundleSender !== undefined}`
 		);
+
+		this.pythPriceSubscriber = pythPriceSubscriber;
+		this.lookupTableAccounts = lookupTableAccounts;
 
 		if (
 			this.fillerConfig.rebalanceFiller &&
@@ -388,6 +397,16 @@ export class FillerBot implements Bot {
 			commitment: 'finalized',
 			resubTimeoutMs: 5_000,
 		});
+
+		const peprMarketPullOracleWhitelist: number[] =
+			PULL_ORACLE_WHITELIST.filter((market) =>
+				isVariant(market.marketType, 'perp')
+			).map((market) => market.marketIndex);
+		this.pullOraclePerpMarketWhitelist = PerpMarkets[
+			this.globalConfig.driftEnv
+		].filter((market) =>
+			peprMarketPullOracleWhitelist.includes(market.marketIndex)
+		);
 	}
 
 	protected recordEvictedTxSig(
@@ -578,8 +597,9 @@ export class FillerBot implements Bot {
 
 		await this.clockSubscriber.subscribe();
 
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts.push(
+			await this.driftClient.fetchMarketLookupTableAccount()
+		);
 	}
 
 	public async init() {
@@ -1121,28 +1141,6 @@ export class FillerBot implements Bot {
 			return false;
 		}
 
-		const perpMarket = this.driftClient.getPerpMarketAccount(
-			nodeToFill.node.order.marketIndex
-		)!;
-		// if making with vAMM, ensure valid oracle
-		if (
-			nodeToFill.makerNodes.length === 0 &&
-			!isVariant(perpMarket.amm.oracleSource, 'prelaunch')
-		) {
-			const oracleIsValid = isOracleValid(
-				perpMarket,
-				oraclePriceData,
-				this.driftClient.getStateAccount().oracleGuardRails,
-				this.getMaxSlot()
-			);
-			if (!oracleIsValid) {
-				logger.error(
-					`Oracle is not valid for market ${marketIndex}, skipping fill with vAMM`
-				);
-				return false;
-			}
-		}
-
 		return true;
 	}
 
@@ -1605,7 +1603,7 @@ export class FillerBot implements Bot {
 	) {
 		let txResp: Promise<TxSigAndSlot> | undefined = undefined;
 		const { estTxSize, accountMetas, writeAccs, txAccounts } =
-			getTransactionAccountMetas(tx, [this.lookupTableAccount!]);
+			getTransactionAccountMetas(tx, this.lookupTableAccounts);
 
 		const txStart = Date.now();
 		// @ts-ignore;
@@ -1717,6 +1715,39 @@ export class FillerBot implements Bot {
 		return recentBlockhash.blockhash;
 	}
 
+	private async getPythIxsFromNode(
+		node: NodeToFill | NodeToTrigger
+	): Promise<TransactionInstruction[]> {
+		const marketIndex = node.node.order?.marketIndex;
+		if (marketIndex === undefined) {
+			throw new Error('Market index not found on node');
+		}
+		const marketIndexIndex = this.pullOraclePerpMarketWhitelist.findIndex(
+			(x) => x.marketIndex === marketIndex
+		);
+		if (marketIndexIndex === -1) {
+			// crankMarketIndex = getStaleOracleMarketIndexes(this.driftClient,
+			// 	this.pullOraclePerpMarketWhitelist,
+			// 	MarketType.PERP,
+			// 	1
+			// )[0];
+			return [];
+		}
+
+		if (!this.pythPriceSubscriber) {
+			throw new Error('Pyth price subscriber not initialized');
+		}
+		const pythIxs = await getAllPythOracleUpdateIxs(
+			this.runtimeSpec.driftEnv as DriftEnv,
+			marketIndex,
+			MarketType.PERP,
+			this.pythPriceSubscriber!,
+			this.driftClient,
+			this.globalConfig.numNonActiveOraclesToPush ?? 0
+		);
+		return pythIxs;
+	}
+
 	/**
 	 *
 	 * @param fillTxId id of current fill
@@ -1796,7 +1827,7 @@ export class FillerBot implements Bot {
 					ixs,
 					connection: this.driftClient.connection,
 					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: [this.lookupTableAccount!],
+					lookupTableAccounts: this.lookupTableAccounts,
 					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
@@ -1824,7 +1855,7 @@ export class FillerBot implements Bot {
 
 			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
 			let txAccounts = simResult.tx.message.getAccountKeys({
-				addressLookupTableAccounts: [this.lookupTableAccount!],
+				addressLookupTableAccounts: this.lookupTableAccounts,
 			}).length;
 			let attempt = 0;
 			while (txAccounts > MAX_ACCOUNTS_PER_TX && makerInfosToUse.length > 0) {
@@ -1836,7 +1867,7 @@ export class FillerBot implements Bot {
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
 				simResult = await buildTxWithMakerInfos(makerInfosToUse);
 				txAccounts = simResult.tx.message.getAccountKeys({
-					addressLookupTableAccounts: [this.lookupTableAccount!],
+					addressLookupTableAccounts: this.lookupTableAccounts,
 				}).length;
 			}
 
@@ -1933,7 +1964,7 @@ export class FillerBot implements Bot {
 		}
 	}
 
-	protected async tryBulkFillPerpNodes(
+	protected async tryFillPerpNodes(
 		nodesToFill: Array<NodeToFill>,
 		buildForBundle: boolean
 	): Promise<number> {
@@ -1948,7 +1979,7 @@ export class FillerBot implements Bot {
 		}
 
 		for (const nodesToFillForMarket of marketNodeMap.values()) {
-			nodesSent += await this.tryBulkFillPerpNodesForMarket(
+			nodesSent += await this.tryFillPerpNodesForMarket(
 				nodesToFillForMarket,
 				buildForBundle
 			);
@@ -1957,69 +1988,32 @@ export class FillerBot implements Bot {
 		return nodesSent;
 	}
 
-	protected async tryBulkFillPerpNodesForMarket(
+	protected async tryFillPerpNodesForMarket(
 		nodesToFill: Array<NodeToFill>,
 		buildForBundle: boolean
 	): Promise<number> {
-		const ixs: Array<TransactionInstruction> = [
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 1_400_000,
-			}),
-		];
-		if (!buildForBundle) {
-			ixs.push(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult()
-					),
-				})
-			);
-		}
-
-		/**
-		 * At all times, the running Tx size is:
-		 * - signatures (compact-u16 array, 64 bytes per elem)
-		 * - message header (3 bytes)
-		 * - affected accounts (compact-u16 array, 32 bytes per elem)
-		 * - previous block hash (32 bytes)
-		 * - message instructions (
-		 * 		- progamIdIdx (1 byte)
-		 * 		- accountsIdx (compact-u16, 1 byte per elem)
-		 *		- instruction data (compact-u16, 1 byte per elem)
-		 */
-		let runningTxSize = 0;
-		let runningCUUsed = 0;
-
-		const uniqueAccounts = new Set<string>();
-		uniqueAccounts.add(this.driftClient.provider.wallet.publicKey.toString()); // fee payer goes first
-
-		const computeBudgetIx = ixs[0];
-		computeBudgetIx.keys.forEach((key) =>
-			uniqueAccounts.add(key.pubkey.toString())
-		);
-		uniqueAccounts.add(computeBudgetIx.programId.toString());
-
-		// initialize the barebones transaction
-		// signatures
-		runningTxSize += this.calcCompactU16EncodedSize(new Array(1), 64);
-		// message header
-		runningTxSize += 3;
-		// accounts
-		runningTxSize += this.calcCompactU16EncodedSize(
-			new Array(uniqueAccounts.size),
-			32
-		);
-		// block hash
-		runningTxSize += 32;
-		runningTxSize += this.calcIxEncodedSize(computeBudgetIx);
-
 		const nodesSent: Array<NodeToFill> = [];
 		let idxUsed = 0;
-		const startingIxsSize = ixs.length;
 		const fillTxId = this.fillTxId++;
+
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
+			const ixs: Array<TransactionInstruction> = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000,
+				}),
+			];
+			if (!buildForBundle) {
+				ixs.push(
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: Math.floor(
+							this.priorityFeeSubscriber.getCustomStrategyResult()
+						),
+					})
+				);
+			}
+
 			// do multi maker fills in a separate tx since they're larger
-			if (nodeToFill.makerNodes.length > 1) {
+			if (nodeToFill.makerNodes.length > 2) {
 				await this.tryFillMultiMakerPerpNode(nodeToFill, buildForBundle);
 				nodesSent.push(nodeToFill);
 				continue;
@@ -2051,6 +2045,11 @@ export class FillerBot implements Bot {
 				throw new Error('expected perp market type');
 			}
 
+			if (this.pythPriceSubscriber) {
+				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+				ixs.push(...pythIxs);
+			}
+
 			const ix = await this.driftClient.getFillPerpOrderIx(
 				await getUserAccountPublicKey(
 					this.driftClient.program.programId,
@@ -2070,38 +2069,6 @@ export class FillerBot implements Bot {
 
 			this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
 
-			// first estimate new tx size with this additional ix and new accounts
-			const ixKeys = ix.keys.map((key) => key.pubkey);
-			const newAccounts = ixKeys
-				.concat(ix.programId)
-				.filter((key) => !uniqueAccounts.has(key.toString()));
-			const newIxCost = this.calcIxEncodedSize(ix);
-			const additionalAccountsCost =
-				newAccounts.length > 0
-					? this.calcCompactU16EncodedSize(newAccounts, 32) - 1
-					: 0;
-
-			// We have to use MAX_TX_PACK_SIZE because it appears we cannot send tx with a size of exactly 1232 bytes.
-			// Also, some logs may get truncated near the end of the tx, so we need to leave some room for that.
-			const cuToUsePerFill = this.useBurstCULimit
-				? BURST_CU_PER_FILL
-				: CU_PER_FILL;
-			if (
-				(runningTxSize + newIxCost + additionalAccountsCost >=
-					MAX_TX_PACK_SIZE ||
-					runningCUUsed + cuToUsePerFill >= MAX_CU_PER_TX) &&
-				ixs.length > startingIxsSize + 1 // ensure at least 1 attempted fill
-			) {
-				logger.info(
-					`Fully packed fill tx (ixs: ${ixs.length}): est. tx size ${
-						runningTxSize + newIxCost + additionalAccountsCost
-					}, max: ${MAX_TX_PACK_SIZE}, est. CU used: expected ${
-						runningCUUsed + cuToUsePerFill
-					}, max: ${MAX_CU_PER_TX}, (fillTxId: ${fillTxId})`
-				);
-				break;
-			}
-
 			// add to tx
 			logger.info(
 				`including taker ${(
@@ -2115,10 +2082,81 @@ export class FillerBot implements Bot {
 					.join(', ')}`
 			);
 			ixs.push(ix);
-			runningTxSize += newIxCost + additionalAccountsCost;
-			runningCUUsed += cuToUsePerFill;
 
-			newAccounts.forEach((key) => uniqueAccounts.add(key.toString()));
+			if (this.revertOnFailure) {
+				ixs.push(await this.driftClient.getRevertFillIx());
+			}
+
+			let simResult;
+			const user = this.driftClient.getUser();
+			try {
+				simResult = await simulateAndGetTxWithCUs({
+					ixs,
+					connection: this.driftClient.connection,
+					payerPublicKey: this.driftClient.wallet.publicKey,
+					lookupTableAccounts: this.lookupTableAccounts,
+					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+					doSimulation: this.simulateTxForCUEstimate,
+					recentBlockhash: await this.getBlockhashForTx(),
+					dumpTx: DUMP_TXS_IN_SIM,
+				});
+			} catch (e) {
+				logger.error(
+					`Error simulating fill perp nodes (fillTxId: ${fillTxId}): ${e}`
+				);
+				return nodesSent.length;
+			}
+
+			this.simulateTxHistogram?.record(simResult.simTxDuration, {
+				type: 'fill',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+			this.estTxCuHistogram?.record(simResult.cuEstimate, {
+				type: 'fill',
+				simError: simResult.simError !== null,
+				...metricAttrFromUserAccount(
+					user.userAccountPublicKey,
+					user.getUserAccount()
+				),
+			});
+
+			if (this.simulateTxForCUEstimate && simResult.simError) {
+				logger.error(
+					`simError: ${JSON.stringify(
+						simResult.simError
+					)} (fillTxId: ${fillTxId})`
+				);
+				handleSimResultError(
+					simResult,
+					errorCodesToSuppress,
+					`${this.name}: (fillTxId: ${fillTxId})`
+				);
+				if (simResult.simTxLogs) {
+					await this.handleTransactionLogs(nodesToFill, simResult.simTxLogs);
+				}
+			} else {
+				if (this.dryRun) {
+					logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
+				} else {
+					if (this.hasEnoughSolToFill) {
+						this.sendFillTxAndParseLogs(
+							fillTxId,
+							nodesSent,
+							simResult.tx,
+							buildForBundle
+						);
+					} else {
+						logger.info(
+							`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
+						);
+					}
+				}
+			}
+
 			idxUsed++;
 			nodesSent.push(nodeToFill);
 		}
@@ -2129,71 +2167,6 @@ export class FillerBot implements Bot {
 
 		if (nodesSent.length === 0) {
 			return 0;
-		}
-
-		if (this.revertOnFailure) {
-			ixs.push(await this.driftClient.getRevertFillIx());
-		}
-
-		const user = this.driftClient.getUser();
-		const simResult = await simulateAndGetTxWithCUs({
-			ixs,
-			connection: this.driftClient.connection,
-			payerPublicKey: this.driftClient.wallet.publicKey,
-			lookupTableAccounts: [this.lookupTableAccount!],
-			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-			doSimulation: this.simulateTxForCUEstimate,
-			recentBlockhash: await this.getBlockhashForTx(),
-			dumpTx: DUMP_TXS_IN_SIM,
-		});
-		this.simulateTxHistogram?.record(simResult.simTxDuration, {
-			type: 'bulkFill',
-			simError: simResult.simError !== null,
-			...metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
-			),
-		});
-		this.estTxCuHistogram?.record(simResult.cuEstimate, {
-			type: 'bulkFill',
-			simError: simResult.simError !== null,
-			...metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
-			),
-		});
-
-		if (this.simulateTxForCUEstimate && simResult.simError) {
-			logger.error(
-				`simError: ${JSON.stringify(
-					simResult.simError
-				)} (fillTxId: ${fillTxId})`
-			);
-			handleSimResultError(
-				simResult,
-				errorCodesToSuppress,
-				`${this.name}: (fillTxId: ${fillTxId})`
-			);
-			if (simResult.simTxLogs) {
-				await this.handleTransactionLogs(nodesToFill, simResult.simTxLogs);
-			}
-		} else {
-			if (this.dryRun) {
-				logger.info(`dry run, not sending tx (fillTxId: ${fillTxId})`);
-			} else {
-				if (this.hasEnoughSolToFill) {
-					this.sendFillTxAndParseLogs(
-						fillTxId,
-						nodesSent,
-						simResult.tx,
-						buildForBundle
-					);
-				} else {
-					logger.info(
-						`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
-					);
-				}
-			}
 		}
 
 		return nodesSent.length;
@@ -2236,7 +2209,7 @@ export class FillerBot implements Bot {
 		fillableNodes: Array<NodeToFill>,
 		buildForBundle: boolean
 	) {
-		await this.tryBulkFillPerpNodes(fillableNodes, buildForBundle);
+		await this.tryFillPerpNodes(fillableNodes, buildForBundle);
 	}
 
 	protected async executeTriggerablePerpNodesForMarket(
@@ -2266,12 +2239,20 @@ export class FillerBot implements Bot {
 						this.priorityFeeSubscriber.getCustomStrategyResult()
 					),
 				}),
+			];
+
+			if (this.pythPriceSubscriber) {
+				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
+				ixs.push(...pythIxs);
+			}
+
+			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
 					user.data,
 					nodeToTrigger.node.order
-				),
-			];
+				)
+			);
 
 			if (this.revertOnFailure) {
 				ixs.push(await this.driftClient.getRevertFillIx());
@@ -2282,7 +2263,7 @@ export class FillerBot implements Bot {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.lookupTableAccount!],
+				lookupTableAccounts: this.lookupTableAccounts,
 				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),
@@ -2451,7 +2432,7 @@ export class FillerBot implements Bot {
 							ixs,
 							connection: this.driftClient.connection,
 							payerPublicKey: this.driftClient.wallet.publicKey,
-							lookupTableAccounts: [this.lookupTableAccount!],
+							lookupTableAccounts: this.lookupTableAccounts,
 							cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 							doSimulation: this.simulateTxForCUEstimate,
 							recentBlockhash: await this.getBlockhashForTx(),
