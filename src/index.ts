@@ -955,12 +955,7 @@ const runBot = async () => {
 	}
 
 	logger.info(`Checking if need pythConnection: ${needPythPriceSubscriber}`);
-	if (needPythPriceSubscriber) {
-		if (!pythPriceSubscriber) {
-			throw new Error(
-				`Pyth connection required for this bot, but not hermesEndpoint not supplied in config`
-			);
-		}
+	if (needPythPriceSubscriber && pythPriceSubscriber) {
 		const feedIds: string[] = Array.from(
 			new Set([
 				...PerpMarkets[config.global.driftEnv!]
@@ -972,6 +967,10 @@ const runBot = async () => {
 			])
 		) as string[];
 		await pythPriceSubscriber!.subscribe(feedIds);
+	} else if (needPythPriceSubscriber && !pythPriceSubscriber) {
+		logger.warn(
+			'Running a bot that should have hermes endpoint set in config, but doesnt'
+		);
 	}
 
 	logger.info(
