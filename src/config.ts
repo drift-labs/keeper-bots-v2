@@ -15,6 +15,30 @@ export const PULL_ORACLE_WHITELIST: {
 		marketType: MarketType.PERP,
 		marketIndex: 17,
 	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 6,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 26,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 25,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 32,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 13,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 11,
+	},
 ];
 
 export type BaseBotConfig = {
