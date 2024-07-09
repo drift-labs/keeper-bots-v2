@@ -17,7 +17,7 @@ export const PULL_ORACLE_WHITELIST: {
 	},
 	{
 		marketType: MarketType.PERP,
-		marketIndex: 6,
+		marketIndex: 3,
 	},
 	{
 		marketType: MarketType.PERP,
@@ -38,6 +38,10 @@ export const PULL_ORACLE_WHITELIST: {
 	{
 		marketType: MarketType.PERP,
 		marketIndex: 11,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 28,
 	},
 ];
 
