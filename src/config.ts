@@ -43,6 +43,10 @@ export const PULL_ORACLE_WHITELIST: {
 		marketType: MarketType.PERP,
 		marketIndex: 28,
 	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 35,
+	},
 ];
 
 export const DEVNET_PULL_ORACLE_WHITELIST: {
