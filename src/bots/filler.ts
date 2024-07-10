@@ -57,7 +57,11 @@ import {
 
 import { logger } from '../logger';
 import { Bot } from '../types';
-import { FillerConfig, GlobalConfig } from '../config';
+import {
+	DEVNET_PULL_ORACLE_WHITELIST,
+	FillerConfig,
+	GlobalConfig,
+} from '../config';
 import {
 	CounterValue,
 	GaugeValue,
@@ -398,10 +402,13 @@ export class FillerBot implements Bot {
 			resubTimeoutMs: 5_000,
 		});
 
-		const peprMarketPullOracleWhitelist: number[] =
-			PULL_ORACLE_WHITELIST.filter((market) =>
-				isVariant(market.marketType, 'perp')
-			).map((market) => market.marketIndex);
+		const whitelistToUse =
+			this.globalConfig.driftEnv !== 'devnet'
+				? PULL_ORACLE_WHITELIST
+				: DEVNET_PULL_ORACLE_WHITELIST;
+		const peprMarketPullOracleWhitelist = whitelistToUse
+			.filter((market) => isVariant(market.marketType, 'perp'))
+			.map((market) => market.marketIndex);
 		this.pullOraclePerpMarketWhitelist = PerpMarkets[
 			this.globalConfig.driftEnv
 		].filter((market) =>

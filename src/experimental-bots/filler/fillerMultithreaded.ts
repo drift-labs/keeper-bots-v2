@@ -31,7 +31,11 @@ import {
 	UserAccount,
 	UserStatsMap,
 } from '@drift-labs/sdk';
-import { FillerMultiThreadedConfig, GlobalConfig } from '../../config';
+import {
+	DEVNET_PULL_ORACLE_WHITELIST,
+	FillerMultiThreadedConfig,
+	GlobalConfig,
+} from '../../config';
 import { BundleSender } from '../../bundleSender';
 import {
 	AddressLookupTableAccount,
@@ -319,10 +323,13 @@ export class FillerMultithreaded {
 			driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
 		});
 
-		const peprMarketPullOracleWhitelist: number[] =
-			PULL_ORACLE_WHITELIST.filter((market) =>
-				isVariant(market.marketType, 'perp')
-			).map((market) => market.marketIndex);
+		const whitelistToUse =
+			this.globalConfig.driftEnv !== 'devnet'
+				? PULL_ORACLE_WHITELIST
+				: DEVNET_PULL_ORACLE_WHITELIST;
+		const peprMarketPullOracleWhitelist = whitelistToUse
+			.filter((market) => isVariant(market.marketType, 'perp'))
+			.map((market) => market.marketIndex);
 		this.pullOraclePerpMarketWhitelist = PerpMarkets[
 			this.globalConfig.driftEnv
 		].filter((market) =>
