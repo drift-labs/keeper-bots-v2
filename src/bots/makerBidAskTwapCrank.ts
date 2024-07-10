@@ -40,7 +40,7 @@ import {
 	simulateAndGetTxWithCUs,
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
-import { PULL_ORACLE_WHITELIST } from '../config';
+import { PULL_ORACLE_WHITELIST, DEVNET_PULL_ORACLE_WHITELIST } from '../config';
 
 const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
@@ -176,10 +176,13 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.pythPriceSubscriber = pythPriceSubscriber;
 		this.lookupTableAccounts = lookupTableAccounts;
 
-		const peprMarketPullOracleWhitelist: number[] =
-			PULL_ORACLE_WHITELIST.filter((market) =>
-				isVariant(market.marketType, 'perp')
-			).map((market) => market.marketIndex);
+		const whitelistToUse =
+			this.globalConfig.driftEnv !== 'devnet'
+				? PULL_ORACLE_WHITELIST
+				: DEVNET_PULL_ORACLE_WHITELIST;
+		const peprMarketPullOracleWhitelist = whitelistToUse
+			.filter((market) => isVariant(market.marketType, 'perp'))
+			.map((market) => market.marketIndex);
 		this.pullOraclePerpMarketWhitelist = PerpMarkets[
 			this.globalConfig.driftEnv
 		].filter((market) =>
