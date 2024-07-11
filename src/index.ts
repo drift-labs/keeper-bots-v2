@@ -788,24 +788,22 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'userPnlSettler')) {
 		needDriftStateWatcher = true;
+		needPriorityFeeSubscriber = true;
 		bots.push(
 			new UserPnlSettlerBot(
-				driftClientConfig,
+				driftClient,
+				slotSubscriber,
 				config.botConfigs!.userPnlSettler!,
-				config.global,
-				txSender
+				config.global
 			)
 		);
 	}
 
 	if (configHasBot(config, 'userLpSettler')) {
 		needDriftStateWatcher = true;
+		needPriorityFeeSubscriber = true;
 		bots.push(
-			new UserLpSettlerBot(
-				driftClientConfig,
-				config.botConfigs!.userLpSettler!,
-				txSender
-			)
+			new UserLpSettlerBot(driftClient, config.botConfigs!.userLpSettler!)
 		);
 	}
 
@@ -816,7 +814,7 @@ const runBot = async () => {
 
 		bots.push(
 			new UserIdleFlipperBot(
-				driftClientConfig,
+				driftClient,
 				config.botConfigs!.userIdleFlipper!,
 				blockhashSubscriber
 			)
@@ -827,10 +825,7 @@ const runBot = async () => {
 		needDriftStateWatcher = true;
 
 		bots.push(
-			new IFRevenueSettlerBot(
-				driftClientConfig,
-				config.botConfigs!.ifRevenueSettler!
-			)
+			new IFRevenueSettlerBot(driftClient, config.botConfigs!.ifRevenueSettler!)
 		);
 	}
 

@@ -2,11 +2,8 @@ import {
 	DriftClient,
 	UserMap,
 	ZERO,
-	DriftClientConfig,
-	BulkAccountLoader,
 	BN,
 	timeRemainingUntilUpdate,
-	TxSender,
 	isOperationPaused,
 	PerpOperation,
 	decodeName,
@@ -60,29 +57,12 @@ export class UserLpSettlerBot implements Bot {
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
-	constructor(
-		driftClientConfigs: DriftClientConfig,
-		config: BaseBotConfig,
-		txSender: TxSender
-	) {
+	constructor(driftClient: DriftClient, config: BaseBotConfig) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.runOnce = config.runOnce || false;
 
-		const bulkAccountLoader = new BulkAccountLoader(
-			driftClientConfigs.connection,
-			driftClientConfigs.connection.commitment || 'confirmed',
-			0
-		);
-		this.driftClient = new DriftClient(
-			Object.assign({}, driftClientConfigs, {
-				accountSubscription: {
-					type: 'polling',
-					accountLoader: bulkAccountLoader,
-				},
-				txSender,
-			})
-		);
+		this.driftClient = driftClient;
 		this.userMap = new UserMap({
 			driftClient: this.driftClient,
 			subscriptionConfig: {

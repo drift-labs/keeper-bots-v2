@@ -21,13 +21,11 @@ import {
 	calculateNetUserPnl,
 	BASE_PRECISION,
 	QUOTE_SPOT_MARKET_INDEX,
-	DriftClientConfig,
-	BulkAccountLoader,
-	TxSender,
 	isOperationPaused,
 	PerpOperation,
 	PriorityFeeSubscriberMap,
 	DriftMarketInfo,
+	SlotSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -68,10 +66,10 @@ export class UserPnlSettlerBot implements Bot {
 	public readonly defaultIntervalMs: number = 300_000;
 
 	private driftClient: DriftClient;
+	private slotSubscriber: SlotSubscriber;
 	private globalConfig: GlobalConfig;
 	private lookupTableAccount?: AddressLookupTableAccount;
 	private intervalIds: Array<NodeJS.Timer> = [];
-	private bulkAccountLoader: BulkAccountLoader;
 	private userMap: UserMap;
 	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
 	private inProgress = false;
@@ -83,10 +81,10 @@ export class UserPnlSettlerBot implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 
 	constructor(
-		driftClientConfigs: DriftClientConfig,
+		driftClient: DriftClient,
+		slotSubscriber: SlotSubscriber,
 		config: UserPnlSettlerConfig,
-		globalConfig: GlobalConfig,
-		txSender: TxSender
+		globalConfig: GlobalConfig
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
@@ -98,21 +96,8 @@ export class UserPnlSettlerBot implements Bot {
 		this.maxUsersToConsider = Number(config.maxUsersToConsider) ?? 50;
 		this.globalConfig = globalConfig;
 
-		const bulkAccountLoader = new BulkAccountLoader(
-			driftClientConfigs.connection,
-			driftClientConfigs.connection.commitment || 'processed',
-			0
-		);
-		this.bulkAccountLoader = bulkAccountLoader;
-		this.driftClient = new DriftClient(
-			Object.assign({}, driftClientConfigs, {
-				accountSubscription: {
-					type: 'polling',
-					accountLoader: bulkAccountLoader,
-				},
-				txSender,
-			})
-		);
+		this.driftClient = driftClient;
+		this.slotSubscriber = slotSubscriber;
 		this.userMap = new UserMap({
 			driftClient: this.driftClient,
 			subscriptionConfig: {
@@ -135,6 +120,9 @@ export class UserPnlSettlerBot implements Bot {
 				marketIndex: perpMarket.marketIndex,
 			});
 		}
+		logger.info(
+			`Adding ${driftMarkets.length} perp markets to PriorityFeeSubscriberMap`
+		);
 		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
 			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
 				this.globalConfig.driftEnv!
@@ -221,14 +209,12 @@ export class UserPnlSettlerBot implements Bot {
 				};
 			}
 
-			const slot = (await this.bulkAccountLoader.mostRecentSlot) ?? 0;
-
 			for (const market of this.driftClient.getPerpMarketAccounts()) {
 				const oracleValid = isOracleValid(
 					perpMarketAndOracleData[market.marketIndex].marketAccount,
 					perpMarketAndOracleData[market.marketIndex].oraclePriceData,
 					this.driftClient.getStateAccount().oracleGuardRails,
-					slot
+					this.slotSubscriber.getSlot()
 				);
 
 				if (!oracleValid) {
