@@ -7,74 +7,6 @@ import {
 import { OrderExecutionAlgoType } from './types';
 import { BN, DriftEnv, MarketType } from '@drift-labs/sdk';
 
-export const PULL_ORACLE_WHITELIST: {
-	marketType: MarketType;
-	marketIndex: number;
-}[] = [
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 17,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 3,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 26,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 25,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 32,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 13,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 11,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 28,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 35,
-	},
-];
-
-export const DEVNET_PULL_ORACLE_WHITELIST: {
-	marketType: MarketType;
-	marketIndex: number;
-}[] = [
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 17,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 3,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 13,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 11,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 25,
-	},
-];
-
 export type BaseBotConfig = {
 	botId: string;
 	dryRun: boolean;
@@ -596,3 +528,151 @@ export function configHasBot(
 	}
 	return botEnabled && botConfigExists;
 }
+
+export const PULL_ORACLE_WHITELIST: {
+	marketType: MarketType;
+	marketIndex: number;
+}[] = [
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 17,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 3,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 26,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 25,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 32,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 13,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 11,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 28,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 35,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 8,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 33,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 14,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 6,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 5,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 27,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 29,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 21,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 22,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 16,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 20,
+	},
+];
+
+export const DEVNET_PULL_ORACLE_WHITELIST: {
+	marketType: MarketType;
+	marketIndex: number;
+}[] = [
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 17,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 3,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 13,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 11,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 25,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 8,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 14,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 6,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 5,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 23,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 21,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 22,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 16,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 20,
+	},
+];
