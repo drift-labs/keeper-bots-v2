@@ -5,7 +5,7 @@ import {
 	loadCommaDelimitToStringArray,
 } from './utils';
 import { OrderExecutionAlgoType } from './types';
-import { BN, DriftEnv, MarketType } from '@drift-labs/sdk';
+import { BN, DriftEnv, MarketType, PerpMarkets } from '@drift-labs/sdk';
 
 export type BaseBotConfig = {
 	botId: string;
@@ -613,66 +613,59 @@ export const PULL_ORACLE_WHITELIST: {
 		marketType: MarketType.PERP,
 		marketIndex: 20,
 	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 34,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 15,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 15,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 7,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 10,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 18,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 9,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 19,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 24,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 30,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 12,
+	},
+	{
+		marketType: MarketType.PERP,
+		marketIndex: 4,
+	},
 ];
 
 export const DEVNET_PULL_ORACLE_WHITELIST: {
 	marketType: MarketType;
 	marketIndex: number;
-}[] = [
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 17,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 3,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 13,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 11,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 25,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 8,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 14,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 6,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 5,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 23,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 21,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 22,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 16,
-	},
-	{
-		marketType: MarketType.PERP,
-		marketIndex: 20,
-	},
-];
+}[] = PerpMarkets['devnet'].map((mkt) => {
+	return { marketType: MarketType.PERP, marketIndex: mkt.marketIndex };
+});
