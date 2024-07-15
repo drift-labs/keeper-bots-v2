@@ -12,8 +12,6 @@ import {
 	DriftMarketInfo,
 	isOneOfVariant,
 	getVariant,
-	PerpMarketConfig,
-	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -40,7 +38,6 @@ import {
 	simulateAndGetTxWithCUs,
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
-import { PULL_ORACLE_WHITELIST, DEVNET_PULL_ORACLE_WHITELIST } from '../config';
 
 const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
@@ -103,10 +100,10 @@ function buildCrankIntervalToMarketIds(driftClient: DriftClient): {
 			marketType: 'perp',
 			marketIndex: perpMarket.marketIndex,
 		});
-		let crankPeriodMs = 30_000;
+		let crankPeriodMs = 20_000;
 		const isPreLaunch = false;
 		if (isOneOfVariant(perpMarket.contractTier, ['a', 'b'])) {
-			crankPeriodMs = 15_000;
+			crankPeriodMs = 10_000;
 		} else if (isVariant(perpMarket.amm.oracleSource, 'prelaunch')) {
 			crankPeriodMs = 15_000;
 		}
@@ -154,7 +151,6 @@ export class MakerBidAskTwapCrank implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 	private pythPriceSubscriber?: PythPriceFeedSubscriber;
 	private lookupTableAccounts: AddressLookupTableAccount[];
-	protected pullOraclePerpMarketWhitelist: PerpMarketConfig[];
 
 	constructor(
 		driftClient: DriftClient,
@@ -175,19 +171,6 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.userMap = userMap;
 		this.pythPriceSubscriber = pythPriceSubscriber;
 		this.lookupTableAccounts = lookupTableAccounts;
-
-		const whitelistToUse =
-			this.globalConfig.driftEnv !== 'devnet'
-				? PULL_ORACLE_WHITELIST
-				: DEVNET_PULL_ORACLE_WHITELIST;
-		const peprMarketPullOracleWhitelist = whitelistToUse
-			.filter((market) => isVariant(market.marketType, 'perp'))
-			.map((market) => market.marketIndex);
-		this.pullOraclePerpMarketWhitelist = PerpMarkets[
-			this.globalConfig.driftEnv
-		].filter((market) =>
-			peprMarketPullOracleWhitelist.includes(market.marketIndex)
-		);
 	}
 
 	public async init() {
@@ -433,9 +416,10 @@ export class MakerBidAskTwapCrank implements Bot {
 
 				if (
 					this.pythPriceSubscriber &&
-					this.pullOraclePerpMarketWhitelist.findIndex(
-						(x) => x.marketIndex === mi
-					) !== -1
+					!isVariant(
+						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+						'prelaunch'
+					)
 				) {
 					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
 					ixs.push(...pythIxs);
