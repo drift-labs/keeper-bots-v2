@@ -32,8 +32,6 @@ import {
 	QUOTE_PRECISION,
 	ClockSubscriber,
 	DriftEnv,
-	PerpMarketConfig,
-	PerpMarkets,
 } from '@drift-labs/sdk';
 import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -57,11 +55,7 @@ import {
 
 import { logger } from '../logger';
 import { Bot } from '../types';
-import {
-	DEVNET_PULL_ORACLE_WHITELIST,
-	FillerConfig,
-	GlobalConfig,
-} from '../config';
+import { FillerConfig, GlobalConfig } from '../config';
 import {
 	CounterValue,
 	GaugeValue,
@@ -102,7 +96,6 @@ import { Metrics } from '../metrics';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
-import { PULL_ORACLE_WHITELIST } from '../config';
 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
@@ -262,7 +255,6 @@ export class FillerBot implements Bot {
 	protected rebalanceSettledPnlThreshold: BN;
 
 	pythPriceSubscriber?: PythPriceFeedSubscriber;
-	protected pullOraclePerpMarketWhitelist: PerpMarketConfig[];
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -401,19 +393,6 @@ export class FillerBot implements Bot {
 			commitment: 'finalized',
 			resubTimeoutMs: 5_000,
 		});
-
-		const whitelistToUse =
-			this.globalConfig.driftEnv !== 'devnet'
-				? PULL_ORACLE_WHITELIST
-				: DEVNET_PULL_ORACLE_WHITELIST;
-		const peprMarketPullOracleWhitelist = whitelistToUse
-			.filter((market) => isVariant(market.marketType, 'perp'))
-			.map((market) => market.marketIndex);
-		this.pullOraclePerpMarketWhitelist = PerpMarkets[
-			this.globalConfig.driftEnv
-		].filter((market) =>
-			peprMarketPullOracleWhitelist.includes(market.marketIndex)
-		);
 	}
 
 	protected recordEvictedTxSig(
@@ -1729,10 +1708,12 @@ export class FillerBot implements Bot {
 		if (marketIndex === undefined) {
 			throw new Error('Market index not found on node');
 		}
-		const marketIndexIndex = this.pullOraclePerpMarketWhitelist.findIndex(
-			(x) => x.marketIndex === marketIndex
-		);
-		if (marketIndexIndex === -1) {
+		if (
+			isVariant(
+				this.driftClient.getPerpMarketAccount(marketIndex)?.amm.oracleSource,
+				'prelaunch'
+			)
+		) {
 			// crankMarketIndex = getStaleOracleMarketIndexes(this.driftClient,
 			// 	this.pullOraclePerpMarketWhitelist,
 			// 	MarketType.PERP,

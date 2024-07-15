@@ -20,7 +20,6 @@ import {
 	MakerInfo,
 	MarketType,
 	NodeToFill,
-	PerpMarketConfig,
 	PerpMarkets,
 	PRICE_PRECISION,
 	PriorityFeeSubscriberMap,
@@ -31,11 +30,7 @@ import {
 	UserAccount,
 	UserStatsMap,
 } from '@drift-labs/sdk';
-import {
-	DEVNET_PULL_ORACLE_WHITELIST,
-	FillerMultiThreadedConfig,
-	GlobalConfig,
-} from '../../config';
+import { FillerMultiThreadedConfig, GlobalConfig } from '../../config';
 import { BundleSender } from '../../bundleSender';
 import {
 	AddressLookupTableAccount,
@@ -111,7 +106,6 @@ import {
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
-import { PULL_ORACLE_WHITELIST } from '../../config';
 
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -262,7 +256,6 @@ export class FillerMultithreaded {
 	protected pythPriceSubscriber?: PythPriceFeedSubscriber;
 	protected latestPythVaas?: Map<string, string>; // priceFeedId -> vaa
 	protected marketIndexesToPriceIds = new Map<number, string>();
-	protected pullOraclePerpMarketWhitelist: PerpMarketConfig[];
 
 	constructor(
 		globalConfig: GlobalConfig,
@@ -308,7 +301,10 @@ export class FillerMultithreaded {
 			connection: driftClient.connection,
 		});
 
-		const perpMarketsToWatchForFees = this.marketIndexesFlattened.map((m) => {
+		const marketIndexesToUse = PerpMarkets[this.globalConfig.driftEnv!].map(
+			(m) => m.marketIndex
+		);
+		const perpMarketsToWatchForFees = marketIndexesToUse.map((m) => {
 			return {
 				marketType: 'perp',
 				marketIndex: m,
@@ -322,19 +318,6 @@ export class FillerMultithreaded {
 			driftMarkets: perpMarketsToWatchForFees,
 			driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
 		});
-
-		const whitelistToUse =
-			this.globalConfig.driftEnv !== 'devnet'
-				? PULL_ORACLE_WHITELIST
-				: DEVNET_PULL_ORACLE_WHITELIST;
-		const peprMarketPullOracleWhitelist = whitelistToUse
-			.filter((market) => isVariant(market.marketType, 'perp'))
-			.map((market) => market.marketIndex);
-		this.pullOraclePerpMarketWhitelist = PerpMarkets[
-			this.globalConfig.driftEnv
-		].filter((market) =>
-			peprMarketPullOracleWhitelist.includes(market.marketIndex)
-		);
 
 		this.subaccount = config.subaccount ?? 0;
 		if (!this.driftClient.hasUser(this.subaccount)) {
@@ -989,10 +972,12 @@ export class FillerMultithreaded {
 			throw new Error('Market index not found on node');
 		}
 
-		const marketIndexIndex = this.pullOraclePerpMarketWhitelist.findIndex(
-			(x) => x.marketIndex === marketIndex
-		);
-		if (marketIndexIndex === -1) {
+		if (
+			isVariant(
+				this.driftClient.getPerpMarketAccount(marketIndex)?.amm.oracleSource,
+				'prelaunch'
+			)
+		) {
 			// marketIndex = getStaleOracleMarketIndexes(this.driftClient,
 			// 	this.pullOraclePerpMarketWhitelist,
 			// 	MarketType.PERP,
