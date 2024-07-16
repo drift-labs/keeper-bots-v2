@@ -2033,7 +2033,7 @@ export class FillerBot implements Bot {
 				throw new Error('expected perp market type');
 			}
 
-			if (this.pythPriceSubscriber) {
+			if (this.pythPriceSubscriber && ((makerInfos.length == 2 && !referrerInfo) || makerInfos.length < 2)) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
 				ixs.push(...pythIxs);
 			}

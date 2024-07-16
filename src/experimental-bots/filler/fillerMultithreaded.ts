@@ -1532,7 +1532,8 @@ export class FillerMultithreaded {
 				fillerRewardEstimate,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			if (this.pythPriceSubscriber && makerInfos.length <= 2) {
+			if (this.pythPriceSubscriber && 
+				((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
 				ixs.push(...pythIxs);
 			}
