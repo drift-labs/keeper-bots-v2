@@ -36,6 +36,7 @@ import {
 	// getStaleOracleMarketIndexes,
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
+	SimulateAndGetTxWithCUsResponse,
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 
@@ -285,10 +286,11 @@ export class MakerBidAskTwapCrank implements Bot {
 		marketIndex: number,
 		ixs: TransactionInstruction[]
 	): Promise<{ success: boolean; canRetry: boolean }> {
+		let simResult: SimulateAndGetTxWithCUsResponse | undefined;
 		try {
 			const recentBlockhash =
 				await this.driftClient.connection.getLatestBlockhash('confirmed');
-			const simResult = await simulateAndGetTxWithCUs({
+			simResult = await simulateAndGetTxWithCUs({
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
@@ -336,9 +338,13 @@ export class MakerBidAskTwapCrank implements Bot {
 				if (isCriticalError(err)) {
 					const e = err as SendTransactionError;
 					await webhookMessage(
-						`[${this.name}] failed to crank funding rate:\n${
-							e.logs ? (e.logs as Array<string>).join('\n') : ''
-						} \n${e.stack ? e.stack : e.message}`
+						`[${
+							this.name
+						}] failed to crank maker twaps for perp market ${marketIndex}. simulated CUs: ${simResult?.cuEstimate}, simError: ${JSON.stringify(
+							simResult?.simError
+						)}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''} \n${
+							e.stack ? e.stack : e.message
+						}`
 					);
 					return { success: false, canRetry: false };
 				} else {
