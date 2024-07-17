@@ -149,19 +149,19 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.10.461":
-  version "0.10.461"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.461.tgz#e542d1cecdd4068c0e70cdf23e21d9c577f2732b"
-  integrity sha512-YUQ1khfVD7fm5CS9g920b4eddsysLtDeu/HIIFNls8M0xvoIDPrETGgLsjL/ykXc0B+nP++hsWuTpmyJgTQw5A==
+"@drift-labs/jit-proxy@0.10.465":
+  version "0.10.465"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.465.tgz#af0db32ef0ddd276c2c1b4fdf5515952c33ff6e9"
+  integrity sha512-1Kz1PaGCpP5VKRaj8WC2SCCO4HiWGSf9GHQCDtMAUIU7qKZlriyQU8rddxc6B8iz+9cAw3kQdemYO5/w7nM6CA==
   dependencies:
     "@coral-xyz/anchor" "^0.26.0"
-    "@drift-labs/sdk" "2.86.0-beta.21"
+    "@drift-labs/sdk" "2.86.0-beta.25"
     "@solana/web3.js" "1.91.7"
 
-"@drift-labs/sdk@2.86.0-beta.21":
-  version "2.86.0-beta.21"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.86.0-beta.21.tgz#a452fecdc9518d2ae05074abb54a18a396a47d64"
-  integrity sha512-98CxXJdkR4dosizrFBdMOz694Ar9LXi9MPNm+2JFK6n0BV7zQmk7934Eerwv/xZkhMFdllPRiziRjSqjxqDFKA==
+"@drift-labs/sdk@2.86.0-beta.25":
+  version "2.86.0-beta.25"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.86.0-beta.25.tgz#a86e909f0f62e5bf4314876d30a10e4fb907079e"
+  integrity sha512-DZ9HsAQXoPzz0gdRINpiG60sACGfsJHBj7XqlZTllKxaGrtKDVNz2y8HHZ7iIcheWoPs+1/0opOpupvMc/LRcw==
   dependencies:
     "@coral-xyz/anchor" "0.28.0"
     "@ellipsis-labs/phoenix-sdk" "^1.4.2"
@@ -1596,6 +1596,11 @@
   integrity sha512-OB3Ax75nmTP+WR9AgdzA42DI7YmBtiNKN2g1Wxl+d5Dyek9SWt740t+ukwXSmv/jMBCUPyV3YEI93vZHgdP7UQ==
   dependencies:
     "@types/koa" "*"
+
+"@types/lodash@4.17.5":
+  version "4.17.5"
+  resolved "https://registry.yarnpkg.com/@types/lodash/-/lodash-4.17.5.tgz#e6c29b58e66995d57cd170ce3e2a61926d55ee04"
+  integrity sha512-MBIOHVZqVqgfro1euRDWX7OO0fBVUUMrN6Pwm8LQsz8cWhEpihlvR70ENj3f40j58TNxZaWv2ndSkInykNBBJw==
 
 "@types/memcached@^2.2.6":
   version "2.2.10"
@@ -3481,6 +3486,11 @@ lodash.truncate@^4.4.2:
   version "4.4.2"
   resolved "https://registry.yarnpkg.com/lodash.truncate/-/lodash.truncate-4.4.2.tgz#5a350da0b1113b837ecfffd5812cbe58d6eae193"
   integrity sha512-jttmRe7bRse52OsWIMDLaXxWqRAmtIUccAQ3garviCqJjafXOfNMO0yMfNpdD6zbGaTU0P5Nz7e7gAT6cKmJRw==
+
+lodash@4.17.5:
+  version "4.17.5"
+  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.5.tgz#99a92d65c0272debe8c96b6057bc8fbfa3bed511"
+  integrity sha512-svL3uiZf1RwhH+cWrfZn3A4+U58wbP0tGVTLQPbjplZxZ8ROD9VLuNgsRniTlLe7OlSqR79RUehXgpBW/s0IQw==
 
 log-symbols@4.1.0:
   version "4.1.0"
