@@ -450,6 +450,8 @@ export type SimulateAndGetTxWithCUsParams = {
 	ixs: Array<TransactionInstruction>;
 	/// multiplier to apply to the estimated CU usage, default: 1.0
 	cuLimitMultiplier?: number;
+	/// minimum CU limit to use, will not use a min CU if not set
+	minCuLimit?: number;
 	/// set false to only create a tx without simulating for CU estimate
 	doSimulation?: boolean;
 	/// recentBlockhash to use in the final tx. If undefined, PLACEHOLDER_BLOCKHASH
@@ -552,7 +554,10 @@ export async function simulateAndGetTxWithCUs(
 
 	const simTxLogs = resp.value.logs;
 	const cuEstimate = resp.value.unitsConsumed!;
-	const cusToUse = cuEstimate * (params.cuLimitMultiplier ?? 1.0);
+	const cusToUse = Math.max(
+		cuEstimate * (params.cuLimitMultiplier ?? 1.0),
+		params.minCuLimit ?? 0
+	);
 	params.ixs[setCULimitIxIdx] = ComputeBudgetProgram.setComputeUnitLimit({
 		units: cusToUse,
 	});
