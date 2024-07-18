@@ -37,6 +37,7 @@ import {
 	ComputeBudgetProgram,
 	Connection,
 	LAMPORTS_PER_SOL,
+	PACKET_DATA_SIZE,
 	PublicKey,
 	SendTransactionError,
 	Signer,
@@ -57,9 +58,11 @@ import {
 	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
+	getSizeOfTransaction,
 	// getStaleOracleMarketIndexes,
 	handleSimResultError,
 	logMessageForNodeToFill,
+	removePythIxs,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
 	sleepMs,
@@ -131,7 +134,7 @@ const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
 	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	// 6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
-	// 6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
+	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6003, // 0x1773 Error Number: 6003. Error Message: Insufficient collateral.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
 
@@ -881,7 +884,7 @@ export class FillerMultithreaded {
 		}
 		this.confirmLoopRunning = true;
 		try {
-			logger.info(`Confirming tx sigs: ${this.pendingTxSigsToconfirm.size}`);
+			logger.debug(`Confirming tx sigs: ${this.pendingTxSigsToconfirm.size}`);
 			const start = Date.now();
 			const txEntries = Array.from(this.pendingTxSigsToconfirm.entries());
 			for (let i = 0; i < txEntries.length; i += TX_CONFIRMATION_BATCH_SIZE) {
@@ -944,7 +947,7 @@ export class FillerMultithreaded {
 					await sleepMs(500);
 				}
 			}
-			logger.info(`Confirming tx sigs took: ${Date.now() - start} ms`);
+			logger.debug(`Confirming tx sigs took: ${Date.now() - start} ms`);
 		} catch (e) {
 			const err = e as Error;
 			if (err.message.includes('429')) {
@@ -978,11 +981,6 @@ export class FillerMultithreaded {
 				'prelaunch'
 			)
 		) {
-			// marketIndex = getStaleOracleMarketIndexes(this.driftClient,
-			// 	this.pullOraclePerpMarketWhitelist,
-			// 	MarketType.PERP,
-			// 	1
-			// )[0];
 			return [];
 		}
 
@@ -1206,7 +1204,7 @@ export class FillerMultithreaded {
 	) {
 		const user = this.driftClient.getUser(this.subaccount);
 		for (const nodeToTrigger of nodesToTrigger) {
-			const ixs = [
+			let ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000,
 				}),
@@ -1255,6 +1253,13 @@ export class FillerMultithreaded {
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
 				}
+			}
+
+			const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
+			if (txSize > PACKET_DATA_SIZE) {
+				logger.info(`tx too large, removing pyth ixs. 
+						`);
+				ixs = removePythIxs(ixs);
 			}
 
 			const simResult = await simulateAndGetTxWithCUs({
@@ -1515,7 +1520,7 @@ export class FillerMultithreaded {
 		nodeToFill: NodeToFillWithBuffer,
 		buildForBundle: boolean
 	): Promise<boolean> {
-		const ixs: Array<TransactionInstruction> = [
+		let ixs: Array<TransactionInstruction> = [
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,
 			}),
@@ -1598,6 +1603,39 @@ export class FillerMultithreaded {
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
 				}
+
+				const txSize = getSizeOfTransaction(
+					ixs,
+					true,
+					this.lookupTableAccounts
+				);
+				if (txSize > PACKET_DATA_SIZE) {
+					logger.info(`tx too large, removing pyth ixs. 
+							keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
+							total number of maker positions: ${makerInfos.reduce(
+								(acc, maker) =>
+									acc +
+									(maker.data.makerUserAccount.perpPositions.length +
+										maker.data.makerUserAccount.spotPositions.length),
+								0
+							)}
+							total taker positions: ${
+								takerUser.perpPositions.length + takerUser.spotPositions.length
+							}
+							marketIndex: ${nodeToFill.node.order!.marketIndex}
+							taker has position in market: ${takerUser.perpPositions.some(
+								(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
+							)}
+							makers have position in market: ${makerInfos.some((maker) =>
+								maker.data.makerUserAccount.perpPositions.some(
+									(pos) =>
+										pos.marketIndex === nodeToFill.node.order!.marketIndex
+								)
+							)}
+							`);
+					ixs = removePythIxs(ixs);
+				}
+
 				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
 					connection: this.driftClient.connection,
@@ -1693,7 +1731,7 @@ export class FillerMultithreaded {
 		nodeToFill: NodeToFillWithBuffer,
 		buildForBundle: boolean
 	) {
-		const ixs = [
+		let ixs = [
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,
 			}),
@@ -1765,6 +1803,33 @@ export class FillerMultithreaded {
 			ixs.push(
 				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 			);
+		}
+
+		const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
+		if (txSize > PACKET_DATA_SIZE) {
+			logger.info(`tx too large, removing pyth ixs. 
+						keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
+						total number of maker positions: ${makerInfos.reduce(
+							(acc, maker) =>
+								acc +
+								(maker.data.makerUserAccount.perpPositions.length +
+									maker.data.makerUserAccount.spotPositions.length),
+							0
+						)}
+						total taker positions: ${
+							takerUser.perpPositions.length + takerUser.spotPositions.length
+						}
+						marketIndex: ${nodeToFill.node.order!.marketIndex}
+						taker has position in market: ${takerUser.perpPositions.some(
+							(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
+						)}
+						makers have position in market: ${makerInfos.some((maker) =>
+							maker.data.makerUserAccount.perpPositions.some(
+								(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
+							)
+						)}
+						`);
+			ixs = removePythIxs(ixs);
 		}
 
 		const simResult = await simulateAndGetTxWithCUs({
