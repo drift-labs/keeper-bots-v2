@@ -41,6 +41,7 @@ import {
 	PerpMarketConfig,
 	PerpMarkets,
 	SpotMarkets,
+	DRIFT_ORACLE_RECEIVER_ID,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -450,6 +451,8 @@ export type SimulateAndGetTxWithCUsParams = {
 	ixs: Array<TransactionInstruction>;
 	/// multiplier to apply to the estimated CU usage, default: 1.0
 	cuLimitMultiplier?: number;
+	/// minimum CU limit to use, will not use a min CU if not set
+	minCuLimit?: number;
 	/// set false to only create a tx without simulating for CU estimate
 	doSimulation?: boolean;
 	/// recentBlockhash to use in the final tx. If undefined, PLACEHOLDER_BLOCKHASH
@@ -552,7 +555,10 @@ export async function simulateAndGetTxWithCUs(
 
 	const simTxLogs = resp.value.logs;
 	const cuEstimate = resp.value.unitsConsumed!;
-	const cusToUse = cuEstimate * (params.cuLimitMultiplier ?? 1.0);
+	const cusToUse = Math.max(
+		cuEstimate * (params.cuLimitMultiplier ?? 1.0),
+		params.minCuLimit ?? 0
+	);
 	params.ixs[setCULimitIxIdx] = ComputeBudgetProgram.setComputeUnitLimit({
 		units: cusToUse,
 	});
@@ -1306,3 +1312,81 @@ export const chunks = <T>(array: readonly T[], size: number): T[][] => {
 		.map((_, index) => index * size)
 		.map((begin) => array.slice(begin, begin + size));
 };
+
+export function removePythIxs(
+	ixs: TransactionInstruction[],
+	receiverPublicKeyStr: string = DRIFT_ORACLE_RECEIVER_ID
+): TransactionInstruction[] {
+	return ixs.filter(
+		(ix) =>
+			!ix.keys
+				.map((meta) => meta.pubkey.toString())
+				.includes(receiverPublicKeyStr)
+	);
+}
+
+export function getSizeOfTransaction(
+	instructions: TransactionInstruction[],
+	versionedTransaction = true,
+	addressLookupTables: AddressLookupTableAccount[] = []
+): number {
+	const programs = new Set<string>();
+	const signers = new Set<string>();
+	let accounts = new Set<string>();
+
+	instructions.map((ix) => {
+		programs.add(ix.programId.toBase58());
+		accounts.add(ix.programId.toBase58());
+		ix.keys.map((key) => {
+			if (key.isSigner) {
+				signers.add(key.pubkey.toBase58());
+			}
+			accounts.add(key.pubkey.toBase58());
+		});
+	});
+
+	const instruction_sizes: number = instructions
+		.map(
+			(ix) =>
+				1 +
+				getSizeOfCompressedU16(ix.keys.length) +
+				ix.keys.length +
+				getSizeOfCompressedU16(ix.data.length) +
+				ix.data.length
+		)
+		.reduce((a, b) => a + b, 0);
+
+	let numberOfAddressLookups = 0;
+	if (addressLookupTables.length > 0) {
+		const lookupTableAddresses = addressLookupTables
+			.map((addressLookupTable) =>
+				addressLookupTable.state.addresses.map((address) => address.toBase58())
+			)
+			.flat();
+		const totalNumberOfAccounts = accounts.size;
+		accounts = new Set(
+			[...accounts].filter((account) => !lookupTableAddresses.includes(account))
+		);
+		accounts = new Set([...accounts, ...programs, ...signers]);
+		numberOfAddressLookups = totalNumberOfAccounts - accounts.size;
+	}
+
+	return (
+		getSizeOfCompressedU16(signers.size) +
+		signers.size * 64 + // array of signatures
+		3 +
+		getSizeOfCompressedU16(accounts.size) +
+		32 * accounts.size + // array of account addresses
+		32 + // recent blockhash
+		getSizeOfCompressedU16(instructions.length) +
+		instruction_sizes + // array of instructions
+		(versionedTransaction ? 1 + getSizeOfCompressedU16(0) : 0) +
+		(versionedTransaction ? 32 * addressLookupTables.length : 0) +
+		(versionedTransaction && addressLookupTables.length > 0 ? 2 : 0) +
+		numberOfAddressLookups
+	);
+}
+
+function getSizeOfCompressedU16(n: number) {
+	return 1 + Number(n >= 128) + Number(n >= 16384);
+}

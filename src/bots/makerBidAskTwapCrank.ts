@@ -42,6 +42,7 @@ import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 
 const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
+const TWAP_CRANK_MIN_CU = 200_000;
 
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
@@ -296,6 +297,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				payerPublicKey: this.driftClient.wallet.publicKey,
 				lookupTableAccounts: this.lookupTableAccounts,
 				cuLimitMultiplier: CU_EST_MULTIPLIER,
+				minCuLimit: TWAP_CRANK_MIN_CU,
 				doSimulation: true,
 				recentBlockhash: recentBlockhash.blockhash,
 			});
