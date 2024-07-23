@@ -1306,6 +1306,13 @@ export async function initializeSpotFulfillmentAccounts(
 	};
 }
 
+export const chunks = <T>(array: readonly T[], size: number): T[][] => {
+	return new Array(Math.ceil(array.length / size))
+		.fill(null)
+		.map((_, index) => index * size)
+		.map((begin) => array.slice(begin, begin + size));
+};
+
 export function removePythIxs(
 	ixs: TransactionInstruction[],
 	receiverPublicKeyStr: string = DRIFT_ORACLE_RECEIVER_ID
