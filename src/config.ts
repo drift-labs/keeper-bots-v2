@@ -93,6 +93,21 @@ export type LiquidatorConfig = BaseBotConfig & {
 	spotDustValueThresholdBN?: BN;
 };
 
+export type PythUpdateConfigs = {
+	timeDiffMs: number;
+	priceDiffPct: number;
+};
+
+export type PythCrankerBotConfig = BaseBotConfig & {
+	intervalMs: number;
+	updateConfigs: {
+		[key: string]: {
+			update: PythUpdateConfigs;
+			earlyUpdate: PythUpdateConfigs;
+		};
+	};
+};
+
 export type BotConfigMap = {
 	fillerMultithreaded?: FillerMultiThreadedConfig;
 	spotFillerMultithreaded?: FillerMultiThreadedConfig;
@@ -111,6 +126,7 @@ export type BotConfigMap = {
 	userIdleFlipper?: BaseBotConfig;
 	markTwapCrank?: BaseBotConfig;
 	uncrossArb?: BaseBotConfig;
+	pythCranker?: PythCrankerBotConfig;
 };
 
 export interface GlobalConfig {
