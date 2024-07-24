@@ -5,6 +5,9 @@
 			"node",
 			"lodash"
 		],
+		"typeRoots": [
+			"node_modules/@types"
+		],
 		"module": "commonjs",
 		"target": "es2019",
 		"esModuleInterop": true,
