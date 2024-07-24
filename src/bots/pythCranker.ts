@@ -166,7 +166,7 @@ export class PythCrankerBot implements Bot {
 			if (
 				this.feedIdsToCrank.findIndex(
 					(feedId) => feedId.baseSymbol === marketConfig.symbol
-				) !== 1
+				) !== -1
 			)
 				continue;
 
