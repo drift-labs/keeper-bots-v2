@@ -1,7 +1,9 @@
 {
 	"compilerOptions": {
 		"types": [
-			"mocha"
+			"chai",
+			"node",
+			"lodash"
 		],
 		"module": "commonjs",
 		"target": "es2019",
