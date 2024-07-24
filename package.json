@@ -26,7 +26,6 @@
 		"commander": "^9.4.0",
 		"dotenv": "^10.0.0",
 		"jito-ts": "3.0.1",
-		"lodash": "4.17.21",
 		"lru-cache": "^10.2.0",
 		"minimist": "^1.2.8",
 		"typescript": "4.5.4",
@@ -36,7 +35,6 @@
 	},
 	"devDependencies": {
 		"@types/chai": "^4.3.5",
-		"@types/lodash": "4.17.5",
 		"@types/mocha": "^10.0.1",
 		"@typescript-eslint/eslint-plugin": "^5.59.11",
 		"@typescript-eslint/parser": "^4.28.0",

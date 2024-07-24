@@ -2,11 +2,6 @@
 	"compilerOptions": {
 		"types": [
 			"chai",
-			"node",
-			"lodash"
-		],
-		"typeRoots": [
-			"node_modules/@types"
 		],
 		"module": "commonjs",
 		"target": "es2019",

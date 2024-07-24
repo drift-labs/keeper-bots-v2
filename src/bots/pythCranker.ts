@@ -38,8 +38,7 @@ import {
 	getFeedIdUint8Array,
 	trimFeedId,
 } from '@drift-labs/sdk/lib/util/pythPullOracleUtils';
-import { chunks, simulateAndGetTxWithCUs, sleepMs } from '../utils';
-import _ from 'lodash';
+import { chunks, shuffle, simulateAndGetTxWithCUs, sleepMs } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
 
 setGlobalDispatcher(
@@ -269,7 +268,7 @@ export class PythCrankerBot implements Bot {
 
 		const feedIdsToUpdate: FeedIdToCrankInfo[] = [];
 		let considerEarlyUpdate = false;
-		_.shuffle(onChainDataResults).forEach((result) => {
+		shuffle(onChainDataResults).forEach((result) => {
 			if (!result) {
 				return;
 			}

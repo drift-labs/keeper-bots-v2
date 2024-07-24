@@ -1313,6 +1313,22 @@ export const chunks = <T>(array: readonly T[], size: number): T[][] => {
 		.map((begin) => array.slice(begin, begin + size));
 };
 
+export const shuffle = <T>(array: T[]): T[] => {
+	let currentIndex = array.length,
+		randomIndex;
+
+	while (currentIndex !== 0) {
+		randomIndex = Math.floor(Math.random() * currentIndex);
+		currentIndex--;
+		[array[currentIndex], array[randomIndex]] = [
+			array[randomIndex],
+			array[currentIndex],
+		];
+	}
+
+	return array;
+};
+
 export function removePythIxs(
 	ixs: TransactionInstruction[],
 	receiverPublicKeyStr: string = DRIFT_ORACLE_RECEIVER_ID
