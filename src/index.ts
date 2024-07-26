@@ -80,6 +80,7 @@ import { DriftStateWatcher, StateChecks } from './driftStateWatcher';
 import { webhookMessage } from './webhook';
 import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 import { PythCrankerBot } from './bots/pythCranker';
+import { SwitchboardCrankerBot } from './bots/switchboardCranker';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -553,6 +554,21 @@ const runBot = async () => {
 			new PythCrankerBot(
 				config.global,
 				config.botConfigs!.pythCranker!,
+				driftClient,
+				priorityFeeSubscriber,
+				bundleSender,
+				[]
+			)
+		);
+	}
+	if (configHasBot(config, 'switchboardCranker')) {
+		needPriorityFeeSubscriber = true;
+		needDriftStateWatcher = true;
+
+		bots.push(
+			new SwitchboardCrankerBot(
+				config.global,
+				config.botConfigs!.switchboardCranker!,
 				driftClient,
 				priorityFeeSubscriber,
 				bundleSender,
