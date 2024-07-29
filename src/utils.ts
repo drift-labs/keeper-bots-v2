@@ -42,6 +42,8 @@ import {
 	PerpMarkets,
 	SpotMarkets,
 	DRIFT_ORACLE_RECEIVER_ID,
+	OpenbookV2FulfillmentConfigAccount,
+	OpenbookV2Subscriber,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -1135,8 +1137,10 @@ export async function initializeSpotFulfillmentAccounts(
 ): Promise<{
 	serumFulfillmentConfigs: Map<number, SerumV3FulfillmentConfigAccount>;
 	phoenixFulfillmentConfigs: Map<number, PhoenixV1FulfillmentConfigAccount>;
+	openbookFulfillmentConfigs: Map<number, OpenbookV2FulfillmentConfigAccount>;
 	serumSubscribers?: Map<number, SerumSubscriber>;
 	phoenixSubscribers?: Map<number, PhoenixSubscriber>;
+	openbookSubscribers?: Map<number, OpenbookV2Subscriber>;
 }> {
 	const serumFulfillmentConfigs = new Map<
 		number,
@@ -1146,11 +1150,18 @@ export async function initializeSpotFulfillmentAccounts(
 		number,
 		PhoenixV1FulfillmentConfigAccount
 	>();
+	const openbookFulfillmentConfigs = new Map<
+		number,
+		OpenbookV2FulfillmentConfigAccount
+	>();
 	const serumSubscribers = includeSubscribers
 		? new Map<number, SerumSubscriber>()
 		: undefined;
 	const phoenixSubscribers = includeSubscribers
 		? new Map<number, PhoenixSubscriber>()
+		: undefined;
+	const openbookSubscribers = includeSubscribers
+		? new Map<number, OpenbookV2Subscriber>()
 		: undefined;
 
 	let accountSubscription:
@@ -1288,6 +1299,58 @@ export async function initializeSpotFulfillmentAccounts(
 		})
 	);
 
+	marketSetupPromises.push(
+		new Promise((resolve) => {
+			(async () => {
+				const openbookMarketConfigs =
+					await driftClient.getOpenbookV2FulfillmentConfigs();
+				for (const config of openbookMarketConfigs) {
+					if (
+						marketsOfInterest &&
+						!marketsOfInterest.includes(config.marketIndex)
+					) {
+						continue;
+					}
+
+					const spotMarket = driftClient.getSpotMarketAccount(
+						config.marketIndex
+					);
+
+					if (!spotMarket) {
+						logger.warn(
+							`SpotMarket not found for OpenbookV2FulfillmentConfig for marketIndex: ${config.marketIndex}`
+						);
+						continue;
+					}
+
+					const symbol = decodeName(spotMarket.name);
+
+					openbookFulfillmentConfigs.set(config.marketIndex, config);
+
+					if (includeSubscribers && isVariant(config.status, 'enabled')) {
+						// set up openbook subscriber
+						const openbookSubscriber = new OpenbookV2Subscriber({
+							connection: driftClient.connection,
+							programId: config.openbookV2ProgramId,
+							marketAddress: config.openbookV2Market,
+							accountSubscription,
+						});
+						logger.info(`Initializing OpenbookSubscriber for ${symbol}...`);
+						subscribePromises.push(
+							openbookSubscriber.subscribe().then(() => {
+								openbookSubscribers!.set(
+									config.marketIndex,
+									openbookSubscriber
+								);
+							})
+						);
+					}
+				}
+				resolve();
+			})();
+		})
+	);
+
 	const marketSetupStart = Date.now();
 	logger.info(`Waiting for spot market startup...`);
 	await Promise.all(marketSetupPromises);
@@ -1301,8 +1364,10 @@ export async function initializeSpotFulfillmentAccounts(
 	return {
 		serumFulfillmentConfigs,
 		phoenixFulfillmentConfigs,
+		openbookFulfillmentConfigs,
 		serumSubscribers,
 		phoenixSubscribers,
+		openbookSubscribers,
 	};
 }
 

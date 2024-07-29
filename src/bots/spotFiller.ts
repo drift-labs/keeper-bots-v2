@@ -26,6 +26,8 @@ import {
 	BlockhashSubscriber,
 	JupiterClient,
 	ClockSubscriber,
+	OpenbookV2FulfillmentConfigAccount,
+	OpenbookV2Subscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -168,7 +170,7 @@ function getMakerNodeFromNodeToFill(
 	return nodeToFill.makerNodes[0];
 }
 
-export type FallbackLiquiditySource = 'serum' | 'phoenix';
+export type FallbackLiquiditySource = 'serum' | 'phoenix' | 'openbook';
 
 export type NodesToFillWithContext = {
 	nodesToFill: NodeToFill[];
@@ -259,6 +261,12 @@ export class SpotFillerBot implements Bot {
 		PhoenixV1FulfillmentConfigAccount
 	>;
 	private phoenixSubscribers?: Map<number, PhoenixSubscriber>;
+
+	private openbookFulfillmentConfigMap: Map<
+		number,
+		OpenbookV2FulfillmentConfigAccount
+	>;
+	private openbookSubscribers?: Map<number, OpenbookV2Subscriber>;
 
 	private periodicTaskMutex = new Mutex();
 
@@ -365,7 +373,15 @@ export class SpotFillerBot implements Bot {
 			number,
 			PhoenixV1FulfillmentConfigAccount
 		>();
+
 		this.phoenixSubscribers = new Map<number, PhoenixSubscriber>();
+
+		this.openbookFulfillmentConfigMap = new Map<
+			number,
+			OpenbookV2FulfillmentConfigAccount
+		>();
+
+		this.openbookSubscribers = new Map<number, OpenbookV2Subscriber>();
 
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
 
@@ -688,8 +704,10 @@ export class SpotFillerBot implements Bot {
 		({
 			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
 			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
+			openbookFulfillmentConfigs: this.openbookFulfillmentConfigMap,
 			serumSubscribers: this.serumSubscribers,
 			phoenixSubscribers: this.phoenixSubscribers,
+			openbookSubscribers: this.openbookSubscribers,
 		} = await initializeSpotFulfillmentAccounts(this.driftClient, true));
 
 		if (!this.serumSubscribers) {
@@ -697,6 +715,9 @@ export class SpotFillerBot implements Bot {
 		}
 		if (!this.phoenixSubscribers) {
 			throw new Error('phoenixSubscribers not initialized');
+		}
+		if (!this.openbookSubscribers) {
+			throw new Error('openbookSubscribers not initialized');
 		}
 
 		this.lookupTableAccounts.push(
@@ -734,6 +755,10 @@ export class SpotFillerBot implements Bot {
 
 		for (const phoenixSubscriber of this.phoenixSubscribers!.values()) {
 			await phoenixSubscriber.unsubscribe();
+		}
+
+		for (const openbookSubscriber of this.openbookSubscribers!.values()) {
+			await openbookSubscriber.unsubscribe();
 		}
 	}
 
@@ -1055,15 +1080,23 @@ export class SpotFillerBot implements Bot {
 		const phoenixBestBid = phoenixSubscriber?.getBestBid();
 		const phoenixBestAsk = phoenixSubscriber?.getBestAsk();
 
+		const openbookSubscriber = this.openbookSubscribers!.get(
+			market.marketIndex
+		);
+		const openbookBestBid = openbookSubscriber?.getBestBid();
+		const openbookBestAsk = openbookSubscriber?.getBestAsk();
+
 		const [fallbackBidPrice, fallbackBidSource] = this.pickFallbackPrice(
 			serumBestBid,
 			phoenixBestBid,
+			openbookBestBid,
 			'bid'
 		);
 
 		const [fallbackAskPrice, fallbackAskSource] = this.pickFallbackPrice(
 			serumBestAsk,
 			phoenixBestAsk,
+			openbookBestAsk,
 			'ask'
 		);
 
@@ -1098,29 +1131,29 @@ export class SpotFillerBot implements Bot {
 	private pickFallbackPrice(
 		serumPrice: BN | undefined,
 		phoenixPrice: BN | undefined,
+		openbookPrice: BN | undefined,
 		side: 'bid' | 'ask'
 	): [BN | undefined, FallbackLiquiditySource | undefined] {
-		if (serumPrice && phoenixPrice) {
-			if (side === 'bid') {
-				return serumPrice.gt(phoenixPrice)
-					? [serumPrice, 'serum']
-					: [phoenixPrice, 'phoenix'];
-			} else {
-				return serumPrice.lt(phoenixPrice)
-					? [serumPrice, 'serum']
-					: [phoenixPrice, 'phoenix'];
-			}
+		const validPrices: [BN, FallbackLiquiditySource][] = [];
+
+		if (serumPrice) validPrices.push([serumPrice, 'serum']);
+		if (phoenixPrice) validPrices.push([phoenixPrice, 'phoenix']);
+		if (openbookPrice) validPrices.push([openbookPrice, 'openbook']);
+
+		if (validPrices.length === 0) {
+			return [undefined, undefined];
 		}
 
-		if (serumPrice) {
-			return [serumPrice, 'serum'];
+		if (validPrices.length === 1) {
+			return validPrices[0];
 		}
 
-		if (phoenixPrice) {
-			return [phoenixPrice, 'phoenix'];
-		}
+		validPrices.sort((a, b) => {
+			const comp = side === 'bid' ? b[0].cmp(a[0]) : a[0].cmp(b[0]);
+			return comp;
+		});
 
-		return [undefined, undefined];
+		return validPrices[0];
 	}
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
@@ -1995,6 +2028,7 @@ export class SpotFillerBot implements Bot {
 		let fulfillmentConfig:
 			| SerumV3FulfillmentConfigAccount
 			| PhoenixV1FulfillmentConfigAccount
+			| OpenbookV2FulfillmentConfigAccount
 			| undefined = undefined;
 		if (makerInfo === undefined) {
 			if (fallbackSource === 'serum') {
@@ -2006,6 +2040,13 @@ export class SpotFillerBot implements Bot {
 				}
 			} else if (fallbackSource === 'phoenix') {
 				const cfg = this.phoenixFulfillmentConfigMap.get(
+					nodeToFill.node.order!.marketIndex
+				);
+				if (cfg && isVariant(cfg.status, 'enabled')) {
+					fulfillmentConfig = cfg;
+				}
+			} else if (fallbackSource === 'openbook') {
+				const cfg = this.openbookFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);
 				if (cfg && isVariant(cfg.status, 'enabled')) {

@@ -23,6 +23,7 @@ import {
 	decodeUser,
 	PriorityFeeSubscriberMap,
 	SpotMarkets,
+	OpenbookV2FulfillmentConfigAccount,
 } from '@drift-labs/sdk';
 import {
 	Connection,
@@ -81,7 +82,6 @@ import {
 	TX_CONFIRMATION_BATCH_SIZE,
 } from '../filler/fillerMultithreaded';
 import {
-	FallbackLiquiditySource,
 	NodeToFillWithBuffer,
 	SerializedNodeToFill,
 	SerializedNodeToTrigger,
@@ -199,6 +199,10 @@ export class SpotFillerMultithreaded {
 	private serumFulfillmentConfigMap: Map<
 		number,
 		SerumV3FulfillmentConfigAccount
+	>;
+	private openbookFulfillmentConfigMap: Map<
+		number,
+		OpenbookV2FulfillmentConfigAccount
 	>;
 
 	private intervalIds: Array<NodeJS.Timer> = [];
@@ -336,6 +340,10 @@ export class SpotFillerMultithreaded {
 		this.phoenixFulfillmentConfigMap = new Map<
 			number,
 			PhoenixV1FulfillmentConfigAccount
+		>();
+		this.openbookFulfillmentConfigMap = new Map<
+			number,
+			OpenbookV2FulfillmentConfigAccount
 		>();
 
 		if (
@@ -1142,6 +1150,7 @@ export class SpotFillerMultithreaded {
 		let fulfillmentConfig:
 			| SerumV3FulfillmentConfigAccount
 			| PhoenixV1FulfillmentConfigAccount
+			| OpenbookV2FulfillmentConfigAccount
 			| undefined = undefined;
 		if (makerInfo === undefined) {
 			if (fallbackSource === 'serum') {
@@ -1153,6 +1162,13 @@ export class SpotFillerMultithreaded {
 				}
 			} else if (fallbackSource === 'phoenix') {
 				const cfg = this.phoenixFulfillmentConfigMap.get(
+					nodeToFill.node.order!.marketIndex
+				);
+				if (cfg && isVariant(cfg.status, 'enabled')) {
+					fulfillmentConfig = cfg;
+				}
+			} else if (fallbackSource === 'openbook') {
+				const cfg = this.openbookFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);
 				if (cfg && isVariant(cfg.status, 'enabled')) {
@@ -1276,34 +1292,6 @@ export class SpotFillerMultithreaded {
 				}
 			}
 		}
-	}
-
-	private pickFallbackPrice(
-		serumPrice: BN | undefined,
-		phoenixPrice: BN | undefined,
-		side: 'bid' | 'ask'
-	): [BN | undefined, FallbackLiquiditySource | undefined] {
-		if (serumPrice && phoenixPrice) {
-			if (side === 'bid') {
-				return serumPrice.gt(phoenixPrice)
-					? [serumPrice, 'serum']
-					: [phoenixPrice, 'phoenix'];
-			} else {
-				return serumPrice.lt(phoenixPrice)
-					? [serumPrice, 'serum']
-					: [phoenixPrice, 'phoenix'];
-			}
-		}
-
-		if (serumPrice) {
-			return [serumPrice, 'serum'];
-		}
-
-		if (phoenixPrice) {
-			return [phoenixPrice, 'phoenix'];
-		}
-
-		return [undefined, undefined];
 	}
 
 	protected async getNodeFillInfo(nodeToFill: NodeToFillWithBuffer): Promise<{
