@@ -251,6 +251,16 @@ class DLOBBuilder {
 					asks[0]
 				);
 
+				if (
+					fallbackBidWithSource === undefined ||
+					fallbackAskWithSource === undefined
+				) {
+					logger.warn(
+						`${logPrefix} No fallback bids or asks found for market ${marketIndex}`
+					);
+					continue;
+				}
+
 				fallbackBidSource =
 					fallbackBidWithSource.source as FallbackLiquiditySource;
 				fallbackAskSource =
