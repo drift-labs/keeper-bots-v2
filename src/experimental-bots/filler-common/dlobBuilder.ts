@@ -18,6 +18,8 @@ import {
 	ClockSubscriber,
 	SerumV3FulfillmentConfigAccount,
 	PhoenixV1FulfillmentConfigAccount,
+	OpenbookV2Subscriber,
+	OpenbookV2FulfillmentConfigAccount,
 } from '@drift-labs/sdk';
 import { Connection } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -53,6 +55,7 @@ class DLOBBuilder {
 	// only used for spot filler
 	private serumSubscribers?: Map<number, SerumSubscriber>;
 	private phoenixSubscribers?: Map<number, PhoenixSubscriber>;
+	private openbookSubscribers?: Map<number, OpenbookV2Subscriber>;
 	private serumFulfillmentConfigMap?: Map<
 		number,
 		SerumV3FulfillmentConfigAccount
@@ -60,6 +63,10 @@ class DLOBBuilder {
 	private phoenixFulfillmentConfigMap?: Map<
 		number,
 		PhoenixV1FulfillmentConfigAccount
+	>;
+	private openbookFulfillmentConfigMap?: Map<
+		number,
+		OpenbookV2FulfillmentConfigAccount
 	>;
 
 	private clockSubscriber: ClockSubscriber;
@@ -80,6 +87,7 @@ class DLOBBuilder {
 		if (marketTypeString.toLowerCase() === 'spot') {
 			this.serumSubscribers = new Map<number, SerumSubscriber>();
 			this.phoenixSubscribers = new Map<number, PhoenixSubscriber>();
+			this.openbookSubscribers = new Map<number, OpenbookV2Subscriber>();
 			this.serumFulfillmentConfigMap = new Map<
 				number,
 				SerumV3FulfillmentConfigAccount
@@ -87,6 +95,10 @@ class DLOBBuilder {
 			this.phoenixFulfillmentConfigMap = new Map<
 				number,
 				PhoenixV1FulfillmentConfigAccount
+			>();
+			this.openbookFulfillmentConfigMap = new Map<
+				number,
+				OpenbookV2FulfillmentConfigAccount
 			>();
 		}
 
@@ -109,8 +121,10 @@ class DLOBBuilder {
 		({
 			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
 			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
+			openbookFulfillmentConfigs: this.openbookFulfillmentConfigMap,
 			serumSubscribers: this.serumSubscribers,
 			phoenixSubscribers: this.phoenixSubscribers,
+			openbookSubscribers: this.openbookSubscribers,
 		} = await initializeSpotFulfillmentAccounts(
 			this.driftClient,
 			true,
@@ -198,45 +212,55 @@ class DLOBBuilder {
 				oraclePriceData =
 					this.driftClient.getOracleDataForSpotMarket(marketIndex);
 
-				const serumSubscriber = this.serumSubscribers!.get(marketIndex);
-				const serumBid = serumSubscriber?.getBestBid();
-				const serumAsk = serumSubscriber?.getBestAsk();
+				const marketSources = [
+					{
+						source: 'serum',
+						subscriber: this.serumSubscribers!.get(marketIndex),
+					},
+					{
+						source: 'phoenix',
+						subscriber: this.phoenixSubscribers!.get(marketIndex),
+					},
+					{
+						source: 'openbook',
+						subscriber: this.openbookSubscribers!.get(marketIndex),
+					},
+				];
 
-				const phoenixSubscriber = this.phoenixSubscribers!.get(marketIndex);
-				const phoenixBid = phoenixSubscriber?.getBestBid();
-				const phoenixAsk = phoenixSubscriber?.getBestAsk();
+				const bids = marketSources
+					.map((source) => ({
+						source: source.source,
+						bid: source.subscriber?.getBestBid(),
+					}))
+					.filter((bid) => bid.bid !== undefined);
 
-				if (serumBid && phoenixBid) {
-					if (serumBid!.gte(phoenixBid!)) {
-						fallbackBid = serumBid;
-						fallbackBidSource = 'serum';
-					} else {
-						fallbackBid = phoenixBid;
-						fallbackBidSource = 'phoenix';
-					}
-				} else if (serumBid) {
-					fallbackBid = serumBid;
-					fallbackBidSource = 'serum';
-				} else if (phoenixBid) {
-					fallbackBid = phoenixBid;
-					fallbackBidSource = 'phoenix';
-				}
+				const asks = marketSources
+					.map((source) => ({
+						source: source.source,
+						ask: source.subscriber?.getBestAsk(),
+					}))
+					.filter((ask) => ask.ask !== undefined);
 
-				if (serumAsk && phoenixAsk) {
-					if (serumAsk!.lte(phoenixAsk!)) {
-						fallbackAsk = serumAsk;
-						fallbackAskSource = 'serum';
-					} else {
-						fallbackAsk = phoenixAsk;
-						fallbackAskSource = 'phoenix';
-					}
-				} else if (serumAsk) {
-					fallbackAsk = serumAsk;
-					fallbackAskSource = 'serum';
-				} else if (phoenixAsk) {
-					fallbackAsk = phoenixAsk;
-					fallbackAskSource = 'phoenix';
-				}
+				const fallbackBidWithSource = bids.reduce(
+					(best, current) => (best.bid!.gte(current.bid!) ? best : current),
+					bids[0]
+				);
+
+				const fallbackAskWithSource = asks.reduce(
+					(best, current) => (best.ask!.lte(current.ask!) ? best : current),
+					asks[0]
+				);
+
+				fallbackBidSource =
+					fallbackBidWithSource.source as FallbackLiquiditySource;
+				fallbackAskSource =
+					fallbackAskWithSource.source as FallbackLiquiditySource;
+				fallbackBid = fallbackBidWithSource.bid
+					? fallbackBidWithSource.bid
+					: undefined;
+				fallbackAsk = fallbackAskWithSource.ask
+					? fallbackAskWithSource.ask
+					: undefined;
 			}
 
 			const stateAccount = this.driftClient.getStateAccount();
