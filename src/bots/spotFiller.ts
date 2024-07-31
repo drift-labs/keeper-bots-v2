@@ -10,7 +10,6 @@ import {
 	UserStatsMap,
 	MarketType,
 	initialize,
-	SerumSubscriber,
 	SerumV3FulfillmentConfigAccount,
 	DLOBNode,
 	DLOBSubscriber,
@@ -168,7 +167,7 @@ function getMakerNodeFromNodeToFill(
 	return nodeToFill.makerNodes[0];
 }
 
-export type FallbackLiquiditySource = 'serum' | 'phoenix';
+export type FallbackLiquiditySource = 'phoenix';
 
 export type NodesToFillWithContext = {
 	nodesToFill: NodeToFill[];
@@ -247,12 +246,6 @@ export class SpotFillerBot implements Bot {
 	private userMap: UserMap;
 	private orderSubscriber: OrderSubscriber;
 	private userStatsMap?: UserStatsMap;
-
-	private serumFulfillmentConfigMap: Map<
-		number,
-		SerumV3FulfillmentConfigAccount
-	>;
-	private serumSubscribers?: Map<number, SerumSubscriber>;
 
 	private phoenixFulfillmentConfigMap: Map<
 		number,
@@ -354,12 +347,6 @@ export class SpotFillerBot implements Bot {
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
 			config.fillerPollingInterval ?? this.defaultIntervalMs;
-
-		this.serumFulfillmentConfigMap = new Map<
-			number,
-			SerumV3FulfillmentConfigAccount
-		>();
-		this.serumSubscribers = new Map<number, SerumSubscriber>();
 
 		this.phoenixFulfillmentConfigMap = new Map<
 			number,
@@ -686,15 +673,10 @@ export class SpotFillerBot implements Bot {
 		});
 
 		({
-			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
 			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
-			serumSubscribers: this.serumSubscribers,
 			phoenixSubscribers: this.phoenixSubscribers,
 		} = await initializeSpotFulfillmentAccounts(this.driftClient, true));
 
-		if (!this.serumSubscribers) {
-			throw new Error('serumSubscribers not initialized');
-		}
 		if (!this.phoenixSubscribers) {
 			throw new Error('phoenixSubscribers not initialized');
 		}
@@ -727,10 +709,6 @@ export class SpotFillerBot implements Bot {
 		await this.dlobSubscriber!.unsubscribe();
 		await this.userStatsMap!.unsubscribe();
 		await this.orderSubscriber.unsubscribe();
-
-		for (const serumSubscriber of this.serumSubscribers!.values()) {
-			await serumSubscriber.unsubscribe();
-		}
 
 		for (const phoenixSubscriber of this.phoenixSubscribers!.values()) {
 			await phoenixSubscriber.unsubscribe();
@@ -1047,25 +1025,15 @@ export class SpotFillerBot implements Bot {
 			market.marketIndex
 		);
 
-		const serumSubscriber = this.serumSubscribers!.get(market.marketIndex);
-		const serumBestBid = serumSubscriber?.getBestBid();
-		const serumBestAsk = serumSubscriber?.getBestAsk();
-
 		const phoenixSubscriber = this.phoenixSubscribers!.get(market.marketIndex);
 		const phoenixBestBid = phoenixSubscriber?.getBestBid();
 		const phoenixBestAsk = phoenixSubscriber?.getBestAsk();
 
-		const [fallbackBidPrice, fallbackBidSource] = this.pickFallbackPrice(
-			serumBestBid,
-			phoenixBestBid,
-			'bid'
-		);
+		const [fallbackBidPrice, fallbackBidSource] =
+			this.pickFallbackPrice(phoenixBestBid);
 
-		const [fallbackAskPrice, fallbackAskSource] = this.pickFallbackPrice(
-			serumBestAsk,
-			phoenixBestAsk,
-			'ask'
-		);
+		const [fallbackAskPrice, fallbackAskSource] =
+			this.pickFallbackPrice(phoenixBestAsk);
 
 		const fillSlot = this.orderSubscriber.getSlot();
 
@@ -1096,26 +1064,8 @@ export class SpotFillerBot implements Bot {
 	}
 
 	private pickFallbackPrice(
-		serumPrice: BN | undefined,
-		phoenixPrice: BN | undefined,
-		side: 'bid' | 'ask'
+		phoenixPrice: BN | undefined
 	): [BN | undefined, FallbackLiquiditySource | undefined] {
-		if (serumPrice && phoenixPrice) {
-			if (side === 'bid') {
-				return serumPrice.gt(phoenixPrice)
-					? [serumPrice, 'serum']
-					: [phoenixPrice, 'phoenix'];
-			} else {
-				return serumPrice.lt(phoenixPrice)
-					? [serumPrice, 'serum']
-					: [phoenixPrice, 'phoenix'];
-			}
-		}
-
-		if (serumPrice) {
-			return [serumPrice, 'serum'];
-		}
-
 		if (phoenixPrice) {
 			return [phoenixPrice, 'phoenix'];
 		}
@@ -1997,14 +1947,7 @@ export class SpotFillerBot implements Bot {
 			| PhoenixV1FulfillmentConfigAccount
 			| undefined = undefined;
 		if (makerInfo === undefined) {
-			if (fallbackSource === 'serum') {
-				const cfg = this.serumFulfillmentConfigMap.get(
-					nodeToFill.node.order!.marketIndex
-				);
-				if (cfg && isVariant(cfg.status, 'enabled')) {
-					fulfillmentConfig = cfg;
-				}
-			} else if (fallbackSource === 'phoenix') {
+			if (fallbackSource === 'phoenix') {
 				const cfg = this.phoenixFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);

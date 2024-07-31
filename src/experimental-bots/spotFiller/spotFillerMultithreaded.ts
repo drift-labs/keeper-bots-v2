@@ -81,7 +81,6 @@ import {
 	TX_CONFIRMATION_BATCH_SIZE,
 } from '../filler/fillerMultithreaded';
 import {
-	FallbackLiquiditySource,
 	NodeToFillWithBuffer,
 	SerializedNodeToFill,
 	SerializedNodeToTrigger,
@@ -125,7 +124,7 @@ enum METRIC_TYPES {
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
 	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
-	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
+	// 6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
 
 	6111, // Error Message: OrderNotTriggerable.
@@ -195,10 +194,6 @@ export class SpotFillerMultithreaded {
 	private phoenixFulfillmentConfigMap: Map<
 		number,
 		PhoenixV1FulfillmentConfigAccount
-	>;
-	private serumFulfillmentConfigMap: Map<
-		number,
-		SerumV3FulfillmentConfigAccount
 	>;
 
 	private intervalIds: Array<NodeJS.Timer> = [];
@@ -329,10 +324,6 @@ export class SpotFillerMultithreaded {
 			throw new Error(`Subaccount ${this.subaccount} not found in driftClient`);
 		}
 
-		this.serumFulfillmentConfigMap = new Map<
-			number,
-			SerumV3FulfillmentConfigAccount
-		>();
 		this.phoenixFulfillmentConfigMap = new Map<
 			number,
 			PhoenixV1FulfillmentConfigAccount
@@ -428,10 +419,8 @@ export class SpotFillerMultithreaded {
 			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
 		);
 
-		({
-			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
-			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
-		} = await initializeSpotFulfillmentAccounts(this.driftClient, false));
+		({ phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap } =
+			await initializeSpotFulfillmentAccounts(this.driftClient, false));
 
 		this.startProcesses();
 		logger.info(`${this.name}: Initialized`);
@@ -1144,14 +1133,7 @@ export class SpotFillerMultithreaded {
 			| PhoenixV1FulfillmentConfigAccount
 			| undefined = undefined;
 		if (makerInfo === undefined) {
-			if (fallbackSource === 'serum') {
-				const cfg = this.serumFulfillmentConfigMap.get(
-					nodeToFill.node.order!.marketIndex
-				);
-				if (cfg && isVariant(cfg.status, 'enabled')) {
-					fulfillmentConfig = cfg;
-				}
-			} else if (fallbackSource === 'phoenix') {
+			if (fallbackSource === 'phoenix') {
 				const cfg = this.phoenixFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);
@@ -1276,34 +1258,6 @@ export class SpotFillerMultithreaded {
 				}
 			}
 		}
-	}
-
-	private pickFallbackPrice(
-		serumPrice: BN | undefined,
-		phoenixPrice: BN | undefined,
-		side: 'bid' | 'ask'
-	): [BN | undefined, FallbackLiquiditySource | undefined] {
-		if (serumPrice && phoenixPrice) {
-			if (side === 'bid') {
-				return serumPrice.gt(phoenixPrice)
-					? [serumPrice, 'serum']
-					: [phoenixPrice, 'phoenix'];
-			} else {
-				return serumPrice.lt(phoenixPrice)
-					? [serumPrice, 'serum']
-					: [phoenixPrice, 'phoenix'];
-			}
-		}
-
-		if (serumPrice) {
-			return [serumPrice, 'serum'];
-		}
-
-		if (phoenixPrice) {
-			return [phoenixPrice, 'phoenix'];
-		}
-
-		return [undefined, undefined];
 	}
 
 	protected async getNodeFillInfo(nodeToFill: NodeToFillWithBuffer): Promise<{

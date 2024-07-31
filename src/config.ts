@@ -108,6 +108,16 @@ export type PythCrankerBotConfig = BaseBotConfig & {
 	};
 };
 
+export type SwitchboardCrankerBotConfig = BaseBotConfig & {
+	intervalMs: number;
+	queuePubkey: string;
+	pullFeedConfigs: {
+		[key: string]: {
+			pubkey: string;
+		};
+	};
+};
+
 export type BotConfigMap = {
 	fillerMultithreaded?: FillerMultiThreadedConfig;
 	spotFillerMultithreaded?: FillerMultiThreadedConfig;
@@ -127,6 +137,7 @@ export type BotConfigMap = {
 	markTwapCrank?: BaseBotConfig;
 	uncrossArb?: BaseBotConfig;
 	pythCranker?: PythCrankerBotConfig;
+	switchboardCranker?: SwitchboardCrankerBotConfig;
 };
 
 export interface GlobalConfig {

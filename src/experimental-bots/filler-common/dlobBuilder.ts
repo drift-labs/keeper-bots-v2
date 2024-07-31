@@ -12,11 +12,9 @@ import {
 	decodeUser,
 	NodeToTrigger,
 	Wallet,
-	SerumSubscriber,
 	PhoenixSubscriber,
 	BN,
 	ClockSubscriber,
-	SerumV3FulfillmentConfigAccount,
 	PhoenixV1FulfillmentConfigAccount,
 } from '@drift-labs/sdk';
 import { Connection } from '@solana/web3.js';
@@ -51,12 +49,7 @@ class DLOBBuilder {
 	public initialized: boolean = false;
 
 	// only used for spot filler
-	private serumSubscribers?: Map<number, SerumSubscriber>;
 	private phoenixSubscribers?: Map<number, PhoenixSubscriber>;
-	private serumFulfillmentConfigMap?: Map<
-		number,
-		SerumV3FulfillmentConfigAccount
-	>;
 	private phoenixFulfillmentConfigMap?: Map<
 		number,
 		PhoenixV1FulfillmentConfigAccount
@@ -78,12 +71,7 @@ class DLOBBuilder {
 		this.driftClient = driftClient;
 
 		if (marketTypeString.toLowerCase() === 'spot') {
-			this.serumSubscribers = new Map<number, SerumSubscriber>();
 			this.phoenixSubscribers = new Map<number, PhoenixSubscriber>();
-			this.serumFulfillmentConfigMap = new Map<
-				number,
-				SerumV3FulfillmentConfigAccount
-			>();
 			this.phoenixFulfillmentConfigMap = new Map<
 				number,
 				PhoenixV1FulfillmentConfigAccount
@@ -107,19 +95,13 @@ class DLOBBuilder {
 
 	private async initializeSpotMarkets() {
 		({
-			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
 			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
-			serumSubscribers: this.serumSubscribers,
 			phoenixSubscribers: this.phoenixSubscribers,
 		} = await initializeSpotFulfillmentAccounts(
 			this.driftClient,
 			true,
 			this.marketIndexes
 		));
-
-		if (!this.serumSubscribers) {
-			throw new Error('serumSubscribers not initialized');
-		}
 		if (!this.phoenixSubscribers) {
 			throw new Error('phoenixSubscribers not initialized');
 		}
@@ -198,45 +180,14 @@ class DLOBBuilder {
 				oraclePriceData =
 					this.driftClient.getOracleDataForSpotMarket(marketIndex);
 
-				const serumSubscriber = this.serumSubscribers!.get(marketIndex);
-				const serumBid = serumSubscriber?.getBestBid();
-				const serumAsk = serumSubscriber?.getBestAsk();
-
 				const phoenixSubscriber = this.phoenixSubscribers!.get(marketIndex);
 				const phoenixBid = phoenixSubscriber?.getBestBid();
 				const phoenixAsk = phoenixSubscriber?.getBestAsk();
 
-				if (serumBid && phoenixBid) {
-					if (serumBid!.gte(phoenixBid!)) {
-						fallbackBid = serumBid;
-						fallbackBidSource = 'serum';
-					} else {
-						fallbackBid = phoenixBid;
-						fallbackBidSource = 'phoenix';
-					}
-				} else if (serumBid) {
-					fallbackBid = serumBid;
-					fallbackBidSource = 'serum';
-				} else if (phoenixBid) {
-					fallbackBid = phoenixBid;
-					fallbackBidSource = 'phoenix';
-				}
-
-				if (serumAsk && phoenixAsk) {
-					if (serumAsk!.lte(phoenixAsk!)) {
-						fallbackAsk = serumAsk;
-						fallbackAskSource = 'serum';
-					} else {
-						fallbackAsk = phoenixAsk;
-						fallbackAskSource = 'phoenix';
-					}
-				} else if (serumAsk) {
-					fallbackAsk = serumAsk;
-					fallbackAskSource = 'serum';
-				} else if (phoenixAsk) {
-					fallbackAsk = phoenixAsk;
-					fallbackAskSource = 'phoenix';
-				}
+				fallbackBid = phoenixBid;
+				fallbackBidSource = 'phoenix';
+				fallbackAsk = phoenixAsk;
+				fallbackAskSource = 'phoenix';
 			}
 
 			const stateAccount = this.driftClient.getStateAccount();
