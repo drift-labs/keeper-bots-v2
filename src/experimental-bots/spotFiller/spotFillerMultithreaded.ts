@@ -6,14 +6,12 @@ import {
 	NodeToFill,
 	JupiterClient,
 	BulkAccountLoader,
-	initialize,
 	DriftEnv,
 	isVariant,
 	DLOBNode,
 	getOrderSignature,
 	BN,
 	PhoenixV1FulfillmentConfigAccount,
-	SerumV3FulfillmentConfigAccount,
 	TEN,
 	SlotSubscriber,
 	DataAndSlot,
@@ -125,7 +123,7 @@ enum METRIC_TYPES {
 const errorCodesToSuppress = [
 	6061, // 0x17AD Error Number: 6061. Error Message: Order does not exist.
 	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
-	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
+	// 6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
 
 	6111, // Error Message: OrderNotTriggerable.
@@ -195,10 +193,6 @@ export class SpotFillerMultithreaded {
 	private phoenixFulfillmentConfigMap: Map<
 		number,
 		PhoenixV1FulfillmentConfigAccount
-	>;
-	private serumFulfillmentConfigMap: Map<
-		number,
-		SerumV3FulfillmentConfigAccount
 	>;
 	private openbookFulfillmentConfigMap: Map<
 		number,
@@ -333,10 +327,6 @@ export class SpotFillerMultithreaded {
 			throw new Error(`Subaccount ${this.subaccount} not found in driftClient`);
 		}
 
-		this.serumFulfillmentConfigMap = new Map<
-			number,
-			SerumV3FulfillmentConfigAccount
-		>();
 		this.phoenixFulfillmentConfigMap = new Map<
 			number,
 			PhoenixV1FulfillmentConfigAccount
@@ -416,17 +406,6 @@ export class SpotFillerMultithreaded {
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
-		const config = initialize({ env: this.runtimeSpec.driftEnv as DriftEnv });
-		if ('SERUM_LOOKUP_TABLE' in config) {
-			const lutAccount = (
-				await this.driftClient.connection.getAddressLookupTable(
-					new PublicKey(config.SERUM_LOOKUP_TABLE as string)
-				)
-			).value;
-			if (lutAccount) {
-				this.lookupTableAccounts.push(lutAccount);
-			}
-		}
 
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
@@ -437,8 +416,8 @@ export class SpotFillerMultithreaded {
 		);
 
 		({
-			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
 			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
+			openbookFulfillmentConfigs: this.openbookFulfillmentConfigMap,
 		} = await initializeSpotFulfillmentAccounts(this.driftClient, false));
 
 		this.startProcesses();
@@ -1148,19 +1127,11 @@ export class SpotFillerMultithreaded {
 
 		const makerInfo = makerInfos.length > 0 ? makerInfos[0].data : undefined;
 		let fulfillmentConfig:
-			| SerumV3FulfillmentConfigAccount
 			| PhoenixV1FulfillmentConfigAccount
 			| OpenbookV2FulfillmentConfigAccount
 			| undefined = undefined;
 		if (makerInfo === undefined) {
-			if (fallbackSource === 'serum') {
-				const cfg = this.serumFulfillmentConfigMap.get(
-					nodeToFill.node.order!.marketIndex
-				);
-				if (cfg && isVariant(cfg.status, 'enabled')) {
-					fulfillmentConfig = cfg;
-				}
-			} else if (fallbackSource === 'phoenix') {
+			if (fallbackSource === 'phoenix') {
 				const cfg = this.phoenixFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);

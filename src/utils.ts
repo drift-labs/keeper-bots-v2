@@ -30,9 +30,7 @@ import {
 	WhileValidTxSender,
 	PriorityFeeSubscriberMap,
 	isOneOfVariant,
-	SerumV3FulfillmentConfigAccount,
 	PhoenixV1FulfillmentConfigAccount,
-	SerumSubscriber,
 	PhoenixSubscriber,
 	BulkAccountLoader,
 	PollingDriftClientAccountSubscriber,
@@ -1135,17 +1133,11 @@ export async function initializeSpotFulfillmentAccounts(
 	includeSubscribers = true,
 	marketsOfInterest?: number[]
 ): Promise<{
-	serumFulfillmentConfigs: Map<number, SerumV3FulfillmentConfigAccount>;
 	phoenixFulfillmentConfigs: Map<number, PhoenixV1FulfillmentConfigAccount>;
 	openbookFulfillmentConfigs: Map<number, OpenbookV2FulfillmentConfigAccount>;
-	serumSubscribers?: Map<number, SerumSubscriber>;
 	phoenixSubscribers?: Map<number, PhoenixSubscriber>;
 	openbookSubscribers?: Map<number, OpenbookV2Subscriber>;
 }> {
-	const serumFulfillmentConfigs = new Map<
-		number,
-		SerumV3FulfillmentConfigAccount
-	>();
 	const phoenixFulfillmentConfigs = new Map<
 		number,
 		PhoenixV1FulfillmentConfigAccount
@@ -1154,9 +1146,6 @@ export async function initializeSpotFulfillmentAccounts(
 		number,
 		OpenbookV2FulfillmentConfigAccount
 	>();
-	const serumSubscribers = includeSubscribers
-		? new Map<number, SerumSubscriber>()
-		: undefined;
 	const phoenixSubscribers = includeSubscribers
 		? new Map<number, PhoenixSubscriber>()
 		: undefined;
@@ -1189,69 +1178,6 @@ export async function initializeSpotFulfillmentAccounts(
 	}
 	const marketSetupPromises: Promise<void>[] = [];
 	const subscribePromises: Promise<void>[] = [];
-
-	marketSetupPromises.push(
-		new Promise((resolve) => {
-			(async () => {
-				const serumMarketConfigs =
-					await driftClient.getSerumV3FulfillmentConfigs();
-				for (const config of serumMarketConfigs) {
-					if (
-						marketsOfInterest &&
-						!marketsOfInterest.includes(config.marketIndex)
-					) {
-						continue;
-					}
-					const spotMarket = driftClient.getSpotMarketAccount(
-						config.marketIndex
-					);
-					if (!spotMarket) {
-						logger.warn(
-							`SpotMarket not found for SerumV3FulfillmentConfig for marketIndex: ${config.marketIndex}`
-						);
-						continue;
-					}
-					const symbol = decodeName(spotMarket.name);
-
-					if (
-						isOneOfVariant(spotMarket?.status, [
-							'initialized',
-							'fillPaused',
-							'delisted',
-						])
-					) {
-						logger.info(
-							`Skipping market ${symbol} (index: ${
-								config.marketIndex
-							}) because its SpotMarket.status is ${getVariant(
-								spotMarket.status
-							)}`
-						);
-						continue;
-					}
-
-					serumFulfillmentConfigs.set(config.marketIndex, config);
-
-					if (includeSubscribers && isVariant(config.status, 'enabled')) {
-						// set up serum price subscriber
-						const serumSubscriber = new SerumSubscriber({
-							connection: driftClient.connection,
-							programId: config.serumProgramId,
-							marketAddress: config.serumMarket,
-							accountSubscription,
-						});
-						logger.info(`Initializing SerumSubscriber for ${symbol}...`);
-						subscribePromises.push(
-							serumSubscriber.subscribe().then(() => {
-								serumSubscribers!.set(config.marketIndex, serumSubscriber);
-							})
-						);
-					}
-				}
-				resolve();
-			})();
-		})
-	);
 
 	marketSetupPromises.push(
 		new Promise((resolve) => {
@@ -1362,10 +1288,8 @@ export async function initializeSpotFulfillmentAccounts(
 	logger.info(`Subscribed to spot markets in ${Date.now() - subscribeStart}ms`);
 
 	return {
-		serumFulfillmentConfigs,
 		phoenixFulfillmentConfigs,
 		openbookFulfillmentConfigs,
-		serumSubscribers,
 		phoenixSubscribers,
 		openbookSubscribers,
 	};

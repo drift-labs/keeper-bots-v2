@@ -9,9 +9,6 @@ import {
 	UserMap,
 	UserStatsMap,
 	MarketType,
-	initialize,
-	SerumSubscriber,
-	SerumV3FulfillmentConfigAccount,
 	DLOBNode,
 	DLOBSubscriber,
 	PhoenixSubscriber,
@@ -170,7 +167,7 @@ function getMakerNodeFromNodeToFill(
 	return nodeToFill.makerNodes[0];
 }
 
-export type FallbackLiquiditySource = 'serum' | 'phoenix' | 'openbook';
+export type FallbackLiquiditySource = 'phoenix' | 'openbook';
 
 export type NodesToFillWithContext = {
 	nodesToFill: NodeToFill[];
@@ -249,12 +246,6 @@ export class SpotFillerBot implements Bot {
 	private userMap: UserMap;
 	private orderSubscriber: OrderSubscriber;
 	private userStatsMap?: UserStatsMap;
-
-	private serumFulfillmentConfigMap: Map<
-		number,
-		SerumV3FulfillmentConfigAccount
-	>;
-	private serumSubscribers?: Map<number, SerumSubscriber>;
 
 	private phoenixFulfillmentConfigMap: Map<
 		number,
@@ -362,12 +353,6 @@ export class SpotFillerBot implements Bot {
 		this.runtimeSpec = runtimeSpec;
 		this.pollingIntervalMs =
 			config.fillerPollingInterval ?? this.defaultIntervalMs;
-
-		this.serumFulfillmentConfigMap = new Map<
-			number,
-			SerumV3FulfillmentConfigAccount
-		>();
-		this.serumSubscribers = new Map<number, SerumSubscriber>();
 
 		this.phoenixFulfillmentConfigMap = new Map<
 			number,
@@ -697,22 +682,13 @@ export class SpotFillerBot implements Bot {
 			`Initialized DLOBSubscriber in ${Date.now() - dlobSubscriberStart}`
 		);
 
-		const initConfig = initialize({
-			env: this.runtimeSpec.driftEnv as DriftEnv,
-		});
-
 		({
-			serumFulfillmentConfigs: this.serumFulfillmentConfigMap,
 			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
 			openbookFulfillmentConfigs: this.openbookFulfillmentConfigMap,
-			serumSubscribers: this.serumSubscribers,
 			phoenixSubscribers: this.phoenixSubscribers,
 			openbookSubscribers: this.openbookSubscribers,
 		} = await initializeSpotFulfillmentAccounts(this.driftClient, true));
 
-		if (!this.serumSubscribers) {
-			throw new Error('serumSubscribers not initialized');
-		}
 		if (!this.phoenixSubscribers) {
 			throw new Error('phoenixSubscribers not initialized');
 		}
@@ -723,16 +699,6 @@ export class SpotFillerBot implements Bot {
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
-		if ('SERUM_LOOKUP_TABLE' in initConfig) {
-			const lutAccount = (
-				await this.driftClient.connection.getAddressLookupTable(
-					new PublicKey(initConfig.SERUM_LOOKUP_TABLE as string)
-				)
-			).value;
-			if (lutAccount) {
-				this.lookupTableAccounts.push(lutAccount);
-			}
-		}
 
 		await this.clockSubscriber.subscribe();
 
@@ -748,10 +714,6 @@ export class SpotFillerBot implements Bot {
 		await this.dlobSubscriber!.unsubscribe();
 		await this.userStatsMap!.unsubscribe();
 		await this.orderSubscriber.unsubscribe();
-
-		for (const serumSubscriber of this.serumSubscribers!.values()) {
-			await serumSubscriber.unsubscribe();
-		}
 
 		for (const phoenixSubscriber of this.phoenixSubscribers!.values()) {
 			await phoenixSubscriber.unsubscribe();
@@ -1072,10 +1034,6 @@ export class SpotFillerBot implements Bot {
 			market.marketIndex
 		);
 
-		const serumSubscriber = this.serumSubscribers!.get(market.marketIndex);
-		const serumBestBid = serumSubscriber?.getBestBid();
-		const serumBestAsk = serumSubscriber?.getBestAsk();
-
 		const phoenixSubscriber = this.phoenixSubscribers!.get(market.marketIndex);
 		const phoenixBestBid = phoenixSubscriber?.getBestBid();
 		const phoenixBestAsk = phoenixSubscriber?.getBestAsk();
@@ -1087,16 +1045,14 @@ export class SpotFillerBot implements Bot {
 		const openbookBestAsk = openbookSubscriber?.getBestAsk();
 
 		const [fallbackBidPrice, fallbackBidSource] = this.pickFallbackPrice(
-			serumBestBid,
-			phoenixBestBid,
 			openbookBestBid,
+			phoenixBestBid,
 			'bid'
 		);
 
 		const [fallbackAskPrice, fallbackAskSource] = this.pickFallbackPrice(
-			serumBestAsk,
-			phoenixBestAsk,
 			openbookBestAsk,
+			phoenixBestAsk,
 			'ask'
 		);
 
@@ -1129,31 +1085,31 @@ export class SpotFillerBot implements Bot {
 	}
 
 	private pickFallbackPrice(
-		serumPrice: BN | undefined,
-		phoenixPrice: BN | undefined,
 		openbookPrice: BN | undefined,
+		phoenixPrice: BN | undefined,
 		side: 'bid' | 'ask'
 	): [BN | undefined, FallbackLiquiditySource | undefined] {
-		const validPrices: [BN, FallbackLiquiditySource][] = [];
-
-		if (serumPrice) validPrices.push([serumPrice, 'serum']);
-		if (phoenixPrice) validPrices.push([phoenixPrice, 'phoenix']);
-		if (openbookPrice) validPrices.push([openbookPrice, 'openbook']);
-
-		if (validPrices.length === 0) {
-			return [undefined, undefined];
+		if (openbookPrice && phoenixPrice) {
+			if (side === 'bid') {
+				return openbookPrice.gt(phoenixPrice)
+					? [openbookPrice, 'openbook']
+					: [phoenixPrice, 'phoenix'];
+			} else {
+				return openbookPrice.lt(phoenixPrice)
+					? [openbookPrice, 'openbook']
+					: [phoenixPrice, 'phoenix'];
+			}
 		}
 
-		if (validPrices.length === 1) {
-			return validPrices[0];
+		if (openbookPrice) {
+			return [openbookPrice, 'openbook'];
 		}
 
-		validPrices.sort((a, b) => {
-			const comp = side === 'bid' ? b[0].cmp(a[0]) : a[0].cmp(b[0]);
-			return comp;
-		});
+		if (phoenixPrice) {
+			return [phoenixPrice, 'phoenix'];
+		}
 
-		return validPrices[0];
+		return [undefined, undefined];
 	}
 
 	private async getNodeFillInfo(nodeToFill: NodeToFill): Promise<{
@@ -2026,19 +1982,11 @@ export class SpotFillerBot implements Bot {
 
 		const makerInfo = makerInfos.length > 0 ? makerInfos[0].data : undefined;
 		let fulfillmentConfig:
-			| SerumV3FulfillmentConfigAccount
 			| PhoenixV1FulfillmentConfigAccount
 			| OpenbookV2FulfillmentConfigAccount
 			| undefined = undefined;
 		if (makerInfo === undefined) {
-			if (fallbackSource === 'serum') {
-				const cfg = this.serumFulfillmentConfigMap.get(
-					nodeToFill.node.order!.marketIndex
-				);
-				if (cfg && isVariant(cfg.status, 'enabled')) {
-					fulfillmentConfig = cfg;
-				}
-			} else if (fallbackSource === 'phoenix') {
+			if (fallbackSource === 'phoenix') {
 				const cfg = this.phoenixFulfillmentConfigMap.get(
 					nodeToFill.node.order!.marketIndex
 				);
