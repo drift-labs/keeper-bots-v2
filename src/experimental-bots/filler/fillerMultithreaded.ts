@@ -188,7 +188,7 @@ export class FillerMultithreaded {
 	private throttledNodes = new Map<string, number>();
 	private fillingNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
-	private revertOnFailure: boolean = true;
+	private revertOnFailure?: boolean;
 	private lookupTableAccounts: AddressLookupTableAccount[];
 	private lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 	private seenFillableOrders = new Set<string>();
@@ -277,6 +277,7 @@ export class FillerMultithreaded {
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		this.marketIndexes = config.marketIndexes;
+		this.revertOnFailure = config.revertOnFailure ?? true;
 		this.marketIndexesFlattened = config.marketIndexes.flat();
 		this.bundleSender = bundleSender;
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
