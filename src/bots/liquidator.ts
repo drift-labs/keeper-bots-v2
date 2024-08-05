@@ -1540,7 +1540,10 @@ export class LiquidatorBot implements Bot {
 		for (const position of userAccount.spotPositions) {
 			if (position.scaledBalance.eq(ZERO) || position.marketIndex === 0) {
 				if (position.openOrders != 0) {
-					await this.cancelOpenOrdersForSpotMarket(position.marketIndex, userAccount.subAccountId);
+					await this.cancelOpenOrdersForSpotMarket(
+						position.marketIndex,
+						userAccount.subAccountId
+					);
 				}
 				continue;
 			}
