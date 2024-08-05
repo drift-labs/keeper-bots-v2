@@ -122,7 +122,7 @@ const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana
 const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 export const CONFIRM_TX_INTERVAL_MS = 5_000;
-const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
+const SIM_CU_ESTIMATE_MULTIPLIER = 1.35;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
 export const TX_CONFIRMATION_BATCH_SIZE = 100;
 export const CACHED_BLOCKHASH_OFFSET = 5;
@@ -134,7 +134,7 @@ const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
 	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	// 6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
-	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
+	// 6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6003, // 0x1773 Error Number: 6003. Error Message: Insufficient collateral.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
 
@@ -188,7 +188,7 @@ export class FillerMultithreaded {
 	private throttledNodes = new Map<string, number>();
 	private fillingNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
-	private revertOnFailure: boolean = true;
+	private revertOnFailure?: boolean;
 	private lookupTableAccounts: AddressLookupTableAccount[];
 	private lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 	private seenFillableOrders = new Set<string>();
@@ -277,6 +277,7 @@ export class FillerMultithreaded {
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
 		this.marketIndexes = config.marketIndexes;
+		this.revertOnFailure = config.revertOnFailure ?? true;
 		this.marketIndexesFlattened = config.marketIndexes.flat();
 		this.bundleSender = bundleSender;
 		this.simulateTxForCUEstimate = config.simulateTxForCUEstimate ?? true;
