@@ -1851,20 +1851,6 @@ export class LiquidatorBot implements Bot {
 				continue;
 			}
 
-			// Check for dust
-			const positionTokenAmount = getTokenAmount(
-				position.scaledBalance,
-				market,
-				position.balanceType
-			);
-			const dustThreshold = market.minOrderSize.mul(new BN(2));
-			if (positionTokenAmount.abs().lt(dustThreshold)) {
-				logger.debug(
-					`findBestSpotPosition: Amount ${position.scaledBalance} below ${dustThreshold} dust liquidation threshold`
-				);
-				continue;
-			}
-
 			if (position.openOrders > 0) {
 				indexWithOpenOrders = position.marketIndex;
 			}
