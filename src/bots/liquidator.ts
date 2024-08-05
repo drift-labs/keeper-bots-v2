@@ -804,6 +804,39 @@ export class LiquidatorBot implements Bot {
 		}
 	}
 
+	private async cancelOpenOrdersForSpotMarket(
+		marketIndex: number,
+		subAccountId: number
+	) {
+		const cancelOrdersIx = await this.driftClient.getCancelOrdersIx(
+			MarketType.SPOT,
+			marketIndex,
+			null,
+			subAccountId
+		);
+		const simResult = await this.buildVersionedTransactionWithSimulatedCus(
+			[cancelOrdersIx],
+			[this.driftLookupTables!],
+			Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
+		);
+		if (simResult.simError !== null) {
+			logger.error(
+				`Error trying to close spot orders for market ${marketIndex}, subaccount start ${subAccountId}, simError: ${JSON.stringify(
+					simResult.simError
+				)}`
+			);
+		} else {
+			const resp = await this.driftClient.txSender.sendVersionedTransaction(
+				simResult.tx,
+				undefined,
+				this.driftClient.opts
+			);
+			logger.info(
+				`Sent derisk placeSpotOrder tx for on market ${marketIndex} tx: ${resp.txSig} `
+			);
+		}
+	}
+
 	private async jupiterSpotSwap(
 		orderDirection: PositionDirection,
 		spotMarketIndex: number,
@@ -1506,6 +1539,9 @@ export class LiquidatorBot implements Bot {
 	private async deriskSpotPositions(userAccount: UserAccount) {
 		for (const position of userAccount.spotPositions) {
 			if (position.scaledBalance.eq(ZERO) || position.marketIndex === 0) {
+				if (position.openOrders != 0) {
+					await this.cancelOpenOrdersForSpotMarket(position.marketIndex, userAccount.subAccountId);
+				}
 				continue;
 			}
 
