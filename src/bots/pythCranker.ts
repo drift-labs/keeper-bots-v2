@@ -362,11 +362,16 @@ export class PythCrankerBot implements Bot {
 					});
 					this.bundleSender?.sendTransaction(simResult.tx);
 				} else {
+					const priorityFees = Math.floor(
+						(this.priorityFeeSubscriber?.getCustomStrategyResult() || 0) *
+							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+					);
+					logger.info(
+						`Priority fees to use: ${priorityFees} with multiplier: ${this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()}`
+					);
 					ixs.push(
 						ComputeBudgetProgram.setComputeUnitPrice({
-							microLamports: Math.floor(
-								this.priorityFeeSubscriber?.getCustomStrategyResult() || 0
-							),
+							microLamports: priorityFees,
 						})
 					);
 					ixs.push(
