@@ -328,7 +328,7 @@ const runBot = async () => {
 	});
 
 	const txSenderType = config.global.txSenderType || 'retry';
-	let txSender;
+	let txSender: FastSingleTxSender | RetryTxSender | WhileValidTxSender;
 	let additionalConnections: Connection[] = [];
 	if (
 		config.global.additionalSendTxEndpoints &&
@@ -347,6 +347,7 @@ const runBot = async () => {
 			timeout: config.global.txRetryTimeoutMs,
 			confirmationStrategy: ConfirmationStrategy.Polling,
 			additionalConnections,
+			trackTxLandRate: config.global.trackTxLandRate,
 		});
 	} else if (txSenderType === 'while-valid') {
 		txSender = new WhileValidTxSender({
@@ -355,6 +356,7 @@ const runBot = async () => {
 			opts,
 			retrySleep: 2000,
 			additionalConnections,
+			trackTxLandRate: config.global.trackTxLandRate,
 		});
 	} else {
 		const skipConfirmation =
@@ -369,6 +371,7 @@ const runBot = async () => {
 			opts,
 			skipConfirmation,
 			additionalConnections,
+			trackTxLandRate: config.global.trackTxLandRate,
 		});
 	}
 

@@ -192,6 +192,7 @@ export interface GlobalConfig {
 	txSenderType?: 'fast' | 'retry' | 'while-valid';
 	txSkipPreflight?: boolean;
 	txMaxRetries?: number;
+	trackTxLandRate?: boolean;
 
 	rebalanceFiller?: boolean;
 }
@@ -252,16 +253,7 @@ const defaultConfig: Partial<Config> = {
 		rebalanceFiller: false,
 	},
 	enabledBots: [],
-	botConfigs: {
-		jitMaker: {
-			botId: 'jit-maker',
-			dryRun: false,
-			marketType: 'perp',
-			targetLeverage: 1,
-			aggressivenessBps: 0,
-			jitCULimit: 800000,
-		},
-	},
+	botConfigs: {},
 };
 
 function mergeDefaults<T>(defaults: T, data: Partial<T>): T {
@@ -368,6 +360,7 @@ export function loadConfigFromOpts(opts: any): Config {
 				? opts.txSkipPreflight.toLowerCase() === 'true'
 				: false,
 			txMaxRetries: parseInt(opts.txMaxRetries ?? '0'),
+			trackTxLandRate: opts.trackTxLandRate ?? false,
 
 			metricsPort: opts.metricsPort ?? 9464,
 			disableMetrics: opts.disableMetrics ?? false,
