@@ -467,6 +467,16 @@ export class LiquidatorBot implements Bot {
 		return this.driftClient.getUser(subAccountId);
 	}
 
+	private getLiquidatorUserForPerpMarket(
+		marketIndex: number
+	): User | undefined {
+		const subAccountId = this.perpMarketToSubAccount.get(marketIndex);
+		if (subAccountId === undefined) {
+			return undefined;
+		}
+		return this.driftClient.getUser(subAccountId);
+	}
+
 	private async buildVersionedTransactionWithSimulatedCus(
 		ixs: Array<TransactionInstruction>,
 		luts: Array<AddressLookupTableAccount>,
@@ -1590,7 +1600,7 @@ export class LiquidatorBot implements Bot {
 	}
 
 	private calculateBaseAmountToLiquidate(liquidateePosition: PerpPosition): BN {
-		const liquidatorUser = this.getLiquidatorUserForSpotMarket(
+		const liquidatorUser = this.getLiquidatorUserForPerpMarket(
 			liquidateePosition.marketIndex
 		);
 		if (!liquidatorUser) {
