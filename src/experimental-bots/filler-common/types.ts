@@ -125,7 +125,7 @@ export type SerializedDLOBNode = {
 	fallbackBidSource?: FallbackLiquiditySource;
 };
 
-export type FallbackLiquiditySource = 'serum' | 'phoenix';
+export type FallbackLiquiditySource = 'serum' | 'phoenix' | 'openbook';
 export type NodeToFillWithContext = NodeToFill & {
 	fallbackAskSource?: FallbackLiquiditySource;
 	fallbackBidSource?: FallbackLiquiditySource;
