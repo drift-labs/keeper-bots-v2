@@ -16,6 +16,8 @@ import {
 	BN,
 	ClockSubscriber,
 	PhoenixV1FulfillmentConfigAccount,
+	OpenbookV2Subscriber,
+	OpenbookV2FulfillmentConfigAccount,
 } from '@drift-labs/sdk';
 import { Connection } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -50,9 +52,14 @@ class DLOBBuilder {
 
 	// only used for spot filler
 	private phoenixSubscribers?: Map<number, PhoenixSubscriber>;
+	private openbookSubscribers?: Map<number, OpenbookV2Subscriber>;
 	private phoenixFulfillmentConfigMap?: Map<
 		number,
 		PhoenixV1FulfillmentConfigAccount
+	>;
+	private openbookFulfillmentConfigMap?: Map<
+		number,
+		OpenbookV2FulfillmentConfigAccount
 	>;
 
 	private clockSubscriber: ClockSubscriber;
@@ -72,9 +79,14 @@ class DLOBBuilder {
 
 		if (marketTypeString.toLowerCase() === 'spot') {
 			this.phoenixSubscribers = new Map<number, PhoenixSubscriber>();
+			this.openbookSubscribers = new Map<number, OpenbookV2Subscriber>();
 			this.phoenixFulfillmentConfigMap = new Map<
 				number,
 				PhoenixV1FulfillmentConfigAccount
+			>();
+			this.openbookFulfillmentConfigMap = new Map<
+				number,
+				OpenbookV2FulfillmentConfigAccount
 			>();
 		}
 
@@ -96,7 +108,9 @@ class DLOBBuilder {
 	private async initializeSpotMarkets() {
 		({
 			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
+			openbookFulfillmentConfigs: this.openbookFulfillmentConfigMap,
 			phoenixSubscribers: this.phoenixSubscribers,
+			openbookSubscribers: this.openbookSubscribers,
 		} = await initializeSpotFulfillmentAccounts(
 			this.driftClient,
 			true,
@@ -180,14 +194,45 @@ class DLOBBuilder {
 				oraclePriceData =
 					this.driftClient.getOracleDataForSpotMarket(marketIndex);
 
+				const openbookSubscriber = this.openbookSubscribers!.get(marketIndex);
+				const openbookBid = openbookSubscriber?.getBestBid();
+				const openbookAsk = openbookSubscriber?.getBestAsk();
+
 				const phoenixSubscriber = this.phoenixSubscribers!.get(marketIndex);
 				const phoenixBid = phoenixSubscriber?.getBestBid();
 				const phoenixAsk = phoenixSubscriber?.getBestAsk();
 
-				fallbackBid = phoenixBid;
-				fallbackBidSource = 'phoenix';
-				fallbackAsk = phoenixAsk;
-				fallbackAskSource = 'phoenix';
+				if (openbookBid && phoenixBid) {
+					if (openbookBid!.gte(phoenixBid!)) {
+						fallbackBid = openbookBid;
+						fallbackBidSource = 'openbook';
+					} else {
+						fallbackBid = phoenixBid;
+						fallbackBidSource = 'phoenix';
+					}
+				} else if (openbookBid) {
+					fallbackBid = openbookBid;
+					fallbackBidSource = 'openbook';
+				} else if (phoenixBid) {
+					fallbackBid = phoenixBid;
+					fallbackBidSource = 'phoenix';
+				}
+
+				if (openbookAsk && phoenixAsk) {
+					if (openbookAsk!.lte(phoenixAsk!)) {
+						fallbackAsk = openbookAsk;
+						fallbackAskSource = 'openbook';
+					} else {
+						fallbackAsk = phoenixAsk;
+						fallbackAskSource = 'phoenix';
+					}
+				} else if (openbookAsk) {
+					fallbackAsk = openbookAsk;
+					fallbackAskSource = 'openbook';
+				} else if (phoenixAsk) {
+					fallbackAsk = phoenixAsk;
+					fallbackAskSource = 'phoenix';
+				}
 			}
 
 			const stateAccount = this.driftClient.getStateAccount();
