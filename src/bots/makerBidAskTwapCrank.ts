@@ -410,8 +410,9 @@ export class MakerBidAskTwapCrank implements Bot {
 				const pfs = this.priorityFeeSubscriberMap!.getPriorityFees('perp', mi);
 				let microLamports = 10_000;
 				if (pfs) {
-					microLamports = Math.floor(pfs.medium);
+					microLamports = Math.floor(pfs.high * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier());
 				}
+				console.log(`market index ${mi}: microLamports: ${microLamports}`);
 
 				const ixs = [
 					ComputeBudgetProgram.setComputeUnitLimit({
