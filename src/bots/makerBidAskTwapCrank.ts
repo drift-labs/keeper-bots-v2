@@ -43,6 +43,7 @@ import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
 const TWAP_CRANK_MIN_CU = 200_000;
+const MIN_PRIORITY_FEE = 10_000;
 
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
@@ -408,21 +409,21 @@ export class MakerBidAskTwapCrank implements Bot {
 			);
 			for (const mi of crankMarkets) {
 				const pfs = this.priorityFeeSubscriberMap!.getPriorityFees('perp', mi);
-				let microLamports = 10_000;
+				let microLamports = MIN_PRIORITY_FEE;
 				if (pfs) {
 					microLamports = Math.floor(
 						pfs.high *
 							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 					);
 				}
-				console.log(`market index ${mi}: microLamports: ${microLamports}`);
+				// console.log(`market index ${mi}: microLamports: ${microLamports}`);
 
 				const ixs = [
 					ComputeBudgetProgram.setComputeUnitLimit({
 						units: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
 					}),
 					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports,
+						microLamports: microLamports ?? MIN_PRIORITY_FEE,
 					}),
 				];
 
