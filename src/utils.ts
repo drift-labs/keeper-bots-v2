@@ -461,6 +461,7 @@ export type SimulateAndGetTxWithCUsParams = {
 	recentBlockhash?: string;
 	/// set true to dump base64 transaction before and after simulating for CUs
 	dumpTx?: boolean;
+	removeLastIxPostSim?: boolean; // remove the last instruction post simulation (used for fillers)
 };
 
 export type SimulateAndGetTxWithCUsResponse = {
@@ -563,9 +564,12 @@ export async function simulateAndGetTxWithCUs(
 		units: cusToUse,
 	});
 
+	const ixsToUse = params.removeLastIxPostSim
+		? params.ixs.slice(0, -1)
+		: params.ixs;
 	const txWithCUs = getVersionedTransaction(
 		params.payerPublicKey,
-		params.ixs,
+		ixsToUse,
 		params.lookupTableAccounts,
 		params.recentBlockhash ?? PLACEHOLDER_BLOCKHASH
 	);
