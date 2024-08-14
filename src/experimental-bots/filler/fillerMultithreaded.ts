@@ -1271,6 +1271,7 @@ export class FillerMultithreaded {
 				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),
+				removeLastIxPostSim: this.revertOnFailure,
 			});
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',
@@ -1645,6 +1646,7 @@ export class FillerMultithreaded {
 					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
+					removeLastIxPostSim: this.revertOnFailure,
 				});
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
@@ -1841,6 +1843,7 @@ export class FillerMultithreaded {
 			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 			doSimulation: this.simulateTxForCUEstimate,
 			recentBlockhash: await this.getBlockhashForTx(),
+			removeLastIxPostSim: this.revertOnFailure,
 		});
 		logger.info(
 			`tryFillPerpNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
@@ -2050,6 +2053,7 @@ export class FillerMultithreaded {
 							cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 							doSimulation: this.simulateTxForCUEstimate,
 							recentBlockhash: await this.getBlockhashForTx(),
+							removeLastIxPostSim: this.revertOnFailure,
 						});
 						this.simulateTxHistogram?.record(simResult.simTxDuration, {
 							type: 'settlePnl',
