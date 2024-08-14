@@ -80,6 +80,9 @@ export class PythCrankerBot implements Bot {
 	public defaultIntervalMs = 30_000;
 
 	private blockhashSubscriber: BlockhashSubscriber;
+	private health: boolean = true;
+	private slotStalenessThresholdRestart: number = 100;
+	private txSuccessRateThreshold: number = 0.5;
 
 	constructor(
 		private globalConfig: GlobalConfig,
@@ -116,6 +119,9 @@ export class PythCrankerBot implements Bot {
 		this.blockhashSubscriber = new BlockhashSubscriber({
 			connection: driftClient.connection,
 		});
+		this.txSuccessRateThreshold = crankConfigs.txSuccessRateThreshold;
+		this.slotStalenessThresholdRestart =
+			crankConfigs.slotStalenessThresholdRestart;
 	}
 
 	async init(): Promise<void> {
@@ -266,6 +272,8 @@ export class PythCrankerBot implements Bot {
 				this.feedIdsToCrank.map((f) => f.accountAddress)
 			);
 
+		const latestSlot = await this.driftClient.connection.getSlot();
+		let numFeedsSignalingRestart = 0;
 		const feedIdsToUpdate: FeedIdToCrankInfo[] = [];
 		let considerEarlyUpdate = false;
 		shuffle(onChainDataResults).forEach((result) => {
@@ -295,6 +303,10 @@ export class PythCrankerBot implements Bot {
 			const pythnetPriceData = pythnetPriceFeed.getPriceUnchecked();
 			const onChainPriceData =
 				this.pythOracleClient.getOraclePriceDataFromBuffer(result.data);
+			const onChainSlot = onChainPriceData.slot.toNumber();
+			const slotDiff = latestSlot - onChainSlot;
+
+			const isSlotStale = slotDiff > this.slotStalenessThresholdRestart;
 
 			const priceDiffPct =
 				Math.abs(
@@ -312,7 +324,6 @@ export class PythCrankerBot implements Bot {
 			const timestampDiff =
 				pythnetPriceData.publishTime -
 				onChainPriceFeed.priceMessage.publishTime.toNumber();
-
 			if (
 				timestampDiff > feedIdCrankInfo.updateConfig.timeDiffMs / 1000 ||
 				priceDiffPct > feedIdCrankInfo.updateConfig.priceDiffPct ||
@@ -323,6 +334,12 @@ export class PythCrankerBot implements Bot {
 			) {
 				feedIdsToUpdate.push(feedIdCrankInfo);
 				considerEarlyUpdate = true;
+			} else if (
+				isSlotStale &&
+				this.driftClient.txSender.getTxLandRate() > this.txSuccessRateThreshold
+			) {
+				// Landing txs but slot is not getting updated on chain
+				numFeedsSignalingRestart++;
 			}
 		});
 
@@ -404,9 +421,27 @@ export class PythCrankerBot implements Bot {
 				}
 			})
 		);
+
+		/*
+			If number of numFeedsWithStaleOnChainDataButNoPriceChange is too high,
+			may need to restart pythnet because we aren't actually updating the price on chain
+		*/
+		logger.info(
+			`Number of feeds with stale on chain data but no price change: ${numFeedsSignalingRestart}`
+		);
+		logger.info(
+			`Tx success rate: ${this.driftClient.txSender.getTxLandRate()}`
+		);
+		console.log(this.driftClient.txSender.getTxLandRate());
+		if (numFeedsSignalingRestart > 2) {
+			logger.error(
+				`Number of feeds with stale on chain data but no price change is too high: ${numFeedsSignalingRestart}. Marking unhealthy`
+			);
+			this.health = false;
+		}
 	}
 
 	async healthCheck(): Promise<boolean> {
-		return true;
+		return this.health;
 	}
 }
