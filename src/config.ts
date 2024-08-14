@@ -100,6 +100,8 @@ export type PythUpdateConfigs = {
 };
 
 export type PythCrankerBotConfig = BaseBotConfig & {
+	slotStalenessThresholdRestart: number;
+	txSuccessRateThreshold: number;
 	intervalMs: number;
 	updateConfigs: {
 		[key: string]: {

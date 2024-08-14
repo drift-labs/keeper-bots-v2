@@ -39,11 +39,20 @@ import {
 	SimulateAndGetTxWithCUsResponse,
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+import { PythPullClient } from '@drift-labs/sdk/lib/oracles/pythPullClient';
 
 const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
 const TWAP_CRANK_MIN_CU = 200_000;
 const MIN_PRIORITY_FEE = 10_000;
+
+const SLOT_STALENESS_THRESHOLD_RESTART = process.env
+	.SLOT_STALENESS_THRESHOLD_RESTART
+	? parseInt(process.env.SLOT_STALENESS_THRESHOLD_RESTART) || 300
+	: 300;
+const TX_LAND_RATE_THRESHOLD = process.env.TX_LAND_RATE_THRESHOLD
+	? parseFloat(process.env.TX_LAND_RATE_THRESHOLD) || 0.5
+	: 0.5;
 
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
@@ -153,6 +162,8 @@ export class MakerBidAskTwapCrank implements Bot {
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 	private pythPriceSubscriber?: PythPriceFeedSubscriber;
+	private pythPullOracleClient: PythPullClient;
+	private pythHealthy: boolean = true;
 	private lookupTableAccounts: AddressLookupTableAccount[];
 
 	constructor(
@@ -174,6 +185,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.userMap = userMap;
 		this.pythPriceSubscriber = pythPriceSubscriber;
 		this.lookupTableAccounts = lookupTableAccounts;
+		this.pythPullOracleClient = new PythPullClient(this.driftClient.connection);
 	}
 
 	public async init() {
@@ -247,7 +259,7 @@ export class MakerBidAskTwapCrank implements Bot {
 			healthy =
 				this.watchdogTimerLastPatTime > Date.now() - 5 * this.maxIntervalGroup!;
 		});
-		return healthy;
+		return healthy && this.pythHealthy;
 	}
 
 	private async initDlob() {
@@ -400,6 +412,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		}
 
 		const start = Date.now();
+		let numFeedsSignalingRestart = 0;
 		try {
 			this.crankIntervalInProgress![intervalGroup] = true;
 			await this.initDlob();
@@ -427,6 +440,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					}),
 				];
 
+				let pythIxsPushed = false;
 				if (
 					this.pythPriceSubscriber &&
 					!isVariant(
@@ -436,6 +450,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				) {
 					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
 					ixs.push(...pythIxs);
+					pythIxsPushed = true;
 				}
 
 				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
@@ -488,6 +503,33 @@ export class MakerBidAskTwapCrank implements Bot {
 				logger.info(
 					`[${this.name}] sent tx for market: ${mi}, success: ${resp.success}`
 				);
+
+				// Check if this change caused the pyth price to update
+				if (
+					pythIxsPushed &&
+					isOneOfVariant(
+						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+						['pythPull', 'pyth1KPull', 'ptyh1MPull', 'pythStableCoinPull']
+					)
+				) {
+					const [data, currentSlot] = await Promise.all([
+						this.driftClient.connection.getAccountInfo(
+							this.driftClient.getPerpMarketAccount(mi)!.amm.oracle
+						),
+						this.driftClient.connection.getSlot(),
+					]);
+					if (!data) continue;
+					const pythData =
+						this.pythPullOracleClient.getOraclePriceDataFromBuffer(data.data);
+					const slotDelay = currentSlot - pythData.slot.toNumber();
+					console.log(slotDelay);
+					if (slotDelay > SLOT_STALENESS_THRESHOLD_RESTART) {
+						logger.info(
+							`[${this.name}] oracle slot stale for market: ${mi}, slot delay: ${slotDelay}`
+						);
+						numFeedsSignalingRestart++;
+					}
+				}
 			}
 		} catch (e) {
 			console.error(e);
@@ -510,6 +552,22 @@ export class MakerBidAskTwapCrank implements Bot {
 			await this.watchdogTimerMutex.runExclusive(async () => {
 				this.watchdogTimerLastPatTime = Date.now();
 			});
+			if (
+				numFeedsSignalingRestart > 2 &&
+				this.driftClient.txSender.getTxLandRate() > TX_LAND_RATE_THRESHOLD
+			) {
+				logger.info(
+					`[${
+						this.name
+					}] ${numFeedsSignalingRestart} feeds signaling restart, tx land rate: ${this.driftClient.txSender.getTxLandRate()}`
+				);
+				await webhookMessage(
+					`[${
+						this.name
+					}] ${numFeedsSignalingRestart} feeds signaling restart, tx land rate: ${this.driftClient.txSender.getTxLandRate()}`
+				);
+				this.pythHealthy = false;
+			}
 		}
 	}
 }
