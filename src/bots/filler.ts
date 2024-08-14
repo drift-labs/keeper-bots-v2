@@ -1823,6 +1823,7 @@ export class FillerBot implements Bot {
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
 					dumpTx: DUMP_TXS_IN_SIM,
+					removeLastIxPostSim: this.revertOnFailure,
 				});
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
@@ -2120,6 +2121,7 @@ export class FillerBot implements Bot {
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
 					dumpTx: DUMP_TXS_IN_SIM,
+					removeLastIxPostSim: this.revertOnFailure,
 				});
 			} catch (e) {
 				logger.error(
@@ -2299,6 +2301,7 @@ export class FillerBot implements Bot {
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),
 				dumpTx: DUMP_TXS_IN_SIM,
+				removeLastIxPostSim: this.revertOnFailure,
 			});
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',
