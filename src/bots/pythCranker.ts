@@ -81,7 +81,7 @@ export class PythCrankerBot implements Bot {
 
 	private blockhashSubscriber: BlockhashSubscriber;
 	private health: boolean = true;
-	private slotStalenessThresholdRestart: number = 100;
+	private slotStalenessThresholdRestart: number = 300;
 	private txSuccessRateThreshold: number = 0.5;
 
 	constructor(
@@ -432,10 +432,9 @@ export class PythCrankerBot implements Bot {
 		logger.info(
 			`Tx success rate: ${this.driftClient.txSender.getTxLandRate()}`
 		);
-		console.log(this.driftClient.txSender.getTxLandRate());
 		if (numFeedsSignalingRestart > 2) {
-			logger.error(
-				`Number of feeds with stale on chain data but no price change is too high: ${numFeedsSignalingRestart}. Marking unhealthy`
+			logger.info(
+				`Number of feeds with stale on chain data but no price change is too high: ${numFeedsSignalingRestart}. Tx land rate: ${this.driftClient.txSender.getTxLandRate()}. Marking unhealthy`
 			);
 			this.health = false;
 		}
