@@ -80,9 +80,9 @@ export class PythCrankerBot implements Bot {
 	public defaultIntervalMs = 30_000;
 
 	private blockhashSubscriber: BlockhashSubscriber;
-	private health: boolean = true;
-	private slotStalenessThresholdRestart: number = 300;
-	private txSuccessRateThreshold: number = 0.5;
+	private health = true;
+	private slotStalenessThresholdRestart = 300;
+	private txSuccessRateThreshold = 0.5;
 
 	constructor(
 		private globalConfig: GlobalConfig,

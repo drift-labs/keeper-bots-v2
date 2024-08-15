@@ -163,7 +163,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private watchdogTimerLastPatTime = Date.now();
 	private pythPriceSubscriber?: PythPriceFeedSubscriber;
 	private pythPullOracleClient: PythPullClient;
-	private pythHealthy: boolean = true;
+	private pythHealthy = true;
 	private lookupTableAccounts: AddressLookupTableAccount[];
 
 	constructor(
