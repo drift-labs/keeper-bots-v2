@@ -1759,7 +1759,8 @@ export class FillerBot implements Bot {
 			ixs.push(
 				ComputeBudgetProgram.setComputeUnitPrice({
 					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult()
+						this.priorityFeeSubscriber.getCustomStrategyResult() *
+							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 					),
 				})
 			);
@@ -1998,7 +1999,8 @@ export class FillerBot implements Bot {
 				ixs.push(
 					ComputeBudgetProgram.setComputeUnitPrice({
 						microLamports: Math.floor(
-							this.priorityFeeSubscriber.getCustomStrategyResult()
+							this.priorityFeeSubscriber.getCustomStrategyResult() *
+								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 						),
 					})
 				);
@@ -2259,7 +2261,8 @@ export class FillerBot implements Bot {
 				}),
 				ComputeBudgetProgram.setComputeUnitPrice({
 					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult()
+						this.priorityFeeSubscriber.getCustomStrategyResult() *
+							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 					),
 				}),
 			];
@@ -2446,7 +2449,8 @@ export class FillerBot implements Bot {
 							}),
 							ComputeBudgetProgram.setComputeUnitPrice({
 								microLamports: Math.floor(
-									this.priorityFeeSubscriber.getCustomStrategyResult()
+									this.priorityFeeSubscriber.getCustomStrategyResult() *
+										this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 								),
 							}),
 						];
