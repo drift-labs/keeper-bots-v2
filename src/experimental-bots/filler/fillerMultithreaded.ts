@@ -1554,7 +1554,8 @@ export class FillerMultithreaded {
 							this.priorityFeeSubscriber.getPriorityFees(
 								'perp',
 								nodeToFill.node.order!.marketIndex!
-							)!.high
+							)!.high *
+								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 						),
 						this.driftClient.getOracleDataForPerpMarket(0).price,
 						fillerRewardEstimate,
@@ -1763,7 +1764,8 @@ export class FillerMultithreaded {
 						this.priorityFeeSubscriber.getPriorityFees(
 							'perp',
 							nodeToFill.node.order!.marketIndex!
-						)!.high
+						)!.high *
+							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 					),
 					this.driftClient.getOracleDataForPerpMarket(0).price,
 					fillerRewardEstimate,
@@ -2025,7 +2027,8 @@ export class FillerMultithreaded {
 													marketId
 												)!.medium;
 											})
-										)
+										) *
+											this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 									),
 								})
 							);

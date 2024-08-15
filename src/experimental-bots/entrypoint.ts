@@ -18,6 +18,7 @@ import {
 	RetryTxSender,
 	SlotSubscriber,
 	initialize,
+	WhileValidTxSender,
 } from '@drift-labs/sdk';
 import {
 	Commitment,
@@ -173,6 +174,16 @@ const runBot = async () => {
 			timeout: config.global.txRetryTimeoutMs,
 			confirmationStrategy: ConfirmationStrategy.Polling,
 			additionalConnections,
+			trackTxLandRate: config.global.trackTxLandRate,
+		});
+	} else if (txSenderType === 'while-valid') {
+		txSender = new WhileValidTxSender({
+			connection: sendTxConnection,
+			wallet,
+			opts,
+			retrySleep: 2000,
+			additionalConnections,
+			trackTxLandRate: config.global.trackTxLandRate,
 		});
 	} else {
 		const skipConfirmation =
@@ -185,6 +196,7 @@ const runBot = async () => {
 			opts,
 			skipConfirmation,
 			additionalConnections,
+			trackTxLandRate: config.global.trackTxLandRate,
 		});
 	}
 
