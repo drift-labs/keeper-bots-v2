@@ -1226,49 +1226,6 @@ export class FillerBot implements Bot {
 	}
 
 	/**
-	 * Returns the number of bytes occupied by this array if it were serialized in compact-u16-format.
-	 * NOTE: assumes each element of the array is 1 byte (not sure if this holds?)
-	 *
-	 * https://docs.solana.com/developing/programming-model/transactions#compact-u16-format
-	 *
-	 * https://stackoverflow.com/a/69951832
-	 *  hex     |  compact-u16
-	 *  --------+------------
-	 *  0x0000  |  [0x00]
-	 *  0x0001  |  [0x01]
-	 *  0x007f  |  [0x7f]
-	 *  0x0080  |  [0x80 0x01]
-	 *  0x3fff  |  [0xff 0x7f]
-	 *  0x4000  |  [0x80 0x80 0x01]
-	 *  0xc000  |  [0x80 0x80 0x03]
-	 *  0xffff  |  [0xff 0xff 0x03])
-	 */
-	protected calcCompactU16EncodedSize(array: any[], elemSize = 1): number {
-		if (array.length > 0x3fff) {
-			return 3 + array.length * elemSize;
-		} else if (array.length > 0x7f) {
-			return 2 + array.length * elemSize;
-		} else {
-			return 1 + (array.length * elemSize || 1);
-		}
-	}
-
-	/**
-	 * Instruction are made of 3 parts:
-	 * - index of accounts where programId resides (1 byte)
-	 * - affected accounts    (compact-u16-format byte array)
-	 * - raw instruction data (compact-u16-format byte array)
-	 * @param ix The instruction to calculate size for.
-	 */
-	protected calcIxEncodedSize(ix: TransactionInstruction): number {
-		return (
-			1 +
-			this.calcCompactU16EncodedSize(new Array(ix.keys.length), 1) +
-			this.calcCompactU16EncodedSize(new Array(ix.data.byteLength), 1)
-		);
-	}
-
-	/**
 	 * Iterates through a tx's logs and handles it appropriately (e.g. throttling users, updating metrics, etc.)
 	 *
 	 * @param nodesFilled nodes that we sent a transaction to fill
@@ -1961,32 +1918,7 @@ export class FillerBot implements Bot {
 		nodesToFill: Array<NodeToFill>,
 		buildForBundle: boolean
 	): Promise<number> {
-		let nodesSent = 0;
-		const marketNodeMap = new Map<number, Array<NodeToFill>>();
-		for (const nodeToFill of nodesToFill) {
-			const marketIndex = nodeToFill.node.order!.marketIndex;
-			if (!marketNodeMap.has(marketIndex)) {
-				marketNodeMap.set(marketIndex, []);
-			}
-			marketNodeMap.get(marketIndex)!.push(nodeToFill);
-		}
-
-		for (const nodesToFillForMarket of marketNodeMap.values()) {
-			nodesSent += await this.tryFillPerpNodesForMarket(
-				nodesToFillForMarket,
-				buildForBundle
-			);
-		}
-
-		return nodesSent;
-	}
-
-	protected async tryFillPerpNodesForMarket(
-		nodesToFill: Array<NodeToFill>,
-		buildForBundle: boolean
-	): Promise<number> {
 		const nodesSent: Array<NodeToFill> = [];
-		let idxUsed = 0;
 		const fillTxId = this.fillTxId++;
 
 		for (const [idx, nodeToFill] of nodesToFill.entries()) {
@@ -2182,16 +2114,7 @@ export class FillerBot implements Bot {
 				}
 			}
 
-			idxUsed++;
 			nodesSent.push(nodeToFill);
-		}
-
-		if (idxUsed === 0) {
-			return nodesSent.length;
-		}
-
-		if (nodesSent.length === 0) {
-			return 0;
 		}
 
 		return nodesSent.length;
