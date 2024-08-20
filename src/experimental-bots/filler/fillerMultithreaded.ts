@@ -1381,7 +1381,7 @@ export class FillerMultithreaded {
 		const buildForBundle = this.shouldBuildForBundle();
 
 		try {
-			await this.executeFillablePerpNodesForMarket(
+			await this.executeFillablePerpNodes(
 				filteredFillableNodes,
 				!!buildForBundle
 			);
@@ -1462,7 +1462,7 @@ export class FillerMultithreaded {
 		return true;
 	}
 
-	async executeFillablePerpNodesForMarket(
+	async executeFillablePerpNodes(
 		nodesToFill: NodeToFillWithBuffer[],
 		buildForBundle: boolean
 	) {
