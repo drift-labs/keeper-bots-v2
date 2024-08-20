@@ -74,7 +74,6 @@ import { FillerLiteBot } from './bots/fillerLite';
 import { JitProxyClient, JitterShotgun } from '@drift-labs/jit-proxy/lib';
 import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 import { UncrossArbBot } from './bots/uncrossArbBot';
-import { FillerBulkBot } from './bots/fillerBulk';
 import { BundleSender } from './bundleSender';
 import { DriftStateWatcher, StateChecks } from './driftStateWatcher';
 import { webhookMessage } from './webhook';
@@ -97,7 +96,6 @@ program
 	)
 	.option('--filler', 'Enable filler bot')
 	.option('--filler-lite', 'Enable filler lite bot')
-	.option('--filler-bulk', 'Enable filler bulk bot')
 	.option('--spot-filler', 'Enable spot filler bot')
 	.option('--trigger', 'Enable trigger bot')
 	.option('--jit-maker', 'Enable JIT auction maker bot')
@@ -633,37 +631,6 @@ const runBot = async () => {
 				},
 				config.global,
 				config.botConfigs!.fillerLite!,
-				priorityFeeSubscriber,
-				blockhashSubscriber,
-				bundleSender,
-				pythPriceSubscriber,
-				[]
-			)
-		);
-	}
-
-	if (configHasBot(config, 'fillerBulk')) {
-		needPythPriceSubscriber = true;
-		needCheckDriftUser = true;
-		needPriorityFeeSubscriber = true;
-		needBlockhashSubscriber = true;
-		needDriftStateWatcher = true;
-
-		logger.info(`Starting filler bulk bot`);
-
-		bots.push(
-			new FillerBulkBot(
-				slotSubscriber,
-				driftClient,
-				{
-					rpcEndpoint: endpoint,
-					commit: commitHash,
-					driftEnv: config.global.driftEnv!,
-					driftPid: driftPublicKey.toBase58(),
-					walletAuthority: wallet.publicKey.toBase58(),
-				},
-				config.global,
-				config.botConfigs!.fillerBulk!,
 				priorityFeeSubscriber,
 				blockhashSubscriber,
 				bundleSender,
