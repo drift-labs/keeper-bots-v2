@@ -197,19 +197,19 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.10.515":
-  version "0.10.515"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.515.tgz#b7894fa8fc7766c217db09377e58d681a3175aa3"
-  integrity sha512-kwWHyPi1E1/roujSR7F/uKtkttgiifY1cnxN73SEHoMBPdnEE80NEENOJdrbVehZ38JSgVzWu9aMDX5BJ+oRyg==
+"@drift-labs/jit-proxy@0.10.518":
+  version "0.10.518"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.518.tgz#68b7cd1263263dc49e5cc1846863ca333613b117"
+  integrity sha512-lrYETUxHaacu4N1avtBhcYT0lswqWDx3rBnleRCQOio+BBuKWfGjkOkxqy45CRJ4o/fX3u/7t6+g+q43bqOFSA==
   dependencies:
     "@coral-xyz/anchor" "^0.26.0"
-    "@drift-labs/sdk" "2.93.0-beta.3"
+    "@drift-labs/sdk" "2.93.0-beta.6"
     "@solana/web3.js" "1.91.7"
 
-"@drift-labs/sdk@2.93.0-beta.3":
-  version "2.93.0-beta.3"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.93.0-beta.3.tgz#f139896a469d962fb63775f2f77b0db0040a96f5"
-  integrity sha512-3R59oCUkW5kOG0VIzeXuBj5c4vq2E1SXRGqrrI+l862FnHVKF4eW3CiM5jlnRng5SSuNmSW5/4iTWgOb7OnFng==
+"@drift-labs/sdk@2.93.0-beta.6":
+  version "2.93.0-beta.6"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.93.0-beta.6.tgz#274e97bb92dc8857da59a5606b05bb413bb2d6ca"
+  integrity sha512-pSnlZ7a5sVUUjw7iFJ6tqUCxKTuHQZiDreGXpux8aV41bILSJXPXZEuLrPK4wnsvgazeztVuMjU6oP2BLtzIuQ==
   dependencies:
     "@coral-xyz/anchor" "0.28.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -221,7 +221,7 @@
     "@pythnetwork/pyth-solana-receiver" "^0.7.0"
     "@solana/spl-token" "0.3.7"
     "@solana/web3.js" "1.92.3"
-    "@switchboard-xyz/on-demand" "1.2.30"
+    "@switchboard-xyz/on-demand" "1.2.32"
     anchor-bankrun "^0.3.0"
     node-cache "^5.1.2"
     rpc-websockets "7.5.1"
@@ -1639,10 +1639,10 @@
     lodash "^4.17.21"
     protobufjs "^7.2.6"
 
-"@switchboard-xyz/on-demand@1.2.30":
-  version "1.2.30"
-  resolved "https://registry.yarnpkg.com/@switchboard-xyz/on-demand/-/on-demand-1.2.30.tgz#67d342bb939b47ba5308b471d9176dba3e2241ee"
-  integrity sha512-Q3VEJz8CMO+XG6lvWSww+GXnKO0gEJgO1wOj7TzrnfOb1UN0ConoiDue1WmSeflMAY+EIW/pxeQghl+osqHEKA==
+"@switchboard-xyz/on-demand@1.2.32":
+  version "1.2.32"
+  resolved "https://registry.yarnpkg.com/@switchboard-xyz/on-demand/-/on-demand-1.2.32.tgz#ae68e45ab9cfb5ccc7c8f6d0506dd3ea7024f9ec"
+  integrity sha512-cS/7rkNg1tu6dtypMQZw6avsTF4DbNYOfA8tNq0rjCpipNTtQZp51UtkGSgIu8qfH8ebSBgpPxkUXlWpXYk3CA==
   dependencies:
     "@brokerloop/ttlcache" "^3.2.3"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
