@@ -144,7 +144,9 @@ export type BotConfigMap = {
 
 export interface GlobalConfig {
 	driftEnv: DriftEnv;
+	/// rpc endpoint to use
 	endpoint: string;
+	/// ws endpoint to use (inferred from endpoint using web3.js rules, only provide if you want to use a different one)
 	wsEndpoint?: string;
 	hermesEndpoint?: string;
 	numNonActiveOraclesToPush?: number;

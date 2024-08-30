@@ -33,12 +33,9 @@ import {
 	ClockSubscriber,
 	DriftEnv,
 } from '@drift-labs/sdk';
-import { TxSigAndSlot } from '@drift-labs/sdk/lib/tx/types';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
 import {
-	SendTransactionError,
-	TransactionSignature,
 	TransactionInstruction,
 	ComputeBudgetProgram,
 	AddressLookupTableAccount,
@@ -83,12 +80,10 @@ import {
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
 	getSizeOfTransaction,
-	getTransactionAccountMetas,
 	handleSimResultError,
 	logMessageForNodeToFill,
 	removePythIxs,
 	simulateAndGetTxWithCUs,
-	sleepMs,
 	swapFillerHardEarnedUSDCForSOL,
 	validMinimumGasAmount,
 	validRebalanceSettledPnlThreshold,
@@ -99,6 +94,7 @@ import { Metrics } from '../metrics';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+import { TxThreaded } from './common/txThreaded';
 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
@@ -147,7 +143,6 @@ enum METRIC_TYPES {
 	tx_sim_error_count = 'tx_sim_error_count',
 	pending_tx_sigs_to_confirm = 'pending_tx_sigs_to_confirm',
 	pending_tx_sigs_loop_rate_limited = 'pending_tx_sigs_loop_rate_limited',
-	evicted_pending_tx_sigs_to_confirm = 'evicted_pending_tx_sigs_to_confirm',
 	estimated_tx_cu_histogram = 'estimated_tx_cu_histogram',
 	simulate_tx_duration_histogram = 'simulate_tx_duration_histogram',
 	expired_nodes_set_size = 'expired_nodes_set_size',
@@ -164,7 +159,7 @@ enum METRIC_TYPES {
 export type MakerNodeMap = Map<string, DLOBNode[]>;
 export type TxType = 'fill' | 'trigger' | 'settlePnl';
 
-export class FillerBot implements Bot {
+export class FillerBot extends TxThreaded implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly defaultIntervalMs: number = 6000;
@@ -179,12 +174,14 @@ export class FillerBot implements Bot {
 	protected pollingIntervalMs: number;
 	protected revertOnFailure?: boolean;
 	protected simulateTxForCUEstimate?: boolean;
-	protected lookupTableAccounts: AddressLookupTableAccount[];
+	protected lutAccounts: AddressLookupTableAccount[];
+	protected lutKeys: string[] = [];
 	protected bundleSender?: BundleSender;
 
 	private fillerConfig: FillerConfig;
 	private globalConfig: GlobalConfig;
 	private dlobSubscriber?: DLOBSubscriber;
+	private signerPubkey: string;
 
 	private userMap?: UserMap;
 	protected userStatsMap?: UserStatsMap;
@@ -206,16 +203,6 @@ export class FillerBot implements Bot {
 
 	protected priorityFeeSubscriber: PriorityFeeSubscriber;
 	protected blockhashSubscriber: BlockhashSubscriber;
-	/// stores txSigs that need to been confirmed in a slower loop, and the time they were confirmed
-	protected pendingTxSigsToconfirm: LRUCache<
-		string,
-		{
-			ts: number;
-			nodeFilled: Array<NodeToFill>;
-			fillTxId: number;
-			txType: TxType;
-		}
-	>;
 	protected expiredNodesSet: LRUCache<string, boolean>;
 	protected confirmLoopRunning = false;
 	protected confirmLoopRateLimitTs =
@@ -236,14 +223,8 @@ export class FillerBot implements Bot {
 	protected simulateTxHistogram?: HistogramValue;
 	protected lastTryFillTimeGauge?: GaugeValue;
 	protected mutexBusyCounter?: CounterValue;
-	protected sentTxsCounter?: CounterValue;
 	protected attemptedTriggersCounter?: CounterValue;
-	protected landedTxsCounter?: CounterValue;
 	protected txSimErrorCounter?: CounterValue;
-	protected pendingTxSigsToConfirmGauge?: GaugeValue;
-	protected pendingTxSigsLoopRateLimitedCounter?: CounterValue;
-	protected evictedPendingTxSigsToConfirmCounter?: CounterValue;
-	protected expiredNodesSetSize?: GaugeValue;
 	protected jitoBundlesAcceptedGauge?: GaugeValue;
 	protected jitoBundlesSimulationFailureGauge?: GaugeValue;
 	protected jitoDroppedBundleGauge?: GaugeValue;
@@ -273,12 +254,14 @@ export class FillerBot implements Bot {
 		pythPriceSubscriber?: PythPriceFeedSubscriber,
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
+		super();
 		this.globalConfig = globalConfig;
 		this.fillerConfig = fillerConfig;
 		this.name = this.fillerConfig.botId;
 		this.dryRun = this.fillerConfig.dryRun;
 		this.slotSubscriber = slotSubscriber;
 		this.driftClient = driftClient;
+
 		if (globalConfig.txConfirmationEndpoint) {
 			this.txConfirmationConnection = new Connection(
 				globalConfig.txConfirmationEndpoint
@@ -322,7 +305,7 @@ export class FillerBot implements Bot {
 		);
 
 		this.pythPriceSubscriber = pythPriceSubscriber;
-		this.lookupTableAccounts = lookupTableAccounts;
+		this.lutAccounts = lookupTableAccounts;
 
 		if (
 			this.fillerConfig.rebalanceFiller &&
@@ -372,21 +355,6 @@ export class FillerBot implements Bot {
 		]);
 		this.blockhashSubscriber = blockhashSubscriber;
 
-		this.pendingTxSigsToconfirm = new LRUCache<
-			string,
-			{
-				ts: number;
-				nodeFilled: Array<NodeToFill>;
-				fillTxId: number;
-				txType: TxType;
-			}
-		>({
-			max: 10_000,
-			ttl: TX_TIMEOUT_THRESHOLD_MS,
-			ttlResolution: 1000,
-			disposeAfter: this.recordEvictedTxSig.bind(this),
-		});
-
 		this.expiredNodesSet = new LRUCache<string, boolean>({
 			max: 10_000,
 			ttl: TX_TIMEOUT_THRESHOLD_MS,
@@ -396,25 +364,8 @@ export class FillerBot implements Bot {
 			commitment: 'finalized',
 			resubTimeoutMs: 5_000,
 		});
-	}
 
-	protected recordEvictedTxSig(
-		_tsTxSigAdded: { ts: number; nodeFilled: Array<NodeToFill> },
-		txSig: string,
-		reason: 'evict' | 'set' | 'delete'
-	) {
-		if (reason === 'evict') {
-			logger.info(
-				`${this.name}: Evicted tx sig ${txSig} from this.txSigsToConfirm`
-			);
-			const user = this.driftClient.getUser();
-			this.evictedPendingTxSigsToConfirmCounter?.add(1, {
-				...metricAttrFromUserAccount(
-					user.userAccountPublicKey,
-					user.getUserAccount()
-				),
-			});
-		}
+		this.signerPubkey = this.driftClient.wallet.publicKey.toBase58();
 	}
 
 	protected initializeMetrics(metricsPort?: number) {
@@ -495,33 +446,9 @@ export class FillerBot implements Bot {
 			METRIC_TYPES.mutex_busy,
 			'Count of times the mutex was busy'
 		);
-		this.landedTxsCounter = this.metrics.addCounter(
-			METRIC_TYPES.landed_transactions,
-			'Count of fills that we successfully landed'
-		);
-		this.sentTxsCounter = this.metrics.addCounter(
-			METRIC_TYPES.sent_transactions,
-			'Count of transactions we sent out'
-		);
 		this.txSimErrorCounter = this.metrics.addCounter(
 			METRIC_TYPES.tx_sim_error_count,
 			'Count of errors from simulating transactions'
-		);
-		this.pendingTxSigsToConfirmGauge = this.metrics.addGauge(
-			METRIC_TYPES.pending_tx_sigs_to_confirm,
-			'Count of tx sigs that are pending confirmation'
-		);
-		this.pendingTxSigsLoopRateLimitedCounter = this.metrics.addCounter(
-			METRIC_TYPES.pending_tx_sigs_loop_rate_limited,
-			'Count of times the pending tx sigs loop was rate limited'
-		);
-		this.evictedPendingTxSigsToConfirmCounter = this.metrics.addCounter(
-			METRIC_TYPES.evicted_pending_tx_sigs_to_confirm,
-			'Count of tx sigs that were evicted from the pending tx sigs to confirm cache'
-		);
-		this.expiredNodesSetSize = this.metrics.addGauge(
-			METRIC_TYPES.expired_nodes_set_size,
-			'Count of nodes that are expired'
 		);
 		this.jitoBundlesAcceptedGauge = this.metrics.addGauge(
 			METRIC_TYPES.jito_bundles_accepted,
@@ -552,9 +479,9 @@ export class FillerBot implements Bot {
 			'Timestamp of the wall clock'
 		);
 
-		this.metrics?.finalizeObservables();
-
-		this.runtimeSpecsGauge.setLatestValue(this.bootTimeMs, this.runtimeSpec);
+		this.initializeTxThreadMetrics(this.metrics, this.name);
+		this.metrics!.finalizeObservables();
+		this.runtimeSpecsGauge!.setLatestValue(this.bootTimeMs!, this.runtimeSpec);
 		this.metricsInitialized = true;
 	}
 
@@ -586,9 +513,22 @@ export class FillerBot implements Bot {
 
 		await this.clockSubscriber.subscribe();
 
-		this.lookupTableAccounts.push(
+		this.lutAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
+
+		// initialize tx thread
+		this.txThreadSetName(this.name);
+		this.initTxThread(this.globalConfig.endpoint);
+		this.sendSignerToTxThread(
+			this.signerPubkey,
+			this.globalConfig.keeperPrivateKey!
+		);
+		this.lutAccounts.forEach((account) => {
+			this.sendAddressLutToTxThread(account.key.toBase58());
+			this.lutKeys.push(account.key.toBase58());
+		});
+		this.setTxEnabledTxThread(!this.fillerConfig.dryRun);
 	}
 
 	public async init() {
@@ -624,9 +564,6 @@ export class FillerBot implements Bot {
 				this.settlePnls.bind(this),
 				SETTLE_POSITIVE_PNL_COOLDOWN_MS / 2
 			)
-		);
-		this.intervalIds.push(
-			setInterval(this.confirmPendingTxSigs.bind(this), CONFIRM_TX_INTERVAL_MS)
 		);
 		if (this.bundleSender) {
 			this.intervalIds.push(
@@ -764,121 +701,6 @@ export class FillerBot implements Bot {
 			this.jitoBundleCount?.setLatestValue(bundleDroppedCount ?? 0, {
 				type: 'dropped',
 			});
-		}
-	}
-
-	protected async confirmPendingTxSigs() {
-		const user = this.driftClient.getUser();
-		this.pendingTxSigsToConfirmGauge?.setLatestValue(
-			this.pendingTxSigsToconfirm.size,
-			{
-				...metricAttrFromUserAccount(
-					user.userAccountPublicKey,
-					user.getUserAccount()
-				),
-			}
-		);
-		this.expiredNodesSetSize?.setLatestValue(this.expiredNodesSet.size, {
-			...metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
-			),
-		});
-		const nextTimeCanRun =
-			this.confirmLoopRateLimitTs + CONFIRM_TX_RATE_LIMIT_BACKOFF_MS;
-		if (Date.now() < nextTimeCanRun) {
-			logger.warn(
-				`Skipping confirm loop due to rate limit, next run in ${
-					nextTimeCanRun - Date.now()
-				} ms`
-			);
-			return;
-		}
-		if (this.confirmLoopRunning) {
-			return;
-		}
-		this.confirmLoopRunning = true;
-		try {
-			logger.debug(`Confirming tx sigs: ${this.pendingTxSigsToconfirm.size}`);
-			const start = Date.now();
-			const txEntries = Array.from(this.pendingTxSigsToconfirm.entries());
-			for (let i = 0; i < txEntries.length; i += TX_CONFIRMATION_BATCH_SIZE) {
-				const txSigsBatch = txEntries.slice(i, i + TX_CONFIRMATION_BATCH_SIZE);
-				const txs = await this.txConfirmationConnection?.getTransactions(
-					txSigsBatch.map((tx) => tx[0]),
-					{
-						commitment: 'confirmed',
-						maxSupportedTransactionVersion: 0,
-					}
-				);
-				for (let j = 0; j < txs.length; j++) {
-					const txResp = txs[j];
-					const txConfirmationInfo = txSigsBatch[j];
-					const txSig = txConfirmationInfo[0];
-					const txAge = txConfirmationInfo[1].ts - Date.now();
-					const nodeFilled = txConfirmationInfo[1].nodeFilled;
-					const txType = txConfirmationInfo[1].txType;
-					const fillTxId = txConfirmationInfo[1].fillTxId;
-					if (txResp === null) {
-						logger.info(
-							`Tx not found, (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
-								txAge / 1000
-							} s`
-						);
-						if (Math.abs(txAge) > TX_TIMEOUT_THRESHOLD_MS) {
-							this.pendingTxSigsToconfirm.delete(txSig);
-						}
-					} else {
-						logger.info(
-							`Tx landed (fillTxId: ${fillTxId}) (txType: ${txType}): ${txSig}, tx age: ${
-								txAge / 1000
-							} s`
-						);
-						this.pendingTxSigsToconfirm.delete(txSig);
-						if (txType === 'fill') {
-							const result = await this.handleTransactionLogs(
-								nodeFilled,
-								txResp.meta?.logMessages
-							);
-							if (result) {
-								this.landedTxsCounter?.add(result.filledNodes, {
-									type: txType,
-									...metricAttrFromUserAccount(
-										user.userAccountPublicKey,
-										user.getUserAccount()
-									),
-								});
-							}
-						} else {
-							this.landedTxsCounter?.add(1, {
-								type: txType,
-								...metricAttrFromUserAccount(
-									user.userAccountPublicKey,
-									user.getUserAccount()
-								),
-							});
-						}
-					}
-					await sleepMs(500);
-				}
-			}
-			logger.debug(`Confirming tx sigs took: ${Date.now() - start} ms`);
-		} catch (e) {
-			const err = e as Error;
-			if (err.message.includes('429')) {
-				logger.info(`Confirming tx loop rate limited: ${err.message}`);
-				this.confirmLoopRateLimitTs = Date.now();
-				this.pendingTxSigsLoopRateLimitedCounter?.add(1, {
-					...metricAttrFromUserAccount(
-						user.userAccountPublicKey,
-						user.getUserAccount()
-					),
-				});
-			} else {
-				logger.error(`Other error confirming tx sigs: ${err.message}`);
-			}
-		} finally {
-			this.confirmLoopRunning = false;
 		}
 	}
 
@@ -1488,33 +1310,6 @@ export class FillerBot implements Bot {
 		};
 	}
 
-	/**
-	 * Queues up the txSig to be confirmed in a slower loop, and have tx logs handled
-	 * @param txSig
-	 */
-	protected async registerTxSigToConfirm(
-		txSig: TransactionSignature,
-		now: number,
-		nodeFilled: Array<NodeToFill>,
-		fillTxId: number,
-		txType: TxType
-	) {
-		this.pendingTxSigsToconfirm.set(txSig, {
-			ts: now,
-			nodeFilled,
-			fillTxId,
-			txType,
-		});
-		const user = this.driftClient.getUser();
-		this.sentTxsCounter?.add(1, {
-			txType,
-			...metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
-			),
-		});
-	}
-
 	protected removeFillingNodes(nodes: Array<NodeToFill>) {
 		for (const node of nodes) {
 			this.fillingNodes.delete(getNodeToFillSignature(node));
@@ -1543,105 +1338,23 @@ export class FillerBot implements Bot {
 
 	protected async sendFillTxAndParseLogs(
 		fillTxId: number,
-		nodesSent: Array<NodeToFill>,
 		tx: VersionedTransaction,
-		buildForBundle: boolean
+		buildForBundle: boolean,
+		ixs?: Array<TransactionInstruction>
 	) {
-		let txResp: Promise<TxSigAndSlot> | undefined = undefined;
-		const { estTxSize, accountMetas, writeAccs, txAccounts } =
-			getTransactionAccountMetas(tx, this.lookupTableAccounts);
-
-		const txStart = Date.now();
-		// @ts-ignore;
-		tx.sign([this.driftClient.wallet.payer]);
-		const txSig = bs58.encode(tx.signatures[0]);
-
 		if (buildForBundle) {
-			await this.sendTxThroughJito(tx, fillTxId, txSig);
-			this.removeFillingNodes(nodesSent);
+			// @ts-ignore;
+			tx.sign([this.driftClient.wallet.payer]);
+			const txSig = bs58.encode(tx.signatures[0]);
+			this.sendTxThroughJito(tx, fillTxId, txSig);
+			this.registerTxToConfirm({ txSig });
 		} else if (this.canSendOutsideJito()) {
-			txResp = this.driftClient.txSender.sendVersionedTransaction(
-				tx,
-				[],
-				this.driftClient.opts,
-				true
-			);
-		}
-
-		this.registerTxSigToConfirm(txSig, Date.now(), nodesSent, fillTxId, 'fill');
-
-		if (txResp) {
-			txResp
-				.then((resp: TxSigAndSlot) => {
-					const duration = Date.now() - txStart;
-					logger.info(
-						`sent tx: ${resp.txSig}, took: ${duration}ms (fillTxId: ${fillTxId})`
-					);
-				})
-				.catch(async (e) => {
-					const simError = e as SendTransactionError;
-					logger.error(
-						`Failed to send packed tx txAccountKeys: ${txAccounts} (${writeAccs} writeable) (fillTxId: ${fillTxId}), error: ${simError.message}`
-					);
-
-					if (e.message.includes('too large:')) {
-						logger.error(
-							`[${
-								this.name
-							}]: :boxing_glove: Tx too large, estimated to be ${estTxSize} (fillTxId: ${fillTxId}). ${
-								e.message
-							}\n${JSON.stringify(accountMetas)}`
-						);
-						webhookMessage(
-							`[${
-								this.name
-							}]: :boxing_glove: Tx too large (fillTxId: ${fillTxId}). ${
-								e.message
-							}\n${JSON.stringify(accountMetas)}`
-						);
-						return;
-					}
-
-					if (simError.logs && simError.logs.length > 0) {
-						await this.handleTransactionLogs(nodesSent, simError.logs);
-
-						const errorCode = getErrorCode(e);
-						logger.error(
-							`Failed to send tx, sim error (fillTxId: ${fillTxId}) error code: ${errorCode}`
-						);
-
-						if (
-							errorCode &&
-							!errorCodesToSuppress.includes(errorCode) &&
-							!(e as Error).message.includes('Transaction was not confirmed')
-						) {
-							const user = this.driftClient.getUser();
-							this.txSimErrorCounter?.add(1, {
-								errorCode: errorCode.toString(),
-								...metricAttrFromUserAccount(
-									user.userAccountPublicKey,
-									user.getUserAccount()
-								),
-							});
-
-							logger.error(
-								`Failed to send tx, sim error (fillTxId: ${fillTxId}) sim logs:\n${
-									simError.logs ? simError.logs.join('\n') : ''
-								}\n${e.stack || e}`
-							);
-
-							webhookMessage(
-								`[${this.name}]: :x: error simulating tx:\n${
-									simError.logs ? simError.logs.join('\n') : ''
-								}\n${e.stack || e}`,
-								process.env.TX_LOG_WEBHOOK_URL
-							);
-						}
-					}
-				})
-				.finally(() => {
-					this.removeFillingNodes(nodesSent);
-				});
+			this.sendIxsToTxthread({
+				ixs: ixs!,
+				signerKeys: [this.signerPubkey],
+				doSimulation: false,
+				addressLookupTables: this.lutKeys,
+			});
 		}
 	}
 
@@ -1752,7 +1465,10 @@ export class FillerBot implements Bot {
 			let makerInfosToUse = makerInfos;
 			const buildTxWithMakerInfos = async (
 				makers: DataAndSlot<MakerInfo>[]
-			): Promise<SimulateAndGetTxWithCUsResponse> => {
+			): Promise<{
+				ixs: Array<TransactionInstruction>;
+				simResult: SimulateAndGetTxWithCUsResponse;
+			}> => {
 				ixs.push(
 					await this.driftClient.getFillPerpOrderIx(
 						await getUserAccountPublicKey(
@@ -1776,7 +1492,7 @@ export class FillerBot implements Bot {
 					ixs,
 					connection: this.driftClient.connection,
 					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: this.lookupTableAccounts,
+					lookupTableAccounts: this.lutAccounts,
 					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
@@ -1800,12 +1516,12 @@ export class FillerBot implements Bot {
 					),
 				});
 
-				return simResult;
+				return { ixs, simResult };
 			};
 
-			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
-			let txAccounts = simResult.tx.message.getAccountKeys({
-				addressLookupTableAccounts: this.lookupTableAccounts,
+			let makerTx = await buildTxWithMakerInfos(makerInfosToUse);
+			let txAccounts = makerTx.simResult.tx.message.getAccountKeys({
+				addressLookupTableAccounts: this.lutAccounts,
 			}).length;
 			let attempt = 0;
 			while (txAccounts > MAX_ACCOUNTS_PER_TX && makerInfosToUse.length > 0) {
@@ -1815,9 +1531,9 @@ export class FillerBot implements Bot {
 					} maker and ${txAccounts} accounts)`
 				);
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
-				simResult = await buildTxWithMakerInfos(makerInfosToUse);
-				txAccounts = simResult.tx.message.getAccountKeys({
-					addressLookupTableAccounts: this.lookupTableAccounts,
+				makerTx = await buildTxWithMakerInfos(makerInfosToUse);
+				txAccounts = makerTx.simResult.tx.message.getAccountKeys({
+					addressLookupTableAccounts: this.lutAccounts,
 				}).length;
 			}
 
@@ -1828,23 +1544,23 @@ export class FillerBot implements Bot {
 				return true;
 			}
 
-			if (simResult.simError) {
+			if (makerTx.simResult.simError) {
 				logger.error(
 					`Error simulating multi maker perp node (fillTxId: ${fillTxId}): ${JSON.stringify(
-						simResult.simError
+						makerTx.simResult.simError
 					)}\nTaker slot: ${takerUserSlot}\nMaker slots: ${makerInfosToUse
 						.map((m) => `  ${m.data.maker.toBase58()}: ${m.slot}`)
 						.join('\n')}`
 				);
 				handleSimResultError(
-					simResult,
+					makerTx.simResult,
 					errorCodesToSuppress,
 					`${this.name}: (fillTxId: ${fillTxId})`
 				);
-				if (simResult.simTxLogs) {
+				if (makerTx.simResult.simTxLogs) {
 					const { exceededCUs } = await this.handleTransactionLogs(
 						[nodeToFill],
-						simResult.simTxLogs
+						makerTx.simResult.simTxLogs
 					);
 					if (exceededCUs) {
 						return false;
@@ -1857,10 +1573,11 @@ export class FillerBot implements Bot {
 					if (this.hasEnoughSolToFill) {
 						this.sendFillTxAndParseLogs(
 							fillTxId,
-							[nodeToFill],
-							simResult.tx,
-							buildForBundle
+							makerTx.simResult.tx,
+							buildForBundle,
+							makerTx.ixs
 						);
+						this.removeFillingNodes([nodeToFill]);
 					} else {
 						logger.info(
 							`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
@@ -2016,9 +1733,9 @@ export class FillerBot implements Bot {
 				ixs.push(await this.driftClient.getRevertFillIx());
 			}
 
-			const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
+			const txSize = getSizeOfTransaction(ixs, true, this.lutAccounts);
 			if (txSize > PACKET_DATA_SIZE) {
-				logger.info(`tx too large, removing pyth ixs. 
+				logger.info(`tx too large, removing pyth ixs.
 						keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
 						total number of maker positions: ${makerInfos.reduce(
 							(acc, maker) =>
@@ -2050,7 +1767,7 @@ export class FillerBot implements Bot {
 					ixs,
 					connection: this.driftClient.connection,
 					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: this.lookupTableAccounts,
+					lookupTableAccounts: this.lutAccounts,
 					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
@@ -2102,10 +1819,11 @@ export class FillerBot implements Bot {
 					if (this.hasEnoughSolToFill) {
 						this.sendFillTxAndParseLogs(
 							fillTxId,
-							nodesSent,
 							simResult.tx,
-							buildForBundle
+							buildForBundle,
+							ixs
 						);
+						this.removeFillingNodes(nodesSent);
 					} else {
 						logger.info(
 							`not sending tx because we don't have enough SOL to fill (fillTxId: ${fillTxId})`
@@ -2207,7 +1925,7 @@ export class FillerBot implements Bot {
 				ixs.push(await this.driftClient.getRevertFillIx());
 			}
 
-			const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
+			const txSize = getSizeOfTransaction(ixs, true, this.lutAccounts);
 			if (txSize > PACKET_DATA_SIZE) {
 				logger.info(
 					`tx too large, removing pyth ixs. keys: ${ixs.map((ix) =>
@@ -2222,7 +1940,7 @@ export class FillerBot implements Bot {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: this.lookupTableAccounts,
+				lookupTableAccounts: this.lutAccounts,
 				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),
@@ -2260,45 +1978,21 @@ export class FillerBot implements Bot {
 			} else {
 				if (!this.dryRun) {
 					if (this.hasEnoughSolToFill) {
-						// Assuming the SOL check is now within the mutex's scope
-						// @ts-ignore;
-						simResult.tx.sign([this.driftClient.wallet.payer]);
-						const txSig = bs58.encode(simResult.tx.signatures[0]);
-						this.registerTxSigToConfirm(txSig, Date.now(), [], -1, 'trigger');
-
 						if (buildForBundle) {
+							// @ts-ignore;
+							simResult.tx.sign([this.driftClient.wallet.payer]);
+							const txSig = bs58.encode(simResult.tx.signatures[0]);
 							this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
+							this.registerTxToConfirm({ txSig });
 						} else if (this.canSendOutsideJito()) {
-							this.driftClient
-								.sendTransaction(simResult.tx)
-								.catch((error) => {
-									nodeToTrigger.node.haveTrigger = false;
-
-									const errorCode = getErrorCode(error);
-									if (
-										errorCode &&
-										!errorCodesToSuppress.includes(errorCode) &&
-										!(error as Error).message.includes(
-											'Transaction was not confirmed'
-										)
-									) {
-										logger.error(
-											`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-										);
-										logger.error(error);
-										webhookMessage(
-											`[${
-												this.name
-											}]: :x: Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-												error.stack ? error.stack : error.message
-											}`
-										);
-									}
-								})
-								.finally(() => {
-									this.removeTriggeringNodes(nodeToTrigger);
-								});
+							this.sendIxsToTxthread({
+								ixs,
+								signerKeys: [this.signerPubkey],
+								doSimulation: false,
+								addressLookupTables: this.lutKeys,
+							});
 						}
+						this.removeTriggeringNodes(nodeToTrigger);
 					} else {
 						logger.info(`Not enough SOL to fill, not triggering node`);
 					}
@@ -2362,7 +2056,6 @@ export class FillerBot implements Bot {
 				} else {
 					chunk_size = marketIds.length / 2;
 				}
-				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
 				for (let i = 0; i < marketIds.length; i += chunk_size) {
 					const marketIdChunks = marketIds.slice(i, i + chunk_size);
 					try {
@@ -2393,7 +2086,7 @@ export class FillerBot implements Bot {
 							ixs,
 							connection: this.driftClient.connection,
 							payerPublicKey: this.driftClient.wallet.publicKey,
-							lookupTableAccounts: this.lookupTableAccounts,
+							lookupTableAccounts: this.lutAccounts,
 							cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 							doSimulation: this.simulateTxForCUEstimate,
 							recentBlockhash: await this.getBlockhashForTx(),
@@ -2427,31 +2120,25 @@ export class FillerBot implements Bot {
 							);
 						} else {
 							if (!this.dryRun) {
-								const buildForBundle = this.shouldBuildForBundle();
-
 								// @ts-ignore;
 								simResult.tx.sign([this.driftClient.wallet.payer]);
 								const txSig = bs58.encode(simResult.tx.signatures[0]);
-								this.registerTxSigToConfirm(
-									txSig,
-									Date.now(),
-									[],
-									-2,
-									'settlePnl'
-								);
 
+								const buildForBundle = this.shouldBuildForBundle();
 								if (buildForBundle) {
 									this.sendTxThroughJito(simResult.tx, 'settlePnl', txSig);
+									this.registerTxToConfirm({ txSig });
 								} else if (this.canSendOutsideJito()) {
-									settlePnlPromises.push(
-										this.driftClient.txSender.sendVersionedTransaction(
-											simResult.tx,
-											[],
-											this.driftClient.opts,
-											true
-										)
-									);
+									this.sendIxsToTxthread({
+										ixs,
+										signerKeys: [this.signerPubkey],
+										doSimulation: false,
+										addressLookupTables: this.lutKeys,
+									});
 								}
+								logger.info(
+									`Settle positive PNLs tx: https://solscan/io/tx/${txSig}`
+								);
 							} else {
 								logger.info(`dry run, skipping settlePnls)`);
 							}
@@ -2468,16 +2155,6 @@ export class FillerBot implements Bot {
 						);
 						console.error(err);
 					}
-				}
-				try {
-					const txs = await Promise.all(settlePnlPromises);
-					for (const tx of txs) {
-						logger.info(
-							`Settle positive PNLs tx: https://solscan/io/tx/${tx.txSig}`
-						);
-					}
-				} catch (e) {
-					logger.error(`Error settling positive pnls: ${e}`);
 				}
 				this.lastSettlePnl = now;
 			}

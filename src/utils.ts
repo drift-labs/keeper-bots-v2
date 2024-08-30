@@ -468,6 +468,7 @@ export type SimulateAndGetTxWithCUsResponse = {
 	cuEstimate: number;
 	simTxLogs: Array<string> | null;
 	simError: TransactionError | string | null;
+	simSlot: number;
 	simTxDuration: number;
 	tx: VersionedTransaction;
 };
@@ -523,6 +524,7 @@ export async function simulateAndGetTxWithCUs(
 			cuEstimate: -1,
 			simTxLogs: null,
 			simError: null,
+			simSlot: -1,
 			simTxDuration,
 			tx,
 		};
@@ -595,6 +597,7 @@ export async function simulateAndGetTxWithCUs(
 		simTxLogs,
 		simTxDuration,
 		simError: resp.value.err,
+		simSlot: resp.context.slot,
 		tx: txWithCUs,
 	};
 }
