@@ -84,8 +84,8 @@ import { SwitchboardCrankerBot } from './bots/switchboardCranker';
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
 
-const preflightCommitment: Commitment = 'processed';
-const stateCommitment: Commitment = 'confirmed';
+const stateCommitment = (process.env.STATE_COMMITMENT ??
+	'confirmed') as Commitment;
 const healthCheckPort = process.env.HEALTH_CHECK_PORT || 8888;
 
 program
@@ -316,7 +316,7 @@ const runBot = async () => {
 	const opts: ConfirmOptions = {
 		commitment: stateCommitment,
 		skipPreflight: config.global.txSkipPreflight,
-		preflightCommitment,
+		preflightCommitment: stateCommitment,
 		maxRetries: config.global.txMaxRetries,
 	};
 	const sendTxConnection = new Connection(endpoint, {
