@@ -406,13 +406,16 @@ export class PythCrankerBot implements Bot {
 						doSimulation: true,
 						recentBlockhash: await this.getBlockhashForTx(),
 					});
+					const startTime = Date.now();
 					this.driftClient
 						.sendTransaction(simResult.tx)
 						.then((txSigAndSlot: TxSigAndSlot) => {
 							logger.info(
 								`Posted multi pyth pull oracle for ${feedIds.map(
 									(feedId) => feedId.baseSymbol
-								)} update atomic tx: ${txSigAndSlot.txSig}`
+								)} update atomic tx: ${txSigAndSlot.txSig}, took ${
+									Date.now() - startTime
+								}ms`
 							);
 						})
 						.catch((e) => {
