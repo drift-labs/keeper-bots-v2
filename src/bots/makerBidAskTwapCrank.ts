@@ -299,7 +299,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private async sendTx(
 		marketIndex: number,
 		ixs: TransactionInstruction[]
-	): Promise<{ success: boolean; canRetry: boolean }> {
+	): Promise<void> {
 		let simResult: SimulateAndGetTxWithCUsResponse | undefined;
 		try {
 			const recentBlockhash =
@@ -325,23 +325,24 @@ export class MakerBidAskTwapCrank implements Bot {
 					)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 				);
 				handleSimResultError(simResult, [], `[${this.name}]`);
-				return { success: false, canRetry: false };
+				return;
 			} else {
 				const sendTxStart = Date.now();
-				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
-					simResult.tx,
-					[],
-					{
+				this.driftClient.txSender
+					.sendVersionedTransaction(simResult.tx, [], {
 						...this.driftClient.opts,
-					}
-				);
-				logger.info(
-					`[${
-						this.name
-					}] makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
-						Date.now() - sendTxStart
-					}ms tx: https://solana.fm/tx/${txSig.txSig}, txSig: ${txSig.txSig}`
-				);
+					})
+					.then((txSig) => {
+						logger.info(
+							`[${
+								this.name
+							}] makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
+								Date.now() - sendTxStart
+							}ms tx: https://solana.fm/tx/${txSig.txSig}, txSig: ${
+								txSig.txSig
+							}, slot: ${txSig.slot}`
+						);
+					});
 			}
 		} catch (err: any) {
 			console.error(err);
@@ -361,13 +362,13 @@ export class MakerBidAskTwapCrank implements Bot {
 							e.stack ? e.stack : e.message
 						}`
 					);
-					return { success: false, canRetry: false };
+					return;
 				} else {
-					return { success: false, canRetry: true };
+					return;
 				}
 			}
 		}
-		return { success: true, canRetry: false };
+		return;
 	}
 
 	private async getPythIxsFromTwapCrankInfo(
@@ -499,10 +500,8 @@ export class MakerBidAskTwapCrank implements Bot {
 					ixs.push(updatePrelaunchOracleIx);
 				}
 
-				const resp = await this.sendTx(mi, ixs);
-				logger.info(
-					`[${this.name}] sent tx for market: ${mi}, success: ${resp.success}`
-				);
+				await this.sendTx(mi, ixs);
+				logger.info(`[${this.name}] sent tx for market: ${mi}`);
 
 				// Check if this change caused the pyth price to update
 				if (
