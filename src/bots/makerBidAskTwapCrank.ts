@@ -426,7 +426,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				let microLamports = MIN_PRIORITY_FEE;
 				if (pfs) {
 					microLamports = Math.floor(
-						pfs.high *
+						pfs.medium *
 							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 					);
 				}
@@ -437,7 +437,9 @@ export class MakerBidAskTwapCrank implements Bot {
 						units: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
 					}),
 					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: microLamports ?? MIN_PRIORITY_FEE,
+						microLamports: isNaN(microLamports)
+							? MIN_PRIORITY_FEE
+							: microLamports,
 					}),
 				];
 
