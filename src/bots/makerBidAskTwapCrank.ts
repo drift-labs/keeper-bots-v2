@@ -45,6 +45,9 @@ const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
 const TWAP_CRANK_MIN_CU = 200_000;
 const MIN_PRIORITY_FEE = 10_000;
+const MAX_PRIORITY_FEE = process.env.MAX_PRIORITY_FEE
+	? parseInt(process.env.MAX_PRIORITY_FEE) || 500_000
+	: 500_000;
 
 const SLOT_STALENESS_THRESHOLD_RESTART = process.env
 	.SLOT_STALENESS_THRESHOLD_RESTART
@@ -430,7 +433,11 @@ export class MakerBidAskTwapCrank implements Bot {
 							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 					);
 				}
-				// console.log(`market index ${mi}: microLamports: ${microLamports}`);
+				const clampedMicroLamports = Math.min(microLamports, MAX_PRIORITY_FEE);
+				console.log(
+					`market index ${mi}: microLamports: ${microLamports} (clamped: ${clampedMicroLamports})`
+				);
+				microLamports = clampedMicroLamports;
 
 				const ixs = [
 					ComputeBudgetProgram.setComputeUnitLimit({
