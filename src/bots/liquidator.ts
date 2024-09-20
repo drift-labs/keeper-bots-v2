@@ -77,11 +77,13 @@ import {
 	TransactionInstruction,
 } from '@solana/web3.js';
 import {
+	createAssociatedTokenAccountInstruction,
 	createCloseAccountInstruction,
 	getAssociatedTokenAddress,
 } from '@solana/spl-token';
 import {
 	calculateAccountValueUsd,
+	checkIfAccountExists,
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
@@ -1485,7 +1487,25 @@ export class LiquidatorBot implements Bot {
 					);
 				ixs.push(...startIxs);
 				userTokenAccount = pubkey;
+			} else {
+				const accountExists = await checkIfAccountExists(
+					this.driftClient.connection,
+					userTokenAccount
+				);
+
+				if (!accountExists) {
+					ixs.push(
+						createAssociatedTokenAccountInstruction(
+							this.driftClient.wallet.publicKey,
+							userTokenAccount,
+							this.driftClient.wallet.publicKey,
+							spotMarket.mint,
+							this.driftClient.getTokenProgramForSpotMarket(spotMarket)
+						)
+					);
+				}
 			}
+
 			ixs.push(
 				await this.driftClient.getWithdrawIx(
 					tokenAmount,
@@ -1519,6 +1539,7 @@ export class LiquidatorBot implements Bot {
 						userAccount.subAccountId
 					}, simError: ${JSON.stringify(simResult.simError)}`
 				);
+				return true;
 			} else {
 				const resp = await this.driftClient.txSender.sendVersionedTransaction(
 					simResult.tx,
@@ -1528,9 +1549,8 @@ export class LiquidatorBot implements Bot {
 				logger.info(
 					`Sent withdraw dust on market ${position.marketIndex} tx: ${resp.txSig} `
 				);
+				return true;
 			}
-
-			return true;
 		}
 
 		return false;
