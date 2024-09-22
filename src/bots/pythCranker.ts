@@ -216,6 +216,10 @@ export class PythCrankerBot implements Bot {
 				this.feedIdToPriceFeedMap.set(priceFeed.id, priceFeed);
 			}
 		);
+
+		this.priorityFeeSubscriber?.updateAddresses([
+			this.driftClient.getReceiverProgram().programId,
+		]);
 	}
 
 	async reset(): Promise<void> {
