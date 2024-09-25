@@ -36,6 +36,7 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 	Connection,
+	Keypair,
 	LAMPORTS_PER_SOL,
 	PACKET_DATA_SIZE,
 	PublicKey,
@@ -1889,8 +1890,10 @@ export class FillerMultithreaded {
 		// @ts-ignore;
 		const signers = [this.driftClient.wallet.payer];
 		if (extraSigners) {
+			// @ts-ignore
 			signers.push(...extraSigners);
 		}
+		// @ts-ignore;
 		tx.sign(signers);
 		const txSig = bs58.encode(tx.signatures[0]);
 
