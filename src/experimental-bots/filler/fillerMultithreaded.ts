@@ -36,7 +36,6 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 	Connection,
-	Keypair,
 	LAMPORTS_PER_SOL,
 	PACKET_DATA_SIZE,
 	PublicKey,
