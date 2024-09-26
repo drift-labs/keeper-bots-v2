@@ -197,24 +197,24 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.10.563":
-  version "0.10.563"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.563.tgz#3e4fb39cd9b22b7db253c78330c08f31f9c3415b"
-  integrity sha512-V1C8/1EM/ZMwn02vh2J9104WakX+/Xnvb0ZzaplMYSAqIqW7PjzPMu2xm7CWTldnMJ3gghZVZo/RdhFgWp51xQ==
+"@drift-labs/jit-proxy@0.10.568":
+  version "0.10.568"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.568.tgz#c4cae3087f92e646775d95bb1039f8a667af56b7"
+  integrity sha512-Zh0B3fmw2FPpQLFrHwRgTvrYXGNRMErJiQ70sCyMv13a3nrKqudlLUJxgOW14LpNuUKEpcfST/CnkHWluOzNMQ==
   dependencies:
     "@coral-xyz/anchor" "^0.26.0"
-    "@drift-labs/sdk" "2.96.0-beta.8"
+    "@drift-labs/sdk" "2.96.0-beta.13"
     "@solana/web3.js" "1.91.7"
 
-"@drift-labs/sdk@2.96.0-beta.8":
-  version "2.96.0-beta.8"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.96.0-beta.8.tgz#e274d602363f235fa9603d62d3cd9ee456bffeff"
-  integrity sha512-imliSUUZtgr5Gn9UbC7ECCwk6U0C1VUxIH4Aii0lvL4QLPDqZt25ek52yTa7OYLouXJ+RAfM154DW2XwvE77YQ==
+"@drift-labs/sdk@2.96.0-beta.13":
+  version "2.96.0-beta.13"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.96.0-beta.13.tgz#499c3920c67bff397ac20e82997a3890c25b8909"
+  integrity sha512-UMNtUbMPX4p6RdOwpZCuxy3No6HuSoTtfrf4wNMFm3mCKCmDrQzHby+xZlgqCkooIyY6rUKTzi3PI2MNbkiH8A==
   dependencies:
     "@coral-xyz/anchor" "0.28.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
     "@ellipsis-labs/phoenix-sdk" "^1.4.2"
-    "@openbook-dex/openbook-v2" "^0.2.10"
+    "@openbook-dex/openbook-v2" "0.2.10"
     "@project-serum/serum" "^0.13.38"
     "@pythnetwork/client" "2.5.3"
     "@pythnetwork/price-service-sdk" "^1.7.1"
@@ -504,7 +504,7 @@
     "@nodelib/fs.scandir" "2.1.5"
     fastq "^1.6.0"
 
-"@openbook-dex/openbook-v2@^0.2.10":
+"@openbook-dex/openbook-v2@0.2.10":
   version "0.2.10"
   resolved "https://registry.yarnpkg.com/@openbook-dex/openbook-v2/-/openbook-v2-0.2.10.tgz#a5cfcd30ce827ecd446b76429a5e41baa23a318c"
   integrity sha512-JOroVQHeia+RbghpluDJB5psUIhdhYRPLu0zWoG0h5vgDU4SjXwlcC+LJiIa2HVPasvZjWuCtlKWFyrOS75lOA==
