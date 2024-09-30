@@ -429,7 +429,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				let microLamports = MIN_PRIORITY_FEE;
 				if (pfs) {
 					microLamports = Math.floor(
-						pfs.medium *
+						pfs.low *
 							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 					);
 				}
