@@ -410,6 +410,24 @@ export class MakerBidAskTwapCrank implements Bot {
 		return pythIxs;
 	}
 
+	/**
+	 * @returns true if configured to use jito AND there is currently a jito leader
+	 */
+	private sendThroughJito(): boolean {
+		if (!this.bundleSender) {
+			// not configured for jito
+			return false;
+		}
+
+		const slotsUntilNextLeader = this.bundleSender.slotsUntilNextLeader() ?? 0;
+		if (slotsUntilNextLeader > 0) {
+			// no current jito leader
+			return false;
+		}
+
+		return true;
+	}
+
 	private async tryTwapCrank(intervalGroup: number | null) {
 		const state = this.driftClient.getStateAccount();
 		let crankMarkets: number[] = [];
@@ -451,7 +469,8 @@ export class MakerBidAskTwapCrank implements Bot {
 				];
 
 				// add priority fees if not using jito
-				if (!this.bundleSender) {
+				const useJito = this.sendThroughJito();
+				if (!useJito) {
 					const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
 						'perp',
 						mi
@@ -541,7 +560,7 @@ export class MakerBidAskTwapCrank implements Bot {
 
 				const txToSend = await this.buildTransaction(mi, ixs);
 				if (txToSend) {
-					if (this.bundleSender) {
+					if (useJito) {
 						// @ts-ignore;
 						txToSend.sign([this.driftClient.wallet.payer]);
 						txsToBundle.push(txToSend);
@@ -581,7 +600,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					}
 				}
 
-				if (this.bundleSender && txsToBundle.length >= TX_PER_JITO_BUNDLE) {
+				if (useJito && txsToBundle.length >= TX_PER_JITO_BUNDLE) {
 					logger.info(
 						`[${this.name}] sending ${txsToBundle.length} txs to jito`
 					);
@@ -590,6 +609,9 @@ export class MakerBidAskTwapCrank implements Bot {
 				}
 			}
 
+			// There's a chance that by the time we get here there is no active jito leader, but we
+			// already built txs without priority fee, so we skip the leader check and just send
+			// the bundle anyways to increase overall land rate.
 			if (this.bundleSender && txsToBundle.length > 0) {
 				logger.info(
 					`[${this.name}] sending remaining ${txsToBundle.length} txs to jito`

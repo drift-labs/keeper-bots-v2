@@ -472,7 +472,7 @@ export class BundleSender {
 			const ts = Date.now();
 			this.bundleIdToTx.set(bundleId, { tx: txSig, ts });
 			logger.info(
-				`${logPrefix} sent bundle with uuid ${bundleId} (${txSig}: ${ts}) ${metadata}`
+				`${logPrefix} sent bundle with uuid ${bundleId} (tx: ${txSig}: ${ts}) ${metadata}`
 			);
 		} catch (e) {
 			const err = e as Error;
