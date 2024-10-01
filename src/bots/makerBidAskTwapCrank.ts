@@ -34,14 +34,13 @@ import { ConfirmOptions, Signer } from '@solana/web3.js';
 import {
 	getAllPythOracleUpdateIxs,
 	getDriftPriorityFeeEndpoint,
-	// getStaleOracleMarketIndexes,
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { PythPullClient } from '@drift-labs/sdk/lib/oracles/pythPullClient';
-import { BundleSender } from 'src/bundleSender';
+import { BundleSender } from '../bundleSender';
 
 const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
