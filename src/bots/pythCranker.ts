@@ -381,7 +381,7 @@ export class PythCrankerBot implements Bot {
 						doSimulation: true,
 						recentBlockhash: await this.getBlockhashForTx(),
 					});
-					this.bundleSender?.sendTransaction(simResult.tx);
+					this.bundleSender?.sendTransactions([simResult.tx]);
 				} else {
 					const priorityFees = Math.floor(
 						(this.priorityFeeSubscriber?.getCustomStrategyResult() || 0) *

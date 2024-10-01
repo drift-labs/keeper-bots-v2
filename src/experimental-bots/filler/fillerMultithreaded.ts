@@ -1113,7 +1113,7 @@ export class FillerMultithreaded {
 		}
 		const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
 		if (slotsUntilNextLeader !== undefined) {
-			this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`);
+			this.bundleSender.sendTransactions(tx, `(fillTxId: ${metadata})`);
 		}
 	}
 
@@ -1233,7 +1233,7 @@ export class FillerMultithreaded {
 				logger.debug(
 					`${logPrefix} already triggered order (account: ${
 						nodeToTrigger.node.userAccount
-					}, order ${nodeToTrigger.node.order.orderId.toString()}. 
+					}, order ${nodeToTrigger.node.order.orderId.toString()}.
 					Just going to pull oracles`
 				);
 			} else {
@@ -1258,7 +1258,7 @@ export class FillerMultithreaded {
 
 			const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
 			if (txSize > PACKET_DATA_SIZE) {
-				logger.info(`tx too large, removing pyth ixs. 
+				logger.info(`tx too large, removing pyth ixs.
 						`);
 				ixs = removePythIxs(ixs);
 			}
@@ -1613,7 +1613,7 @@ export class FillerMultithreaded {
 					this.lookupTableAccounts
 				);
 				if (txSize > PACKET_DATA_SIZE) {
-					logger.info(`tx too large, removing pyth ixs. 
+					logger.info(`tx too large, removing pyth ixs.
 							keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
 							total number of maker positions: ${makerInfos.reduce(
 								(acc, maker) =>
@@ -1812,7 +1812,7 @@ export class FillerMultithreaded {
 
 		const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
 		if (txSize > PACKET_DATA_SIZE) {
-			logger.info(`tx too large, removing pyth ixs. 
+			logger.info(`tx too large, removing pyth ixs.
 						keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
 						total number of maker positions: ${makerInfos.reduce(
 							(acc, maker) =>

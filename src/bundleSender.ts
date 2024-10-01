@@ -415,13 +415,15 @@ export class BundleSender {
 		);
 	}
 
-	// Alternatively, don't create the bundle now, but batch them and send them together with 1 tip.
-	// not really confident in doing that in nodejs land, maybe rust filler.
-	async sendTransaction(
-		signedTx: VersionedTransaction,
+	async sendTransactions(
+		signedTxs: VersionedTransaction[],
 		metadata?: string,
 		txSig?: string
 	) {
+		if (signedTxs.length + 1 > 5) {
+			throw new Error(`jito max bundle size is 5, got ${signedTxs.length + 1}`);
+		}
+
 		if (!this.isSubscribed) {
 			logger.warn(
 				`${logPrefix} You should call bundleSender.subscribe() before sendTransaction()`
@@ -439,7 +441,11 @@ export class BundleSender {
 		}
 		this.bundlesSent++;
 
-		let b: Bundle | Error = new Bundle([signedTx], 2);
+		// +1 for tip tx, jito max is 5
+		let b: Bundle | Error = new Bundle(
+			signedTxs,
+			Math.max(signedTxs.length + 1, 5)
+		);
 
 		const tipAccountToUse =
 			this.jitoTipAccounts[
@@ -450,7 +456,7 @@ export class BundleSender {
 			this.tipPayerKeypair!,
 			this.calculateCurrentTipAmount(),
 			tipAccountToUse!,
-			signedTx.message.recentBlockhash
+			signedTxs[0].message.recentBlockhash
 		);
 		if (b instanceof Error) {
 			logger.error(`${logPrefix} failed to attach tip: ${b.message})`);
@@ -458,8 +464,9 @@ export class BundleSender {
 		}
 
 		try {
+			// txSig used for tracking purposes, if none provided, use the sig of the first tx in the bundle
 			if (!txSig) {
-				txSig = bs58.encode(signedTx.signatures[0]);
+				txSig = bs58.encode(signedTxs[0].signatures[0]);
 			}
 			const bundleId = await this.searcherClient.sendBundle(b);
 			const ts = Date.now();

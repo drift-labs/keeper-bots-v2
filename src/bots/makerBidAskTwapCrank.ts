@@ -27,6 +27,7 @@ import {
 	TransactionInstruction,
 	TransactionExpiredBlockheightExceededError,
 	SendTransactionError,
+	Version,
 } from '@solana/web3.js';
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
@@ -40,6 +41,7 @@ import {
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { PythPullClient } from '@drift-labs/sdk/lib/oracles/pythPullClient';
+import { BundleSender } from 'src/bundleSender';
 
 const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
@@ -56,6 +58,8 @@ const SLOT_STALENESS_THRESHOLD_RESTART = process.env
 const TX_LAND_RATE_THRESHOLD = process.env.TX_LAND_RATE_THRESHOLD
 	? parseFloat(process.env.TX_LAND_RATE_THRESHOLD) || 0.5
 	: 0.5;
+const NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK = 2;
+const TX_PER_JITO_BUNDLE = 4; // jito max is 5
 
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
@@ -169,6 +173,8 @@ export class MakerBidAskTwapCrank implements Bot {
 	private pythHealthy: boolean = true;
 	private lookupTableAccounts: AddressLookupTableAccount[];
 
+	private bundleSender?: BundleSender;
+
 	constructor(
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
@@ -177,7 +183,8 @@ export class MakerBidAskTwapCrank implements Bot {
 		globalConfig: GlobalConfig,
 		runOnce: boolean,
 		pythPriceSubscriber?: PythPriceFeedSubscriber,
-		lookupTableAccounts: AddressLookupTableAccount[] = []
+		lookupTableAccounts: AddressLookupTableAccount[] = [],
+		bundleSender?: BundleSender
 	) {
 		this.slotSubscriber = slotSubscriber;
 		this.name = config.botId;
@@ -189,6 +196,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.pythPriceSubscriber = pythPriceSubscriber;
 		this.lookupTableAccounts = lookupTableAccounts;
 		this.pythPullOracleClient = new PythPullClient(this.driftClient.connection);
+		this.bundleSender = bundleSender;
 	}
 
 	public async init() {
@@ -299,54 +307,28 @@ export class MakerBidAskTwapCrank implements Bot {
 		return combinedList;
 	}
 
-	private async sendTx(
+	private async sendSingleTx(
 		marketIndex: number,
-		ixs: TransactionInstruction[]
+		tx: VersionedTransaction
 	): Promise<void> {
 		let simResult: SimulateAndGetTxWithCUsResponse | undefined;
 		try {
-			const recentBlockhash =
-				await this.driftClient.connection.getLatestBlockhash('confirmed');
-			simResult = await simulateAndGetTxWithCUs({
-				ixs,
-				connection: this.driftClient.connection,
-				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: this.lookupTableAccounts,
-				cuLimitMultiplier: CU_EST_MULTIPLIER,
-				minCuLimit: TWAP_CRANK_MIN_CU,
-				doSimulation: true,
-				recentBlockhash: recentBlockhash.blockhash,
-			});
-			logger.info(
-				`[${this.name}] estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
-			);
-
-			if (simResult.simError !== null) {
-				logger.error(
-					`[${this.name}] Sim error (market: ${marketIndex}): ${JSON.stringify(
-						simResult.simError
-					)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
-				);
-				handleSimResultError(simResult, [], `[${this.name}]`);
-				return;
-			} else {
-				const sendTxStart = Date.now();
-				this.driftClient.txSender
-					.sendVersionedTransaction(simResult.tx, [], {
-						...this.driftClient.opts,
-					})
-					.then((txSig) => {
-						logger.info(
-							`[${
-								this.name
-							}] makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
-								Date.now() - sendTxStart
-							}ms tx: https://solana.fm/tx/${txSig.txSig}, txSig: ${
-								txSig.txSig
-							}, slot: ${txSig.slot}`
-						);
-					});
-			}
+			const sendTxStart = Date.now();
+			this.driftClient.txSender
+				.sendVersionedTransaction(tx, [], {
+					...this.driftClient.opts,
+				})
+				.then((txSig) => {
+					logger.info(
+						`[${
+							this.name
+						}] makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
+							Date.now() - sendTxStart
+						}ms tx: https://solana.fm/tx/${txSig.txSig}, txSig: ${
+							txSig.txSig
+						}, slot: ${txSig.slot}`
+					);
+				});
 		} catch (err: any) {
 			console.error(err);
 			if (err instanceof TransactionExpiredBlockheightExceededError) {
@@ -372,6 +354,40 @@ export class MakerBidAskTwapCrank implements Bot {
 			}
 		}
 		return;
+	}
+
+	private async buildTransaction(
+		marketIndex: number,
+		ixs: TransactionInstruction[]
+	): Promise<VersionedTransaction | undefined> {
+		let simResult: SimulateAndGetTxWithCUsResponse | undefined;
+		const recentBlockhash =
+			await this.driftClient.connection.getLatestBlockhash('confirmed');
+		simResult = await simulateAndGetTxWithCUs({
+			ixs,
+			connection: this.driftClient.connection,
+			payerPublicKey: this.driftClient.wallet.publicKey,
+			lookupTableAccounts: this.lookupTableAccounts,
+			cuLimitMultiplier: CU_EST_MULTIPLIER,
+			minCuLimit: TWAP_CRANK_MIN_CU,
+			doSimulation: true,
+			recentBlockhash: recentBlockhash.blockhash,
+		});
+		logger.info(
+			`[${this.name}] estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
+		);
+
+		if (simResult.simError !== null) {
+			logger.error(
+				`[${this.name}] Sim error (market: ${marketIndex}): ${JSON.stringify(
+					simResult.simError
+				)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
+			);
+			handleSimResultError(simResult, [], `[${this.name}]`);
+			return;
+		} else {
+			return simResult.tx;
+		}
 	}
 
 	private async getPythIxsFromTwapCrankInfo(
@@ -424,31 +440,45 @@ export class MakerBidAskTwapCrank implements Bot {
 			logger.info(
 				`[${this.name}] Cranking interval group ${intervalGroup}: ${crankMarkets}`
 			);
-			for (const mi of crankMarkets) {
-				const pfs = this.priorityFeeSubscriberMap!.getPriorityFees('perp', mi);
-				let microLamports = MIN_PRIORITY_FEE;
-				if (pfs) {
-					microLamports = Math.floor(
-						pfs.low *
-							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-					);
-				}
-				const clampedMicroLamports = Math.min(microLamports, MAX_PRIORITY_FEE);
-				console.log(
-					`market index ${mi}: microLamports: ${microLamports} (clamped: ${clampedMicroLamports})`
-				);
-				microLamports = clampedMicroLamports;
 
+			let txsToBundle: VersionedTransaction[] = [];
+
+			for (const mi of crankMarkets) {
 				const ixs = [
 					ComputeBudgetProgram.setComputeUnitLimit({
 						units: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
 					}),
-					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: isNaN(microLamports)
-							? MIN_PRIORITY_FEE
-							: microLamports,
-					}),
 				];
+
+				// add priority fees if not using jito
+				if (!this.bundleSender) {
+					const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
+						'perp',
+						mi
+					);
+					let microLamports = MIN_PRIORITY_FEE;
+					if (pfs) {
+						microLamports = Math.floor(
+							pfs.low *
+								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+						);
+					}
+					const clampedMicroLamports = Math.min(
+						microLamports,
+						MAX_PRIORITY_FEE
+					);
+					console.log(
+						`market index ${mi}: microLamports: ${microLamports} (clamped: ${clampedMicroLamports})`
+					);
+					microLamports = clampedMicroLamports;
+					ixs.push(
+						ComputeBudgetProgram.setComputeUnitPrice({
+							microLamports: isNaN(microLamports)
+								? MIN_PRIORITY_FEE
+								: microLamports,
+						})
+					);
+				}
 
 				let pythIxsPushed = false;
 				if (
@@ -471,7 +501,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					direction: PositionDirection.LONG,
 					slot: this.latestDlobSlot!,
 					oraclePriceData,
-					numMakers: 2,
+					numMakers: NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK,
 				});
 
 				const askMakers = this.dlob!.getBestMakers({
@@ -480,7 +510,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					direction: PositionDirection.SHORT,
 					slot: this.latestDlobSlot!,
 					oraclePriceData,
-					numMakers: 2,
+					numMakers: NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK,
 				});
 				logger.info(
 					`[${this.name}] loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
@@ -491,12 +521,12 @@ export class MakerBidAskTwapCrank implements Bot {
 					...this.getCombinedList(askMakers),
 				];
 
-				const ix = await this.driftClient.getUpdatePerpBidAskTwapIx(
-					mi,
-					concatenatedList as [PublicKey, PublicKey][]
+				ixs.push(
+					await this.driftClient.getUpdatePerpBidAskTwapIx(
+						mi,
+						concatenatedList as [PublicKey, PublicKey][]
+					)
 				);
-
-				ixs.push(ix);
 
 				if (
 					isVariant(
@@ -509,10 +539,22 @@ export class MakerBidAskTwapCrank implements Bot {
 					ixs.push(updatePrelaunchOracleIx);
 				}
 
-				await this.sendTx(mi, ixs);
-				logger.info(`[${this.name}] sent tx for market: ${mi}`);
+				const txToSend = await this.buildTransaction(mi, ixs);
+				if (txToSend) {
+					if (this.bundleSender) {
+						// @ts-ignore;
+						txToSend.sign([this.driftClient.wallet.payer]);
+						txsToBundle.push(txToSend);
+					} else {
+						await this.sendSingleTx(mi, txToSend);
+					}
+				} else {
+					logger.error(`[${this.name}] failed to build tx for market: ${mi}`);
+				}
+				// logger.info(`[${this.name}] sent tx for market: ${mi}`);
 
 				// Check if this change caused the pyth price to update
+				// TODO: move into own loop
 				if (
 					pythIxsPushed &&
 					isOneOfVariant(
@@ -538,6 +580,21 @@ export class MakerBidAskTwapCrank implements Bot {
 						numFeedsSignalingRestart++;
 					}
 				}
+
+				if (this.bundleSender && txsToBundle.length >= TX_PER_JITO_BUNDLE) {
+					logger.info(
+						`[${this.name}] sending ${txsToBundle.length} txs to jito`
+					);
+					await this.bundleSender!.sendTransactions(txsToBundle);
+					txsToBundle = [];
+				}
+			}
+
+			if (this.bundleSender && txsToBundle.length > 0) {
+				logger.info(
+					`[${this.name}] sending remaining ${txsToBundle.length} txs to jito`
+				);
+				await this.bundleSender!.sendTransactions(txsToBundle);
 			}
 		} catch (e) {
 			console.error(e);
