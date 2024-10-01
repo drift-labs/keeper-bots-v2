@@ -134,7 +134,7 @@ export class SwitchboardCrankerBot implements Bot {
 				});
 
 				if (this.globalConfig.useJito) {
-					this.bundleSender?.sendTransaction(simResult.tx);
+					this.bundleSender?.sendTransactions([simResult.tx]);
 				} else {
 					this.driftClient
 						.sendTransaction(simResult.tx)

@@ -1826,7 +1826,11 @@ export class SpotFillerMultithreaded {
 		) {
 			const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
 			if (slotsUntilNextLeader !== undefined) {
-				this.bundleSender.sendTransaction(tx, `(fillTxId: ${metadata})`, txSig);
+				this.bundleSender.sendTransactions(
+					tx,
+					`(fillTxId: ${metadata})`,
+					txSig
+				);
 			}
 		}
 	}

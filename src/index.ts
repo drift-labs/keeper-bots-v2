@@ -860,7 +860,8 @@ const runBot = async () => {
 				config.global,
 				config.global.runOnce ?? false,
 				pythPriceSubscriber,
-				[]
+				[],
+				bundleSender
 			)
 		);
 	}
