@@ -1113,7 +1113,7 @@ export class FillerMultithreaded {
 		}
 		const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
 		if (slotsUntilNextLeader !== undefined) {
-			this.bundleSender.sendTransactions(tx, `(fillTxId: ${metadata})`);
+			this.bundleSender.sendTransactions([tx], `(fillTxId: ${metadata})`);
 		}
 	}
 

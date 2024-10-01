@@ -1827,7 +1827,7 @@ export class SpotFillerMultithreaded {
 			const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
 			if (slotsUntilNextLeader !== undefined) {
 				this.bundleSender.sendTransactions(
-					tx,
+					[tx],
 					`(fillTxId: ${metadata})`,
 					txSig
 				);
