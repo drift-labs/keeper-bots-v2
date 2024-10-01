@@ -252,7 +252,7 @@ export class BundleSender {
 
 		this.searcherClient.onBundleResult(
 			(bundleResult: BundleResult) => {
-				logger.debug(
+				logger.info(
 					`${logPrefix}: got bundle result:\n${JSON.stringify(bundleResult)}`
 				);
 				this.bundleResultsReceived++;

@@ -415,12 +415,16 @@ export class MakerBidAskTwapCrank implements Bot {
 	private sendThroughJito(): boolean {
 		if (!this.bundleSender) {
 			// not configured for jito
+			console.warn(`skip sendThroughJito, bundleSender not initialized`);
 			return false;
 		}
 
 		const slotsUntilNextLeader = this.bundleSender.slotsUntilNextLeader() ?? 0;
 		if (slotsUntilNextLeader > 0) {
 			// no current jito leader
+			console.warn(
+				`skip sendThroughJito, slotsUntilNextLeader: ${slotsUntilNextLeader}`
+			);
 			return false;
 		}
 
@@ -571,6 +575,14 @@ export class MakerBidAskTwapCrank implements Bot {
 				}
 				// logger.info(`[${this.name}] sent tx for market: ${mi}`);
 
+				if (useJito && txsToBundle.length >= TX_PER_JITO_BUNDLE) {
+					logger.info(
+						`[${this.name}] sending ${txsToBundle.length} txs to jito`
+					);
+					await this.bundleSender!.sendTransactions(txsToBundle);
+					txsToBundle = [];
+				}
+
 				// Check if this change caused the pyth price to update
 				// TODO: move into own loop
 				if (
@@ -597,14 +609,6 @@ export class MakerBidAskTwapCrank implements Bot {
 						);
 						numFeedsSignalingRestart++;
 					}
-				}
-
-				if (useJito && txsToBundle.length >= TX_PER_JITO_BUNDLE) {
-					logger.info(
-						`[${this.name}] sending ${txsToBundle.length} txs to jito`
-					);
-					await this.bundleSender!.sendTransactions(txsToBundle);
-					txsToBundle = [];
 				}
 			}
 
