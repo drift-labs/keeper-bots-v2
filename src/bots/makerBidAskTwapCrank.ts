@@ -27,7 +27,6 @@ import {
 	TransactionInstruction,
 	TransactionExpiredBlockheightExceededError,
 	SendTransactionError,
-	Version,
 } from '@solana/web3.js';
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
@@ -359,19 +358,19 @@ export class MakerBidAskTwapCrank implements Bot {
 		marketIndex: number,
 		ixs: TransactionInstruction[]
 	): Promise<VersionedTransaction | undefined> {
-		let simResult: SimulateAndGetTxWithCUsResponse | undefined;
 		const recentBlockhash =
 			await this.driftClient.connection.getLatestBlockhash('confirmed');
-		simResult = await simulateAndGetTxWithCUs({
-			ixs,
-			connection: this.driftClient.connection,
-			payerPublicKey: this.driftClient.wallet.publicKey,
-			lookupTableAccounts: this.lookupTableAccounts,
-			cuLimitMultiplier: CU_EST_MULTIPLIER,
-			minCuLimit: TWAP_CRANK_MIN_CU,
-			doSimulation: true,
-			recentBlockhash: recentBlockhash.blockhash,
-		});
+		const simResult: SimulateAndGetTxWithCUsResponse | undefined =
+			await simulateAndGetTxWithCUs({
+				ixs,
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: this.lookupTableAccounts,
+				cuLimitMultiplier: CU_EST_MULTIPLIER,
+				minCuLimit: TWAP_CRANK_MIN_CU,
+				doSimulation: true,
+				recentBlockhash: recentBlockhash.blockhash,
+			});
 		logger.info(
 			`[${this.name}] estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
 		);
@@ -505,14 +504,29 @@ export class MakerBidAskTwapCrank implements Bot {
 				let pythIxsPushed = false;
 				if (
 					this.pythPriceSubscriber &&
-					!isVariant(
-						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-						'prelaunch'
-					)
+					this.driftClient
+						.getPerpMarketAccount(mi)!
+						.amm.oracleSource.toString()
+						.includes('pyth')
 				) {
 					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
 					ixs.push(...pythIxs);
 					pythIxsPushed = true;
+				} else if (
+					isVariant(
+						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+						'switchboardOnDemand'
+					)
+				) {
+					const sbIx =
+						await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
+							this.driftClient.getPerpMarketAccount(mi)!.amm.oracle
+						);
+					if (sbIx) {
+						ixs.push(sbIx);
+					} else {
+						logger.error(`[${this.name}] No switchboard ix for market: ${mi}`);
+					}
 				}
 
 				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
@@ -602,7 +616,6 @@ export class MakerBidAskTwapCrank implements Bot {
 					const pythData =
 						this.pythPullOracleClient.getOraclePriceDataFromBuffer(data.data);
 					const slotDelay = currentSlot - pythData.slot.toNumber();
-					console.log(slotDelay);
 					if (slotDelay > SLOT_STALENESS_THRESHOLD_RESTART) {
 						logger.info(
 							`[${this.name}] oracle slot stale for market: ${mi}, slot delay: ${slotDelay}`
