@@ -449,24 +449,26 @@ export const spawnChild = (
 export const getPriorityFeeInstruction = (
 	priorityFeeMicroLamports: number,
 	solPrice: BN,
-	fillerRewardEstimate: BN,
+	fillerRewardEstimate?: BN,
 	feeMultiplier = 1.0
 ) => {
-	const fillerRewardMicroLamports = Math.floor(
-		fillerRewardEstimate
-			.mul(PRICE_PRECISION)
-			.mul(new BN(LAMPORTS_PER_SOL))
-			.div(solPrice)
-			.div(QUOTE_PRECISION)
-			.toNumber() * feeMultiplier
-	);
-	logger.info(`
-		fillerRewardEstimate microLamports: ${fillerRewardMicroLamports}
-		priority fee subscriber micro lamports: ${priorityFeeMicroLamports}`);
+	let microLamports = priorityFeeMicroLamports;
+	if (fillerRewardEstimate !== undefined) {
+		const fillerRewardMicroLamports = Math.floor(
+			fillerRewardEstimate
+				.mul(PRICE_PRECISION)
+				.mul(new BN(LAMPORTS_PER_SOL))
+				.div(solPrice)
+				.div(QUOTE_PRECISION)
+				.toNumber() * feeMultiplier
+		);
+		logger.info(`
+			fillerRewardEstimate microLamports: ${fillerRewardMicroLamports}
+			priority fee subscriber micro lamports: ${priorityFeeMicroLamports}`);
+
+		microLamports = Math.max(microLamports, fillerRewardMicroLamports);
+	}
 	return ComputeBudgetProgram.setComputeUnitPrice({
-		microLamports: Math.max(
-			priorityFeeMicroLamports,
-			fillerRewardMicroLamports
-		),
+		microLamports,
 	});
 };

@@ -46,6 +46,7 @@ export type FillerMultiThreadedConfig = BaseBotConfig & {
 	rebalanceFiller?: boolean;
 	rebalanceSettledPnlThreshold?: number;
 	minGasBalanceToFill?: number;
+	bidToFillerReward?: boolean;
 };
 
 export type FillerConfig = BaseBotConfig & {

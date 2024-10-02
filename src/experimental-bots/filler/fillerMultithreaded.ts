@@ -359,11 +359,11 @@ export class FillerMultithreaded {
 		}
 
 		logger.info(
-			`${this.name}: minimumAmountToFill: ${this.minGasBalanceToFill}`
-		);
-
-		logger.info(
-			`${this.name}: minimumAmountToSettle: ${this.rebalanceSettledPnlThreshold}`
+			`${this.name}: multiThreadedFillerConfig:\n${JSON.stringify(
+				config,
+				null,
+				2
+			)}`
 		);
 
 		this.pendingTxSigsToconfirm = new LRUCache<
@@ -1558,7 +1558,7 @@ export class FillerMultithreaded {
 								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 						),
 						this.driftClient.getOracleDataForPerpMarket(0).price,
-						fillerRewardEstimate,
+						this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
 						this.globalConfig.priorityFeeMultiplier
 					)
 				);
@@ -1768,7 +1768,7 @@ export class FillerMultithreaded {
 							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 					),
 					this.driftClient.getOracleDataForPerpMarket(0).price,
-					fillerRewardEstimate,
+					this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
 					this.globalConfig.priorityFeeMultiplier
 				)
 			);
