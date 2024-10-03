@@ -504,10 +504,10 @@ export class MakerBidAskTwapCrank implements Bot {
 				let pythIxsPushed = false;
 				if (
 					this.pythPriceSubscriber &&
-					this.driftClient
-						.getPerpMarketAccount(mi)!
-						.amm.oracleSource.toString()
-						.includes('pyth')
+					isOneOfVariant(
+						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+						['pythPull', 'pyth1KPull', 'pyth1MPull', 'pythStableCoinPull']
+					)
 				) {
 					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
 					ixs.push(...pythIxs);
@@ -603,7 +603,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					pythIxsPushed &&
 					isOneOfVariant(
 						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-						['pythPull', 'pyth1KPull', 'ptyh1MPull', 'pythStableCoinPull']
+						['pythPull', 'pyth1KPull', 'pyth1MPull', 'pythStableCoinPull']
 					)
 				) {
 					const [data, currentSlot] = await Promise.all([
