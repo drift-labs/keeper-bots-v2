@@ -95,7 +95,6 @@ export class SwitchboardCrankerBot implements Bot {
 	async runCrankLoop() {
 		for (const alias in this.crankConfigs.pullFeedConfigs) {
 			try {
-				console.log(this.crankConfigs.pullFeedConfigs[alias].pubkey);
 				const pubkey = new PublicKey(
 					this.crankConfigs.pullFeedConfigs[alias].pubkey
 				);
