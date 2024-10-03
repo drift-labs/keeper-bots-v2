@@ -381,6 +381,8 @@ export class PythCrankerBot implements Bot {
 						doSimulation: true,
 						recentBlockhash: await this.getBlockhashForTx(),
 					});
+					// @ts-ignore
+					simResult.tx.sign([this.driftClient.wallet.payer]);
 					this.bundleSender?.sendTransactions([simResult.tx]);
 				} else {
 					const priorityFees = Math.floor(
