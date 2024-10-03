@@ -197,19 +197,19 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.10.569":
-  version "0.10.569"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.569.tgz#15077850c2d3c66b82b9180c8cc099d6e7194cdc"
-  integrity sha512-/isBTGcvSh2zKJQX1vQFhwOCUIkCGjzToy8oDGZrQY6qer5k0M5eQBqG63HIZ/gpQpUz//ui0ohY0H4jpcrn3w==
+"@drift-labs/jit-proxy@0.10.579":
+  version "0.10.579"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.579.tgz#3be5f17c8cf265ee96a2e90921f6bde9d9a29316"
+  integrity sha512-Xf9mkXDDUeVkjeNGYRO+AFPTPR7AfDvKQqp6OaMwyLOjYqR4JQpGqMIqwBMyOKP/j2Nv1l+OiEewOy8uS56wOQ==
   dependencies:
     "@coral-xyz/anchor" "^0.26.0"
-    "@drift-labs/sdk" "2.96.0-beta.14"
+    "@drift-labs/sdk" "2.96.0-beta.25"
     "@solana/web3.js" "1.91.7"
 
-"@drift-labs/sdk@2.96.0-beta.14":
-  version "2.96.0-beta.14"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.96.0-beta.14.tgz#d99310d8402f8a63e9147a1e3d76a40b3622e52a"
-  integrity sha512-id2k5O8cXAfC1mhNWmafQTqlHc9sIWfZtjlMDs/yW/zUGj+4mHW0Z3uFMgMGBK/CFPClbs+VV0tN4ql55EBK6g==
+"@drift-labs/sdk@2.96.0-beta.25":
+  version "2.96.0-beta.25"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.96.0-beta.25.tgz#17c5f9828855891651d446d296e7df8f47bcf579"
+  integrity sha512-7hYlHVxnDubSTTjBoQj1iHD9colPOQlRh9r2Uj+fhD19I6EkAGMxqn30/u1z/gUAPl8jid+ppQr8/MBN5DP1sg==
   dependencies:
     "@coral-xyz/anchor" "0.28.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -221,7 +221,7 @@
     "@pythnetwork/pyth-solana-receiver" "^0.7.0"
     "@solana/spl-token" "0.3.7"
     "@solana/web3.js" "1.92.3"
-    "@switchboard-xyz/on-demand" "1.2.32"
+    "@switchboard-xyz/on-demand" "1.2.42"
     anchor-bankrun "^0.3.0"
     node-cache "^5.1.2"
     rpc-websockets "7.5.1"
@@ -1624,10 +1624,10 @@
   dependencies:
     tslib "^2.4.0"
 
-"@switchboard-xyz/common@^2.4.5":
-  version "2.4.5"
-  resolved "https://registry.yarnpkg.com/@switchboard-xyz/common/-/common-2.4.5.tgz#d6298ab4838172a1cde7012b63514dd00b9d616d"
-  integrity sha512-6OYdLsilVW7PFjLIzK8LKnOQW0EgQHgaMzEraTx/X8bRXQnJmi2XT3I+ZoNUejvo6cwQ9NNYXWQIjSpQgYYeGQ==
+"@switchboard-xyz/common@^2.5.0":
+  version "2.5.0"
+  resolved "https://registry.yarnpkg.com/@switchboard-xyz/common/-/common-2.5.0.tgz#15f60abd0c2503d855caf6f120ed98f8f0dd9d25"
+  integrity sha512-BgQTvqOZGZxMSscy2x3GHrs2/BRhFf55t7QrqVdED1KneCP0KgcZn436GjGttc61nP2i8Yd7VoJzTNksezn2kA==
   dependencies:
     "@solana/web3.js" "^1.93.0"
     axios "^1.7.2"
@@ -1636,19 +1636,21 @@
     bs58 "^5.0.0"
     cron-validator "^1.3.1"
     decimal.js "^10.4.3"
+    js-sha256 "^0.11.0"
     lodash "^4.17.21"
     protobufjs "^7.2.6"
+    yaml "^2.5.0"
 
-"@switchboard-xyz/on-demand@1.2.32":
-  version "1.2.32"
-  resolved "https://registry.yarnpkg.com/@switchboard-xyz/on-demand/-/on-demand-1.2.32.tgz#ae68e45ab9cfb5ccc7c8f6d0506dd3ea7024f9ec"
-  integrity sha512-cS/7rkNg1tu6dtypMQZw6avsTF4DbNYOfA8tNq0rjCpipNTtQZp51UtkGSgIu8qfH8ebSBgpPxkUXlWpXYk3CA==
+"@switchboard-xyz/on-demand@1.2.42":
+  version "1.2.42"
+  resolved "https://registry.yarnpkg.com/@switchboard-xyz/on-demand/-/on-demand-1.2.42.tgz#1ec8ae18381baa66e20341648a1cdbd3c30efc8f"
+  integrity sha512-Q2qMpBM95RIDhGWA5vqRrAySRYncWKa7QWpAwLaIu5xPZMlSqNo12+lX30fUnqTWVeIXey/rp/3n6yOJLBsjjA==
   dependencies:
     "@brokerloop/ttlcache" "^3.2.3"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
     "@solana/web3.js" "^1.95.0"
     "@solworks/soltoolkit-sdk" "^0.0.23"
-    "@switchboard-xyz/common" "^2.4.5"
+    "@switchboard-xyz/common" "^2.5.0"
     axios "^1.7.4"
     big.js "^6.2.1"
     bs58 "^5.0.0"
@@ -3759,6 +3761,11 @@ joi@^17.3.0:
     "@sideway/formula" "^3.0.1"
     "@sideway/pinpoint" "^2.0.0"
 
+js-sha256@^0.11.0:
+  version "0.11.0"
+  resolved "https://registry.yarnpkg.com/js-sha256/-/js-sha256-0.11.0.tgz#256a921d9292f7fe98905face82e367abaca9576"
+  integrity sha512-6xNlKayMZvds9h1Y1VWc0fQHQ82BxTXizWPEtEeGvmOUYpBRy4gbWroHLpzowe6xiQhHpelCQiE7HEdznyBL9Q==
+
 js-sha256@^0.9.0:
   version "0.9.0"
   resolved "https://registry.yarnpkg.com/js-sha256/-/js-sha256-0.9.0.tgz#0b89ac166583e91ef9123644bd3c5334ce9d0966"
@@ -5212,6 +5219,11 @@ yaml@^2.2.1:
   version "2.3.4"
   resolved "https://registry.yarnpkg.com/yaml/-/yaml-2.3.4.tgz#53fc1d514be80aabf386dc6001eb29bf3b7523b2"
   integrity sha512-8aAvwVUSHpfEqTQ4w/KMlf3HcRdt50E5ODIQJBw1fQ5RL34xabzxtUlzTXVqc4rkZsPbvrXKWnABCD7kWSmocA==
+
+yaml@^2.5.0:
+  version "2.5.1"
+  resolved "https://registry.yarnpkg.com/yaml/-/yaml-2.5.1.tgz#c9772aacf62cb7494a95b0c4f1fb065b563db130"
+  integrity sha512-bLQOjaX/ADgQ20isPJRvF0iRUHIxVhYvr53Of7wGcWlO2jvtUlH5m87DsmulFVxRpNLOnI4tB6p/oh8D7kpn9Q==
 
 yargs-parser@20.2.4:
   version "20.2.4"
