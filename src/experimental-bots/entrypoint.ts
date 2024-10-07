@@ -222,7 +222,9 @@ const runBot = async () => {
 		getMarketsAndOraclesForSubscription(
 			config.global.driftEnv || 'mainnet-beta'
 		);
-
+	const marketLookupTable = config.global?.lutPubkey
+		? new PublicKey(config.global.lutPubkey)
+		: undefined;
 	const driftClientConfig = {
 		connection,
 		wallet,
@@ -235,6 +237,7 @@ const runBot = async () => {
 		oracleInfos,
 		txVersion: 0 as TransactionVersion,
 		txSender,
+		marketLookupTable,
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	await driftClient.subscribe();

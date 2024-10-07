@@ -199,6 +199,8 @@ export interface GlobalConfig {
 	trackTxLandRate?: boolean;
 
 	rebalanceFiller?: boolean;
+
+	lutPubkey?: string;
 }
 
 export interface Config {
