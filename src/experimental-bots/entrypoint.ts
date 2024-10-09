@@ -157,6 +157,8 @@ const runBot = async () => {
 	const txSenderType = config.global.txSenderType || 'retry';
 	let txSender;
 	let additionalConnections: Connection[] = [];
+	const confirmationStrategy: ConfirmationStrategy =
+		config.global.txSenderConfirmationStrategy;
 	if (
 		config.global.additionalSendTxEndpoints &&
 		config.global.additionalSendTxEndpoints.length > 0
@@ -184,6 +186,7 @@ const runBot = async () => {
 			retrySleep: 2000,
 			additionalConnections,
 			trackTxLandRate: config.global.trackTxLandRate,
+			confirmationStrategy,
 		});
 	} else {
 		const skipConfirmation =
@@ -197,6 +200,7 @@ const runBot = async () => {
 			skipConfirmation,
 			additionalConnections,
 			trackTxLandRate: config.global.trackTxLandRate,
+			confirmationStrategy,
 		});
 	}
 

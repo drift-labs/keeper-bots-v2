@@ -5,7 +5,13 @@ import {
 	loadCommaDelimitToStringArray,
 } from './utils';
 import { OrderExecutionAlgoType } from './types';
-import { BN, DriftEnv, MarketType, PerpMarkets } from '@drift-labs/sdk';
+import {
+	BN,
+	ConfirmationStrategy,
+	DriftEnv,
+	MarketType,
+	PerpMarkets,
+} from '@drift-labs/sdk';
 
 export type BaseBotConfig = {
 	botId: string;
@@ -194,6 +200,7 @@ export interface GlobalConfig {
 
 	txRetryTimeoutMs?: number;
 	txSenderType?: 'fast' | 'retry' | 'while-valid';
+	txSenderConfirmationStrategy: ConfirmationStrategy;
 	txSkipPreflight?: boolean;
 	txMaxRetries?: number;
 	trackTxLandRate?: boolean;
@@ -252,6 +259,7 @@ const defaultConfig: Partial<Config> = {
 		onlySendDuringJitoLeader: false,
 		txSkipPreflight: false,
 		txMaxRetries: 0,
+		txSenderConfirmationStrategy: ConfirmationStrategy.Combo,
 
 		metricsPort: 9464,
 		disableMetrics: false,
@@ -367,6 +375,8 @@ export function loadConfigFromOpts(opts: any): Config {
 				: false,
 			txMaxRetries: parseInt(opts.txMaxRetries ?? '0'),
 			trackTxLandRate: opts.trackTxLandRate ?? false,
+			txSenderConfirmationStrategy:
+				opts.txSenderConfirmationStrategy ?? ConfirmationStrategy.Combo,
 
 			metricsPort: opts.metricsPort ?? 9464,
 			disableMetrics: opts.disableMetrics ?? false,

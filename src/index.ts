@@ -31,7 +31,6 @@ import {
 	UserMap,
 	Wallet,
 	RetryTxSender,
-	ConfirmationStrategy,
 	PriorityFeeSubscriber,
 	PriorityFeeMethod,
 	HeliusPriorityFeeResponse,
@@ -327,6 +326,7 @@ const runBot = async () => {
 
 	const txSenderType = config.global.txSenderType || 'retry';
 	let txSender: FastSingleTxSender | RetryTxSender | WhileValidTxSender;
+	const confirmationStrategy = config.global.txSenderConfirmationStrategy;
 	let additionalConnections: Connection[] = [];
 	if (
 		config.global.additionalSendTxEndpoints &&
@@ -343,7 +343,7 @@ const runBot = async () => {
 			opts,
 			retrySleep: 8000,
 			timeout: config.global.txRetryTimeoutMs,
-			confirmationStrategy: ConfirmationStrategy.Polling,
+			confirmationStrategy,
 			additionalConnections,
 			trackTxLandRate: config.global.trackTxLandRate,
 		});
@@ -354,6 +354,7 @@ const runBot = async () => {
 			opts,
 			retrySleep: 2000,
 			additionalConnections,
+			confirmationStrategy,
 			trackTxLandRate: config.global.trackTxLandRate,
 		});
 	} else {
