@@ -546,7 +546,7 @@ export async function simulateAndGetTxWithCUs(
 		});
 		simTxDuration = Date.now() - start;
 	} catch (e) {
-		console.error(e);
+		logger.error(`Error simulating transaction: ${JSON.stringify(e)}`);
 	}
 	if (!resp) {
 		throw new Error('Failed to simulate transaction');
