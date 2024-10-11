@@ -113,6 +113,15 @@ function buildCrankIntervalToMarketIds(driftClient: DriftClient): {
 	const driftMarkets: DriftMarketInfo[] = [];
 
 	for (const perpMarket of driftClient.getPerpMarketAccounts()) {
+		if (isOneOfVariant(perpMarket.status, ['settlement', 'delisted'])) {
+			logger.info(
+				`markTwapCrank skipping market ${
+					perpMarket.marketIndex
+				} with status ${getVariant(perpMarket.status)}`
+			);
+			continue;
+		}
+
 		driftMarkets.push({
 			marketType: 'perp',
 			marketIndex: perpMarket.marketIndex,
