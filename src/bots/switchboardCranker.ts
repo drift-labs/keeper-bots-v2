@@ -133,6 +133,8 @@ export class SwitchboardCrankerBot implements Bot {
 				});
 
 				if (this.globalConfig.useJito) {
+					// @ts-ignore;
+					simResult.tx.sign([this.driftClient.wallet.payer]);
 					this.bundleSender?.sendTransactions([simResult.tx]);
 				} else {
 					this.driftClient
