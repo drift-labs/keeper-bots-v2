@@ -521,21 +521,6 @@ export class MakerBidAskTwapCrank implements Bot {
 					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
 					ixs.push(...pythIxs);
 					pythIxsPushed = true;
-				} else if (
-					isVariant(
-						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-						'switchboardOnDemand'
-					)
-				) {
-					const sbIx =
-						await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
-							this.driftClient.getPerpMarketAccount(mi)!.amm.oracle
-						);
-					if (sbIx) {
-						ixs.push(sbIx);
-					} else {
-						logger.error(`[${this.name}] No switchboard ix for market: ${mi}`);
-					}
 				}
 
 				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
