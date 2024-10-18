@@ -197,19 +197,19 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.10.604":
-  version "0.10.604"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.604.tgz#247a8b7f2c67970b4ade33110819cc85b5e9a48b"
-  integrity sha512-H7nIYswmV9WV+TA0jqy/g0y6LN7s7u3z1cP6YO7amTCw32njzyQXXa9XDmJDUR/cIoryBdJT2aJB2eQogs2FpQ==
+"@drift-labs/jit-proxy@0.10.605":
+  version "0.10.605"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.605.tgz#01643ffeaba0400b1857a3c3bc5edfd9d21f5cea"
+  integrity sha512-24azEj8h03HA1Qd9heaNTLpmGu8PF+CY1pqP06pf5yKxF6hTmX6TnJ7kDQ8pZ/1D3lUZCNVYNvqt6AtfUtW1TQ==
   dependencies:
     "@coral-xyz/anchor" "^0.26.0"
-    "@drift-labs/sdk" "2.97.0-beta.21"
+    "@drift-labs/sdk" "2.97.0-beta.22"
     "@solana/web3.js" "1.91.7"
 
-"@drift-labs/sdk@2.97.0-beta.21":
-  version "2.97.0-beta.21"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.97.0-beta.21.tgz#a446f0a9cc8ca482697a0b6094aad87bbf9be132"
-  integrity sha512-t7uN4z+FTRG9Y1BxvdSvUpsJpxBQX7COOmz81Jy4AAIdhM9GLaf798DKXDJU7eoZIe3zKZPNaEHzhDVQpaTOFg==
+"@drift-labs/sdk@2.97.0-beta.22":
+  version "2.97.0-beta.22"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.97.0-beta.22.tgz#d6af59a189b062fbf8b49f5b5bc8d79655132b07"
+  integrity sha512-ZvZ0EL1CGO67WPQxQFxcTzWVRSfvYzD4XOageJ4LMT+U7W46jwg7+eNqSzKtwKYSyvb1RsXIFwZrquR39N7mwQ==
   dependencies:
     "@coral-xyz/anchor" "0.28.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -227,6 +227,7 @@
     rpc-websockets "7.5.1"
     solana-bankrun "^0.3.0"
     strict-event-emitter-types "^2.0.0"
+    tweetnacl "1.0.3"
     uuid "^8.3.2"
     zstddec "^0.1.0"
 
@@ -4995,6 +4996,11 @@ tsutils@^3.21.0:
   integrity sha512-mHKK3iUXL+3UF6xL5k0PEhKRUBKPBCv/+RkEOpjRWxxx27KKRBmmA60A9pgOUvMi8GKhRMPEmjBRPzs2W7O1OA==
   dependencies:
     tslib "^1.8.1"
+
+tweetnacl@1.0.3:
+  version "1.0.3"
+  resolved "https://registry.yarnpkg.com/tweetnacl/-/tweetnacl-1.0.3.tgz#ac0af71680458d8a6378d0d0d050ab1407d35596"
+  integrity sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw==
 
 type-check@^0.4.0, type-check@~0.4.0:
   version "0.4.0"
