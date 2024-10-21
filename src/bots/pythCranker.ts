@@ -34,10 +34,7 @@ import {
 	PublicKey,
 } from '@solana/web3.js';
 import { convertPythPrice } from '@drift-labs/sdk';
-import {
-	getFeedIdUint8Array,
-	trimFeedId,
-} from '@drift-labs/sdk';
+import { getFeedIdUint8Array, trimFeedId } from '@drift-labs/sdk';
 import { chunks, shuffle, simulateAndGetTxWithCUs, sleepMs } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
 

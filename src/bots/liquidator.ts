@@ -66,10 +66,7 @@ import { Bot, TwapExecutionProgress } from '../types';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { webhookMessage } from '../webhook';
 import { LiquidatorConfig } from '../config';
-import {
-	getPerpMarketTierNumber,
-	perpTierIsAsSafeAs,
-} from '@drift-labs/sdk';
+import { getPerpMarketTierNumber, perpTierIsAsSafeAs } from '@drift-labs/sdk';
 import {
 	ComputeBudgetProgram,
 	PublicKey,

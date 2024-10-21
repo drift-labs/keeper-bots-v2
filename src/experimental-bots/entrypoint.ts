@@ -187,6 +187,7 @@ const runBot = async () => {
 			additionalConnections,
 			trackTxLandRate: config.global.trackTxLandRate,
 			confirmationStrategy,
+			throwOnTimeoutError: false,
 		});
 	} else {
 		const skipConfirmation =
