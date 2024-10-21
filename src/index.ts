@@ -388,11 +388,13 @@ const runBot = async () => {
 		({ perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 			getMarketsAndOraclesForSubscription(config.global.driftEnv!));
 	}
+	const marketLookupTable = config.global?.lutPubkey
+		? new PublicKey(config.global.lutPubkey)
+		: undefined;
 	const driftClientConfig = {
 		connection,
 		wallet,
 		programID: driftPublicKey,
-
 		opts,
 		accountSubscription,
 		env: config.global.driftEnv,
@@ -404,6 +406,7 @@ const runBot = async () => {
 		subAccountIds: config.global.subaccounts ?? [0],
 		txVersion: 0 as TransactionVersion,
 		txSender,
+		marketLookupTable
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	driftClient.eventEmitter.on('error', (e) => {
