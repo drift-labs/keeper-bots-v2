@@ -38,7 +38,7 @@ import {
 	SimulateAndGetTxWithCUsResponse,
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
-import { PythPullClient } from '@drift-labs/sdk/lib/oracles/pythPullClient';
+import { PythPullClient } from '@drift-labs/sdk';
 import { BundleSender } from '../bundleSender';
 
 const CU_EST_MULTIPLIER = 1.4;

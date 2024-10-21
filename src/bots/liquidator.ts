@@ -69,7 +69,7 @@ import { LiquidatorConfig } from '../config';
 import {
 	getPerpMarketTierNumber,
 	perpTierIsAsSafeAs,
-} from '@drift-labs/sdk/lib/math/tiers';
+} from '@drift-labs/sdk';
 import {
 	ComputeBudgetProgram,
 	PublicKey,

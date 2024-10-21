@@ -40,7 +40,7 @@ import {
 	WhileValidTxSender,
 	PerpMarkets,
 } from '@drift-labs/sdk';
-import { promiseTimeout } from '@drift-labs/sdk/lib/util/promiseTimeout';
+import { promiseTimeout } from '@drift-labs/sdk';
 
 import { logger, setLogLevel } from './logger';
 import { constants } from './types';
@@ -356,6 +356,7 @@ const runBot = async () => {
 			additionalConnections,
 			confirmationStrategy,
 			trackTxLandRate: config.global.trackTxLandRate,
+			throwOnTimeoutError: false,
 		});
 	} else {
 		const skipConfirmation =
