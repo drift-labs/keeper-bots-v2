@@ -406,7 +406,7 @@ const runBot = async () => {
 		subAccountIds: config.global.subaccounts ?? [0],
 		txVersion: 0 as TransactionVersion,
 		txSender,
-		marketLookupTable
+		marketLookupTable,
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	driftClient.eventEmitter.on('error', (e) => {
