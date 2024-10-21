@@ -7,7 +7,7 @@ import {
 	PriorityFeeSubscriber,
 	TxSigAndSlot,
 } from '@drift-labs/sdk';
-import { SwitchboardOnDemandClient } from '@drift-labs/sdk/lib/oracles/switchboardOnDemandClient';
+import { SwitchboardOnDemandClient } from '@drift-labs/sdk';
 import { BundleSender } from '../bundleSender';
 import {
 	AddressLookupTableAccount,

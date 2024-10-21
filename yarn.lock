@@ -197,23 +197,24 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.10.602":
-  version "0.10.602"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.602.tgz#e8b92971e5f9e9ff756eb8c425ae123d2de6ab38"
-  integrity sha512-CeUyUD2fBXWZcQCIufUx1qVZo8+Yx/wfINbLu7CcYWJhKZNlHIk37qYXGTFrG/4r5l20uq8l2K+kuwc4AHSv2A==
+"@drift-labs/jit-proxy@0.10.608":
+  version "0.10.608"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.10.608.tgz#41c8692744837799ad6e643919335bee5df0f33f"
+  integrity sha512-wJy9S/zi0o0DEf18wWnZPhPlRD97O6gnSBtJGSS7io8Sf9amKcY1IOUKy9uNrW90uC1OZawnPVLJIojMT1Zvfw==
   dependencies:
     "@coral-xyz/anchor" "^0.26.0"
-    "@drift-labs/sdk" "2.97.0-beta.19"
+    "@drift-labs/sdk" "2.97.0-beta.28"
     "@solana/web3.js" "1.91.7"
 
-"@drift-labs/sdk@2.97.0-beta.19":
-  version "2.97.0-beta.19"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.97.0-beta.19.tgz#2434560e2805cd2a2a484db4b96dad23e496da66"
-  integrity sha512-ZKuE3qGzmFI1VfhRuATVN7jfL0DmgUOCiFHybXDb8CR8m6OleoGCn8YIcNHlRrmQe9rR7IXmMwgRZzBcsVw4sw==
+"@drift-labs/sdk@2.97.0-beta.28":
+  version "2.97.0-beta.28"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.97.0-beta.28.tgz#80fe4f739b209dd05e8aa076405877b41d7f7d74"
+  integrity sha512-UOng+ZoL6XtSmc/t0XMDP9DqWQgOjV2xx3SUQ9qvydCjxu16hmLGrE0vj4Ez6mCtmCRq8G09ECtLTiroAVO/OA==
   dependencies:
     "@coral-xyz/anchor" "0.28.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
     "@ellipsis-labs/phoenix-sdk" "^1.4.2"
+    "@grpc/grpc-js" "^1.8.0"
     "@openbook-dex/openbook-v2" "0.2.10"
     "@project-serum/serum" "^0.13.38"
     "@pythnetwork/client" "2.5.3"
@@ -222,11 +223,13 @@
     "@solana/spl-token" "0.3.7"
     "@solana/web3.js" "1.92.3"
     "@switchboard-xyz/on-demand" "1.2.42"
+    "@triton-one/yellowstone-grpc" "0.6.0"
     anchor-bankrun "^0.3.0"
     node-cache "^5.1.2"
     rpc-websockets "7.5.1"
     solana-bankrun "^0.3.0"
     strict-event-emitter-types "^2.0.0"
+    tweetnacl "1.0.3"
     uuid "^8.3.2"
     zstddec "^0.1.0"
 
@@ -283,6 +286,14 @@
   resolved "https://registry.yarnpkg.com/@fastify/error/-/error-2.0.0.tgz#a9f94af56eb934f0ab1ce4ef9f0ced6ebf2319dc"
   integrity sha512-wI3fpfDT0t7p8E6dA2eTECzzOd+bZsZCJ2Hcv+Onn2b7ZwK3RwD27uW2QDaMtQhAfWQQP+WNK7nKf0twLsBf9w==
 
+"@grpc/grpc-js@^1.8.0":
+  version "1.12.2"
+  resolved "https://registry.yarnpkg.com/@grpc/grpc-js/-/grpc-js-1.12.2.tgz#97eda82dd49bb9c24eaf6434ea8d7de446e95aac"
+  integrity sha512-bgxdZmgTrJZX50OjyVwz3+mNEnCTNkh3cIqGPWVNeW9jX6bn1ZkU80uPd+67/ZpIJIjRQ9qaHCjhavyoWYxumg==
+  dependencies:
+    "@grpc/proto-loader" "^0.7.13"
+    "@js-sdsl/ordered-map" "^4.4.2"
+
 "@grpc/grpc-js@^1.8.13":
   version "1.9.12"
   resolved "https://registry.yarnpkg.com/@grpc/grpc-js/-/grpc-js-1.9.12.tgz#a45b23a7d9ee1eadc9fa8fe480e27edbc6544cdd"
@@ -290,6 +301,16 @@
   dependencies:
     "@grpc/proto-loader" "^0.7.8"
     "@types/node" ">=12.12.47"
+
+"@grpc/proto-loader@^0.7.13":
+  version "0.7.13"
+  resolved "https://registry.yarnpkg.com/@grpc/proto-loader/-/proto-loader-0.7.13.tgz#f6a44b2b7c9f7b609f5748c6eac2d420e37670cf"
+  integrity sha512-AiXO/bfe9bmxBjxxtYxFAXGZvMaN5s8kO+jBHAJCON8rJoB5YS/D6X7ZNc6XQkuHNmyl4CYaMI1fJ/Gn27RGGw==
+  dependencies:
+    lodash.camelcase "^4.3.0"
+    long "^5.0.0"
+    protobufjs "^7.2.5"
+    yargs "^17.7.2"
 
 "@grpc/proto-loader@^0.7.8":
   version "0.7.10"
@@ -403,6 +424,11 @@
   dependencies:
     "@jridgewell/resolve-uri" "^3.0.3"
     "@jridgewell/sourcemap-codec" "^1.4.10"
+
+"@js-sdsl/ordered-map@^4.4.2":
+  version "4.4.2"
+  resolved "https://registry.yarnpkg.com/@js-sdsl/ordered-map/-/ordered-map-4.4.2.tgz#9299f82874bab9e4c7f9c48d865becbfe8d6907c"
+  integrity sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==
 
 "@metaplex-foundation/beet-solana@^0.3.0":
   version "0.3.1"
@@ -1656,6 +1682,13 @@
     bs58 "^5.0.0"
     js-yaml "^4.1.0"
     protobufjs "^7.2.6"
+
+"@triton-one/yellowstone-grpc@0.6.0":
+  version "0.6.0"
+  resolved "https://registry.yarnpkg.com/@triton-one/yellowstone-grpc/-/yellowstone-grpc-0.6.0.tgz#9e6376cec8a42284c23dc195df2c3423c87c4f27"
+  integrity sha512-rgdZM2N3U9/d/QKOI5PP+9rSHUl2oSI5Uwzvuss8y/mtTaHFjbOMpXpQXviIeDkusOa+mef4wLYrbjEZCwTXiw==
+  dependencies:
+    "@grpc/grpc-js" "^1.8.0"
 
 "@tsconfig/node10@^1.0.7":
   version "1.0.9"
@@ -4421,6 +4454,24 @@ protobufjs@^7.2.4:
     "@types/node" ">=13.7.0"
     long "^5.0.0"
 
+protobufjs@^7.2.5:
+  version "7.4.0"
+  resolved "https://registry.yarnpkg.com/protobufjs/-/protobufjs-7.4.0.tgz#7efe324ce9b3b61c82aae5de810d287bc08a248a"
+  integrity sha512-mRUWCc3KUU4w1jU8sGxICXH/gNS94DvI1gxqDvBzhj1JpcsimQkYiOJfwsPUykUI5ZaspFbSgmBLER8IrQ3tqw==
+  dependencies:
+    "@protobufjs/aspromise" "^1.1.2"
+    "@protobufjs/base64" "^1.1.2"
+    "@protobufjs/codegen" "^2.0.4"
+    "@protobufjs/eventemitter" "^1.1.0"
+    "@protobufjs/fetch" "^1.1.0"
+    "@protobufjs/float" "^1.0.2"
+    "@protobufjs/inquire" "^1.1.0"
+    "@protobufjs/path" "^1.1.2"
+    "@protobufjs/pool" "^1.1.0"
+    "@protobufjs/utf8" "^1.1.0"
+    "@types/node" ">=13.7.0"
+    long "^5.0.0"
+
 protobufjs@^7.2.6:
   version "7.3.2"
   resolved "https://registry.yarnpkg.com/protobufjs/-/protobufjs-7.3.2.tgz#60f3b7624968868f6f739430cfbc8c9370e26df4"
@@ -5038,6 +5089,11 @@ tsutils@^3.21.0:
   integrity sha512-mHKK3iUXL+3UF6xL5k0PEhKRUBKPBCv/+RkEOpjRWxxx27KKRBmmA60A9pgOUvMi8GKhRMPEmjBRPzs2W7O1OA==
   dependencies:
     tslib "^1.8.1"
+
+tweetnacl@1.0.3:
+  version "1.0.3"
+  resolved "https://registry.yarnpkg.com/tweetnacl/-/tweetnacl-1.0.3.tgz#ac0af71680458d8a6378d0d0d050ab1407d35596"
+  integrity sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw==
 
 type-check@^0.4.0, type-check@~0.4.0:
   version "0.4.0"
