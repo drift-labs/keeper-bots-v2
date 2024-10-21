@@ -425,7 +425,8 @@ export class BundleSender {
 	calculateCurrentTipAmount() {
 		return Math.floor(
 			Math.max(
-				this.lastTipStream?.landed_tips_25th_percentile ?? 0 * LAMPORTS_PER_SOL,
+				(this.lastTipStream?.landed_tips_25th_percentile ?? 0) *
+					LAMPORTS_PER_SOL,
 				this.minBundleTip,
 				Math.min(
 					this.maxBundleTip,
