@@ -147,6 +147,8 @@ export type BotConfigMap = {
 	uncrossArb?: BaseBotConfig;
 	pythCranker?: PythCrankerBotConfig;
 	switchboardCranker?: SwitchboardCrankerBotConfig;
+	swiftTaker?: BaseBotConfig;
+	swiftMaker?: BaseBotConfig;
 };
 
 export interface GlobalConfig {

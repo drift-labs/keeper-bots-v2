@@ -19,6 +19,7 @@ import {
 	SlotSubscriber,
 	initialize,
 	WhileValidTxSender,
+	UserMap,
 } from '@drift-labs/sdk';
 import {
 	Commitment,
@@ -34,6 +35,8 @@ import { promiseTimeout } from '@drift-labs/sdk';
 import { SpotFillerMultithreaded } from './spotFiller/spotFillerMultithreaded';
 import { setGlobalDispatcher, Agent } from 'undici';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+import { SwiftMaker } from './swift/makerExample';
+import { SwiftTaker } from './swift/takerExample';
 
 setGlobalDispatcher(
 	new Agent({
@@ -366,6 +369,44 @@ const runBot = async () => {
 		);
 		bots.push(spotFillerMultithreaded);
 	}
+
+	if (configHasBot(config, 'swiftMaker')) {
+		const userMap = new UserMap({
+			connection,
+			driftClient,
+			subscriptionConfig: {
+				type: 'polling',
+				frequency: 5000,
+			},
+			fastDecode: true,
+		});
+		await userMap.subscribe();
+
+		const swiftMaker = new SwiftMaker(driftClient, userMap, {
+			rpcEndpoint: endpoint,
+			commit: '',
+			driftEnv: config.global.driftEnv!,
+			driftPid: driftPublicKey.toBase58(),
+			walletAuthority: wallet.publicKey.toBase58(),
+		});
+		bots.push(swiftMaker);
+	}
+
+	if (configHasBot(config, 'swiftTaker')) {
+		const swiftMaker = new SwiftTaker(
+			driftClient,
+			{
+				rpcEndpoint: endpoint,
+				commit: '',
+				driftEnv: config.global.driftEnv!,
+				driftPid: driftPublicKey.toBase58(),
+				walletAuthority: wallet.publicKey.toBase58(),
+			},
+			1000
+		);
+		bots.push(swiftMaker);
+	}
+
 	// Initialize bots
 	logger.info(`initializing bots`);
 	await Promise.all(bots.map((bot: any) => bot.init()));
