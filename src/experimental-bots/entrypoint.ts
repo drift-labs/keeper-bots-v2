@@ -251,6 +251,7 @@ const runBot = async () => {
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	await driftClient.subscribe();
+	await driftClient.fetchMarketLookupTableAccount();
 
 	const slotSubscriber = new SlotSubscriber(connection, {
 		resubTimeoutMs: 10_000,
