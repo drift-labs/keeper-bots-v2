@@ -21,6 +21,7 @@ import {
 	WhileValidTxSender,
 	UserMap,
 	DriftClientConfig,
+	configs,
 } from '@drift-labs/sdk';
 import {
 	Commitment,
@@ -233,7 +234,9 @@ const runBot = async () => {
 		);
 	const marketLookupTable = config.global?.lutPubkey
 		? new PublicKey(config.global.lutPubkey)
-		: undefined;
+		: new PublicKey(
+				configs[config.global.driftEnv || 'mainnet-beta'].MARKET_LOOKUP_TABLE
+		  );
 	const driftClientConfig: DriftClientConfig = {
 		connection,
 		wallet,
