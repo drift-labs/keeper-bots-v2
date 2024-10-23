@@ -39,6 +39,7 @@ import {
 	BlockhashSubscriber,
 	WhileValidTxSender,
 	PerpMarkets,
+	configs,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk';
 
@@ -390,7 +391,7 @@ const runBot = async () => {
 	}
 	const marketLookupTable = config.global?.lutPubkey
 		? new PublicKey(config.global.lutPubkey)
-		: undefined;
+		: new PublicKey(configs[config.global.driftEnv!].MARKET_LOOKUP_TABLE);
 	const driftClientConfig = {
 		connection,
 		wallet,
