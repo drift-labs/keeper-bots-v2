@@ -20,6 +20,7 @@ import {
 	initialize,
 	WhileValidTxSender,
 	UserMap,
+	DriftClientConfig,
 } from '@drift-labs/sdk';
 import {
 	Commitment,
@@ -233,7 +234,7 @@ const runBot = async () => {
 	const marketLookupTable = config.global?.lutPubkey
 		? new PublicKey(config.global.lutPubkey)
 		: undefined;
-	const driftClientConfig = {
+	const driftClientConfig: DriftClientConfig = {
 		connection,
 		wallet,
 		programID: driftPublicKey,
@@ -246,6 +247,7 @@ const runBot = async () => {
 		txVersion: 0 as TransactionVersion,
 		txSender,
 		marketLookupTable,
+		activeSubAccountId: config.global.subaccounts?.[0] || 0,
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	await driftClient.subscribe();
