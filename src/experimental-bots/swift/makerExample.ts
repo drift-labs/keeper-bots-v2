@@ -127,6 +127,10 @@ export class SwiftMaker {
 		this.ws = ws;
 	}
 
+	public async healthCheck() {
+		return true;
+	}
+
 	private startHeartbeatTimer() {
 		if (this.heartbeatTimeout) {
 			clearTimeout(this.heartbeatTimeout);

@@ -25,6 +25,10 @@ export class SwiftTaker {
 		await this.startInterval();
 	}
 
+	public async healthCheck() {
+		return true;
+	}
+
 	async startInterval() {
 		this.interval = setInterval(async () => {
 			const slot = await this.driftClient.connection.getSlot();
