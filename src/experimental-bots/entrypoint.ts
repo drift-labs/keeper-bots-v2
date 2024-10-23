@@ -19,6 +19,9 @@ import {
 	SlotSubscriber,
 	initialize,
 	WhileValidTxSender,
+	UserMap,
+	DriftClientConfig,
+	configs,
 } from '@drift-labs/sdk';
 import {
 	Commitment,
@@ -34,6 +37,8 @@ import { promiseTimeout } from '@drift-labs/sdk';
 import { SpotFillerMultithreaded } from './spotFiller/spotFillerMultithreaded';
 import { setGlobalDispatcher, Agent } from 'undici';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+import { SwiftMaker } from './swift/makerExample';
+import { SwiftTaker } from './swift/takerExample';
 
 setGlobalDispatcher(
 	new Agent({
@@ -229,8 +234,10 @@ const runBot = async () => {
 		);
 	const marketLookupTable = config.global?.lutPubkey
 		? new PublicKey(config.global.lutPubkey)
-		: undefined;
-	const driftClientConfig = {
+		: new PublicKey(
+				configs[config.global.driftEnv || 'mainnet-beta'].MARKET_LOOKUP_TABLE
+		  );
+	const driftClientConfig: DriftClientConfig = {
 		connection,
 		wallet,
 		programID: driftPublicKey,
@@ -243,9 +250,11 @@ const runBot = async () => {
 		txVersion: 0 as TransactionVersion,
 		txSender,
 		marketLookupTable,
+		activeSubAccountId: config.global.subaccounts?.[0] || 0,
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	await driftClient.subscribe();
+	await driftClient.fetchMarketLookupTableAccount();
 
 	const slotSubscriber = new SlotSubscriber(connection, {
 		resubTimeoutMs: 10_000,
@@ -366,6 +375,44 @@ const runBot = async () => {
 		);
 		bots.push(spotFillerMultithreaded);
 	}
+
+	if (configHasBot(config, 'swiftMaker')) {
+		const userMap = new UserMap({
+			connection,
+			driftClient,
+			subscriptionConfig: {
+				type: 'polling',
+				frequency: 5000,
+			},
+			fastDecode: true,
+		});
+		await userMap.subscribe();
+
+		const swiftMaker = new SwiftMaker(driftClient, userMap, {
+			rpcEndpoint: endpoint,
+			commit: '',
+			driftEnv: config.global.driftEnv!,
+			driftPid: driftPublicKey.toBase58(),
+			walletAuthority: wallet.publicKey.toBase58(),
+		});
+		bots.push(swiftMaker);
+	}
+
+	if (configHasBot(config, 'swiftTaker')) {
+		const swiftMaker = new SwiftTaker(
+			driftClient,
+			{
+				rpcEndpoint: endpoint,
+				commit: '',
+				driftEnv: config.global.driftEnv!,
+				driftPid: driftPublicKey.toBase58(),
+				walletAuthority: wallet.publicKey.toBase58(),
+			},
+			1000
+		);
+		bots.push(swiftMaker);
+	}
+
 	// Initialize bots
 	logger.info(`initializing bots`);
 	await Promise.all(bots.map((bot: any) => bot.init()));
