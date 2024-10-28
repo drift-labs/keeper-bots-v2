@@ -1236,6 +1236,8 @@ export class FillerMultithreaded {
 				);
 			}
 
+			const nonActionIxCount = ixs.length;
+
 			nodeToTrigger.node.haveTrigger = true;
 			// @ts-ignore
 			const buffer = Buffer.from(nodeToTrigger.node.userAccountData.data);
@@ -1286,6 +1288,15 @@ export class FillerMultithreaded {
 				logger.info(`tx too large, removing pyth ixs.
 						`);
 				ixs = removePythIxs(ixs);
+			}
+
+			if (ixs.length === nonActionIxCount) {
+				logger.warn(
+					`${logPrefix} No ixs in trigger tx (account: ${
+						nodeToTrigger.node.userAccount
+					}, order ${nodeToTrigger.node.order.orderId.toString()})`
+				);
+				return;
 			}
 
 			const simResult = await simulateAndGetTxWithCUs({
@@ -2072,6 +2083,8 @@ export class FillerMultithreaded {
 							);
 						}
 
+						const nonActionIxCount = ixs.length;
+
 						ixs.push(
 							...(await this.driftClient.getSettlePNLsIxs(
 								[
@@ -2085,6 +2098,11 @@ export class FillerMultithreaded {
 								marketIdChunks
 							))
 						);
+
+						if (ixs.length === nonActionIxCount) {
+							logger.warn(`${logPrefix} No ixs in settlePnls tx`);
+							return;
+						}
 
 						const simResult = await simulateAndGetTxWithCUs({
 							ixs,

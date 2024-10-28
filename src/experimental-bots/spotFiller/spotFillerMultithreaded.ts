@@ -721,6 +721,8 @@ export class SpotFillerMultithreaded {
 				);
 			}
 
+			const nonActionIxCount = ixs.length;
+
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
@@ -734,6 +736,13 @@ export class SpotFillerMultithreaded {
 				ixs.push(
 					await this.driftClient.getRevertFillIx(driftUser.userAccountPublicKey)
 				);
+			}
+
+			if (ixs.length === nonActionIxCount) {
+				logger.warn(
+					`${logPrefix} No ixs in trigger tx for (account: ${nodeToTrigger.node.userAccount.toString()}, order: ${nodeToTrigger.node.order.orderId.toString()})`
+				);
+				return;
 			}
 
 			const simResult = await simulateAndGetTxWithCUs({
