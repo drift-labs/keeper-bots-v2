@@ -1583,7 +1583,9 @@ export class FillerMultithreaded {
 				ixs.push(...pythIxs);
 			}
 
-			if (!buildForBundle) {
+			if (buildForBundle) {
+				ixs.push(this.bundleSender!.getTipIx());
+			} else {
 				ixs.push(
 					getPriorityFeeInstruction(
 						Math.floor(
@@ -1809,7 +1811,9 @@ export class FillerMultithreaded {
 			ixs.push(...pythIxs);
 		}
 
-		if (!buildForBundle) {
+		if (buildForBundle) {
+			ixs.push(this.bundleSender!.getTipIx());
+		} else {
 			ixs.push(
 				getPriorityFeeInstruction(
 					Math.floor(
