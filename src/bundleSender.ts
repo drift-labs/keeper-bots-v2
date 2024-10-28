@@ -505,7 +505,7 @@ export class BundleSender {
 		// +1 for tip tx, jito max is 5
 		let b: Bundle | Error = new Bundle(
 			signedTxs,
-			Math.max(signedTxs.length + 1, 5)
+			maxAllowedTxs
 		);
 
 		if (addTipTx) {
