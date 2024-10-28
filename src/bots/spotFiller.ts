@@ -1598,32 +1598,14 @@ export class SpotFillerBot implements Bot {
 		lutAccounts: Array<AddressLookupTableAccount>
 	) {
 		const txSigners = [this.driftClient.wallet.payer];
+		// @ts-ignore
+		tx.sign(txSigners);
+		const txSig = bs58.encode(tx.signatures[0]);
+		this.registerTxSigToConfirm(txSig, Date.now(), nodeSent, fillTxId, 'fill');
 
 		if (buildForBundle) {
-			txSigners.push(this.bundleSender!.tipPayerKeypair);
-			// @ts-ignore
-			tx.sign(txSigners);
-			const txSig = bs58.encode(tx.signatures[0]);
-			this.registerTxSigToConfirm(
-				txSig,
-				Date.now(),
-				nodeSent,
-				fillTxId,
-				'fill'
-			);
-
 			await this.sendTxThroughJito(tx, fillTxId, txSig);
 		} else if (this.canSendOutsideJito()) {
-			// @ts-ignore;
-			tx.sign(txSigners);
-			const txSig = bs58.encode(tx.signatures[0]);
-			this.registerTxSigToConfirm(
-				txSig,
-				Date.now(),
-				nodeSent,
-				fillTxId,
-				'fill'
-			);
 			const { estTxSize, accountMetas, writeAccs, txAccounts } =
 				getTransactionAccountMetas(tx, lutAccounts);
 
@@ -2267,31 +2249,20 @@ export class SpotFillerBot implements Bot {
 					if (this.hasEnoughSolToFill) {
 						const txSigners = [this.driftClient.wallet.payer];
 
+						// @ts-ignore;
+						simResult.tx.sign(txSigners);
+						const txSig = bs58.encode(simResult.tx.signatures[0]);
+						this.registerTxSigToConfirm(
+							txSig,
+							Date.now(),
+							undefined,
+							-1,
+							'trigger'
+						);
 						if (buildForBundle) {
-							txSigners.push(this.bundleSender!.tipPayerKeypair);
-							// @ts-ignore;
-							simResult.tx.sign(txSigners);
-							const txSig = bs58.encode(simResult.tx.signatures[0]);
-							this.registerTxSigToConfirm(
-								txSig,
-								Date.now(),
-								undefined,
-								-1,
-								'trigger'
-							);
 							await this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
 							this.removeTriggeringNodes(nodeToTrigger);
 						} else if (this.canSendOutsideJito()) {
-							// @ts-ignore
-							simResult.tx.sign(txSigners);
-							const txSig = bs58.encode(simResult.tx.signatures[0]);
-							this.registerTxSigToConfirm(
-								txSig,
-								Date.now(),
-								undefined,
-								-1,
-								'trigger'
-							);
 							this.driftClient
 								.sendTransaction(simResult.tx)
 								.then((txSig) => {

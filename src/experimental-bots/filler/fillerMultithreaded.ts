@@ -1104,7 +1104,6 @@ export class FillerMultithreaded {
 		tx.sign([
 			// @ts-ignore;
 			this.driftClient.wallet.payer,
-			this.bundleSender!.tipPayerKeypair,
 		]);
 
 		if (this.bundleSender === undefined) {
@@ -1912,14 +1911,7 @@ export class FillerMultithreaded {
 		const accountMetas: any[] = [];
 		const txStart = Date.now();
 		// @ts-ignore;
-		const signers = [this.driftClient.wallet.payer];
-		if (buildForBundle) {
-			// @ts-ignore
-			signers.push(this.bundleSender.tipPayerKeypair);
-		}
-
-		// @ts-ignore;
-		tx.sign(signers);
+		tx.sign([this.driftClient.wallet.payer]);
 		const txSig = bs58.encode(tx.signatures[0]);
 
 		if (buildForBundle) {
@@ -2116,16 +2108,12 @@ export class FillerMultithreaded {
 							);
 						} else {
 							if (!this.dryRun) {
-								const txSigners = [this.driftClient.wallet.payer];
+								// @ts-ignore;
+								simResult.tx.sign([this.driftClient.wallet.payer]);
 
 								if (buildForBundle) {
-									txSigners.push(this.bundleSender!.tipPayerKeypair);
-									// @ts-ignore;
-									simResult.tx.sign(txSigners);
 									this.sendTxThroughJito(simResult.tx, 'settlePnl');
 								} else if (this.canSendOutsideJito()) {
-									// @ts-ignore;
-									simResult.tx.sign(txSigners);
 									settlePnlPromises.push(
 										this.driftClient.txSender.sendVersionedTransaction(
 											simResult.tx,
