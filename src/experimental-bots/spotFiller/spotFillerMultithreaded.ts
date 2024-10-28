@@ -1964,18 +1964,13 @@ export class SpotFillerMultithreaded {
 		buildForBundle: boolean,
 		lutAccounts: Array<AddressLookupTableAccount>
 	) {
-		const txSigners = [this.driftClient.wallet.payer];
+		// @ts-ignore;
+		tx.sign([this.driftClient.wallet.payer]);
+		const txSig = bs58.encode(tx.signatures[0]);
+
 		if (buildForBundle) {
-			txSigners.push(this.bundleSender!.tipPayerKeypair);
-			// @ts-ignore;
-			tx.sign(txSigners);
-			const txSig = bs58.encode(tx.signatures[0]);
 			await this.sendTxThroughJito(tx, fillTxId, txSig);
 		} else if (this.canSendOutsideJito()) {
-			// @ts-ignore;
-			tx.sign(txSigners);
-			const txSig = bs58.encode(tx.signatures[0]);
-
 			this.registerTxSigToConfirm(
 				txSig,
 				Date.now(),

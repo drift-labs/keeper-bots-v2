@@ -1351,7 +1351,6 @@ export class FillerBot extends TxThreaded implements Bot {
 			tx.sign([
 				// @ts-ignore;
 				this.driftClient.wallet.payer,
-				this.bundleSender!.tipPayerKeypair,
 			]);
 			const txSig = bs58.encode(tx.signatures[0]);
 			this.sendTxThroughJito(tx, fillTxId, txSig);
@@ -1998,7 +1997,6 @@ export class FillerBot extends TxThreaded implements Bot {
 							simResult.tx.sign([
 								// @ts-ignore;
 								this.driftClient.wallet.payer,
-								this.bundleSender!.tipPayerKeypair,
 							]);
 							const txSig = bs58.encode(simResult.tx.signatures[0]);
 							this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
@@ -2150,7 +2148,6 @@ export class FillerBot extends TxThreaded implements Bot {
 									simResult.tx.sign([
 										// @ts-ignore;
 										this.driftClient.wallet.payer,
-										this.bundleSender!.tipPayerKeypair,
 									]);
 									const txSig = bs58.encode(simResult.tx.signatures[0]);
 									this.sendTxThroughJito(simResult.tx, 'settlePnl', txSig);

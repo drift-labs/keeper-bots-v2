@@ -138,7 +138,6 @@ export class SwitchboardCrankerBot implements Bot {
 					simResult.tx.sign([
 						// @ts-ignore;
 						this.driftClient.wallet.payer,
-						this.bundleSender!.tipPayerKeypair,
 					]);
 					this.bundleSender?.sendTransactions(
 						[simResult.tx],
