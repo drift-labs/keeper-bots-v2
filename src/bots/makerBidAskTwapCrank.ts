@@ -423,14 +423,13 @@ export class MakerBidAskTwapCrank implements Bot {
 	private sendThroughJito(): boolean {
 		if (!this.bundleSender) {
 			// not configured for jito
-			console.warn(`skip sendThroughJito, bundleSender not initialized`);
+			logger.warn(`skip sendThroughJito, bundleSender not initialized`);
 			return false;
 		}
 
-		const slotsUntilNextLeader = this.bundleSender.slotsUntilNextLeader() ?? 0;
-		if (slotsUntilNextLeader > 0) {
-			// no current jito leader
-			console.warn(
+		const slotsUntilNextLeader = this.bundleSender.slotsUntilNextLeader();
+		if (slotsUntilNextLeader === undefined || slotsUntilNextLeader > 0) {
+			logger.warn(
 				`skip sendThroughJito, slotsUntilNextLeader: ${slotsUntilNextLeader}`
 			);
 			return false;

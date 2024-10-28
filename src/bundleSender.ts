@@ -281,10 +281,9 @@ export class BundleSender {
 				this.bundleResultsReceived++;
 				this.handleBundleResult(bundleResult);
 			},
-			(e) => {
-				const err = e as Error;
+			(err: Error) => {
 				logger.error(
-					`${logPrefix}: error getting bundle result: ${err.message}: ${e.stack}`
+					`${logPrefix}: error getting bundle result: ${err.message}: ${err.stack}`
 				);
 			}
 		);
@@ -409,6 +408,7 @@ export class BundleSender {
 		try {
 			this.nextJitoLeader = await this.searcherClient.getNextScheduledLeader();
 		} catch (e) {
+			this.nextJitoLeader = undefined;
 			const err = e as Error;
 			logger.error(
 				`${logPrefix}: error checking jito leader schedule: ${err.message}`
