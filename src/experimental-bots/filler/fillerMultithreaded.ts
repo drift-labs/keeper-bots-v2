@@ -1607,7 +1607,10 @@ export class FillerMultithreaded {
 			let makerInfosToUse = makerInfos;
 			const buildTxWithMakerInfos = async (
 				makers: DataAndSlot<MakerInfo>[]
-			): Promise<SimulateAndGetTxWithCUsResponse> => {
+			): Promise<SimulateAndGetTxWithCUsResponse | undefined> => {
+				if (makers.length === 0) {
+					return undefined;
+				}
 				ixs.push(
 					await this.driftClient.getFillPerpOrderIx(
 						await getUserAccountPublicKey(
@@ -1694,6 +1697,9 @@ export class FillerMultithreaded {
 			};
 
 			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
+			if (simResult === undefined) {
+				return true;
+			}
 			let txAccounts = simResult.tx.message.getAccountKeys({
 				addressLookupTableAccounts: this.lookupTableAccounts,
 			}).length;
@@ -1706,9 +1712,6 @@ export class FillerMultithreaded {
 				);
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
 				simResult = await buildTxWithMakerInfos(makerInfosToUse);
-				txAccounts = simResult.tx.message.getAccountKeys({
-					addressLookupTableAccounts: this.lookupTableAccounts!,
-				}).length;
 			}
 
 			if (makerInfosToUse.length === 0) {
@@ -1718,14 +1721,27 @@ export class FillerMultithreaded {
 				return true;
 			}
 
+			if (simResult === undefined) {
+				logger.error(
+					`${logPrefix} No simResult after ${attempt} attempts (fillTxId: ${fillTxId})`
+				);
+				return true;
+			}
+
+			txAccounts = simResult.tx.message.getAccountKeys({
+				addressLookupTableAccounts: this.lookupTableAccounts!,
+			}).length;
+
 			logger.info(
-				`${logPrefix} tryFillMultiMakerPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
+				`${logPrefix} tryFillMultiMakerPerpNodes estimated CUs: ${
+					simResult!.cuEstimate
+				} (fillTxId: ${fillTxId})`
 			);
 
-			if (simResult.simError) {
+			if (simResult!.simError) {
 				logger.error(
 					`${logPrefix} Error simulating multi maker perp node (fillTxId: ${fillTxId}): ${JSON.stringify(
-						simResult.simError
+						simResult!.simError
 					)}\nTaker slot: ${takerUserSlot}\nMaker slots: ${makerInfosToUse
 						.map((m) => `  ${m.data.maker.toBase58()}: ${m.slot}`)
 						.join('\n')}`
@@ -1735,7 +1751,7 @@ export class FillerMultithreaded {
 					this.sendFillTxAndParseLogs(
 						fillTxId,
 						[nodeToFill],
-						simResult.tx,
+						simResult!.tx,
 						buildForBundle
 					);
 				} else {

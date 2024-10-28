@@ -503,10 +503,7 @@ export class BundleSender {
 		}
 
 		// +1 for tip tx, jito max is 5
-		let b: Bundle | Error = new Bundle(
-			signedTxs,
-			maxAllowedTxs
-		);
+		let b: Bundle | Error = new Bundle(signedTxs, maxAllowedTxs);
 
 		if (addTipTx) {
 			const tipAccountToUse =

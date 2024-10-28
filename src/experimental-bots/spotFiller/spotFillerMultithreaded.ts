@@ -993,7 +993,10 @@ export class SpotFillerMultithreaded {
 			let makerInfosToUse = makerInfos;
 			const buildTxWithMakerInfos = async (
 				makers: DataAndSlot<MakerInfo>[]
-			): Promise<SimulateAndGetTxWithCUsResponse> => {
+			): Promise<SimulateAndGetTxWithCUsResponse | undefined> => {
+				if (makers.length === 0) {
+					return undefined;
+				}
 				ixs.push(
 					await this.driftClient.getFillSpotOrderIx(
 						new PublicKey(takerUserPubKey),
@@ -1042,6 +1045,9 @@ export class SpotFillerMultithreaded {
 			};
 
 			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
+			if (simResult === undefined) {
+				return true;
+			}
 			let txAccounts = simResult.tx.message.getAccountKeys({
 				addressLookupTableAccounts: this.lookupTableAccounts,
 			}).length;
@@ -1054,9 +1060,6 @@ export class SpotFillerMultithreaded {
 				);
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
 				simResult = await buildTxWithMakerInfos(makerInfosToUse);
-				txAccounts = simResult.tx.message.getAccountKeys({
-					addressLookupTableAccounts: this.lookupTableAccounts,
-				}).length;
 			}
 
 			if (makerInfosToUse.length === 0) {
@@ -1065,6 +1068,16 @@ export class SpotFillerMultithreaded {
 				);
 				return true;
 			}
+			if (simResult === undefined) {
+				logger.error(
+					`No simResult after ${attempt} attempts (fillTxId: ${fillTxId})`
+				);
+				return true;
+			}
+
+			txAccounts = simResult.tx.message.getAccountKeys({
+				addressLookupTableAccounts: this.lookupTableAccounts,
+			}).length;
 
 			logger.info(
 				`tryFillMultiMakerSpotNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
@@ -1197,7 +1210,9 @@ export class SpotFillerMultithreaded {
 				units: 1_400_000,
 			}),
 		];
-		if (!buildForBundle) {
+		if (buildForBundle) {
+			ixs.push(this.bundleSender!.getTipIx());
+		} else {
 			const priorityFee = Math.floor(
 				this.priorityFeeSubscriber.getPriorityFees(
 					'spot',
