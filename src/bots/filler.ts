@@ -1334,7 +1334,8 @@ export class FillerBot extends TxThreaded implements Bot {
 				this.bundleSender.sendTransactions(
 					[tx],
 					`(fillTxId: ${metadata})`,
-					txSig
+					txSig,
+					false
 				);
 			}
 		}
@@ -1347,8 +1348,11 @@ export class FillerBot extends TxThreaded implements Bot {
 		ixs?: Array<TransactionInstruction>
 	) {
 		if (buildForBundle) {
-			// @ts-ignore;
-			tx.sign([this.driftClient.wallet.payer]);
+			tx.sign([
+				// @ts-ignore;
+				this.driftClient.wallet.payer,
+				this.bundleSender!.tipPayerKeypair,
+			]);
 			const txSig = bs58.encode(tx.signatures[0]);
 			this.sendTxThroughJito(tx, fillTxId, txSig);
 			this.registerTxToConfirm({ txSig });
@@ -1648,7 +1652,9 @@ export class FillerBot extends TxThreaded implements Bot {
 					units: 1_400_000,
 				}),
 			];
-			if (!buildForBundle) {
+			if (buildForBundle) {
+				ixs.push(this.bundleSender!.getTipIx());
+			} else {
 				ixs.push(
 					ComputeBudgetProgram.setComputeUnitPrice({
 						microLamports: Math.floor(
@@ -1904,13 +1910,19 @@ export class FillerBot extends TxThreaded implements Bot {
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000,
 				}),
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult() *
-							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-					),
-				}),
 			];
+			if (buildForBundle) {
+				ixs.push(this.bundleSender!.getTipIx());
+			} else {
+				ixs.push(
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: Math.floor(
+							this.priorityFeeSubscriber.getCustomStrategyResult() *
+								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+						),
+					})
+				);
+			}
 
 			if (this.pythPriceSubscriber) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
@@ -1983,8 +1995,11 @@ export class FillerBot extends TxThreaded implements Bot {
 				if (!this.dryRun) {
 					if (this.hasEnoughSolToFill) {
 						if (buildForBundle) {
-							// @ts-ignore;
-							simResult.tx.sign([this.driftClient.wallet.payer]);
+							simResult.tx.sign([
+								// @ts-ignore;
+								this.driftClient.wallet.payer,
+								this.bundleSender!.tipPayerKeypair,
+							]);
 							const txSig = bs58.encode(simResult.tx.signatures[0]);
 							this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
 							this.registerTxToConfirm({ txSig });
@@ -2061,19 +2076,26 @@ export class FillerBot extends TxThreaded implements Bot {
 					chunk_size = marketIds.length / 2;
 				}
 				for (let i = 0; i < marketIds.length; i += chunk_size) {
+					const buildForBundle = this.shouldBuildForBundle();
 					const marketIdChunks = marketIds.slice(i, i + chunk_size);
 					try {
 						const ixs = [
 							ComputeBudgetProgram.setComputeUnitLimit({
 								units: 1_400_000, // will be overridden by simulateTx
 							}),
-							ComputeBudgetProgram.setComputeUnitPrice({
-								microLamports: Math.floor(
-									this.priorityFeeSubscriber.getCustomStrategyResult() *
-										this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-								),
-							}),
 						];
+						if (buildForBundle) {
+							ixs.push(this.bundleSender!.getTipIx());
+						} else {
+							ixs.push(
+								ComputeBudgetProgram.setComputeUnitPrice({
+									microLamports: Math.floor(
+										this.priorityFeeSubscriber.getCustomStrategyResult() *
+											this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+									),
+								})
+							);
+						}
 						ixs.push(
 							...(await this.driftClient.getSettlePNLsIxs(
 								[
@@ -2124,12 +2146,13 @@ export class FillerBot extends TxThreaded implements Bot {
 							);
 						} else {
 							if (!this.dryRun) {
-								// @ts-ignore;
-								simResult.tx.sign([this.driftClient.wallet.payer]);
-								const txSig = bs58.encode(simResult.tx.signatures[0]);
-
-								const buildForBundle = this.shouldBuildForBundle();
 								if (buildForBundle) {
+									simResult.tx.sign([
+										// @ts-ignore;
+										this.driftClient.wallet.payer,
+										this.bundleSender!.tipPayerKeypair,
+									]);
+									const txSig = bs58.encode(simResult.tx.signatures[0]);
 									this.sendTxThroughJito(simResult.tx, 'settlePnl', txSig);
 									this.registerTxToConfirm({ txSig });
 								} else if (this.canSendOutsideJito()) {
@@ -2140,9 +2163,6 @@ export class FillerBot extends TxThreaded implements Bot {
 										addressLookupTables: this.lutKeys,
 									});
 								}
-								logger.info(
-									`Settle positive PNLs tx: https://solscan/io/tx/${txSig}`
-								);
 							} else {
 								logger.info(`dry run, skipping settlePnls)`);
 							}

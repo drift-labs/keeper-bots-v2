@@ -40,7 +40,6 @@ import {
 	PACKET_DATA_SIZE,
 	PublicKey,
 	SendTransactionError,
-	Signer,
 	TransactionInstruction,
 	TransactionSignature,
 	VersionedTransaction,
@@ -1102,8 +1101,11 @@ export class FillerMultithreaded {
 		const blockhash = await this.getBlockhashForTx();
 		tx.message.recentBlockhash = blockhash;
 
-		// @ts-ignore;
-		tx.sign([this.driftClient.wallet.payer]);
+		tx.sign([
+			// @ts-ignore;
+			this.driftClient.wallet.payer,
+			this.bundleSender!.tipPayerKeypair,
+		]);
 
 		if (this.bundleSender === undefined) {
 			logger.error(
@@ -1113,7 +1115,12 @@ export class FillerMultithreaded {
 		}
 		const slotsUntilNextLeader = this.bundleSender?.slotsUntilNextLeader();
 		if (slotsUntilNextLeader !== undefined) {
-			this.bundleSender.sendTransactions([tx], `(fillTxId: ${metadata})`);
+			this.bundleSender.sendTransactions(
+				[tx],
+				`(fillTxId: ${metadata})`,
+				undefined,
+				false
+			);
 		}
 	}
 
@@ -1210,6 +1217,25 @@ export class FillerMultithreaded {
 					units: 1_400_000,
 				}),
 			];
+
+			if (buildForBundle) {
+				ixs.push(this.bundleSender!.getTipIx());
+			} else {
+				ixs.push(
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: Math.floor(
+							Math.max(
+								...nodesToTrigger.map((node: SerializedNodeToTrigger) => {
+									return this.priorityFeeSubscriber.getPriorityFees(
+										'perp',
+										node.node.order.marketIndex
+									)!.medium;
+								})
+							) * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+						),
+					})
+				);
+			}
 
 			nodeToTrigger.node.haveTrigger = true;
 			// @ts-ignore
@@ -1877,8 +1903,7 @@ export class FillerMultithreaded {
 		fillTxId: number,
 		nodesSent: Array<NodeToFillWithBuffer>,
 		tx: VersionedTransaction,
-		buildForBundle: boolean,
-		extraSigners?: Signer[]
+		buildForBundle: boolean
 	) {
 		let txResp: Promise<TxSigAndSlot> | undefined = undefined;
 		let estTxSize: number | undefined = undefined;
@@ -1888,10 +1913,11 @@ export class FillerMultithreaded {
 		const txStart = Date.now();
 		// @ts-ignore;
 		const signers = [this.driftClient.wallet.payer];
-		if (extraSigners) {
+		if (buildForBundle) {
 			// @ts-ignore
-			signers.push(...extraSigners);
+			signers.push(this.bundleSender.tipPayerKeypair);
 		}
+
 		// @ts-ignore;
 		tx.sign(signers);
 		const txSig = bs58.encode(tx.signatures[0]);
@@ -2018,7 +2044,9 @@ export class FillerMultithreaded {
 							}),
 						];
 
-						if (!buildForBundle) {
+						if (buildForBundle) {
+							ixs.push(this.bundleSender!.getTipIx());
+						} else {
 							ixs.push(
 								ComputeBudgetProgram.setComputeUnitPrice({
 									microLamports: Math.floor(
@@ -2088,20 +2116,16 @@ export class FillerMultithreaded {
 							);
 						} else {
 							if (!this.dryRun) {
-								// @ts-ignore;
-								simResult.tx.sign([this.driftClient.wallet.payer]);
-								const txSig = bs58.encode(simResult.tx.signatures[0]);
-								this.registerTxSigToConfirm(
-									txSig,
-									Date.now(),
-									[],
-									-2,
-									'settlePnl'
-								);
+								const txSigners = [this.driftClient.wallet.payer];
 
 								if (buildForBundle) {
+									txSigners.push(this.bundleSender!.tipPayerKeypair);
+									// @ts-ignore;
+									simResult.tx.sign(txSigners);
 									this.sendTxThroughJito(simResult.tx, 'settlePnl');
 								} else if (this.canSendOutsideJito()) {
+									// @ts-ignore;
+									simResult.tx.sign(txSigners);
 									settlePnlPromises.push(
 										this.driftClient.txSender.sendVersionedTransaction(
 											simResult.tx,
@@ -2111,6 +2135,15 @@ export class FillerMultithreaded {
 										)
 									);
 								}
+
+								const txSig = bs58.encode(simResult.tx.signatures[0]);
+								this.registerTxSigToConfirm(
+									txSig,
+									Date.now(),
+									[],
+									-2,
+									'settlePnl'
+								);
 							} else {
 								logger.info(`dry run, skipping settlePnls)`);
 							}

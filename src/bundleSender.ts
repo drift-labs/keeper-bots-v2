@@ -4,6 +4,8 @@ import {
 	Keypair,
 	LAMPORTS_PER_SOL,
 	PublicKey,
+	SystemProgram,
+	TransactionInstruction,
 	VersionedTransaction,
 } from '@solana/web3.js';
 import {
@@ -103,7 +105,7 @@ export class BundleSender {
 		private connection: Connection,
 		jitoBlockEngineUrl: string,
 		jitoAuthKeypair: Keypair,
-		private tipPayerKeypair: Keypair,
+		public tipPayerKeypair: Keypair,
 		private slotSubscriber: SlotSubscriber,
 
 		/// tip algo params
@@ -281,10 +283,9 @@ export class BundleSender {
 				this.bundleResultsReceived++;
 				this.handleBundleResult(bundleResult);
 			},
-			(e) => {
-				const err = e as Error;
+			(err: Error) => {
 				logger.error(
-					`${logPrefix}: error getting bundle result: ${err.message}: ${e.stack}`
+					`${logPrefix}: error getting bundle result: ${err.message}: ${err.stack}`
 				);
 			}
 		);
@@ -409,6 +410,7 @@ export class BundleSender {
 		try {
 			this.nextJitoLeader = await this.searcherClient.getNextScheduledLeader();
 		} catch (e) {
+			this.nextJitoLeader = undefined;
 			const err = e as Error;
 			logger.error(
 				`${logPrefix}: error checking jito leader schedule: ${err.message}`
@@ -439,13 +441,49 @@ export class BundleSender {
 		);
 	}
 
+	/**
+	 * Returns a transaction instruction for sending a tip to a tip account, use this to prevent adding an extra tx to your bundle, and/or to avoid conflicting tx hashes from the transfer ix. You will need to sign the final tx with the tip payer keypair before sending it in a bundle.
+	 * @param tipAccount Optional tip account to send to. If not provided, a random one will be chosen from jitoTipAccounts
+	 * @param tipAmount Optional tip amount to send. If not provided, the current tip amount will be calculated
+	 * @returns
+	 */
+	getTipIx(tipAccount?: PublicKey, tipAmount?: number): TransactionInstruction {
+		if (!tipAccount) {
+			tipAccount =
+				this.jitoTipAccounts[
+					Math.floor(Math.random() * this.jitoTipAccounts.length)
+				];
+		}
+		if (tipAmount === undefined) {
+			tipAmount = this.calculateCurrentTipAmount();
+		}
+		const tipIx = SystemProgram.transfer({
+			fromPubkey: this.tipPayerKeypair.publicKey,
+			toPubkey: tipAccount,
+			lamports: tipAmount,
+		});
+		return tipIx;
+	}
+
+	/**
+	 * Sends a bundle of signed transactions to Jito MEV searcher
+	 * @param signedTxs Array of signed versioned transactions to include in bundle
+	 * @param metadata Optional metadata string to attach to bundle
+	 * @param txSig Optional transaction signature for tracking purposes. If not provided, uses first tx signature
+	 * @param addTipTx Whether to add a tip transaction to the bundle, if false, your signedTxs must already include a payment to a tip account. Defaults to true
+	 * @throws Error if bundle size would exceed Jito's max of 5 transactions
+	 */
 	async sendTransactions(
 		signedTxs: VersionedTransaction[],
 		metadata?: string,
-		txSig?: string
+		txSig?: string,
+		addTipTx = true
 	) {
-		if (signedTxs.length + 1 > 5) {
-			throw new Error(`jito max bundle size is 5, got ${signedTxs.length + 1}`);
+		const maxAllowedTxs = addTipTx ? 4 : 5;
+		if (signedTxs.length > maxAllowedTxs) {
+			throw new Error(
+				`jito max bundle size is ${maxAllowedTxs}, got ${signedTxs.length} (addTipTx: ${addTipTx})`
+			);
 		}
 
 		if (!this.isSubscribed) {
@@ -470,20 +508,21 @@ export class BundleSender {
 			Math.max(signedTxs.length + 1, 5)
 		);
 
-		const tipAccountToUse =
-			this.jitoTipAccounts[
-				Math.floor(Math.random() * this.jitoTipAccounts.length)
-			];
-
-		b = b.addTipTx(
-			this.tipPayerKeypair!,
-			this.calculateCurrentTipAmount(),
-			tipAccountToUse!,
-			signedTxs[0].message.recentBlockhash
-		);
-		if (b instanceof Error) {
-			logger.error(`${logPrefix} failed to attach tip: ${b.message})`);
-			return;
+		if (addTipTx) {
+			const tipAccountToUse =
+				this.jitoTipAccounts[
+					Math.floor(Math.random() * this.jitoTipAccounts.length)
+				];
+			b = b.addTipTx(
+				this.tipPayerKeypair!,
+				this.calculateCurrentTipAmount(),
+				tipAccountToUse!,
+				signedTxs[0].message.recentBlockhash
+			);
+			if (b instanceof Error) {
+				logger.error(`${logPrefix} failed to attach tip: ${b.message})`);
+				return;
+			}
 		}
 
 		try {

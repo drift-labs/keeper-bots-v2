@@ -57,7 +57,7 @@ const TX_LAND_RATE_THRESHOLD = process.env.TX_LAND_RATE_THRESHOLD
 	? parseFloat(process.env.TX_LAND_RATE_THRESHOLD) || 0.5
 	: 0.5;
 const NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK = 2;
-const TX_PER_JITO_BUNDLE = 4; // jito max is 5
+const TX_PER_JITO_BUNDLE = 5;
 
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
@@ -423,14 +423,13 @@ export class MakerBidAskTwapCrank implements Bot {
 	private sendThroughJito(): boolean {
 		if (!this.bundleSender) {
 			// not configured for jito
-			console.warn(`skip sendThroughJito, bundleSender not initialized`);
+			logger.warn(`skip sendThroughJito, bundleSender not initialized`);
 			return false;
 		}
 
-		const slotsUntilNextLeader = this.bundleSender.slotsUntilNextLeader() ?? 0;
-		if (slotsUntilNextLeader > 0) {
-			// no current jito leader
-			console.warn(
+		const slotsUntilNextLeader = this.bundleSender.slotsUntilNextLeader();
+		if (slotsUntilNextLeader === undefined || slotsUntilNextLeader > 0) {
+			logger.warn(
 				`skip sendThroughJito, slotsUntilNextLeader: ${slotsUntilNextLeader}`
 			);
 			return false;
@@ -569,17 +568,28 @@ export class MakerBidAskTwapCrank implements Bot {
 					ixs.push(updatePrelaunchOracleIx);
 				}
 
-				const txToSend = await this.buildTransaction(mi, ixs);
-				if (txToSend) {
-					if (useJito) {
+				if (useJito) {
+					// first tx in bundle pays the tip
+					const isFirstTxInBundle = txsToBundle.length === 0;
+					const jitoSigners = [this.driftClient.wallet.payer];
+					if (isFirstTxInBundle) {
+						ixs.push(this.bundleSender!.getTipIx());
+					}
+					const txToSend = await this.buildTransaction(mi, ixs);
+					if (txToSend) {
 						// @ts-ignore;
-						txToSend.sign([this.driftClient.wallet.payer]);
+						txToSend.sign(jitoSigners);
 						txsToBundle.push(txToSend);
 					} else {
-						await this.sendSingleTx(mi, txToSend);
+						logger.error(`[${this.name}] failed to build tx for market: ${mi}`);
 					}
 				} else {
-					logger.error(`[${this.name}] failed to build tx for market: ${mi}`);
+					const txToSend = await this.buildTransaction(mi, ixs);
+					if (txToSend) {
+						await this.sendSingleTx(mi, txToSend);
+					} else {
+						logger.error(`[${this.name}] failed to build tx for market: ${mi}`);
+					}
 				}
 				// logger.info(`[${this.name}] sent tx for market: ${mi}`);
 
@@ -587,7 +597,12 @@ export class MakerBidAskTwapCrank implements Bot {
 					logger.info(
 						`[${this.name}] sending ${txsToBundle.length} txs to jito`
 					);
-					await this.bundleSender!.sendTransactions(txsToBundle);
+					await this.bundleSender!.sendTransactions(
+						txsToBundle,
+						undefined,
+						undefined,
+						false
+					);
 					txsToBundle = [];
 				}
 
@@ -626,7 +641,12 @@ export class MakerBidAskTwapCrank implements Bot {
 				logger.info(
 					`[${this.name}] sending remaining ${txsToBundle.length} txs to jito`
 				);
-				await this.bundleSender!.sendTransactions(txsToBundle);
+				await this.bundleSender!.sendTransactions(
+					txsToBundle,
+					undefined,
+					undefined,
+					false
+				);
 			}
 		} catch (e) {
 			console.error(e);

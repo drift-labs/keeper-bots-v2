@@ -369,6 +369,7 @@ export class PythCrankerBot implements Bot {
 							feedIds.map((f) => f.feedId)
 						))
 					);
+					ixs.push(this.bundleSender!.getTipIx());
 					const simResult = await simulateAndGetTxWithCUs({
 						ixs,
 						connection: this.driftClient.connection,
@@ -378,9 +379,17 @@ export class PythCrankerBot implements Bot {
 						doSimulation: true,
 						recentBlockhash: await this.getBlockhashForTx(),
 					});
-					// @ts-ignore
-					simResult.tx.sign([this.driftClient.wallet.payer]);
-					this.bundleSender?.sendTransactions([simResult.tx]);
+					simResult.tx.sign([
+						// @ts-ignore
+						this.driftClient.wallet.payer,
+						this.bundleSender!.tipPayerKeypair,
+					]);
+					this.bundleSender?.sendTransactions(
+						[simResult.tx],
+						undefined,
+						undefined,
+						false
+					);
 				} else {
 					const priorityFees = Math.floor(
 						(this.priorityFeeSubscriber?.getCustomStrategyResult() || 0) *
