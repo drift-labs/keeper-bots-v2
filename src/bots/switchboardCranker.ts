@@ -104,7 +104,9 @@ export class SwitchboardCrankerBot implements Bot {
 					}),
 				];
 
-				if (!this.globalConfig.useJito) {
+				if (this.globalConfig.useJito) {
+					ixs.push(this.bundleSender!.getTipIx());
+				} else {
 					ixs.push(
 						ComputeBudgetProgram.setComputeUnitPrice({
 							microLamports: Math.floor(
@@ -133,9 +135,17 @@ export class SwitchboardCrankerBot implements Bot {
 				});
 
 				if (this.globalConfig.useJito) {
-					// @ts-ignore;
-					simResult.tx.sign([this.driftClient.wallet.payer]);
-					this.bundleSender?.sendTransactions([simResult.tx]);
+					simResult.tx.sign([
+						// @ts-ignore;
+						this.driftClient.wallet.payer,
+						this.bundleSender!.tipPayerKeypair,
+					]);
+					this.bundleSender?.sendTransactions(
+						[simResult.tx],
+						undefined,
+						undefined,
+						false
+					);
 				} else {
 					this.driftClient
 						.sendTransaction(simResult.tx)

@@ -694,7 +694,32 @@ export class SpotFillerMultithreaded {
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
 			this.triggeringNodes.set(nodeSignature, Date.now());
 
-			const ixs = [];
+			const ixs = [
+				ComputeBudgetProgram.setComputeUnitLimit({
+					units: 1_400_000,
+				}),
+			];
+
+			if (buildForBundle) {
+				ixs.push(this.bundleSender!.getTipIx());
+			} else {
+				ixs.push(
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: Math.floor(
+							Math.max(
+								...serializedNodesToTrigger.map(
+									(node: SerializedNodeToTrigger) => {
+										return this.priorityFeeSubscriber.getPriorityFees(
+											'spot',
+											node.node.order.marketIndex
+										)!.medium;
+									}
+								)
+							) * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+						),
+					})
+				);
+			}
 
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
@@ -923,7 +948,9 @@ export class SpotFillerMultithreaded {
 				units: 1_400_000,
 			}),
 		];
-		if (!buildForBundle) {
+		if (buildForBundle) {
+			ixs.push(this.bundleSender!.getTipIx());
+		} else {
 			ixs.push(
 				ComputeBudgetProgram.setComputeUnitPrice({
 					microLamports: Math.floor(
@@ -1829,7 +1856,8 @@ export class SpotFillerMultithreaded {
 				this.bundleSender.sendTransactions(
 					[tx],
 					`(fillTxId: ${metadata})`,
-					txSig
+					txSig,
+					false
 				);
 			}
 		}
@@ -1936,18 +1964,29 @@ export class SpotFillerMultithreaded {
 		buildForBundle: boolean,
 		lutAccounts: Array<AddressLookupTableAccount>
 	) {
-		// @ts-ignore;
-		tx.sign([this.driftClient.wallet.payer]);
-		const txSig = bs58.encode(tx.signatures[0]);
-
-		this.registerTxSigToConfirm(txSig, Date.now(), nodeSent, fillTxId, 'fill');
-
-		const { estTxSize, accountMetas, writeAccs, txAccounts } =
-			getTransactionAccountMetas(tx, lutAccounts);
-
+		const txSigners = [this.driftClient.wallet.payer];
 		if (buildForBundle) {
+			txSigners.push(this.bundleSender!.tipPayerKeypair);
+			// @ts-ignore;
+			tx.sign(txSigners);
+			const txSig = bs58.encode(tx.signatures[0]);
 			await this.sendTxThroughJito(tx, fillTxId, txSig);
 		} else if (this.canSendOutsideJito()) {
+			// @ts-ignore;
+			tx.sign(txSigners);
+			const txSig = bs58.encode(tx.signatures[0]);
+
+			this.registerTxSigToConfirm(
+				txSig,
+				Date.now(),
+				nodeSent,
+				fillTxId,
+				'fill'
+			);
+
+			const { estTxSize, accountMetas, writeAccs, txAccounts } =
+				getTransactionAccountMetas(tx, lutAccounts);
+
 			this.driftClient.txSender
 				.sendVersionedTransaction(tx, [], this.driftClient.opts, true)
 				.then(async (txSig) => {

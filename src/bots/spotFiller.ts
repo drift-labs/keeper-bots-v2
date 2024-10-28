@@ -1534,7 +1534,8 @@ export class SpotFillerBot implements Bot {
 				this.bundleSender.sendTransactions(
 					[tx],
 					`(fillTxId: ${metadata})`,
-					txSig
+					txSig,
+					false
 				);
 			}
 		}
@@ -1596,17 +1597,36 @@ export class SpotFillerBot implements Bot {
 		buildForBundle: boolean,
 		lutAccounts: Array<AddressLookupTableAccount>
 	) {
-		// @ts-ignore;
-		tx.sign([this.driftClient.wallet.payer]);
-		const txSig = bs58.encode(tx.signatures[0]);
-		this.registerTxSigToConfirm(txSig, Date.now(), nodeSent, fillTxId, 'fill');
-
-		const { estTxSize, accountMetas, writeAccs, txAccounts } =
-			getTransactionAccountMetas(tx, lutAccounts);
+		const txSigners = [this.driftClient.wallet.payer];
 
 		if (buildForBundle) {
+			txSigners.push(this.bundleSender!.tipPayerKeypair);
+			// @ts-ignore
+			tx.sign(txSigners);
+			const txSig = bs58.encode(tx.signatures[0]);
+			this.registerTxSigToConfirm(
+				txSig,
+				Date.now(),
+				nodeSent,
+				fillTxId,
+				'fill'
+			);
+
 			await this.sendTxThroughJito(tx, fillTxId, txSig);
 		} else if (this.canSendOutsideJito()) {
+			// @ts-ignore;
+			tx.sign(txSigners);
+			const txSig = bs58.encode(tx.signatures[0]);
+			this.registerTxSigToConfirm(
+				txSig,
+				Date.now(),
+				nodeSent,
+				fillTxId,
+				'fill'
+			);
+			const { estTxSize, accountMetas, writeAccs, txAccounts } =
+				getTransactionAccountMetas(tx, lutAccounts);
+
 			this.driftClient.txSender
 				.sendVersionedTransaction(tx, [], this.driftClient.opts, true)
 				.then(async (txSig) => {
@@ -1741,7 +1761,9 @@ export class SpotFillerBot implements Bot {
 				units: 1_400_000,
 			}),
 		];
-		if (!buildForBundle) {
+		if (buildForBundle) {
+			ixs.push(this.bundleSender!.getTipIx());
+		} else {
 			ixs.push(
 				ComputeBudgetProgram.setComputeUnitPrice({
 					microLamports: Math.floor(
@@ -2029,7 +2051,9 @@ export class SpotFillerBot implements Bot {
 				units: 1_400_000,
 			}),
 		];
-		if (!buildForBundle) {
+		if (buildForBundle) {
+			ixs.push(this.bundleSender!.getTipIx());
+		} else {
 			const priorityFee = Math.floor(
 				this.priorityFeeSubscriber.getCustomStrategyResult()
 			);
@@ -2173,17 +2197,27 @@ export class SpotFillerBot implements Bot {
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000,
 				}),
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult()
-					),
-				}),
+			];
+
+			if (buildForBundle) {
+				ixs.push(this.bundleSender!.getTipIx());
+			} else {
+				ixs.push(
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: Math.floor(
+							this.priorityFeeSubscriber.getCustomStrategyResult()
+						),
+					})
+				);
+			}
+
+			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
 					userAccount,
 					nodeToTrigger.node.order
-				),
-			];
+				)
+			);
 
 			if (this.revertOnFailure) {
 				ixs.push(await this.driftClient.getRevertFillIx());
@@ -2231,21 +2265,33 @@ export class SpotFillerBot implements Bot {
 			} else {
 				if (!this.dryRun) {
 					if (this.hasEnoughSolToFill) {
-						// @ts-ignore;
-						simResult.tx.sign([this.driftClient.wallet.payer]);
-						const txSig = bs58.encode(simResult.tx.signatures[0]);
-						this.registerTxSigToConfirm(
-							txSig,
-							Date.now(),
-							undefined,
-							-1,
-							'trigger'
-						);
+						const txSigners = [this.driftClient.wallet.payer];
 
 						if (buildForBundle) {
+							txSigners.push(this.bundleSender!.tipPayerKeypair);
+							// @ts-ignore;
+							simResult.tx.sign(txSigners);
+							const txSig = bs58.encode(simResult.tx.signatures[0]);
+							this.registerTxSigToConfirm(
+								txSig,
+								Date.now(),
+								undefined,
+								-1,
+								'trigger'
+							);
 							await this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
 							this.removeTriggeringNodes(nodeToTrigger);
 						} else if (this.canSendOutsideJito()) {
+							// @ts-ignore
+							simResult.tx.sign(txSigners);
+							const txSig = bs58.encode(simResult.tx.signatures[0]);
+							this.registerTxSigToConfirm(
+								txSig,
+								Date.now(),
+								undefined,
+								-1,
+								'trigger'
+							);
 							this.driftClient
 								.sendTransaction(simResult.tx)
 								.then((txSig) => {
