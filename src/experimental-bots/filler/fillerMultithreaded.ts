@@ -61,6 +61,7 @@ import {
 	// getStaleOracleMarketIndexes,
 	handleSimResultError,
 	logMessageForNodeToFill,
+	MEMO_PROGRAM_ID,
 	removePythIxs,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
@@ -1236,6 +1237,8 @@ export class FillerMultithreaded {
 				);
 			}
 
+			const nonActionIxCount = ixs.length;
+
 			nodeToTrigger.node.haveTrigger = true;
 			// @ts-ignore
 			const buffer = Buffer.from(nodeToTrigger.node.userAccountData.data);
@@ -1286,6 +1289,15 @@ export class FillerMultithreaded {
 				logger.info(`tx too large, removing pyth ixs.
 						`);
 				ixs = removePythIxs(ixs);
+			}
+
+			if (ixs.length === nonActionIxCount) {
+				logger.warn(
+					`${logPrefix} No ixs in trigger tx (account: ${
+						nodeToTrigger.node.userAccount
+					}, order ${nodeToTrigger.node.order.orderId.toString()})`
+				);
+				return;
 			}
 
 			const simResult = await simulateAndGetTxWithCUs({
@@ -1572,7 +1584,9 @@ export class FillerMultithreaded {
 				ixs.push(...pythIxs);
 			}
 
-			if (!buildForBundle) {
+			if (buildForBundle) {
+				ixs.push(this.bundleSender!.getTipIx());
+			} else {
 				ixs.push(
 					getPriorityFeeInstruction(
 						Math.floor(
@@ -1607,7 +1621,10 @@ export class FillerMultithreaded {
 			let makerInfosToUse = makerInfos;
 			const buildTxWithMakerInfos = async (
 				makers: DataAndSlot<MakerInfo>[]
-			): Promise<SimulateAndGetTxWithCUsResponse> => {
+			): Promise<SimulateAndGetTxWithCUsResponse | undefined> => {
+				if (makers.length === 0) {
+					return undefined;
+				}
 				ixs.push(
 					await this.driftClient.getFillPerpOrderIx(
 						await getUserAccountPublicKey(
@@ -1664,6 +1681,13 @@ export class FillerMultithreaded {
 					ixs = removePythIxs(ixs);
 				}
 
+				ixs.push(
+					new TransactionInstruction({
+						programId: MEMO_PROGRAM_ID,
+						keys: [],
+						data: Buffer.from(`mm-perp ${fillTxId} ${makers.length}`, 'utf-8'),
+					})
+				);
 				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
 					connection: this.driftClient.connection,
@@ -1694,6 +1718,9 @@ export class FillerMultithreaded {
 			};
 
 			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
+			if (simResult === undefined) {
+				return true;
+			}
 			let txAccounts = simResult.tx.message.getAccountKeys({
 				addressLookupTableAccounts: this.lookupTableAccounts,
 			}).length;
@@ -1706,9 +1733,6 @@ export class FillerMultithreaded {
 				);
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
 				simResult = await buildTxWithMakerInfos(makerInfosToUse);
-				txAccounts = simResult.tx.message.getAccountKeys({
-					addressLookupTableAccounts: this.lookupTableAccounts!,
-				}).length;
 			}
 
 			if (makerInfosToUse.length === 0) {
@@ -1718,14 +1742,27 @@ export class FillerMultithreaded {
 				return true;
 			}
 
+			if (simResult === undefined) {
+				logger.error(
+					`${logPrefix} No simResult after ${attempt} attempts (fillTxId: ${fillTxId})`
+				);
+				return true;
+			}
+
+			txAccounts = simResult.tx.message.getAccountKeys({
+				addressLookupTableAccounts: this.lookupTableAccounts!,
+			}).length;
+
 			logger.info(
-				`${logPrefix} tryFillMultiMakerPerpNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
+				`${logPrefix} tryFillMultiMakerPerpNodes estimated CUs: ${
+					simResult!.cuEstimate
+				} (fillTxId: ${fillTxId})`
 			);
 
-			if (simResult.simError) {
+			if (simResult!.simError) {
 				logger.error(
 					`${logPrefix} Error simulating multi maker perp node (fillTxId: ${fillTxId}): ${JSON.stringify(
-						simResult.simError
+						simResult!.simError
 					)}\nTaker slot: ${takerUserSlot}\nMaker slots: ${makerInfosToUse
 						.map((m) => `  ${m.data.maker.toBase58()}: ${m.slot}`)
 						.join('\n')}`
@@ -1735,7 +1772,7 @@ export class FillerMultithreaded {
 					this.sendFillTxAndParseLogs(
 						fillTxId,
 						[nodeToFill],
-						simResult.tx,
+						simResult!.tx,
 						buildForBundle
 					);
 				} else {
@@ -1782,7 +1819,9 @@ export class FillerMultithreaded {
 			ixs.push(...pythIxs);
 		}
 
-		if (!buildForBundle) {
+		if (buildForBundle) {
+			ixs.push(this.bundleSender!.getTipIx());
+		} else {
 			ixs.push(
 				getPriorityFeeInstruction(
 					Math.floor(
@@ -1861,6 +1900,14 @@ export class FillerMultithreaded {
 						`);
 			ixs = removePythIxs(ixs);
 		}
+
+		ixs.push(
+			new TransactionInstruction({
+				programId: MEMO_PROGRAM_ID,
+				keys: [],
+				data: Buffer.from(`ff-perp ${fillTxId}`, 'utf-8'),
+			})
+		);
 
 		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
@@ -2056,6 +2103,8 @@ export class FillerMultithreaded {
 							);
 						}
 
+						const nonActionIxCount = ixs.length;
+
 						ixs.push(
 							...(await this.driftClient.getSettlePNLsIxs(
 								[
@@ -2069,6 +2118,11 @@ export class FillerMultithreaded {
 								marketIdChunks
 							))
 						);
+
+						if (ixs.length === nonActionIxCount) {
+							logger.warn(`${logPrefix} No ixs in settlePnls tx`);
+							return;
+						}
 
 						const simResult = await simulateAndGetTxWithCUs({
 							ixs,

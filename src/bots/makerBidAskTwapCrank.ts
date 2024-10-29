@@ -57,7 +57,7 @@ const TX_LAND_RATE_THRESHOLD = process.env.TX_LAND_RATE_THRESHOLD
 	? parseFloat(process.env.TX_LAND_RATE_THRESHOLD) || 0.5
 	: 0.5;
 const NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK = 2;
-const TX_PER_JITO_BUNDLE = 5;
+const TX_PER_JITO_BUNDLE = 3;
 
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard

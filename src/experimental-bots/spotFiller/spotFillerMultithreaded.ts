@@ -48,6 +48,7 @@ import {
 	RuntimeSpec,
 } from '../../metrics';
 import {
+	MEMO_PROGRAM_ID,
 	SimulateAndGetTxWithCUsResponse,
 	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
@@ -721,6 +722,8 @@ export class SpotFillerMultithreaded {
 				);
 			}
 
+			const nonActionIxCount = ixs.length;
+
 			ixs.push(
 				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
@@ -734,6 +737,13 @@ export class SpotFillerMultithreaded {
 				ixs.push(
 					await this.driftClient.getRevertFillIx(driftUser.userAccountPublicKey)
 				);
+			}
+
+			if (ixs.length === nonActionIxCount) {
+				logger.warn(
+					`${logPrefix} No ixs in trigger tx for (account: ${nodeToTrigger.node.userAccount.toString()}, order: ${nodeToTrigger.node.order.orderId.toString()})`
+				);
+				return;
 			}
 
 			const simResult = await simulateAndGetTxWithCUs({
@@ -993,7 +1003,10 @@ export class SpotFillerMultithreaded {
 			let makerInfosToUse = makerInfos;
 			const buildTxWithMakerInfos = async (
 				makers: DataAndSlot<MakerInfo>[]
-			): Promise<SimulateAndGetTxWithCUsResponse> => {
+			): Promise<SimulateAndGetTxWithCUsResponse | undefined> => {
+				if (makers.length === 0) {
+					return undefined;
+				}
 				ixs.push(
 					await this.driftClient.getFillSpotOrderIx(
 						new PublicKey(takerUserPubKey),
@@ -1011,6 +1024,15 @@ export class SpotFillerMultithreaded {
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
 				}
+
+				ixs.push(
+					new TransactionInstruction({
+						programId: MEMO_PROGRAM_ID,
+						keys: [],
+						data: Buffer.from(`mm-spot ${fillTxId} ${makers.length}`, 'utf-8'),
+					})
+				);
+
 				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
 					connection: this.driftClient.connection,
@@ -1042,6 +1064,9 @@ export class SpotFillerMultithreaded {
 			};
 
 			let simResult = await buildTxWithMakerInfos(makerInfosToUse);
+			if (simResult === undefined) {
+				return true;
+			}
 			let txAccounts = simResult.tx.message.getAccountKeys({
 				addressLookupTableAccounts: this.lookupTableAccounts,
 			}).length;
@@ -1054,9 +1079,6 @@ export class SpotFillerMultithreaded {
 				);
 				makerInfosToUse = makerInfosToUse.slice(0, makerInfosToUse.length - 1);
 				simResult = await buildTxWithMakerInfos(makerInfosToUse);
-				txAccounts = simResult.tx.message.getAccountKeys({
-					addressLookupTableAccounts: this.lookupTableAccounts,
-				}).length;
 			}
 
 			if (makerInfosToUse.length === 0) {
@@ -1065,6 +1087,16 @@ export class SpotFillerMultithreaded {
 				);
 				return true;
 			}
+			if (simResult === undefined) {
+				logger.error(
+					`No simResult after ${attempt} attempts (fillTxId: ${fillTxId})`
+				);
+				return true;
+			}
+
+			txAccounts = simResult.tx.message.getAccountKeys({
+				addressLookupTableAccounts: this.lookupTableAccounts,
+			}).length;
 
 			logger.info(
 				`tryFillMultiMakerSpotNodes estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
@@ -1197,7 +1229,9 @@ export class SpotFillerMultithreaded {
 				units: 1_400_000,
 			}),
 		];
-		if (!buildForBundle) {
+		if (buildForBundle) {
+			ixs.push(this.bundleSender!.getTipIx());
+		} else {
 			const priorityFee = Math.floor(
 				this.priorityFeeSubscriber.getPriorityFees(
 					'spot',
@@ -1230,6 +1264,15 @@ export class SpotFillerMultithreaded {
 				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 			);
 		}
+
+		ixs.push(
+			new TransactionInstruction({
+				programId: MEMO_PROGRAM_ID,
+				keys: [],
+				data: Buffer.from(`ff-spot ${fillTxId}`, 'utf-8'),
+			})
+		);
+
 		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
 			connection: this.driftClient.connection,
