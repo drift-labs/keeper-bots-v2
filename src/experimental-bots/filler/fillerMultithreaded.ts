@@ -61,7 +61,6 @@ import {
 	// getStaleOracleMarketIndexes,
 	handleSimResultError,
 	logMessageForNodeToFill,
-	MEMO_PROGRAM_ID,
 	removePythIxs,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
@@ -1255,16 +1254,17 @@ export class FillerMultithreaded {
 				}, order ${nodeToTrigger.node.order.orderId.toString()}`
 			);
 
+			let removeLastIxPostSim = this.revertOnFailure;
 			if (this.pythPriceSubscriber) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
 				ixs.push(...pythIxs);
 				txDebugStr += `Pyths (${pythIxs.length}). `;
-				console.log(pythIxs);
+				removeLastIxPostSim = false;
 			}
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
 			if (this.seenTriggerableOrders.has(nodeSignature)) {
-				logger.debug(
+				logger.info(
 					`${logPrefix} already triggered order (account: ${
 						nodeToTrigger.node.userAccount
 					}, order ${nodeToTrigger.node.order.orderId.toString()}.
@@ -1319,7 +1319,7 @@ export class FillerMultithreaded {
 				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),
-				removeLastIxPostSim: this.revertOnFailure,
+				removeLastIxPostSim,
 			});
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',
@@ -1343,7 +1343,9 @@ export class FillerMultithreaded {
 					simResult.cuEstimate
 				} (nonActionIxCount: ${nonActionIxCount}, finalIxCount: ${
 					ixs.length
-				}). debug str: ${txDebugStr} Tx: ${Buffer.from(
+				}). revertTx: ${
+					this.revertOnFailure
+				}, debug str: ${txDebugStr} Tx: ${Buffer.from(
 					simResult.tx.serialize()
 				).toString('base64')}`
 			);
@@ -1593,12 +1595,14 @@ export class FillerMultithreaded {
 				fillerRewardEstimate,
 			} = await this.getNodeFillInfo(nodeToFill);
 
+			let removeLastIxPostSim = this.revertOnFailure;
 			if (
 				this.pythPriceSubscriber &&
 				((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)
 			) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
 				ixs.push(...pythIxs);
+				removeLastIxPostSim = false;
 			}
 
 			if (buildForBundle) {
@@ -1698,13 +1702,6 @@ export class FillerMultithreaded {
 					ixs = removePythIxs(ixs);
 				}
 
-				ixs.push(
-					new TransactionInstruction({
-						programId: MEMO_PROGRAM_ID,
-						keys: [],
-						data: Buffer.from(`mm-perp ${fillTxId} ${makers.length}`, 'utf-8'),
-					})
-				);
 				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
 					connection: this.driftClient.connection,
@@ -1713,7 +1710,7 @@ export class FillerMultithreaded {
 					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
-					removeLastIxPostSim: this.revertOnFailure,
+					removeLastIxPostSim,
 				});
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
@@ -1831,9 +1828,11 @@ export class FillerMultithreaded {
 			fillerRewardEstimate,
 		} = await this.getNodeFillInfo(nodeToFill);
 
+		let removeLastIxPostSim = this.revertOnFailure;
 		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
 			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
 			ixs.push(...pythIxs);
+			removeLastIxPostSim = false;
 		}
 
 		if (buildForBundle) {
@@ -1918,14 +1917,6 @@ export class FillerMultithreaded {
 			ixs = removePythIxs(ixs);
 		}
 
-		ixs.push(
-			new TransactionInstruction({
-				programId: MEMO_PROGRAM_ID,
-				keys: [],
-				data: Buffer.from(`ff-perp ${fillTxId}`, 'utf-8'),
-			})
-		);
-
 		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
 			connection: this.driftClient.connection,
@@ -1934,7 +1925,7 @@ export class FillerMultithreaded {
 			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 			doSimulation: this.simulateTxForCUEstimate,
 			recentBlockhash: await this.getBlockhashForTx(),
-			removeLastIxPostSim: this.revertOnFailure,
+			removeLastIxPostSim,
 		});
 		logger.info(
 			`tryFillPerpNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
