@@ -48,6 +48,7 @@ import {
 	RuntimeSpec,
 } from '../../metrics';
 import {
+	MEMO_PROGRAM_ID,
 	SimulateAndGetTxWithCUsResponse,
 	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
@@ -1023,6 +1024,15 @@ export class SpotFillerMultithreaded {
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
 				}
+
+				ixs.push(
+					new TransactionInstruction({
+						programId: MEMO_PROGRAM_ID,
+						keys: [],
+						data: Buffer.from(`mm-spot ${fillTxId} ${makers.length}`, 'utf-8'),
+					})
+				);
+
 				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
 					connection: this.driftClient.connection,
@@ -1254,6 +1264,15 @@ export class SpotFillerMultithreaded {
 				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 			);
 		}
+
+		ixs.push(
+			new TransactionInstruction({
+				programId: MEMO_PROGRAM_ID,
+				keys: [],
+				data: Buffer.from(`ff-spot ${fillTxId}`, 'utf-8'),
+			})
+		);
+
 		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
 			connection: this.driftClient.connection,

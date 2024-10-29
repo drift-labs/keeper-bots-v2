@@ -61,6 +61,7 @@ import {
 	// getStaleOracleMarketIndexes,
 	handleSimResultError,
 	logMessageForNodeToFill,
+	MEMO_PROGRAM_ID,
 	removePythIxs,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
@@ -1680,6 +1681,13 @@ export class FillerMultithreaded {
 					ixs = removePythIxs(ixs);
 				}
 
+				ixs.push(
+					new TransactionInstruction({
+						programId: MEMO_PROGRAM_ID,
+						keys: [],
+						data: Buffer.from(`mm-perp ${fillTxId} ${makers.length}`, 'utf-8'),
+					})
+				);
 				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
 					connection: this.driftClient.connection,
@@ -1892,6 +1900,14 @@ export class FillerMultithreaded {
 						`);
 			ixs = removePythIxs(ixs);
 		}
+
+		ixs.push(
+			new TransactionInstruction({
+				programId: MEMO_PROGRAM_ID,
+				keys: [],
+				data: Buffer.from(`ff-perp ${fillTxId}`, 'utf-8'),
+			})
+		);
 
 		const simResult = await simulateAndGetTxWithCUs({
 			ixs,

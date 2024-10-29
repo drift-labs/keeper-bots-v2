@@ -70,6 +70,10 @@ export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
 	'V4v1mQiAdLz4qwckEb45WqHYceYizoib39cDBHSWfaB'
 );
 
+export const MEMO_PROGRAM_ID = new PublicKey(
+	'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr'
+);
+
 const JUPITER_SLIPPAGE_BPS = 100;
 export const PRIORITY_FEE_SERVER_RATE_LIMIT_PER_MIN = 300;
 
