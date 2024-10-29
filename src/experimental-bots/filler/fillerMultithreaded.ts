@@ -1286,8 +1286,7 @@ export class FillerMultithreaded {
 
 			const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
 			if (txSize > PACKET_DATA_SIZE) {
-				logger.info(`tx too large, removing pyth ixs.
-						`);
+				logger.info(`tx too large, removing pyth ixs.`);
 				ixs = removePythIxs(ixs);
 			}
 
@@ -1328,7 +1327,7 @@ export class FillerMultithreaded {
 			});
 
 			logger.info(
-				`executeTriggerablePerpNodesForMarket estimated CUs: ${simResult.cuEstimate}`
+				`executeTriggerablePerpNodesForMarket estimated CUs: ${simResult.cuEstimate} (nonActionIxCount: ${nonActionIxCount}, finalIxCount: ${ixs.length})`
 			);
 
 			if (simResult.simError) {
