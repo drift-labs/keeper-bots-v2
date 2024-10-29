@@ -1339,7 +1339,7 @@ export class FillerMultithreaded {
 			});
 
 			logger.info(
-				`executeTriggerablePerpNodesForMarket estimated CUs: ${
+				`executeTriggerablePerpNodesForMarket (${nodeSignature}) estimated CUs: ${
 					simResult.cuEstimate
 				} (nonActionIxCount: ${nonActionIxCount}, finalIxCount: ${
 					ixs.length
