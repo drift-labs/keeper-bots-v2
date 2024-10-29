@@ -1212,6 +1212,7 @@ export class FillerMultithreaded {
 	) {
 		const user = this.driftClient.getUser(this.subaccount);
 		for (const nodeToTrigger of nodesToTrigger) {
+			let txDebugStr = 'CULimit. ';
 			let ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000,
@@ -1220,6 +1221,7 @@ export class FillerMultithreaded {
 
 			if (buildForBundle) {
 				ixs.push(this.bundleSender!.getTipIx());
+				txDebugStr += 'Tip.';
 			} else {
 				ixs.push(
 					ComputeBudgetProgram.setComputeUnitPrice({
@@ -1235,9 +1237,11 @@ export class FillerMultithreaded {
 						),
 					})
 				);
+				txDebugStr += 'PF. ';
 			}
 
 			const nonActionIxCount = ixs.length;
+			txDebugStr += `${nonActionIxCount}. `;
 
 			nodeToTrigger.node.haveTrigger = true;
 			// @ts-ignore
@@ -1254,6 +1258,7 @@ export class FillerMultithreaded {
 			if (this.pythPriceSubscriber) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
 				ixs.push(...pythIxs);
+				txDebugStr += `Pyths (${pythIxs.length}). `;
 			}
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
@@ -1276,11 +1281,15 @@ export class FillerMultithreaded {
 						user.userAccountPublicKey
 					)
 				);
+				txDebugStr += `Trig (${
+					nodeToTrigger.node.userAccount
+				}-${nodeToTrigger.node.order.orderId.toString()}). `;
 
 				if (this.revertOnFailure) {
 					ixs.push(
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
+					txDebugStr += `Revert. `;
 				}
 			}
 
@@ -1288,8 +1297,10 @@ export class FillerMultithreaded {
 			if (txSize > PACKET_DATA_SIZE) {
 				logger.info(`tx too large, removing pyth ixs.`);
 				ixs = removePythIxs(ixs);
+				txDebugStr += `Pyths removed. `;
 			}
 
+			txDebugStr += `Final ${ixs.length}. `;
 			if (ixs.length === nonActionIxCount) {
 				logger.warn(
 					`${logPrefix} No ixs in trigger tx (account: ${
@@ -1327,7 +1338,13 @@ export class FillerMultithreaded {
 			});
 
 			logger.info(
-				`executeTriggerablePerpNodesForMarket estimated CUs: ${simResult.cuEstimate} (nonActionIxCount: ${nonActionIxCount}, finalIxCount: ${ixs.length})`
+				`executeTriggerablePerpNodesForMarket estimated CUs: ${
+					simResult.cuEstimate
+				} (nonActionIxCount: ${nonActionIxCount}, finalIxCount: ${
+					ixs.length
+				}). debug str: ${txDebugStr} Tx: ${Buffer.from(
+					simResult.tx.serialize()
+				).toString('base64')}`
 			);
 
 			if (simResult.simError) {
