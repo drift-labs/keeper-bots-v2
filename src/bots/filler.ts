@@ -1697,12 +1697,14 @@ export class FillerBot extends TxThreaded implements Bot {
 				throw new Error('expected perp market type');
 			}
 
+			let removeLastIxPostSim = this.revertOnFailure;
 			if (
 				this.pythPriceSubscriber &&
 				((makerInfos.length == 2 && !referrerInfo) || makerInfos.length < 2)
 			) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
 				ixs.push(...pythIxs);
+				removeLastIxPostSim = false;
 			}
 
 			const ix = await this.driftClient.getFillPerpOrderIx(
@@ -1781,7 +1783,7 @@ export class FillerBot extends TxThreaded implements Bot {
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
 					dumpTx: DUMP_TXS_IN_SIM,
-					removeLastIxPostSim: this.revertOnFailure,
+					removeLastIxPostSim,
 				});
 			} catch (e) {
 				logger.error(
@@ -1923,9 +1925,11 @@ export class FillerBot extends TxThreaded implements Bot {
 				);
 			}
 
+			let removeLastIxPostSim = this.revertOnFailure;
 			if (this.pythPriceSubscriber) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
 				ixs.push(...pythIxs);
+				removeLastIxPostSim = false;
 			}
 
 			ixs.push(
@@ -1960,7 +1964,7 @@ export class FillerBot extends TxThreaded implements Bot {
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),
 				dumpTx: DUMP_TXS_IN_SIM,
-				removeLastIxPostSim: this.revertOnFailure,
+				removeLastIxPostSim,
 			});
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',

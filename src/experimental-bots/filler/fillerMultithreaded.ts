@@ -61,7 +61,6 @@ import {
 	// getStaleOracleMarketIndexes,
 	handleSimResultError,
 	logMessageForNodeToFill,
-	MEMO_PROGRAM_ID,
 	removePythIxs,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
@@ -1237,8 +1236,6 @@ export class FillerMultithreaded {
 				);
 			}
 
-			const nonActionIxCount = ixs.length;
-
 			nodeToTrigger.node.haveTrigger = true;
 			// @ts-ignore
 			const buffer = Buffer.from(nodeToTrigger.node.userAccountData.data);
@@ -1251,14 +1248,16 @@ export class FillerMultithreaded {
 				}, order ${nodeToTrigger.node.order.orderId.toString()}`
 			);
 
+			let removeLastIxPostSim = this.revertOnFailure;
 			if (this.pythPriceSubscriber) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
 				ixs.push(...pythIxs);
+				removeLastIxPostSim = false;
 			}
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
 			if (this.seenTriggerableOrders.has(nodeSignature)) {
-				logger.debug(
+				logger.info(
 					`${logPrefix} already triggered order (account: ${
 						nodeToTrigger.node.userAccount
 					}, order ${nodeToTrigger.node.order.orderId.toString()}.
@@ -1286,18 +1285,8 @@ export class FillerMultithreaded {
 
 			const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
 			if (txSize > PACKET_DATA_SIZE) {
-				logger.info(`tx too large, removing pyth ixs.
-						`);
+				logger.info(`tx too large, removing pyth ixs.`);
 				ixs = removePythIxs(ixs);
-			}
-
-			if (ixs.length === nonActionIxCount) {
-				logger.warn(
-					`${logPrefix} No ixs in trigger tx (account: ${
-						nodeToTrigger.node.userAccount
-					}, order ${nodeToTrigger.node.order.orderId.toString()})`
-				);
-				return;
 			}
 
 			const simResult = await simulateAndGetTxWithCUs({
@@ -1308,7 +1297,7 @@ export class FillerMultithreaded {
 				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 				doSimulation: this.simulateTxForCUEstimate,
 				recentBlockhash: await this.getBlockhashForTx(),
-				removeLastIxPostSim: this.revertOnFailure,
+				removeLastIxPostSim,
 			});
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',
@@ -1328,7 +1317,7 @@ export class FillerMultithreaded {
 			});
 
 			logger.info(
-				`executeTriggerablePerpNodesForMarket estimated CUs: ${simResult.cuEstimate}`
+				`executeTriggerablePerpNodesForMarket (${nodeSignature}) estimated CUs: ${simResult.cuEstimate}, finalIxCount: ${ixs.length}). revertTx: ${this.revertOnFailure}}`
 			);
 
 			if (simResult.simError) {
@@ -1576,12 +1565,14 @@ export class FillerMultithreaded {
 				fillerRewardEstimate,
 			} = await this.getNodeFillInfo(nodeToFill);
 
+			let removeLastIxPostSim = this.revertOnFailure;
 			if (
 				this.pythPriceSubscriber &&
 				((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)
 			) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
 				ixs.push(...pythIxs);
+				removeLastIxPostSim = false;
 			}
 
 			if (buildForBundle) {
@@ -1681,13 +1672,6 @@ export class FillerMultithreaded {
 					ixs = removePythIxs(ixs);
 				}
 
-				ixs.push(
-					new TransactionInstruction({
-						programId: MEMO_PROGRAM_ID,
-						keys: [],
-						data: Buffer.from(`mm-perp ${fillTxId} ${makers.length}`, 'utf-8'),
-					})
-				);
 				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
 					connection: this.driftClient.connection,
@@ -1696,7 +1680,7 @@ export class FillerMultithreaded {
 					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 					doSimulation: this.simulateTxForCUEstimate,
 					recentBlockhash: await this.getBlockhashForTx(),
-					removeLastIxPostSim: this.revertOnFailure,
+					removeLastIxPostSim,
 				});
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
@@ -1814,9 +1798,11 @@ export class FillerMultithreaded {
 			fillerRewardEstimate,
 		} = await this.getNodeFillInfo(nodeToFill);
 
+		let removeLastIxPostSim = this.revertOnFailure;
 		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
 			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
 			ixs.push(...pythIxs);
+			removeLastIxPostSim = false;
 		}
 
 		if (buildForBundle) {
@@ -1901,14 +1887,6 @@ export class FillerMultithreaded {
 			ixs = removePythIxs(ixs);
 		}
 
-		ixs.push(
-			new TransactionInstruction({
-				programId: MEMO_PROGRAM_ID,
-				keys: [],
-				data: Buffer.from(`ff-perp ${fillTxId}`, 'utf-8'),
-			})
-		);
-
 		const simResult = await simulateAndGetTxWithCUs({
 			ixs,
 			connection: this.driftClient.connection,
@@ -1917,7 +1895,7 @@ export class FillerMultithreaded {
 			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 			doSimulation: this.simulateTxForCUEstimate,
 			recentBlockhash: await this.getBlockhashForTx(),
-			removeLastIxPostSim: this.revertOnFailure,
+			removeLastIxPostSim,
 		});
 		logger.info(
 			`tryFillPerpNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
@@ -2103,8 +2081,6 @@ export class FillerMultithreaded {
 							);
 						}
 
-						const nonActionIxCount = ixs.length;
-
 						ixs.push(
 							...(await this.driftClient.getSettlePNLsIxs(
 								[
@@ -2118,11 +2094,6 @@ export class FillerMultithreaded {
 								marketIdChunks
 							))
 						);
-
-						if (ixs.length === nonActionIxCount) {
-							logger.warn(`${logPrefix} No ixs in settlePnls tx`);
-							return;
-						}
 
 						const simResult = await simulateAndGetTxWithCUs({
 							ixs,
