@@ -1259,6 +1259,7 @@ export class FillerMultithreaded {
 				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
 				ixs.push(...pythIxs);
 				txDebugStr += `Pyths (${pythIxs.length}). `;
+				console.log(pythIxs);
 			}
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
