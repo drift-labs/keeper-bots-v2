@@ -45,8 +45,6 @@ export class SwiftTaker {
 					price: oracleInfo.price.muln(105).divn(100),
 				}),
 				subAccountId: 0,
-				expectedOrderId: this.driftClient.getUser().getUserAccount()
-					.nextOrderId,
 				stopLossOrderParams: null,
 				takeProfitOrderParams: null,
 			});
