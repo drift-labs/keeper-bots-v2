@@ -36,7 +36,7 @@ export class SwiftTaker {
 				Math.random() > 0.5 ? PositionDirection.LONG : PositionDirection.SHORT;
 			console.log('Sending order in slot:', slot, Date.now());
 			const oracleInfo = this.driftClient.getOracleDataForPerpMarket(0);
-			const orderMessage = this.driftClient.encodeSwiftOrderParamsMessage({
+			const orderMessage = {
 				swiftOrderParams: getMarketOrderParams({
 					marketIndex: 0,
 					marketType: MarketType.PERP,
@@ -47,15 +47,18 @@ export class SwiftTaker {
 				subAccountId: 0,
 				stopLossOrderParams: null,
 				takeProfitOrderParams: null,
-			});
+			};
+			const signature =
+				this.driftClient.signSwiftOrderParamsMessage(orderMessage);
 
-			const signature = this.driftClient.signMessage(orderMessage);
 			const response = await axios.default.post(
 				'https://master.swift.drift.trade/orders',
 				{
 					market_index: 0,
 					market_type: 'perp',
-					message: orderMessage.toString('base64'),
+					message: this.driftClient
+						.encodeSwiftOrderParamsMessage(orderMessage)
+						.toString('base64'),
 					signature: signature.toString('base64'),
 					taker_pubkey: this.driftClient.wallet.publicKey.toBase58(),
 				},
