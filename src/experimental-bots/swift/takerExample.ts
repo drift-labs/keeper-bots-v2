@@ -48,9 +48,9 @@ export class SwiftTaker {
 				stopLossOrderParams: null,
 				takeProfitOrderParams: null,
 			};
-
 			const signature =
 				this.driftClient.signSwiftOrderParamsMessage(orderMessage);
+
 			const response = await axios.default.post(
 				'https://master.swift.drift.trade/orders',
 				{
