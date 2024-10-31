@@ -1,7 +1,11 @@
 import {
+	BN,
 	DriftClient,
+	getLimitOrderParams,
 	getUserAccountPublicKey,
 	getUserStatsAccountPublicKey,
+	MarketType,
+	PositionDirection,
 	PublicKey,
 	UserMap,
 } from '@drift-labs/sdk';
@@ -82,12 +86,16 @@ export class SwiftMaker {
 					const takerUserAccount = (
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();
-					const ixs = await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
+
+					const isOrderLong =
+						order['order_message']['swift_order_params']['direction'] ===
+						'long';
+					const ixs = await this.driftClient.getPlaceAndMakeSwiftPerpOrderIxs(
 						Buffer.from(order['swift_message'], 'base64'),
 						Buffer.from(order['swift_signature'], 'base64'),
 						Buffer.from(order['order_message'], 'base64'),
 						Buffer.from(order['order_signature'], 'base64'),
-						order['market_index'],
+						order['uuid'],
 						{
 							taker: takerUserPubkey,
 							takerUserAccount,
@@ -95,7 +103,27 @@ export class SwiftMaker {
 								this.driftClient.program.programId,
 								takerUserAccount.authority
 							),
-						}
+						},
+						getLimitOrderParams({
+							marketType: MarketType.PERP,
+							marketIndex:
+								order['order_message']['swift_order_params']['market_index'],
+							direction: isOrderLong
+								? PositionDirection.SHORT
+								: PositionDirection.LONG,
+							baseAssetAmount: new BN(
+								order['order_message']['swift_order_params'][
+									'base_asset_amount'
+								]
+							),
+							price: isOrderLong
+								? new BN(order['order_message']['swift_order_params']['price'])
+										.muln(99)
+										.divn(100)
+								: new BN(order['order_message']['swift_order_params']['price'])
+										.muln(101)
+										.divn(100),
+						})
 					);
 					const tx = await this.driftClient.txSender.getVersionedTransaction(
 						ixs,
