@@ -1025,11 +1025,17 @@ export function validRebalanceSettledPnlThreshold(
 
 export const getPythPriceFeedIdForMarket = (
 	marketIndex: number,
-	markets: Array<SpotMarketConfig | PerpMarketConfig>
-) => {
+	markets: Array<SpotMarketConfig | PerpMarketConfig>,
+	throwOnNotFound = true
+): string | undefined => {
 	const market = markets.find((market) => market.marketIndex === marketIndex);
 	if (!market) {
-		throw new Error(`Market ${marketIndex} not found`);
+		if (throwOnNotFound) {
+			throw new Error(`Pyth feedID for market ${marketIndex} not found`);
+		} else {
+			logger.warn(`Pyth feedID for market ${marketIndex} not found`);
+			return undefined;
+		}
 	}
 	return market.pythFeedId;
 };
@@ -1101,7 +1107,11 @@ export const getAllPythOracleUpdateIxs = async (
 		);
 	}
 
-	const primaryFeedId = getPythPriceFeedIdForMarket(activeMarketIndex, markets);
+	const primaryFeedId = getPythPriceFeedIdForMarket(
+		activeMarketIndex,
+		markets,
+		false
+	);
 	marketIndexesToConsider =
 		marketIndexesToConsider ?? markets.map((market) => market.marketIndex);
 	const staleFeedIds = getStaleOracleMarketIndexes(
@@ -1109,9 +1119,10 @@ export const getAllPythOracleUpdateIxs = async (
 		markets,
 		marketType,
 		numNonActiveOraclesToTryAndPush
-	).map((index) => getPythPriceFeedIdForMarket(index, markets));
+	).map((index) => getPythPriceFeedIdForMarket(index, markets, false));
 
 	const postOracleUpdateIxsPromises = [primaryFeedId, ...staleFeedIds]
+		.filter((feedId) => feedId !== undefined)
 		.map((feedId) => {
 			if (!feedId) return;
 			const vaa = pythPriceSubscriber.getLatestCachedVaa(feedId);
