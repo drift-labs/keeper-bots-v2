@@ -5,6 +5,7 @@ import {
 	BlockhashSubscriber,
 	DriftClient,
 	PriorityFeeSubscriber,
+	SlothashSubscriber,
 	TxSigAndSlot,
 } from '@drift-labs/sdk';
 import { SwitchboardOnDemandClient } from '@drift-labs/sdk';
@@ -33,6 +34,7 @@ export class SwitchboardCrankerBot implements Bot {
 	public defaultIntervalMs = 30_000;
 
 	private blockhashSubscriber: BlockhashSubscriber;
+	private slothashSubscriber: SlothashSubscriber;
 
 	constructor(
 		private globalConfig: GlobalConfig,
@@ -52,6 +54,13 @@ export class SwitchboardCrankerBot implements Bot {
 		this.oracleClient = new SwitchboardOnDemandClient(
 			this.driftClient.connection
 		);
+
+		this.slothashSubscriber = new SlothashSubscriber(
+			this.driftClient.connection,
+			{
+				commitment: 'processed',
+			}
+		);
 	}
 
 	async init(): Promise<void> {
@@ -60,6 +69,7 @@ export class SwitchboardCrankerBot implements Bot {
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
+		await this.slothashSubscriber.subscribe();
 	}
 
 	async reset(): Promise<void> {
@@ -117,7 +127,8 @@ export class SwitchboardCrankerBot implements Bot {
 				}
 				const pullIx =
 					await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
-						pubkey
+						pubkey,
+						this.slothashSubscriber.currentSlothash
 					);
 				if (!pullIx) {
 					logger.error(`No pullIx for ${alias}`);
