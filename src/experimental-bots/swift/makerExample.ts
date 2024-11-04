@@ -130,8 +130,8 @@ export class SwiftMaker {
 								: PositionDirection.LONG,
 							baseAssetAmount: swiftOrderParams.baseAssetAmount,
 							price: isOrderLong
-								? swiftOrderParams.price.muln(99).divn(100)
-								: swiftOrderParams.price.muln(101).divn(100),
+								? swiftOrderParams.auctionStartPrice!.muln(99).divn(100)
+								: swiftOrderParams.auctionEndPrice!.muln(101).divn(100),
 							postOnly: PostOnlyParams.MUST_POST_ONLY,
 							immediateOrCancel: true,
 						})
