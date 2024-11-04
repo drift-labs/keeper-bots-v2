@@ -76,6 +76,7 @@ export class SwiftMaker {
 
 				if (message['order'] && this.driftClient.isSubscribed) {
 					const order = JSON.parse(message['order']);
+					console.info(`received order. uuid: ${order['uuid']}`);
 					const takerAuthority = new PublicKey(order['taker_authority']);
 					const takerSubaccountId = order['taker_sub_account_id'] ?? 0;
 					const takerUserPubkey = await getUserAccountPublicKey(
@@ -111,7 +112,7 @@ export class SwiftMaker {
 						Buffer.from(order['swift_signature'], 'base64'),
 						swiftOrderParamsBuf,
 						Buffer.from(order['order_signature'], 'base64'),
-						order['uuid'],
+						decodeUTF8(order['uuid']),
 						{
 							taker: takerUserPubkey,
 							takerUserAccount,
