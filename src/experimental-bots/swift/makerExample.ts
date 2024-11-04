@@ -1,5 +1,4 @@
 import {
-	BN,
 	DriftClient,
 	getLimitOrderParams,
 	getUserAccountPublicKey,
@@ -7,6 +6,7 @@ import {
 	MarketType,
 	PositionDirection,
 	PublicKey,
+	SwiftOrderParamsMessage,
 	UserMap,
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
@@ -87,13 +87,29 @@ export class SwiftMaker {
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();
 
+					const swiftOrderParamsBuf = Buffer.from(
+						order['order_message'],
+						'base64'
+					);
+					const { swiftOrderParams }: SwiftOrderParamsMessage =
+						this.driftClient.program.coder.types.decode(
+							'SwiftOrderParamsMessage',
+							swiftOrderParamsBuf
+						);
+
 					const isOrderLong =
-						order['order_message']['swift_order_params']['direction'] ===
-						'long';
+						swiftOrderParams.direction === PositionDirection.LONG;
+					if (!swiftOrderParams.price) {
+						console.error(
+							`order has no price: ${JSON.stringify(swiftOrderParams)}`
+						);
+						return;
+					}
+
 					const ixs = await this.driftClient.getPlaceAndMakeSwiftPerpOrderIxs(
 						Buffer.from(order['swift_message'], 'base64'),
 						Buffer.from(order['swift_signature'], 'base64'),
-						Buffer.from(order['order_message'], 'base64'),
+						swiftOrderParamsBuf,
 						Buffer.from(order['order_signature'], 'base64'),
 						order['uuid'],
 						{
@@ -106,23 +122,14 @@ export class SwiftMaker {
 						},
 						getLimitOrderParams({
 							marketType: MarketType.PERP,
-							marketIndex:
-								order['order_message']['swift_order_params']['market_index'],
+							marketIndex: swiftOrderParams.marketIndex,
 							direction: isOrderLong
 								? PositionDirection.SHORT
 								: PositionDirection.LONG,
-							baseAssetAmount: new BN(
-								order['order_message']['swift_order_params'][
-									'base_asset_amount'
-								]
-							),
+							baseAssetAmount: swiftOrderParams.baseAssetAmount,
 							price: isOrderLong
-								? new BN(order['order_message']['swift_order_params']['price'])
-										.muln(99)
-										.divn(100)
-								: new BN(order['order_message']['swift_order_params']['price'])
-										.muln(101)
-										.divn(100),
+								? swiftOrderParams.price.muln(99).divn(100)
+								: swiftOrderParams.price.muln(101).divn(100),
 						})
 					);
 					const tx = await this.driftClient.txSender.getVersionedTransaction(
