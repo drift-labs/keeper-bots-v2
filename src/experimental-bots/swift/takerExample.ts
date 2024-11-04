@@ -37,8 +37,10 @@ export class SwiftTaker {
 				Math.random() > 0.5 ? PositionDirection.LONG : PositionDirection.SHORT;
 			console.log('Sending order in slot:', slot, Date.now());
 			const oracleInfo = this.driftClient.getOracleDataForPerpMarket(0);
+
 			const highPrice = oracleInfo.price.muln(102).divn(100);
 			const lowPrice = oracleInfo.price.muln(101).divn(100);
+
 			const orderMessage = {
 				swiftOrderParams: getMarketOrderParams({
 					marketIndex: 0,
