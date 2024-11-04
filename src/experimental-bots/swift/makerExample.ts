@@ -3,6 +3,7 @@ import {
 	getLimitOrderParams,
 	getUserAccountPublicKey,
 	getUserStatsAccountPublicKey,
+	isVariant,
 	MarketType,
 	PositionDirection,
 	PostOnlyParams,
@@ -99,8 +100,7 @@ export class SwiftMaker {
 							swiftOrderParamsBuf
 						);
 
-					const isOrderLong =
-						swiftOrderParams.direction === PositionDirection.LONG;
+					const isOrderLong = isVariant(swiftOrderParams.direction, 'long');
 					if (!swiftOrderParams.price) {
 						console.error(
 							`order has no price: ${JSON.stringify(swiftOrderParams)}`
