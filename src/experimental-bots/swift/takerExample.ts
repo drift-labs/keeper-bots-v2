@@ -2,6 +2,7 @@ import {
 	BASE_PRECISION,
 	DriftClient,
 	getMarketOrderParams,
+	isVariant,
 	MarketType,
 	PositionDirection,
 } from '@drift-labs/sdk';
@@ -36,14 +37,18 @@ export class SwiftTaker {
 				Math.random() > 0.5 ? PositionDirection.LONG : PositionDirection.SHORT;
 			console.log('Sending order in slot:', slot, Date.now());
 			const oracleInfo = this.driftClient.getOracleDataForPerpMarket(0);
+			const highPrice = oracleInfo.price.muln(102).divn(100);
+			const lowPrice = oracleInfo.price.muln(101).divn(100);
 			const orderMessage = {
 				swiftOrderParams: getMarketOrderParams({
 					marketIndex: 0,
 					marketType: MarketType.PERP,
 					direction,
 					baseAssetAmount: BASE_PRECISION,
-					auctionStartPrice: oracleInfo.price.muln(101).divn(100),
-					auctionEndPrice: oracleInfo.price.muln(102).divn(100),
+					auctionStartPrice: isVariant(direction, 'long')
+						? lowPrice
+						: highPrice,
+					auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
 					auctionDuration: 15,
 				}),
 				subAccountId: 0,
