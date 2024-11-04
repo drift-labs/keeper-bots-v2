@@ -131,6 +131,8 @@ export class SwiftMaker {
 							price: isOrderLong
 								? swiftOrderParams.price.muln(99).divn(100)
 								: swiftOrderParams.price.muln(101).divn(100),
+							postOnly: true,
+							immediateOrCancel: true,
 						})
 					);
 					const tx = await this.driftClient.txSender.getVersionedTransaction(
