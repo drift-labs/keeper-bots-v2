@@ -12,6 +12,7 @@ import {
 import { RuntimeSpec } from 'src/metrics';
 import WebSocket from 'ws';
 import nacl from 'tweetnacl';
+import { decodeUTF8 } from 'tweetnacl-util';
 
 export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
@@ -49,7 +50,7 @@ export class SwiftMaker {
 				this.startHeartbeatTimer();
 
 				if (message['channel'] === 'auth' && message['nonce'] != null) {
-					const messageBytes = Buffer.from(message['nonce']);
+					const messageBytes = decodeUTF8(message['nonce']);
 					const signature = nacl.sign.detached(messageBytes, keypair.secretKey);
 					const signatureBase64 = Buffer.from(signature).toString('base64');
 					ws.send(
