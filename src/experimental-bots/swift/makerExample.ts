@@ -79,8 +79,21 @@ export class SwiftMaker {
 				if (message['order'] && this.driftClient.isSubscribed) {
 					const order = JSON.parse(message['order']);
 					console.info(`received order. uuid: ${order['uuid']}`);
+
+					const swiftOrderParamsBuf = Buffer.from(
+						order['order_message'],
+						'base64'
+					);
+					const {
+						swiftOrderParams,
+						subAccountId: takerSubaccountId,
+					}: SwiftOrderParamsMessage =
+						this.driftClient.program.coder.types.decode(
+							'SwiftOrderParamsMessage',
+							swiftOrderParamsBuf
+						);
+
 					const takerAuthority = new PublicKey(order['taker_authority']);
-					const takerSubaccountId = order['taker_sub_account_id'] ?? 0;
 					const takerUserPubkey = await getUserAccountPublicKey(
 						this.driftClient.program.programId,
 						takerAuthority,
@@ -89,16 +102,6 @@ export class SwiftMaker {
 					const takerUserAccount = (
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();
-
-					const swiftOrderParamsBuf = Buffer.from(
-						order['order_message'],
-						'base64'
-					);
-					const { swiftOrderParams }: SwiftOrderParamsMessage =
-						this.driftClient.program.coder.types.decode(
-							'SwiftOrderParamsMessage',
-							swiftOrderParamsBuf
-						);
 
 					const isOrderLong = isVariant(swiftOrderParams.direction, 'long');
 					if (!swiftOrderParams.price) {
