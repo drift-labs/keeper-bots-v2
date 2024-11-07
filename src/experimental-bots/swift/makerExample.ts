@@ -3,8 +3,10 @@ import {
 	getLimitOrderParams,
 	getUserAccountPublicKey,
 	getUserStatsAccountPublicKey,
+	isVariant,
 	MarketType,
 	PositionDirection,
+	PostOnlyParams,
 	PublicKey,
 	SwiftOrderParamsMessage,
 	UserMap,
@@ -77,8 +79,21 @@ export class SwiftMaker {
 				if (message['order'] && this.driftClient.isSubscribed) {
 					const order = JSON.parse(message['order']);
 					console.info(`received order. uuid: ${order['uuid']}`);
+
+					const swiftOrderParamsBuf = Buffer.from(
+						order['order_message'],
+						'base64'
+					);
+					const {
+						swiftOrderParams,
+						subAccountId: takerSubaccountId,
+					}: SwiftOrderParamsMessage =
+						this.driftClient.program.coder.types.decode(
+							'SwiftOrderParamsMessage',
+							swiftOrderParamsBuf
+						);
+
 					const takerAuthority = new PublicKey(order['taker_authority']);
-					const takerSubaccountId = order['taker_sub_account_id'] ?? 0;
 					const takerUserPubkey = await getUserAccountPublicKey(
 						this.driftClient.program.programId,
 						takerAuthority,
@@ -88,18 +103,7 @@ export class SwiftMaker {
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();
 
-					const swiftOrderParamsBuf = Buffer.from(
-						order['order_message'],
-						'base64'
-					);
-					const { swiftOrderParams }: SwiftOrderParamsMessage =
-						this.driftClient.program.coder.types.decode(
-							'SwiftOrderParamsMessage',
-							swiftOrderParamsBuf
-						);
-
-					const isOrderLong =
-						swiftOrderParams.direction === PositionDirection.LONG;
+					const isOrderLong = isVariant(swiftOrderParams.direction, 'long');
 					if (!swiftOrderParams.price) {
 						console.error(
 							`order has no price: ${JSON.stringify(swiftOrderParams)}`
@@ -129,9 +133,9 @@ export class SwiftMaker {
 								: PositionDirection.LONG,
 							baseAssetAmount: swiftOrderParams.baseAssetAmount,
 							price: isOrderLong
-								? swiftOrderParams.price.muln(99).divn(100)
-								: swiftOrderParams.price.muln(101).divn(100),
-							postOnly: true,
+								? swiftOrderParams.auctionStartPrice!.muln(99).divn(100)
+								: swiftOrderParams.auctionEndPrice!.muln(101).divn(100),
+							postOnly: PostOnlyParams.MUST_POST_ONLY,
 							immediateOrCancel: true,
 						})
 					);
