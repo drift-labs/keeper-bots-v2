@@ -9,6 +9,7 @@ import {
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
 import * as axios from 'axios';
+import { sleepMs } from 'src/utils';
 
 const CONFIRM_TIMEOUT = 30_000;
 
@@ -34,18 +35,24 @@ export class SwiftTaker {
 	}
 
 	async startInterval() {
+		const marketIndexes = [0, 1, 2, 3, 4, 5, 6];
 		this.interval = setInterval(async () => {
+			await sleepMs(Math.random() * 1000); // Randomize for different grafana metrics
 			const slot = await this.driftClient.connection.getSlot();
 			const direction =
 				Math.random() > 0.5 ? PositionDirection.LONG : PositionDirection.SHORT;
-			const oracleInfo = this.driftClient.getOracleDataForPerpMarket(0);
 
-			const highPrice = oracleInfo.price.muln(102).divn(100);
-			const lowPrice = oracleInfo.price.muln(101).divn(100);
+			const marketIndex =
+				marketIndexes[Math.floor(Math.random() * marketIndexes.length)];
+
+			const oracleInfo =
+				this.driftClient.getOracleDataForPerpMarket(marketIndex);
+			const highPrice = oracleInfo.price.muln(101).divn(100);
+			const lowPrice = oracleInfo.price;
 
 			const orderMessage = {
 				swiftOrderParams: getMarketOrderParams({
-					marketIndex: 0,
+					marketIndex,
 					marketType: MarketType.PERP,
 					direction,
 					baseAssetAmount: BASE_PRECISION,
@@ -53,7 +60,7 @@ export class SwiftTaker {
 						? lowPrice
 						: highPrice,
 					auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
-					auctionDuration: 100,
+					auctionDuration: 30,
 				}),
 				subAccountId: 0,
 				stopLossOrderParams: null,
