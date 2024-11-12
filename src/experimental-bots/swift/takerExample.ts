@@ -9,7 +9,7 @@ import {
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
 import * as axios from 'axios';
-import { sleepMs } from 'src/utils';
+import { sleepMs } from '../../utils';
 
 const CONFIRM_TIMEOUT = 30_000;
 
