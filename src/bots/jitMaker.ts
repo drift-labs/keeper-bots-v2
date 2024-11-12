@@ -35,7 +35,18 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 import { PublicKey } from '@solana/web3.js';
-import { JitMakerConfig } from '../config';
+import { BaseBotConfig } from '../config';
+
+export type JitMakerConfig = BaseBotConfig & {
+	subaccounts?: Array<number>;
+	marketType: string;
+	/// @deprecated, use {@link JitMakerConfig.marketIndexes} and {@link JitMakerConfig.marketType}
+	perpMarketIndicies?: Array<number>;
+	marketIndexes?: Array<number>;
+	targetLeverage?: number;
+	aggressivenessBps?: number;
+	jitCULimit?: number;
+};
 
 /**
  * This is an example of a bot that implements the Bot interface.

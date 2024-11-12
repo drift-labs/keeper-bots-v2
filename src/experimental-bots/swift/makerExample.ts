@@ -74,6 +74,41 @@ export class SwiftMaker {
 							market_name: 'SOL-PERP',
 						})
 					);
+					ws.send(
+						JSON.stringify({
+							action: 'subscribe',
+							market_type: 'perp',
+							market_name: 'BTC-PERP',
+						})
+					);
+					ws.send(
+						JSON.stringify({
+							action: 'subscribe',
+							market_type: 'perp',
+							market_name: 'ETH-PERP',
+						})
+					);
+					ws.send(
+						JSON.stringify({
+							action: 'subscribe',
+							market_type: 'perp',
+							market_name: 'APT-PERP',
+						})
+					);
+					ws.send(
+						JSON.stringify({
+							action: 'subscribe',
+							market_type: 'perp',
+							market_name: 'MATIC-PERP',
+						})
+					);
+					ws.send(
+						JSON.stringify({
+							action: 'subscribe',
+							market_type: 'perp',
+							market_name: 'ARB-PERP',
+						})
+					);
 				}
 
 				if (message['order'] && this.driftClient.isSubscribed) {
