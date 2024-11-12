@@ -3,6 +3,7 @@ import YAML from 'yaml';
 import {
 	loadCommaDelimitToArray,
 	loadCommaDelimitToStringArray,
+	parsePositiveIntArray,
 } from './utils';
 import { OrderExecutionAlgoType } from './types';
 import {
@@ -19,17 +20,6 @@ export type BaseBotConfig = {
 	/// will override {@link GlobalConfig.metricsPort}
 	metricsPort?: number;
 	runOnce?: boolean;
-};
-
-export type JitMakerConfig = BaseBotConfig & {
-	subaccounts?: Array<number>;
-	marketType: string;
-	/// @deprecated, use {@link JitMakerConfig.marketIndexes} and {@link JitMakerConfig.marketType}
-	perpMarketIndicies?: Array<number>;
-	marketIndexes?: Array<number>;
-	targetLeverage?: number;
-	aggressivenessBps?: number;
-	jitCULimit?: number;
 };
 
 export type UserPnlSettlerConfig = BaseBotConfig & {
@@ -137,14 +127,12 @@ export type BotConfigMap = {
 	trigger?: BaseBotConfig;
 	liquidator?: LiquidatorConfig;
 	floatingMaker?: BaseBotConfig;
-	jitMaker?: JitMakerConfig;
 	ifRevenueSettler?: BaseBotConfig;
 	fundingRateUpdater?: BaseBotConfig;
 	userPnlSettler?: UserPnlSettlerConfig;
 	userLpSettler?: BaseBotConfig;
 	userIdleFlipper?: BaseBotConfig;
 	markTwapCrank?: BaseBotConfig;
-	uncrossArb?: BaseBotConfig;
 	pythCranker?: PythCrankerBotConfig;
 	switchboardCranker?: SwitchboardCrankerBotConfig;
 	swiftTaker?: BaseBotConfig;
@@ -159,6 +147,10 @@ export interface GlobalConfig {
 	wsEndpoint?: string;
 	hermesEndpoint?: string;
 	numNonActiveOraclesToPush?: number;
+
+	// Optional to specify markets loaded by drift client
+	perpMarketsToLoad?: Array<number>;
+	spotMarketsToLoad?: Array<number>;
 
 	/// helius endpoint to use helius priority fee strategy
 	heliusEndpoint?: string;
@@ -231,6 +223,9 @@ const defaultConfig: Partial<Config> = {
 		runOnce: false,
 		debug: false,
 		subaccounts: [0],
+
+		perpMarketsToLoad: parsePositiveIntArray(process.env.PERP_MARKETS_TO_LOAD),
+		spotMarketsToLoad: parsePositiveIntArray(process.env.SPOT_MARKETS_TO_LOAD),
 
 		eventSubscriberPollingInterval: 5000,
 		bulkAccountLoaderPollingInterval: 5000,
@@ -455,21 +450,6 @@ export function loadConfigFromOpts(opts: any): Config {
 			runOnce: opts.runOnce ?? false,
 		};
 	}
-	if (opts.jitMaker) {
-		config.enabledBots.push('jitMaker');
-		config.botConfigs!.jitMaker = {
-			dryRun: opts.dryRun ?? false,
-			botId: process.env.BOT_ID ?? 'jitMaker',
-			metricsPort: 9464,
-			runOnce: opts.runOnce ?? false,
-			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies) ?? [
-				0,
-			],
-			subaccounts: loadCommaDelimitToArray(opts.subaccounts) ?? [0],
-			marketType: opts.marketType ?? 'perp',
-			targetLeverage: 1,
-		};
-	}
 	if (opts.ifRevenueSettler) {
 		config.enabledBots.push('ifRevenueSettler');
 		config.botConfigs!.ifRevenueSettler = {
@@ -528,17 +508,6 @@ export function loadConfigFromOpts(opts: any): Config {
 			runOnce: opts.runOnce ?? false,
 		};
 	}
-
-	if (opts.uncrossArb) {
-		config.enabledBots.push('uncrossArb');
-		config.botConfigs!.uncrossArb = {
-			dryRun: opts.dryRun ?? false,
-			botId: process.env.BOT_ID ?? 'uncrossArb',
-			metricsPort: 9464,
-			runOnce: opts.runOnce ?? false,
-		};
-	}
-
 	return mergeDefaults(defaultConfig, config) as Config;
 }
 

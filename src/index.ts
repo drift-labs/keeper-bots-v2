@@ -24,10 +24,7 @@ import {
 	TokenFaucet,
 	DriftClientSubscriptionConfig,
 	LogProviderConfig,
-	getMarketsAndOraclesForSubscription,
-	AuctionSubscriber,
 	FastSingleTxSender,
-	OracleInfo,
 	UserMap,
 	Wallet,
 	RetryTxSender,
@@ -48,7 +45,6 @@ import { constants } from './types';
 import { FillerBot } from './bots/filler';
 import { SpotFillerBot } from './bots/spotFiller';
 import { TriggerBot } from './bots/trigger';
-import { JitMaker } from './bots/jitMaker';
 import { LiquidatorBot } from './bots/liquidator';
 import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
@@ -62,6 +58,7 @@ import {
 	TOKEN_FAUCET_PROGRAM_ID,
 	getWallet,
 	loadKeypair,
+	getMarketsAndOracleInfosToLoad,
 } from './utils';
 import {
 	Config,
@@ -71,9 +68,7 @@ import {
 } from './config';
 import { FundingRateUpdaterBot } from './bots/fundingRateUpdater';
 import { FillerLiteBot } from './bots/fillerLite';
-import { JitProxyClient, JitterShotgun } from '@drift-labs/jit-proxy/lib';
 import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
-import { UncrossArbBot } from './bots/uncrossArbBot';
 import { BundleSender } from './bundleSender';
 import { DriftStateWatcher, StateChecks } from './driftStateWatcher';
 import { webhookMessage } from './webhook';
@@ -382,16 +377,15 @@ const runBot = async () => {
 
 	// keeping these arrays undefined will prompt DriftClient to call `findAllMarketAndOracles`
 	// and load all markets and oracle accounts from on-chain
-	let perpMarketIndexes: number[] | undefined;
-	let spotMarketIndexes: number[] | undefined;
-	let oracleInfos: OracleInfo[] | undefined;
-	if (configHasBot(config, 'jitMaker')) {
-		({ perpMarketIndexes, spotMarketIndexes, oracleInfos } =
-			getMarketsAndOraclesForSubscription(config.global.driftEnv!));
-	}
 	const marketLookupTable = config.global?.lutPubkey
 		? new PublicKey(config.global.lutPubkey)
 		: new PublicKey(configs[config.global.driftEnv!].MARKET_LOOKUP_TABLE);
+	const marketsAndOracleInfos = getMarketsAndOracleInfosToLoad(
+		sdkConfig,
+		config.global.perpMarketsToLoad,
+		config.global.spotMarketsToLoad
+	);
+	const oracleInfos = marketsAndOracleInfos.oracleInfos;
 	const driftClientConfig = {
 		connection,
 		wallet,
@@ -400,9 +394,9 @@ const runBot = async () => {
 		accountSubscription,
 		env: config.global.driftEnv,
 		userStats: true,
-		perpMarketIndexes,
-		spotMarketIndexes,
-		oracleInfos,
+		perpMarketIndexes: marketsAndOracleInfos.perpMarketIndicies,
+		spotMarketIndexes: marketsAndOracleInfos.spotMarketIndicies,
+		oracleInfos: oracleInfos.length > 0 ? oracleInfos : undefined,
 		activeSubAccountId: config.global.subaccounts![0],
 		subAccountIds: config.global.subaccounts ?? [0],
 		txVersion: 0 as TransactionVersion,
@@ -696,60 +690,6 @@ const runBot = async () => {
 		);
 	}
 
-	let auctionSubscriber: AuctionSubscriber | undefined = undefined;
-	let jitter: JitterShotgun | undefined = undefined;
-	if (configHasBot(config, 'jitMaker')) {
-		// Subscribe to drift client
-
-		needCheckDriftUser = true;
-		needForceCollateral = true;
-		needPriorityFeeSubscriber = true;
-
-		const jitProxyClient = new JitProxyClient({
-			driftClient,
-			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
-		});
-
-		auctionSubscriber = new AuctionSubscriber({
-			driftClient,
-			opts: { commitment: stateCommitment },
-		});
-		await auctionSubscriber.subscribe();
-
-		jitter = new JitterShotgun({
-			auctionSubscriber,
-			driftClient,
-			jitProxyClient,
-		});
-		await jitter.subscribe();
-
-		const txSenderConnection = new Connection(endpoint, {
-			wsEndpoint: wsEndpoint,
-			commitment: stateCommitment,
-			disableRetryOnRateLimit: true,
-		});
-		driftClient.txSender = new FastSingleTxSender({
-			connection: txSenderConnection,
-			wallet,
-			blockhashRefreshInterval: 1000,
-			opts: {
-				preflightCommitment: 'processed',
-				skipPreflight: false,
-				commitment: 'processed',
-			},
-		});
-
-		bots.push(
-			new JitMaker(
-				driftClient,
-				jitter,
-				config.botConfigs!.jitMaker!,
-				config.global.driftEnv!,
-				priorityFeeSubscriber
-			)
-		);
-	}
-
 	if (configHasBot(config, 'liquidator')) {
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
@@ -872,33 +812,11 @@ const runBot = async () => {
 		);
 	}
 
-	if (configHasBot(config, 'uncrossArb')) {
-		needCheckDriftUser = true;
-		needPriorityFeeSubscriber = true;
-		const jitProxyClient = new JitProxyClient({
-			driftClient,
-			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
-		});
-
-		bots.push(
-			new UncrossArbBot(
-				driftClient,
-				jitProxyClient,
-				slotSubscriber,
-				config.botConfigs!.uncrossArb!,
-				config.global.driftEnv!,
-				priorityFeeSubscriber
-			)
-		);
-	}
-
 	// Run subscribe functions once
 	if (
 		needCheckDriftUser ||
 		needForceCollateral ||
 		eventSubscriber ||
-		auctionSubscriber ||
-		jitter ||
 		needUserMapSubscribe ||
 		needPythPriceSubscriber ||
 		needDriftStateWatcher
@@ -930,34 +848,6 @@ const runBot = async () => {
 		await userMap.subscribe();
 		const hrEnd = process.hrtime(hrStart);
 		logger.info(`userMap.subscribe took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`);
-	}
-
-	logger.info(
-		`Checking if need auctionSubscriber: ${auctionSubscriber !== undefined}`
-	);
-	if (auctionSubscriber) {
-		const hrStart = process.hrtime();
-		await auctionSubscriber.subscribe();
-		const hrEnd = process.hrtime(hrStart);
-		logger.info(
-			`auctionSubscriber.subscribe took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`
-		);
-	}
-
-	logger.info(`Checking if need jitter: ${jitter !== undefined}`);
-	if (jitter) {
-		const freeCollateral = driftClient
-			.getUser()
-			.getFreeCollateral('Maintenance');
-		if (freeCollateral.isZero()) {
-			throw new Error(
-				`No collateral in account, collateral is required to run JitMakerBot, run with --force-deposit flag to deposit collateral`
-			);
-		}
-		const hrStart = process.hrtime();
-		await jitter.subscribe();
-		const hrEnd = process.hrtime(hrStart);
-		logger.info(`jitter.subscribe took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`);
 	}
 
 	logger.info(`Checking if need pythConnection: ${needPythPriceSubscriber}`);
