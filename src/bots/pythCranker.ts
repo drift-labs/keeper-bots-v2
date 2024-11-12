@@ -128,7 +128,20 @@ export class PythCrankerBot implements Bot {
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
 
-		for (const marketConfig of PerpMarkets[this.globalConfig.driftEnv]) {
+		const perpMarketIndexes = this.driftClient
+			.getPerpMarketAccounts()
+			.map((market) => market.marketIndex);
+		const perpMarketConfigs = PerpMarkets[this.globalConfig.driftEnv].filter(
+			(market) => perpMarketIndexes.includes(market.marketIndex)
+		);
+		const spotMarketIndexes = this.driftClient
+			.getSpotMarketAccounts()
+			.map((market) => market.marketIndex);
+		const spotMarketConfigs = SpotMarkets[this.globalConfig.driftEnv].filter(
+			(market) => spotMarketIndexes.includes(market.marketIndex)
+		);
+
+		for (const marketConfig of perpMarketConfigs) {
 			const feedId = marketConfig.pythFeedId;
 			if (!feedId) {
 				logger.warn(`No pyth feed id for market ${marketConfig.symbol}`);
@@ -165,7 +178,7 @@ export class PythCrankerBot implements Bot {
 			});
 		}
 
-		for (const marketConfig of SpotMarkets[this.globalConfig.driftEnv]) {
+		for (const marketConfig of spotMarketConfigs) {
 			if (
 				this.feedIdsToCrank.findIndex(
 					(feedId) => feedId.baseSymbol === marketConfig.symbol

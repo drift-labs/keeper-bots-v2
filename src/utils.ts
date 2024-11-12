@@ -42,6 +42,7 @@ import {
 	DRIFT_ORACLE_RECEIVER_ID,
 	OpenbookV2FulfillmentConfigAccount,
 	OpenbookV2Subscriber,
+	OracleInfo,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -129,6 +130,20 @@ export function loadCommaDelimitToArray(str: string): number[] {
 	} catch (e) {
 		return [];
 	}
+}
+
+export function parsePositiveIntArray(
+	intArray: string | undefined,
+	separator = ','
+): number[] | undefined {
+	if (!intArray) {
+		return undefined;
+	}
+	return intArray
+		.split(separator)
+		.map((s) => s.trim())
+		.map((s) => parseInt(s))
+		.filter((n) => !isNaN(n) && n >= 0);
 }
 
 export function loadCommaDelimitToStringArray(str: string): string[] {
@@ -1430,4 +1445,87 @@ export async function checkIfAccountExists(
 		// Doesn't already exist
 		return false;
 	}
+}
+
+export function getMarketsAndOracleInfosToLoad(
+	sdkConfig: any,
+	perpMarketIndicies: number[] | undefined,
+	spotMarketIndicies: number[] | undefined
+): {
+	oracleInfos: OracleInfo[];
+	perpMarketIndicies: number[] | undefined;
+	spotMarketIndicies: number[] | undefined;
+} {
+	const oracleInfos: OracleInfo[] = [];
+	const oraclesTracked = new Set();
+
+	// only watch all markets if neither env vars are specified
+	const noMarketsSpecified = !perpMarketIndicies && !spotMarketIndicies;
+
+	let perpIndexes = perpMarketIndicies;
+	if (!perpIndexes) {
+		if (noMarketsSpecified) {
+			perpIndexes = sdkConfig.PERP_MARKETS.map(
+				(m: PerpMarketConfig) => m.marketIndex
+			);
+		} else {
+			perpIndexes = [];
+		}
+	}
+	let spotIndexes = spotMarketIndicies;
+	if (!spotIndexes) {
+		if (noMarketsSpecified) {
+			spotIndexes = sdkConfig.SPOT_MARKETS.map(
+				(m: SpotMarketConfig) => m.marketIndex
+			);
+		} else {
+			spotIndexes = [];
+		}
+	}
+
+	if (perpIndexes && perpIndexes.length > 0) {
+		for (const idx of perpIndexes) {
+			const perpMarketConfig = sdkConfig.PERP_MARKETS[idx] as PerpMarketConfig;
+			if (!perpMarketConfig) {
+				throw new Error(`Perp market config for ${idx} not found`);
+			}
+			const oracleKey = perpMarketConfig.oracle.toBase58();
+			if (!oraclesTracked.has(oracleKey)) {
+				logger.info(`Tracking oracle ${oracleKey} for perp market ${idx}`);
+				oracleInfos.push({
+					publicKey: perpMarketConfig.oracle,
+					source: perpMarketConfig.oracleSource,
+				});
+				oraclesTracked.add(oracleKey);
+			}
+		}
+		logger.info(`Bot tracking perp markets: ${JSON.stringify(perpIndexes)}`);
+	}
+
+	if (spotIndexes && spotIndexes.length > 0) {
+		for (const idx of spotIndexes) {
+			const spotMarketConfig = sdkConfig.SPOT_MARKETS[idx] as SpotMarketConfig;
+			if (!spotMarketConfig) {
+				throw new Error(`Spot market config for ${idx} not found`);
+			}
+			const oracleKey = spotMarketConfig.oracle.toBase58();
+			if (!oraclesTracked.has(oracleKey)) {
+				logger.info(`Tracking oracle ${oracleKey} for spot market ${idx}`);
+				oracleInfos.push({
+					publicKey: spotMarketConfig.oracle,
+					source: spotMarketConfig.oracleSource,
+				});
+				oraclesTracked.add(oracleKey);
+			}
+		}
+		logger.info(`Bot tracking spot markets: ${JSON.stringify(spotIndexes)}`);
+	}
+
+	return {
+		oracleInfos,
+		perpMarketIndicies:
+			perpIndexes && perpIndexes.length > 0 ? perpIndexes : undefined,
+		spotMarketIndicies:
+			spotIndexes && spotIndexes.length > 0 ? spotIndexes : undefined,
+	};
 }
