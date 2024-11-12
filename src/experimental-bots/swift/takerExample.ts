@@ -5,9 +5,12 @@ import {
 	isVariant,
 	MarketType,
 	PositionDirection,
+	digestSignature,
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
 import * as axios from 'axios';
+
+const CONFIRM_TIMEOUT = 30_000;
 
 export class SwiftTaker {
 	interval: NodeJS.Timeout | null = null;
@@ -35,7 +38,6 @@ export class SwiftTaker {
 			const slot = await this.driftClient.connection.getSlot();
 			const direction =
 				Math.random() > 0.5 ? PositionDirection.LONG : PositionDirection.SHORT;
-			console.log('Sending order in slot:', slot, Date.now());
 			const oracleInfo = this.driftClient.getOracleDataForPerpMarket(0);
 
 			const highPrice = oracleInfo.price.muln(102).divn(100);
@@ -51,7 +53,7 @@ export class SwiftTaker {
 						? lowPrice
 						: highPrice,
 					auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
-					auctionDuration: 15,
+					auctionDuration: 100,
 				}),
 				subAccountId: 0,
 				stopLossOrderParams: null,
@@ -59,6 +61,11 @@ export class SwiftTaker {
 			};
 			const signature =
 				this.driftClient.signSwiftOrderParamsMessage(orderMessage);
+
+			const hash = digestSignature(Uint8Array.from(signature));
+			console.log(
+				`Sending order in slot: ${slot}, time: ${Date.now()}, hash: ${hash}`
+			);
 
 			const response = await axios.default.post(
 				'https://master.swift.drift.trade/orders',
@@ -77,7 +84,29 @@ export class SwiftTaker {
 					},
 				}
 			);
-			console.log(response.data);
+			if (response.status !== 200) {
+				console.error('Failed to send order', response.data);
+				return;
+			}
+
+			const expireTime = Date.now() + CONFIRM_TIMEOUT;
+			while (Date.now() < expireTime) {
+				const response = await axios.default.get(
+					'https://master.swift.drift.trade/confirmation/hash-status?hash=' +
+						encodeURIComponent(hash),
+					{
+						validateStatus: (_status) => true,
+					}
+				);
+				if (response.status === 200) {
+					console.log('Confirmed hash ', hash);
+					return;
+				} else if (response.status >= 500) {
+					break;
+				}
+				await new Promise((resolve) => setTimeout(resolve, 10000));
+			}
+			console.error('Failed to confirm hash: ', hash);
 		}, this.intervalMs);
 	}
 }

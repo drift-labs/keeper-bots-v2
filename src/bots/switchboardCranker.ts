@@ -5,9 +5,9 @@ import {
 	BlockhashSubscriber,
 	DriftClient,
 	PriorityFeeSubscriber,
+	SlothashSubscriber,
 	TxSigAndSlot,
 } from '@drift-labs/sdk';
-import { SwitchboardOnDemandClient } from '@drift-labs/sdk';
 import { BundleSender } from '../bundleSender';
 import {
 	AddressLookupTableAccount,
@@ -28,11 +28,10 @@ const SIM_CU_ESTIMATE_MULTIPLIER = 1.5;
 export class SwitchboardCrankerBot implements Bot {
 	public name: string;
 	public dryRun: boolean;
-	private intervalMs: number;
-	private oracleClient: SwitchboardOnDemandClient;
-	public defaultIntervalMs = 30_000;
+	public defaultIntervalMs: number;
 
 	private blockhashSubscriber: BlockhashSubscriber;
+	private slothashSubscriber: SlothashSubscriber;
 
 	constructor(
 		private globalConfig: GlobalConfig,
@@ -44,13 +43,16 @@ export class SwitchboardCrankerBot implements Bot {
 	) {
 		this.name = crankConfigs.botId;
 		this.dryRun = crankConfigs.dryRun;
-		this.intervalMs = crankConfigs.intervalMs;
+		this.defaultIntervalMs = crankConfigs.intervalMs || 10_000;
 		this.blockhashSubscriber = new BlockhashSubscriber({
 			connection: driftClient.connection,
 		});
 
-		this.oracleClient = new SwitchboardOnDemandClient(
-			this.driftClient.connection
+		this.slothashSubscriber = new SlothashSubscriber(
+			this.driftClient.connection,
+			{
+				commitment: 'processed',
+			}
 		);
 	}
 
@@ -60,6 +62,7 @@ export class SwitchboardCrankerBot implements Bot {
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
+		await this.slothashSubscriber.subscribe();
 	}
 
 	async reset(): Promise<void> {
@@ -68,7 +71,7 @@ export class SwitchboardCrankerBot implements Bot {
 		await this.driftClient.unsubscribe();
 	}
 
-	async startIntervalLoop(intervalMs = this.intervalMs): Promise<void> {
+	async startIntervalLoop(intervalMs = this.defaultIntervalMs): Promise<void> {
 		logger.info(`Starting ${this.name} bot with interval ${intervalMs} ms`);
 		await sleepMs(5000);
 		await this.runCrankLoop();
@@ -117,7 +120,8 @@ export class SwitchboardCrankerBot implements Bot {
 				}
 				const pullIx =
 					await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
-						pubkey
+						pubkey,
+						this.slothashSubscriber.currentSlothash
 					);
 				if (!pullIx) {
 					logger.error(`No pullIx for ${alias}`);
