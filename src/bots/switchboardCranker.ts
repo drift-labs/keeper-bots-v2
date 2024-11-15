@@ -129,13 +129,6 @@ export class SwitchboardCrankerBot implements Bot {
 				}
 				ixs.push(pullIx);
 
-				if (
-					pubkey.toString() === 'J9nrFWjDUeDVZ4BhhxsbQXWgLcLEgQyNBrCbwSADmJdr'
-				) {
-					const updateAmmIx = await this.driftClient.getUpdateAMMsIx([23]);
-					ixs.push(updateAmmIx);
-				}
-
 				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
 					connection: this.driftClient.connection,
