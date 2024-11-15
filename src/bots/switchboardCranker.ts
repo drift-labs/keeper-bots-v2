@@ -63,6 +63,14 @@ export class SwitchboardCrankerBot implements Bot {
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
 		await this.slothashSubscriber.subscribe();
+
+		this.priorityFeeSubscriber?.updateAddresses(
+			Object.entries(this.crankConfigs.pullFeedConfigs).map(
+				([_alias, config]) => {
+					return new PublicKey(config.pubkey);
+				}
+			)
+		);
 	}
 
 	async reset(): Promise<void> {
@@ -110,11 +118,12 @@ export class SwitchboardCrankerBot implements Bot {
 				if (this.globalConfig.useJito) {
 					ixs.push(this.bundleSender!.getTipIx());
 				} else {
+					const priorityFees =
+						this.priorityFeeSubscriber?.getCustomStrategyResult() || 0;
+					logger.info(`Priority fee for ${alias}: ${priorityFees}`);
 					ixs.push(
 						ComputeBudgetProgram.setComputeUnitPrice({
-							microLamports: Math.floor(
-								this.priorityFeeSubscriber?.getCustomStrategyResult() || 0
-							),
+							microLamports: Math.floor(priorityFees),
 						})
 					);
 				}
@@ -154,7 +163,9 @@ export class SwitchboardCrankerBot implements Bot {
 					this.driftClient
 						.sendTransaction(simResult.tx)
 						.then((txSigAndSlot: TxSigAndSlot) => {
-							logger.info(`Posted update sb atomic tx: ${txSigAndSlot.txSig}`);
+							logger.info(
+								`Posted update sb atomic tx for ${alias}: ${txSigAndSlot.txSig}`
+							);
 						})
 						.catch((e) => {
 							console.log(e);
