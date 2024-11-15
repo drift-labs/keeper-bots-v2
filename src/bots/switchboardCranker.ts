@@ -64,13 +64,14 @@ export class SwitchboardCrankerBot implements Bot {
 		);
 		await this.slothashSubscriber.subscribe();
 
-		this.priorityFeeSubscriber?.updateAddresses(
-			Object.entries(this.crankConfigs.pullFeedConfigs).map(
+		this.priorityFeeSubscriber?.updateAddresses([
+			...Object.entries(this.crankConfigs.pullFeedConfigs).map(
 				([_alias, config]) => {
 					return new PublicKey(config.pubkey);
 				}
-			)
-		);
+			),
+			...this.crankConfigs.writableAccounts.map((acc) => new PublicKey(acc)),
+		]);
 	}
 
 	async reset(): Promise<void> {

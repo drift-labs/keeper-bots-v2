@@ -270,6 +270,9 @@ export class FillerMultithreaded {
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
+		if (!this.globalConfig.useJito && runtimeSpec.driftEnv === 'mainnet-beta') {
+			throw new Error('Jito is required for spot multithreaded filler');
+		}
 		this.name = config.botId;
 		this.config = config;
 		this.dryRun = config.dryRun;
