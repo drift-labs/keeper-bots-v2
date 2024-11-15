@@ -64,6 +64,8 @@ class DLOBBuilder {
 
 	private clockSubscriber: ClockSubscriber;
 
+	private swiftOrderParamsMessageCache: NodeCache
+
 	constructor(
 		driftClient: DriftClient,
 		marketType: MarketType,
@@ -424,6 +426,8 @@ const main = async () => {
 			return;
 		}
 		switch (msg.data.type) {
+			case 'swift':
+				break;
 			case 'update':
 				dlobBuilder.deserializeAndUpdateUserAccountData(
 					msg.data.userAccount,

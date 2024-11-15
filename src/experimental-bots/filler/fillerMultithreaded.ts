@@ -197,6 +197,7 @@ export class FillerMultithreaded {
 
 	private dlobHealthy = true;
 	private orderSubscriberHealthy = true;
+	private swiftOrderSubscriberHealth = true;
 	private simulateTxForCUEstimate?: boolean;
 
 	private intervalIds: NodeJS.Timeout[] = [];
@@ -543,17 +544,44 @@ export class FillerMultithreaded {
 			process.exit(code || 1);
 		});
 
+		logger.info(
+			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
+		);
+
+		// Swift Subscriber process
+		const swiftOrderSubscriberProcess = spawnChild(
+			'./src/experimental-bots/filler-common/swiftOrderSubscriber.ts',
+			orderSubscriberArgs,
+			'swiftOrderSubscriber',
+			(msg: any) => {
+				switch (msg.type) {
+					case 'swiftOrderParamsMessage':
+						routeMessageToDlobBuilder(msg);
+						break;
+					case 'health':
+						this.swiftOrderSubscriberHealth = msg.data.healthy;
+						break;
+				}
+			}
+		);
+
+		swiftOrderSubscriberProcess.on('exit', (code) => {
+			logger.error(`swiftOrderSubscriber exited with code ${code}`);
+			process.exit(code || 1);
+		});
+
 		process.on('SIGINT', () => {
 			logger.info(`${logPrefix} Received SIGINT, killing children`);
 			this.dlobBuilders.forEach((value: DLOBBuilderWithProcess, _: number) => {
 				value.process.kill();
 			});
 			orderSubscriberProcess.kill();
+			swiftOrderSubscriberProcess.kill();
 			process.exit(0);
 		});
 
 		logger.info(
-			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
+			`swiftOrderSubscriber process spawned with pid: ${swiftOrderSubscriberProcess.pid}`
 		);
 
 		this.intervalIds.push(
