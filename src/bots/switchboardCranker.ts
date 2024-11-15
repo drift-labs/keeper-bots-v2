@@ -128,6 +128,7 @@ export class SwitchboardCrankerBot implements Bot {
 					continue;
 				}
 				ixs.push(pullIx);
+
 				const simResult = await simulateAndGetTxWithCUs({
 					ixs,
 					connection: this.driftClient.connection,
