@@ -10,6 +10,7 @@ import {
 	PublicKey,
 	PriorityFeeSubscriberMap,
 	DriftMarketInfo,
+	isVariant,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -257,8 +258,21 @@ export class FundingRateUpdaterBot implements Bot {
 			ComputeBudgetProgram.setComputeUnitPrice({
 				microLamports,
 			}),
-			await this.driftClient.getUpdateFundingRateIx(marketIndex, oracle),
 		];
+		const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex);
+		if (isVariant(perpMarket?.amm.oracleSource, 'switchboardOnDemand')) {
+			const crankIx =
+				await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
+					perpMarket!.amm.oracle
+				);
+			if (crankIx) {
+				ixs.push(crankIx);
+			}
+		}
+		ixs.push(
+			await this.driftClient.getUpdateFundingRateIx(marketIndex, oracle)
+		);
+
 		const recentBlockhash =
 			await this.driftClient.connection.getLatestBlockhash('confirmed');
 		const simResult = await simulateAndGetTxWithCUs({
