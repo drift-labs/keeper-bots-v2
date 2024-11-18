@@ -4,7 +4,6 @@ import {
 	DriftEnv,
 	loadKeypair,
 	MainnetPerpMarkets,
-	SwiftOrderParamsMessage,
 	Wallet,
 } from '@drift-labs/sdk';
 import { Connection, Keypair } from '@solana/web3.js';
@@ -24,9 +23,6 @@ export type SwiftOrderSubscriberConfig = {
 };
 
 export class SwiftOrderSubscriber {
-	public swiftOrderParamsMessageCallbackFn?: (
-		swiftOrderParamsMessage: SwiftOrderParamsMessage
-	) => void;
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
 	private readonly heartbeatIntervalMs = 30000;
 	private ws: WebSocket | null = null;
@@ -37,7 +33,7 @@ export class SwiftOrderSubscriber {
 		private config: SwiftOrderSubscriberConfig
 	) {}
 
-	get_symbol_for_market_index(marketIndex: number) {
+	getSymbolForMarketIndex(marketIndex: number) {
 		const markets =
 			this.config.driftEnv === 'devnet'
 				? DevnetPerpMarkets
@@ -76,7 +72,7 @@ export class SwiftOrderSubscriber {
 					JSON.stringify({
 						action: 'subscribe',
 						marketType: 'perp',
-						market: this.get_symbol_for_market_index(marketIndex),
+						market: this.getSymbolForMarketIndex(marketIndex),
 					})
 				);
 				await sleepMs(100);
@@ -84,15 +80,7 @@ export class SwiftOrderSubscriber {
 		}
 	}
 
-	async subscribe(
-		swiftOrderParamsMessageCallbackFn?: (
-			swiftOrderParamsMessage: SwiftOrderParamsMessage
-		) => void
-	) {
-		if (!swiftOrderParamsMessageCallbackFn) {
-			throw new Error('ordersCallbackFn is required');
-		}
-		this.swiftOrderParamsMessageCallbackFn = swiftOrderParamsMessageCallbackFn;
+	async subscribe() {
 
 		const ws = new WebSocket(
 			this.config.endpoint +
@@ -112,17 +100,12 @@ export class SwiftOrderSubscriber {
 				}
 
 				if (message['order']) {
-					const order = JSON.parse(message['order']);
-					const swiftOrderParamsBuf = Buffer.from(
-						order['order_message'],
-						'base64'
-					);
-					const swiftOrderParamsMessage: SwiftOrderParamsMessage =
-						this.driftClient.program.coder.types.decode(
-							'SwiftOrderParamsMessage',
-							swiftOrderParamsBuf
-						);
-					swiftOrderParamsMessageCallbackFn(swiftOrderParamsMessage);
+					if (typeof process.send === 'function') {
+						process.send({
+							type: 'swiftOrderParamsMessage',
+							data: JSON.parse(message['order']),
+						});
+					}
 				}
 			});
 
@@ -156,7 +139,7 @@ export class SwiftOrderSubscriber {
 
 		console.log('Reconnecting to WebSocket...');
 		setTimeout(() => {
-			this.subscribe(this.swiftOrderParamsMessageCallbackFn);
+			this.subscribe();
 		}, 1000);
 	}
 }
@@ -209,14 +192,7 @@ async function main() {
 		driftClient,
 		swiftOrderSubscriberConfig
 	);
-	await swiftOrderSubscriber.subscribe((swiftOrderParamsMessage) => {
-		if (typeof process.send === 'function') {
-			process.send({
-				type: 'swiftOrderParamsMessage',
-				data: swiftOrderParamsMessage,
-			});
-		}
-	});
+	await swiftOrderSubscriber.subscribe();
 }
 
 main();

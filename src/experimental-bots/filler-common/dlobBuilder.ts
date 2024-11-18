@@ -15,9 +15,8 @@ import {
 	PhoenixSubscriber,
 	BN,
 	ClockSubscriber,
-	PhoenixV1FulfillmentConfigAccount,
 	OpenbookV2Subscriber,
-	OpenbookV2FulfillmentConfigAccount,
+	SwiftOrderParamsMessage,
 } from '@drift-labs/sdk';
 import { Connection } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -35,6 +34,7 @@ import {
 	serializeNodeToTrigger,
 } from './utils';
 import { initializeSpotFulfillmentAccounts, sleepMs } from '../../utils';
+import { LRUCache } from 'lru-cache';
 
 const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
 
@@ -53,18 +53,7 @@ class DLOBBuilder {
 	// only used for spot filler
 	private phoenixSubscribers?: Map<number, PhoenixSubscriber>;
 	private openbookSubscribers?: Map<number, OpenbookV2Subscriber>;
-	private phoenixFulfillmentConfigMap?: Map<
-		number,
-		PhoenixV1FulfillmentConfigAccount
-	>;
-	private openbookFulfillmentConfigMap?: Map<
-		number,
-		OpenbookV2FulfillmentConfigAccount
-	>;
-
 	private clockSubscriber: ClockSubscriber;
-
-	private swiftOrderParamsMessageCache: NodeCache
 
 	constructor(
 		driftClient: DriftClient,
@@ -82,14 +71,6 @@ class DLOBBuilder {
 		if (marketTypeString.toLowerCase() === 'spot') {
 			this.phoenixSubscribers = new Map<number, PhoenixSubscriber>();
 			this.openbookSubscribers = new Map<number, OpenbookV2Subscriber>();
-			this.phoenixFulfillmentConfigMap = new Map<
-				number,
-				PhoenixV1FulfillmentConfigAccount
-			>();
-			this.openbookFulfillmentConfigMap = new Map<
-				number,
-				OpenbookV2FulfillmentConfigAccount
-			>();
 		}
 
 		this.clockSubscriber = new ClockSubscriber(driftClient.connection, {
@@ -109,8 +90,6 @@ class DLOBBuilder {
 
 	private async initializeSpotMarkets() {
 		({
-			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
-			openbookFulfillmentConfigs: this.openbookFulfillmentConfigMap,
 			phoenixSubscribers: this.phoenixSubscribers,
 			openbookSubscribers: this.openbookSubscribers,
 		} = await initializeSpotFulfillmentAccounts(
@@ -163,6 +142,10 @@ class DLOBBuilder {
 		});
 		logger.debug(`${logPrefix} Built DLOB with ${counter} orders`);
 		return this.dlob;
+	}
+
+	public insertSwiftOrder(swiftOrderParamsMessage: SwiftOrderParamsMessage) {
+		
 	}
 
 	public getNodesToTriggerAndNodesToFill(): [
@@ -427,6 +410,7 @@ const main = async () => {
 		}
 		switch (msg.data.type) {
 			case 'swift':
+				dlobBuilder.deserializeAndUpdateUserAccountData
 				break;
 			case 'update':
 				dlobBuilder.deserializeAndUpdateUserAccountData(
