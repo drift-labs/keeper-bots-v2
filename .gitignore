@@ -145,4 +145,4 @@ scratch
 
 test.yaml
 test.config.yaml
-devnet.config.yaml
+devnet*.config.yaml

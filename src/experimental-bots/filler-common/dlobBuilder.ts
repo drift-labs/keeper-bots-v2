@@ -17,8 +17,16 @@ import {
 	ClockSubscriber,
 	OpenbookV2Subscriber,
 	SwiftOrderParamsMessage,
+	getUserAccountPublicKey,
+	SwiftOrderNode,
+	Order,
+	OrderType,
+	getAuctionPrice,
+	ZERO,
+	OrderTriggerCondition,
+	PositionDirection,
 } from '@drift-labs/sdk';
-import { Connection } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
 import parseArgs from 'minimist';
 import { logger } from '../../logger';
@@ -54,6 +62,26 @@ class DLOBBuilder {
 	private phoenixSubscribers?: Map<number, PhoenixSubscriber>;
 	private openbookSubscribers?: Map<number, OpenbookV2Subscriber>;
 	private clockSubscriber: ClockSubscriber;
+
+	private swiftUserAuthorities = new Map<string, string>();
+
+	// Swift orders to keep track of
+	private swiftOrders = new LRUCache<number, SwiftOrderNode>({
+		max: 5000,
+		dispose: (_, key) => {
+			console.log('disposing', key);
+			if (typeof process.send === 'function') {
+				process.send({
+					type: 'swiftOrderParamsMessage',
+					data: {
+						uuid: key,
+						type: 'delete',
+					},
+				});
+			}
+			return;
+		},
+	});
 
 	constructor(
 		driftClient: DriftClient,
@@ -126,7 +154,7 @@ class DLOBBuilder {
 		logger.debug(
 			`${logPrefix} Building DLOB with ${this.userAccountData.size} users`
 		);
-		this.dlob = new DLOB();
+		const dlob = new DLOB();
 		let counter = 0;
 		this.userAccountData.forEach((userAccount, pubkey) => {
 			userAccount.orders.forEach((order) => {
@@ -136,16 +164,95 @@ class DLOBBuilder {
 				) {
 					return;
 				}
-				this.dlob.insertOrder(order, pubkey, this.slotSubscriber.getSlot());
+				dlob.insertOrder(order, pubkey, this.slotSubscriber.getSlot());
 				counter++;
 			});
 		});
+		for (const swiftNode of this.swiftOrders.values()) {
+			dlob.insertSwiftOrder(swiftNode.order, swiftNode.userAccount);
+			counter++;
+		}
 		logger.debug(`${logPrefix} Built DLOB with ${counter} orders`);
-		return this.dlob;
+		this.dlob = dlob;
+		return dlob;
 	}
 
-	public insertSwiftOrder(swiftOrderParamsMessage: SwiftOrderParamsMessage) {
-		
+	public async insertSwiftOrder(orderData: any, uuid: number) {
+		// Deserialize and store
+		const {
+			swiftOrderParams,
+			subAccountId: takerSubaccountId,
+		}: SwiftOrderParamsMessage = this.driftClient.program.coder.types.decode(
+			'SwiftOrderParamsMessage',
+			Buffer.from(orderData['order_message'], 'base64')
+		);
+
+		const takerAuthority = new PublicKey(orderData['taker_authority']);
+		const takerUserPubkey = await getUserAccountPublicKey(
+			this.driftClient.program.programId,
+			takerAuthority,
+			takerSubaccountId
+		);
+		this.swiftUserAuthorities.set(
+			takerUserPubkey.toString(),
+			orderData['taker_authority']
+		);
+		const swiftMessage = this.driftClient.decodeSwiftServerMessage(
+			Buffer.from(orderData['swift_message'], 'base64')
+		);
+
+		const maxSlot = swiftMessage.slot.addn(
+			swiftOrderParams.auctionDuration ?? 0
+		);
+		if (maxSlot.toNumber() < this.slotSubscriber.getSlot()) {
+			logger.warn(
+				`${logPrefix} Received expired swift order with uuid: ${uuid}`
+			);
+			return;
+		}
+
+		const swiftOrder: Order = {
+			status: 'open',
+			orderType: OrderType.MARKET,
+			orderId: uuid,
+			slot: swiftMessage.slot,
+			marketIndex: swiftOrderParams.marketIndex,
+			marketType: MarketType.PERP,
+			baseAssetAmount: swiftOrderParams.baseAssetAmount,
+			auctionDuration: swiftOrderParams.auctionDuration!,
+			auctionStartPrice: swiftOrderParams.auctionStartPrice!,
+			auctionEndPrice: swiftOrderParams.auctionEndPrice!,
+			immediateOrCancel: true,
+			direction: swiftOrderParams.direction,
+			postOnly: false,
+			oraclePriceOffset: swiftOrderParams.oraclePriceOffset ?? 0,
+			// Rest are not required for DLOB
+			price: ZERO,
+			maxTs: ZERO,
+			triggerPrice: ZERO,
+			triggerCondition: OrderTriggerCondition.ABOVE,
+			existingPositionDirection: PositionDirection.LONG,
+			reduceOnly: false,
+			baseAssetAmountFilled: ZERO,
+			quoteAssetAmountFilled: ZERO,
+			quoteAssetAmount: ZERO,
+			userOrderId: 0,
+		};
+		swiftOrder.price = getAuctionPrice(
+			swiftOrder,
+			this.slotSubscriber.getSlot(),
+			this.driftClient.getOracleDataForPerpMarket(swiftOrder.marketIndex).price
+		);
+
+		const swiftOrderNode = new SwiftOrderNode(
+			swiftOrder,
+			takerUserPubkey.toString()
+		);
+
+		const ttl = (maxSlot.toNumber() - this.slotSubscriber.getSlot()) * 500;
+		this.swiftOrders.set(uuid, swiftOrderNode, {
+			ttl,
+		});
 	}
 
 	public getNodesToTriggerAndNodesToFill(): [
@@ -256,21 +363,25 @@ class DLOBBuilder {
 		return nodesToFill
 			.map((node) => {
 				const buffer = this.getUserBuffer(node.node.userAccount!);
-				if (!buffer) {
+				if (!buffer && !node.node.isSwift) {
+					console.log(`Received node to fill without user account`);
 					return undefined;
 				}
 				const makerBuffers = new Map<string, Buffer>();
 				for (const makerNode of node.makerNodes) {
-					// @ts-ignore
-					const makerBuffer = this.getUserBuffer(makerNode.userAccount);
+					const makerBuffer = this.getUserBuffer(makerNode.userAccount!);
 
 					if (!makerBuffer) {
 						return undefined;
 					}
-					// @ts-ignore
-					makerBuffers.set(makerNode.userAccount, makerBuffer);
+					makerBuffers.set(makerNode.userAccount!, makerBuffer);
 				}
-				return serializeNodeToFill(node, buffer, makerBuffers);
+				return serializeNodeToFill(
+					node,
+					makerBuffers,
+					buffer,
+					this.swiftUserAuthorities.get(node.node.userAccount!)
+				);
 			})
 			.filter((node): node is SerializedNodeToFill => node !== undefined);
 	}
@@ -403,14 +514,13 @@ const main = async () => {
 	}
 
 	process.on('message', (msg: any) => {
-		// console.log("received msg");
 		if (!msg.data || typeof msg.data.type === 'undefined') {
 			logger.warn(`${logPrefix} Received message without data.type field.`);
 			return;
 		}
 		switch (msg.data.type) {
-			case 'swift':
-				dlobBuilder.deserializeAndUpdateUserAccountData
+			case 'swiftOrderParamsMessage':
+				dlobBuilder.insertSwiftOrder(msg.data.swiftOrder, msg.data.uuid);
 				break;
 			case 'update':
 				dlobBuilder.deserializeAndUpdateUserAccountData(

@@ -1,19 +1,16 @@
 import {
 	DevnetPerpMarkets,
-	DriftClient,
 	DriftEnv,
 	loadKeypair,
 	MainnetPerpMarkets,
-	Wallet,
 } from '@drift-labs/sdk';
-import { Connection, Keypair } from '@solana/web3.js';
+import { Keypair } from '@solana/web3.js';
 import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
 import WebSocket from 'ws';
 import { sleepMs } from '../../utils';
 import dotenv from 'dotenv';
 import parseArgs from 'minimist';
-import { getDriftClientFromArgs } from './utils';
 
 export type SwiftOrderSubscriberConfig = {
 	driftEnv: DriftEnv;
@@ -28,10 +25,7 @@ export class SwiftOrderSubscriber {
 	private ws: WebSocket | null = null;
 	subscribed: boolean = false;
 
-	constructor(
-		private driftClient: DriftClient,
-		private config: SwiftOrderSubscriberConfig
-	) {}
+	constructor(private config: SwiftOrderSubscriberConfig) {}
 
 	getSymbolForMarketIndex(marketIndex: number) {
 		const markets =
@@ -64,15 +58,15 @@ export class SwiftOrderSubscriber {
 
 		if (
 			message['channel'] === 'auth' &&
-			message['message'].toLowerCase() === 'authenticated'
+			message['message']?.toLowerCase() === 'authenticated'
 		) {
 			this.subscribed = true;
 			this.config.marketIndexes.forEach(async (marketIndex) => {
 				this.ws?.send(
 					JSON.stringify({
 						action: 'subscribe',
-						marketType: 'perp',
-						market: this.getSymbolForMarketIndex(marketIndex),
+						market_type: 'perp',
+						market_name: this.getSymbolForMarketIndex(marketIndex),
 					})
 				);
 				await sleepMs(100);
@@ -81,7 +75,6 @@ export class SwiftOrderSubscriber {
 	}
 
 	async subscribe() {
-
 		const ws = new WebSocket(
 			this.config.endpoint +
 				'?pubkey=' +
@@ -100,10 +93,16 @@ export class SwiftOrderSubscriber {
 				}
 
 				if (message['order']) {
+					const order = JSON.parse(message['order']);
 					if (typeof process.send === 'function') {
 						process.send({
 							type: 'swiftOrderParamsMessage',
-							data: JSON.parse(message['order']),
+							data: {
+								type: 'swiftOrderParamsMessage',
+								swiftOrder: order,
+								marketIndex: order.market_index,
+								uuid: this.convertUuidToNumber(order.uuid),
+							},
 						});
 					}
 				}
@@ -142,6 +141,19 @@ export class SwiftOrderSubscriber {
 			this.subscribe();
 		}, 1000);
 	}
+
+	private convertUuidToNumber(uuid: string): number {
+		return uuid
+			.split('')
+			.reduce(
+				(n, c) =>
+					n * 64 +
+					'_~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'.indexOf(
+						c
+					),
+				0
+			);
+	}
 }
 
 async function main() {
@@ -166,18 +178,6 @@ async function main() {
 	}
 
 	const keypair = loadKeypair(privateKey);
-	const wallet = new Wallet(keypair);
-	const connection = new Connection(endpoint, 'processed');
-
-	const driftClient = getDriftClientFromArgs({
-		connection,
-		wallet,
-		marketIndexes,
-		marketTypeStr: 'perp',
-		env: driftEnv,
-	});
-	await driftClient.subscribe();
-
 	const swiftOrderSubscriberConfig: SwiftOrderSubscriberConfig = {
 		driftEnv,
 		endpoint:
@@ -189,7 +189,6 @@ async function main() {
 	};
 
 	const swiftOrderSubscriber = new SwiftOrderSubscriber(
-		driftClient,
 		swiftOrderSubscriberConfig
 	);
 	await swiftOrderSubscriber.subscribe();

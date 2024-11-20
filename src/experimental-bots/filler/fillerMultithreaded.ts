@@ -12,6 +12,8 @@ import {
 	FeeTier,
 	getOrderSignature,
 	getUserAccountPublicKey,
+	getUserStatsAccountPublicKey,
+	getUserWithoutOrderFilter,
 	isFillableByVAMM,
 	isOneOfVariant,
 	isOrderExpired,
@@ -28,6 +30,7 @@ import {
 	SlotSubscriber,
 	TxSigAndSlot,
 	UserAccount,
+	UserMap,
 	UserStatsMap,
 } from '@drift-labs/sdk';
 import { FillerMultiThreadedConfig, GlobalConfig } from '../../config';
@@ -133,7 +136,7 @@ const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
 	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	// 6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
-	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
+	// 6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6003, // 0x1773 Error Number: 6003. Error Message: Insufficient collateral.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
 
@@ -184,6 +187,7 @@ export class FillerMultithreaded {
 
 	private fillTxId: number = 0;
 	private userStatsMap: UserStatsMap;
+	private userMap: UserMap;
 	private throttledNodes = new Map<string, number>();
 	private fillingNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
@@ -199,6 +203,9 @@ export class FillerMultithreaded {
 	private orderSubscriberHealthy = true;
 	private swiftOrderSubscriberHealth = true;
 	private simulateTxForCUEstimate?: boolean;
+
+	// Swift orders
+	private swiftOrderMessages: Map<number, any> = new Map();
 
 	private intervalIds: NodeJS.Timeout[] = [];
 
@@ -292,6 +299,19 @@ export class FillerMultithreaded {
 			this.pythPriceSubscriber = pythPriceSubscriber;
 		}
 		this.lookupTableAccounts = lookupTableAccounts;
+
+		this.userMap = new UserMap({
+			driftClient,
+			fastDecode: true,
+			includeIdle: false,
+			subscriptionConfig: {
+				type: 'websocket',
+				resubTimeoutMs: 10_000,
+				commitment: 'processed',
+			},
+			additionalFilters: [getUserWithoutOrderFilter()],
+			skipInitialLoad: true,
+		});
 
 		this.userStatsMap = new UserStatsMap(
 			this.driftClient,
@@ -404,6 +424,8 @@ export class FillerMultithreaded {
 		logger.info(
 			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
 		);
+
+		await this.userMap.subscribe();
 
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
@@ -556,7 +578,13 @@ export class FillerMultithreaded {
 			(msg: any) => {
 				switch (msg.type) {
 					case 'swiftOrderParamsMessage':
-						routeMessageToDlobBuilder(msg);
+						if (msg.data.type === 'swiftOrderParamsMessage') {
+							this.swiftOrderMessages.set(msg.data.uuid, msg.data.swiftOrder);
+							routeMessageToDlobBuilder(msg);
+						} else if (msg.data.type === 'delete') {
+							console.log(`received delete message for ${msg.data.uuid}`);
+							this.swiftOrderMessages.delete(msg.data.uuid);
+						}
 						break;
 					case 'health':
 						this.swiftOrderSubscriberHealth = msg.data.healthy;
@@ -751,7 +779,14 @@ export class FillerMultithreaded {
 		if (!this.orderSubscriberHealthy) {
 			logger.error(`${logPrefix} Order subscriber not healthy`);
 		}
-		return this.dlobHealthy && this.orderSubscriberHealthy;
+		if (!this.swiftOrderSubscriberHealth) {
+			logger.error(`${logPrefix} Swift order subscriber not healthy`);
+		}
+		return (
+			this.dlobHealthy &&
+			this.orderSubscriberHealthy &&
+			this.swiftOrderSubscriberHealth
+		);
 	}
 
 	protected recordJitoBundleStats() {
@@ -1418,6 +1453,7 @@ export class FillerMultithreaded {
 		const deserializedNodesToFill = serializedNodesToFill.map(
 			deserializeNodeToFill
 		);
+		// console.log(deserializedNodesToFill);
 
 		const seenFillableNodes = new Set<string>();
 		const filteredFillableNodes = deserializedNodesToFill.filter((node) => {
@@ -1591,6 +1627,9 @@ export class FillerMultithreaded {
 				referrerInfo,
 				marketType,
 				fillerRewardEstimate,
+				takerStatsPubKey,
+				isSwift,
+				authority,
 			} = await this.getNodeFillInfo(nodeToFill);
 
 			let removeLastIxPostSim = this.revertOnFailure;
@@ -1637,6 +1676,27 @@ export class FillerMultithreaded {
 				throw new Error('expected perp market type');
 			}
 
+			if (isSwift) {
+				const swiftOrderMessageParams = this.swiftOrderMessages.get(
+					nodeToFill.node.order!.orderId
+				);
+				ixs.push(
+					...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
+						Buffer.from(swiftOrderMessageParams['swift_message'], 'base64'),
+						Buffer.from(swiftOrderMessageParams['swift_signature'], 'base64'),
+						Buffer.from(swiftOrderMessageParams['order_message'], 'base64'),
+						Buffer.from(swiftOrderMessageParams['order_signature'], 'base64'),
+						nodeToFill.node.order!.marketIndex,
+						{
+							taker: new PublicKey(takerUserPubKey),
+							takerStats: takerStatsPubKey,
+							takerUserAccount: takerUser,
+						},
+						authority
+					))
+				);
+			}
+
 			let makerInfosToUse = makerInfos;
 			const buildTxWithMakerInfos = async (
 				makers: DataAndSlot<MakerInfo>[]
@@ -1648,14 +1708,15 @@ export class FillerMultithreaded {
 					await this.driftClient.getFillPerpOrderIx(
 						await getUserAccountPublicKey(
 							this.driftClient.program.programId,
-							takerUser.authority,
-							takerUser.subAccountId
+							takerUser!.authority,
+							takerUser!.subAccountId
 						),
-						takerUser,
+						takerUser!,
 						nodeToFill.node.order!,
 						makers.map((m) => m.data),
 						referrerInfo,
-						this.subaccount
+						this.subaccount,
+						isSwift
 					)
 				);
 
@@ -1687,7 +1748,7 @@ export class FillerMultithreaded {
 								takerUser.perpPositions.length + takerUser.spotPositions.length
 							}
 							marketIndex: ${nodeToFill.node.order!.marketIndex}
-							taker has position in market: ${takerUser.perpPositions.some(
+							taker has position in market: ${takerUser!.perpPositions.some(
 								(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
 							)}
 							makers have position in market: ${makerInfos.some((maker) =>
@@ -1824,6 +1885,9 @@ export class FillerMultithreaded {
 			referrerInfo,
 			marketType,
 			fillerRewardEstimate,
+			takerStatsPubKey,
+			isSwift,
+			authority,
 		} = await this.getNodeFillInfo(nodeToFill);
 
 		let removeLastIxPostSim = this.revertOnFailure;
@@ -1867,20 +1931,36 @@ export class FillerMultithreaded {
 			throw new Error('expected perp market type');
 		}
 
-		const ix = await this.driftClient.getFillPerpOrderIx(
-			await getUserAccountPublicKey(
-				this.driftClient.program.programId,
-				takerUser.authority,
-				takerUser.subAccountId
-			),
-			takerUser,
+		if (isSwift) {
+			const swiftOrderMessageParams = this.swiftOrderMessages.get(
+				nodeToFill.node.order!.orderId
+			);
+			ixs.push(
+				...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
+					Buffer.from(swiftOrderMessageParams['swift_message'], 'base64'),
+					Buffer.from(swiftOrderMessageParams['swift_signature'], 'base64'),
+					Buffer.from(swiftOrderMessageParams['order_message'], 'base64'),
+					Buffer.from(swiftOrderMessageParams['order_signature'], 'base64'),
+					nodeToFill.node.order!.marketIndex,
+					{
+						taker: new PublicKey(takerUserPubKey),
+						takerStats: takerStatsPubKey,
+						takerUserAccount: takerUser,
+					},
+					authority
+				))
+			);
+		}
+		await this.driftClient.getFillPerpOrderIx(
+			new PublicKey(nodeToFill.node.userAccount!),
+			takerUser!,
 			nodeToFill.node.order!,
 			makerInfos.map((m) => m.data),
 			referrerInfo,
-			this.subaccount
+			this.subaccount,
+			isSwift
 		);
 
-		ixs.push(ix);
 		const user = this.driftClient.getUser(this.subaccount);
 		if (this.revertOnFailure) {
 			ixs.push(
@@ -1890,28 +1970,36 @@ export class FillerMultithreaded {
 
 		const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
 		if (txSize > PACKET_DATA_SIZE) {
-			logger.info(`tx too large, removing pyth ixs.
-						keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
-						total number of maker positions: ${makerInfos.reduce(
-							(acc, maker) =>
-								acc +
-								(maker.data.makerUserAccount.perpPositions.length +
-									maker.data.makerUserAccount.spotPositions.length),
-							0
-						)}
-						total taker positions: ${
-							takerUser.perpPositions.length + takerUser.spotPositions.length
-						}
-						marketIndex: ${nodeToFill.node.order!.marketIndex}
-						taker has position in market: ${takerUser.perpPositions.some(
-							(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
-						)}
-						makers have position in market: ${makerInfos.some((maker) =>
-							maker.data.makerUserAccount.perpPositions.some(
-								(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
-							)
-						)}
-						`);
+			const lutAccounts = this.lookupTableAccounts[0].state.addresses.map((a) =>
+				a.toBase58()
+			);
+			logger.info(`tx too large: ${txSize} bytes, removing pyth ixs.
+				keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
+				keys not in LUT: ${ixs
+					.map((ix) => ix.keys.map((key) => key.pubkey.toString()))
+					.flat()
+					.filter((key) => !lutAccounts.includes(key))}
+				total number of maker positions: ${makerInfos.reduce(
+					(acc, maker) =>
+						acc +
+						(maker.data.makerUserAccount.perpPositions.length +
+							maker.data.makerUserAccount.spotPositions.length),
+					0
+				)}
+				total taker positions: ${
+					takerUser.perpPositions.length + takerUser.spotPositions.length
+				}
+				marketIndex: ${nodeToFill.node.order!.marketIndex}
+				taker has position in market: ${takerUser.perpPositions.some(
+					(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
+				)}
+				makers have position in market: ${makerInfos.some((maker) =>
+					maker.data.makerUserAccount.perpPositions.some(
+						(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
+					)
+				)}
+				`);
+
 			ixs = removePythIxs(ixs);
 		}
 
@@ -2283,10 +2371,13 @@ export class FillerMultithreaded {
 		makerInfos: Array<DataAndSlot<MakerInfo>>;
 		takerUserPubKey: string;
 		takerUser: UserAccount;
+		takerStatsPubKey: PublicKey;
 		takerUserSlot: number;
 		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
 		fillerRewardEstimate: BN;
+		isSwift: boolean | undefined;
+		authority?: PublicKey;
 	}> {
 		const makerInfos: Array<DataAndSlot<MakerInfo>> = [];
 
@@ -2338,21 +2429,30 @@ export class FillerMultithreaded {
 		}
 
 		const takerUserPubKey = nodeToFill.node.userAccount!.toString();
-		const takerUserAccount = decodeUser(
-			// @ts-ignore
-			Buffer.from(nodeToFill.userAccountData.data)
-		);
+
+		// @ts-ignore
+		const takerUserAccount = nodeToFill.userAccountData?.data
+			? decodeUser(
+					// @ts-ignore
+					Buffer.from(nodeToFill.userAccountData.data)
+			  )
+			: (await this.userMap.mustGet(takerUserPubKey)).getUserAccount();
+
+		const authority = nodeToFill.authority
+			? nodeToFill.authority
+			: getUserStatsAccountPublicKey(
+					this.driftClient.program.programId,
+					takerUserAccount!.authority
+			  ).toString();
 		const referrerInfo = (
-			await this.userStatsMap!.mustGet(takerUserAccount.authority.toString())
+			await this.userStatsMap!.mustGet(authority)
 		).getReferrerInfo();
 
 		const fillerReward = this.calculateFillerRewardEstimate(
 			getUserFeeTier(
 				MarketType.PERP,
 				this.driftClient.getStateAccount(),
-				(
-					await this.userStatsMap.mustGet(takerUserAccount.authority.toString())
-				).getAccount()
+				(await this.userStatsMap.mustGet(authority)).getAccount()
 			),
 			// eslint-disable-next-line @typescript-eslint/no-non-null-asserted-optional-chain
 			nodeToFill.node
@@ -2367,10 +2467,18 @@ export class FillerMultithreaded {
 			makerInfos,
 			takerUserPubKey,
 			takerUser: takerUserAccount,
+			takerStatsPubKey: getUserStatsAccountPublicKey(
+				this.driftClient.program.programId,
+				new PublicKey(authority)
+			),
 			takerUserSlot: this.slotSubscriber.getSlot(),
 			referrerInfo,
 			marketType: nodeToFill.node.order!.marketType,
 			fillerRewardEstimate: fillerReward,
+			isSwift: nodeToFill.node.isSwift,
+			authority: nodeToFill.authority
+				? new PublicKey(nodeToFill.authority)
+				: undefined,
 		});
 	}
 
