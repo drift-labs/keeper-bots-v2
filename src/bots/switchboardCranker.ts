@@ -149,6 +149,14 @@ export class SwitchboardCrankerBot implements Bot {
 					recentBlockhash: await this.getBlockhashForTx(),
 				});
 
+				if (simResult.cuEstimate < 100000) {
+					logger.info(
+						`cuEst: ${simResult.cuEstimate}, logs: ${JSON.stringify(
+							simResult.simTxLogs
+						)}`
+					);
+				}
+
 				if (this.globalConfig.useJito) {
 					simResult.tx.sign([
 						// @ts-ignore;
