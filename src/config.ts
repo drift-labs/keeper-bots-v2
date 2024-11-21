@@ -240,7 +240,7 @@ const defaultConfig: Partial<Config> = {
 		txConfirmationEndpoint: process.env.TX_CONFIRMATION_ENDPOINT,
 		priorityFeeMethod: process.env.PRIORITY_FEE_METHOD ?? 'solana',
 		maxPriorityFeeMicroLamports: parseInt(
-			process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ?? '10000'
+			process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ?? '1000000'
 		),
 		priorityFeeMultiplier: 1.0,
 		keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY,
