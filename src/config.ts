@@ -340,7 +340,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			maxPriorityFeeMicroLamports: parseInt(
 				opts.maxPriorityFeeMicroLamports ??
 					process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ??
-					'10000'
+					'1000000'
 			),
 			priorityFeeMultiplier: parseFloat(opts.priorityFeeMultiplier ?? '1.0'),
 			keeperPrivateKey: opts.privateKey ?? process.env.KEEPER_PRIVATE_KEY,
