@@ -51,7 +51,7 @@ export class SwitchboardCrankerBot implements Bot {
 		this.slothashSubscriber = new SlothashSubscriber(
 			this.driftClient.connection,
 			{
-				commitment: 'processed',
+				commitment: 'confirmed',
 			}
 		);
 	}
@@ -120,7 +120,7 @@ export class SwitchboardCrankerBot implements Bot {
 					ixs.push(this.bundleSender!.getTipIx());
 				} else {
 					const priorityFees =
-						this.priorityFeeSubscriber?.getCustomStrategyResult() || 0;
+						this.priorityFeeSubscriber?.getHeliusPriorityFeeLevel() || 0;
 					logger.info(`Priority fee for ${alias}: ${priorityFees}`);
 					ixs.push(
 						ComputeBudgetProgram.setComputeUnitPrice({
