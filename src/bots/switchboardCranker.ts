@@ -14,7 +14,7 @@ import {
 	ComputeBudgetProgram,
 	PublicKey,
 } from '@solana/web3.js';
-import { simulateAndGetTxWithCUs, sleepMs } from '../utils';
+import { getVersionedTransaction, sleepMs } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
 
 setGlobalDispatcher(
@@ -23,7 +23,8 @@ setGlobalDispatcher(
 	})
 );
 
-const SIM_CU_ESTIMATE_MULTIPLIER = 1.5;
+// ref: https://solscan.io/tx/Z5X334CFBmzbzxXHgfa49UVbMdLZf7nJdDCekjaZYinpykVqgTm47VZphazocMjYe1XJtEyeiL6QgrmvLeMesMA
+const MIN_CU_LIMIT = 350_000;
 
 export class SwitchboardCrankerBot implements Bot {
 	public name: string;
@@ -112,7 +113,7 @@ export class SwitchboardCrankerBot implements Bot {
 				);
 				const ixs = [
 					ComputeBudgetProgram.setComputeUnitLimit({
-						units: 1_400_000,
+						units: MIN_CU_LIMIT,
 					}),
 				];
 
@@ -139,38 +140,27 @@ export class SwitchboardCrankerBot implements Bot {
 				}
 				ixs.push(pullIx);
 
-				const simResult = await simulateAndGetTxWithCUs({
+				const tx = getVersionedTransaction(
+					this.driftClient.wallet.publicKey,
 					ixs,
-					connection: this.driftClient.connection,
-					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: this.lookupTableAccounts,
-					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-					doSimulation: true,
-					recentBlockhash: await this.getBlockhashForTx(),
-				});
-
-				if (simResult.cuEstimate < 100000) {
-					logger.info(
-						`cuEst: ${simResult.cuEstimate}, logs: ${JSON.stringify(
-							simResult.simTxLogs
-						)}`
-					);
-				}
+					this.lookupTableAccounts,
+					await this.getBlockhashForTx()
+				);
 
 				if (this.globalConfig.useJito) {
-					simResult.tx.sign([
+					tx.sign([
 						// @ts-ignore;
 						this.driftClient.wallet.payer,
 					]);
 					this.bundleSender?.sendTransactions(
-						[simResult.tx],
+						[tx],
 						undefined,
 						undefined,
 						false
 					);
 				} else {
 					this.driftClient
-						.sendTransaction(simResult.tx)
+						.sendTransaction(tx)
 						.then((txSigAndSlot: TxSigAndSlot) => {
 							logger.info(
 								`Posted update sb atomic tx for ${alias}: ${txSigAndSlot.txSig}`
