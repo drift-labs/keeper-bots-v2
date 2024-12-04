@@ -26,6 +26,7 @@ import {
 	StateAccount,
 	PRICE_PRECISION,
 	DriftEnv,
+	SwiftOrderNode,
 } from '@drift-labs/sdk';
 import {
 	ComputeBudgetProgram,
@@ -242,8 +243,9 @@ const serializeTriggerOrderNode = (
 
 export const serializeNodeToFill = (
 	node: NodeToFillWithContext,
-	userAccountData: Buffer,
-	makerAccountDatas: Map<string, Buffer>
+	makerAccountDatas: Map<string, Buffer>,
+	userAccountData?: Buffer,
+	authority?: string
 ): SerializedNodeToFill => {
 	return {
 		node: serializeDLOBNode(node.node, userAccountData),
@@ -253,12 +255,13 @@ export const serializeNodeToFill = (
 		}),
 		fallbackAskSource: node.fallbackAskSource,
 		fallbackBidSource: node.fallbackBidSource,
+		authority,
 	};
 };
 
 const serializeDLOBNode = (
 	node: DLOBNode,
-	userAccountData: Buffer
+	userAccountData?: Buffer
 ): SerializedDLOBNode => {
 	if (node instanceof OrderNode) {
 		return {
@@ -269,6 +272,7 @@ const serializeDLOBNode = (
 			sortValue: node.sortValue.toString('hex'),
 			haveFilled: node.haveFilled,
 			haveTrigger: 'haveTrigger' in node ? node.haveTrigger : undefined,
+			isSwift: 'isSwift' in node ? node.isSwift : undefined,
 		};
 	} else {
 		throw new Error(
@@ -296,6 +300,7 @@ export const deserializeNodeToFill = (
 		makerNodes: serializedNode.makerNodes.map(deserializeDLOBNode),
 		fallbackAskSource: serializedNode.fallbackAskSource,
 		fallbackBidSource: serializedNode.fallbackBidSource,
+		authority: serializedNode.authority,
 	};
 	return node;
 };
@@ -311,6 +316,8 @@ const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
 			return new FloatingLimitOrderNode(order, node.userAccount);
 		case 'MarketOrderNode':
 			return new MarketOrderNode(order, node.userAccount);
+		case 'SwiftOrderNode':
+			return new SwiftOrderNode(order, node.userAccount);
 		default:
 			throw new Error(`Invalid node type: ${node.type}`);
 	}

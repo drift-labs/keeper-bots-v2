@@ -1,5 +1,4 @@
 import {
-	BASE_PRECISION,
 	DriftClient,
 	getMarketOrderParams,
 	isVariant,
@@ -47,19 +46,21 @@ export class SwiftTaker {
 
 			const oracleInfo =
 				this.driftClient.getOracleDataForPerpMarket(marketIndex);
-			const highPrice = oracleInfo.price.muln(101).divn(100);
-			const lowPrice = oracleInfo.price;
 
 			const orderMessage = {
 				swiftOrderParams: getMarketOrderParams({
 					marketIndex,
 					marketType: MarketType.PERP,
 					direction,
-					baseAssetAmount: BASE_PRECISION,
+					baseAssetAmount: this.driftClient
+						.getPerpMarketAccount(marketIndex)!
+						.amm.minOrderSize.muln(2),
 					auctionStartPrice: isVariant(direction, 'long')
-						? lowPrice
-						: highPrice,
-					auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
+						? oracleInfo.price.muln(101).divn(100)
+						: oracleInfo.price.muln(99).divn(100),
+					auctionEndPrice: isVariant(direction, 'long')
+						? oracleInfo.price.muln(102).divn(100)
+						: oracleInfo.price.muln(98).divn(100),
 					auctionDuration: 30,
 				}),
 				subAccountId: 0,

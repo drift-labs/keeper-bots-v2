@@ -576,6 +576,7 @@ export async function simulateAndGetTxWithCUs(
 		throw new Error(`Failed to get units consumed from simulateTransaction`);
 	}
 
+	console.log(resp.value);
 	const simTxLogs = resp.value.logs;
 	const cuEstimate = resp.value.unitsConsumed!;
 	const cusToUse = Math.max(
@@ -758,7 +759,9 @@ export function logMessageForNodeToFill(
 				basePrecision
 			)} @ ${convertToNumber(makerOrder.price, PRICE_PRECISION)} (offset: ${
 				makerOrder.oraclePriceOffset / PRICE_PRECISION.toNumber()
-			}) (orderType: ${getVariant(makerOrder.orderType)})\n`;
+			}) (orderType: ${
+				node.node.isSwift ? 'swift' : getVariant(makerOrder.orderType)
+			})\n`;
 		}
 	} else {
 		msg += `  ${fallbackSource}`;
