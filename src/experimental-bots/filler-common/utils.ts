@@ -303,7 +303,8 @@ export const deserializeNodeToFill = (
 };
 
 const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
-	const userAccount = decodeUser(node.userAccountData);
+	// @ts-ignore
+	const userAccount = decodeUser(Buffer.from(node.userAccountData.data));
 	const order = deserializeOrder(node.order);
 	const isProtectedMaker = isUserProtectedMaker(userAccount);
 
