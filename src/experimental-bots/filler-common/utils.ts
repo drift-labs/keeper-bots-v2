@@ -26,6 +26,8 @@ import {
 	StateAccount,
 	PRICE_PRECISION,
 	DriftEnv,
+	isUserProtectedMaker,
+	decodeUser,
 } from '@drift-labs/sdk';
 import {
 	ComputeBudgetProgram,
@@ -301,16 +303,31 @@ export const deserializeNodeToFill = (
 };
 
 const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
+	const userAccount = decodeUser(node.userAccountData);
 	const order = deserializeOrder(node.order);
+	const isProtectedMaker = isUserProtectedMaker(userAccount);
+
 	switch (node.type) {
 		case 'TakingLimitOrderNode':
-			return new TakingLimitOrderNode(order, node.userAccount);
+			return new TakingLimitOrderNode(
+				order,
+				node.userAccount,
+				isProtectedMaker
+			);
 		case 'RestingLimitOrderNode':
-			return new RestingLimitOrderNode(order, node.userAccount);
+			return new RestingLimitOrderNode(
+				order,
+				node.userAccount,
+				isProtectedMaker
+			);
 		case 'FloatingLimitOrderNode':
-			return new FloatingLimitOrderNode(order, node.userAccount);
+			return new FloatingLimitOrderNode(
+				order,
+				node.userAccount,
+				isProtectedMaker
+			);
 		case 'MarketOrderNode':
-			return new MarketOrderNode(order, node.userAccount);
+			return new MarketOrderNode(order, node.userAccount, isProtectedMaker);
 		default:
 			throw new Error(`Invalid node type: ${node.type}`);
 	}

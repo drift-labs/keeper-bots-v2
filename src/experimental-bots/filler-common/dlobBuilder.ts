@@ -18,6 +18,7 @@ import {
 	PhoenixV1FulfillmentConfigAccount,
 	OpenbookV2Subscriber,
 	OpenbookV2FulfillmentConfigAccount,
+	isUserProtectedMaker,
 } from '@drift-labs/sdk';
 import { Connection } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -155,7 +156,12 @@ class DLOBBuilder {
 				) {
 					return;
 				}
-				this.dlob.insertOrder(order, pubkey, this.slotSubscriber.getSlot());
+				this.dlob.insertOrder(
+					order,
+					pubkey,
+					this.slotSubscriber.getSlot(),
+					isUserProtectedMaker(userAccount)
+				);
 				counter++;
 			});
 		});
