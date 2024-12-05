@@ -115,7 +115,11 @@ export class BundleSender {
 		private maxFailBundleCount = 100, // at 100 failed txs, can expect tip to become maxBundleTip
 		private tipMultiplier = 3 // bigger == more superlinear, delay the ramp up to prevent overpaying too soon
 	) {
-		this.searcherClient = searcherClient(jitoBlockEngineUrl, jitoAuthKeypair);
+		this.searcherClient = searcherClient(jitoBlockEngineUrl, jitoAuthKeypair, {
+			'grpc.keepalive_time_ms': 10_000,
+			'grpc.keepalive_timeout_ms': 1_000,
+			'grpc.keepalive_permit_without_calls': 1,
+		});
 		this.bundleIdToTx = new LRUCache({
 			max: 500,
 		});
