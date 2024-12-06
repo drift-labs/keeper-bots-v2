@@ -347,6 +347,7 @@ export class BundleSender {
 		this.shuttingDown = false;
 
 		await this.connectSearcherClient();
+		this.connectJitoTipStream();
 
 		this.slotSubscriber.eventEmitter.on(
 			'newSlot',
