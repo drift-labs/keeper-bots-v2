@@ -25,6 +25,9 @@ export const jitoBundlePriceEndpoint =
 const logPrefix = '[BundleSender]';
 const MS_DELAY_BEFORE_CHECK_INCLUSION = 30_000;
 const MAX_TXS_TO_CHECK = 50;
+const RECONNECT_DELAY_MS = 5000;
+const MAX_RECONNECT_ATTEMPTS = 3;
+const RECONNECT_RESET_DELAY_MS = 30000;
 
 export type TipStream = {
 	time: string;
@@ -67,7 +70,7 @@ const initBundleStats: BundleStats = {
 
 export class BundleSender {
 	private ws: WebSocket | undefined;
-	private searcherClient: SearcherClient;
+	private searcherClient: SearcherClient | undefined;
 	private leaderScheduleIntervalId: NodeJS.Timeout | undefined;
 	private checkSentTxsIntervalId: NodeJS.Timeout | undefined;
 	private isSubscribed = false;
@@ -80,6 +83,8 @@ export class BundleSender {
 	};
 	private updatingJitoSchedule = false;
 	private checkingSentTxs = false;
+	private reconnectAttempts = 0;
+	private lastReconnectTime = 0;
 
 	// if there is a big difference, probably jito ws connection is bad, should resub
 	private bundlesSent = 0;
@@ -103,8 +108,8 @@ export class BundleSender {
 
 	constructor(
 		private connection: Connection,
-		jitoBlockEngineUrl: string,
-		jitoAuthKeypair: Keypair,
+		private jitoBlockEngineUrl: string,
+		private jitoAuthKeypair: Keypair,
 		public tipPayerKeypair: Keypair,
 		private slotSubscriber: SlotSubscriber,
 
@@ -115,11 +120,6 @@ export class BundleSender {
 		private maxFailBundleCount = 100, // at 100 failed txs, can expect tip to become maxBundleTip
 		private tipMultiplier = 3 // bigger == more superlinear, delay the ramp up to prevent overpaying too soon
 	) {
-		this.searcherClient = searcherClient(jitoBlockEngineUrl, jitoAuthKeypair, {
-			'grpc.keepalive_time_ms': 10_000,
-			'grpc.keepalive_timeout_ms': 1_000,
-			'grpc.keepalive_permit_without_calls': 1,
-		});
 		this.bundleIdToTx = new LRUCache({
 			max: 500,
 		});
@@ -269,6 +269,76 @@ export class BundleSender {
 		connect();
 	}
 
+	private async connectSearcherClient() {
+		const now = Date.now();
+
+		if (now - this.lastReconnectTime > RECONNECT_RESET_DELAY_MS) {
+			this.reconnectAttempts = 0;
+		}
+
+		if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+			logger.error(
+				`${logPrefix}: Max reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Waiting ${RECONNECT_RESET_DELAY_MS}ms before trying again`
+			);
+			return;
+		}
+
+		try {
+			this.searcherClient = searcherClient(
+				this.jitoBlockEngineUrl,
+				this.jitoAuthKeypair,
+				{
+					'grpc.keepalive_time_ms': 10_000,
+					'grpc.keepalive_timeout_ms': 1_000,
+					'grpc.keepalive_permit_without_calls': 1,
+				}
+			);
+
+			this.searcherClient.onBundleResult(
+				(bundleResult: BundleResult) => {
+					logger.info(
+						`${logPrefix}: got bundle result: ${JSON.stringify(bundleResult)}`
+					);
+					this.bundleResultsReceived++;
+					this.handleBundleResult(bundleResult);
+				},
+				async (err: Error) => {
+					logger.error(
+						`${logPrefix}: error getting bundle result, retrying in: ${RECONNECT_DELAY_MS}ms. msg: ${err.message}`
+					);
+					if (this.shuttingDown) {
+						logger.info(`${logPrefix}: shutting down, skipping reconnect`);
+						return;
+					}
+
+					this.reconnectAttempts++;
+					this.lastReconnectTime = Date.now();
+
+					await new Promise((resolve) =>
+						setTimeout(resolve, RECONNECT_DELAY_MS)
+					);
+					await this.connectSearcherClient();
+				}
+			);
+
+			// Reset attempts on successful connection
+			this.reconnectAttempts = 0;
+
+			const tipAccounts = await this.searcherClient.getTipAccounts();
+			this.jitoTipAccounts = tipAccounts.map((k) => new PublicKey(k));
+		} catch (e) {
+			const err = e as Error;
+			logger.error(
+				`${logPrefix}: Failed to connect searcherClient, retrying in: ${RECONNECT_DELAY_MS}ms. msg: ${err.message}`
+			);
+			this.reconnectAttempts++;
+			this.lastReconnectTime = Date.now();
+
+			await new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAY_MS));
+			await this.connectSearcherClient();
+		}
+	}
+
 	async subscribe() {
 		if (this.isSubscribed) {
 			return;
@@ -276,25 +346,7 @@ export class BundleSender {
 		this.isSubscribed = true;
 		this.shuttingDown = false;
 
-		const tipAccounts = await this.searcherClient.getTipAccounts();
-		this.jitoTipAccounts = tipAccounts.map((k) => new PublicKey(k));
-
-		this.searcherClient.onBundleResult(
-			(bundleResult: BundleResult) => {
-				logger.info(
-					`${logPrefix}: got bundle result: ${JSON.stringify(bundleResult)}`
-				);
-				this.bundleResultsReceived++;
-				this.handleBundleResult(bundleResult);
-			},
-			(err: Error) => {
-				logger.error(
-					`${logPrefix}: error getting bundle result: ${err.message}: ${err.stack}`
-				);
-			}
-		);
-
-		this.connectJitoTipStream();
+		await this.connectSearcherClient();
 
 		this.slotSubscriber.eventEmitter.on(
 			'newSlot',
@@ -315,6 +367,8 @@ export class BundleSender {
 			return;
 		}
 		this.shuttingDown = true;
+
+		this.searcherClient = undefined;
 
 		if (this.ws) {
 			this.ws.close();
@@ -407,7 +461,12 @@ export class BundleSender {
 	}
 
 	private async updateJitoLeaderSchedule() {
-		if (this.updatingJitoSchedule) {
+		if (this.updatingJitoSchedule || !this.searcherClient) {
+			if (!this.searcherClient) {
+				logger.error(
+					`${logPrefix} no searcherClient, skipping updateJitoLeaderSchedule`
+				);
+			}
 			return;
 		}
 		this.updatingJitoSchedule = true;
@@ -495,6 +554,11 @@ export class BundleSender {
 				`${logPrefix} You should call bundleSender.subscribe() before sendTransaction()`
 			);
 			await this.subscribe();
+			return;
+		}
+
+		if (!this.searcherClient) {
+			logger.error(`${logPrefix} searcherClient not initialized`);
 			return;
 		}
 
