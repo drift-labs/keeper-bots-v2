@@ -20,7 +20,7 @@ export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
 	private ws: WebSocket | null = null;
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
-	private readonly heartbeatIntervalMs = 30000;
+	private readonly heartbeatIntervalMs = 80_000;
 	constructor(
 		private driftClient: DriftClient,
 		private userMap: UserMap,
@@ -216,7 +216,7 @@ export class SwiftMaker {
 			clearTimeout(this.heartbeatTimeout);
 		}
 		this.heartbeatTimeout = setTimeout(() => {
-			console.warn('No heartbeat received within 30 seconds, reconnecting...');
+			console.warn('No heartbeat received within 60 seconds, reconnecting...');
 			this.reconnect();
 		}, this.heartbeatIntervalMs);
 	}
