@@ -20,7 +20,7 @@ export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
 	private ws: WebSocket | null = null;
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
-	private readonly heartbeatIntervalMs = 30000;
+	private readonly heartbeatIntervalMs = 65000;
 	constructor(
 		private driftClient: DriftClient,
 		private userMap: UserMap,
