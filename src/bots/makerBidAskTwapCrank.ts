@@ -390,7 +390,11 @@ export class MakerBidAskTwapCrank implements Bot {
 					simResult.simError
 				)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 			);
-			handleSimResultError(simResult, [], `[${this.name}]`);
+			handleSimResultError(
+				simResult,
+				[],
+				`[${this.name}] (market: ${marketIndex})`
+			);
 			return;
 		} else {
 			return simResult.tx;
