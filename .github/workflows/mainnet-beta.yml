@@ -61,19 +61,12 @@ jobs:
         env:
           BRANCH_NAME: ${{ github.ref_name }}
         run: |
-          kubectl get deployments -n $BRANCH_NAME -o name | grep order-filler-bot | xargs -I {} kubectl rollout restart {} -n $BRANCH_NAME
-          kubectl get deployments -n $BRANCH_NAME -o name | grep spot-filler-bot | xargs -I {} kubectl rollout restart {} -n $BRANCH_NAME
+          kubectl get deployments -n $BRANCH_NAME -o name | grep filler | xargs -I {} kubectl rollout restart {} -n $BRANCH_NAME
 
           kubectl rollout restart -n $BRANCH_NAME deployment/funding-rate-updater-bot
-
           kubectl rollout restart -n $BRANCH_NAME deployment/liquidator-global-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/liquidator-global-2-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/user-lp-settler-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/user-pnl-settler-bot
-          kubectl rollout restart -n $BRANCH_NAME deployment/order-filler-multithreaded-jito-bot
-          kubectl rollout restart -n $BRANCH_NAME deployment/order-filler-multithreaded-jito-btc-eth
-          kubectl rollout restart -n $BRANCH_NAME deployment/spot-filler-multithreaded-rest
-          kubectl rollout restart -n $BRANCH_NAME deployment/spot-filler-multithreaded-sol
           kubectl rollout restart -n $BRANCH_NAME deployment/pyth-cranker-bot
-          kubectl rollout restart -n $BRANCH_NAME deployment/pyusd-distributor-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/switchboard-cranker-bot
