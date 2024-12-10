@@ -233,6 +233,34 @@
     uuid "^8.3.2"
     zstddec "^0.1.0"
 
+"@drift-labs/sdk@2.104.0-beta.6":
+  version "2.104.0-beta.6"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.104.0-beta.6.tgz#fcf3772a02e099da9e5bb662503058f1ffaf61aa"
+  integrity sha512-p5MJ45YvZmGmHdm20mIxJgudE4q0Gyv0EJ8hlxTx49Nb/DIddAEyfcOzcu5kNd5SsY7HE0ENfKbCT/FD/CKf4Q==
+  dependencies:
+    "@coral-xyz/anchor" "0.28.0"
+    "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
+    "@ellipsis-labs/phoenix-sdk" "^1.4.2"
+    "@grpc/grpc-js" "^1.8.0"
+    "@openbook-dex/openbook-v2" "0.2.10"
+    "@project-serum/serum" "^0.13.38"
+    "@pythnetwork/client" "2.5.3"
+    "@pythnetwork/price-service-sdk" "^1.7.1"
+    "@pythnetwork/pyth-solana-receiver" "^0.7.0"
+    "@solana/spl-token" "0.3.7"
+    "@solana/web3.js" "1.92.3"
+    "@switchboard-xyz/on-demand" "1.2.42"
+    "@triton-one/yellowstone-grpc" "1.3.0"
+    anchor-bankrun "^0.3.0"
+    node-cache "^5.1.2"
+    rpc-websockets "7.5.1"
+    solana-bankrun "^0.3.0"
+    strict-event-emitter-types "^2.0.0"
+    tweetnacl "1.0.3"
+    uuid "^8.3.2"
+    yargs "^17.7.2"
+    zstddec "^0.1.0"
+
 "@ellipsis-labs/phoenix-sdk@^1.4.2":
   version "1.4.5"
   resolved "https://registry.yarnpkg.com/@ellipsis-labs/phoenix-sdk/-/phoenix-sdk-1.4.5.tgz#42cf8de8463b32c910ab8844eae71ca082a6773a"
@@ -1666,6 +1694,13 @@
   version "0.6.0"
   resolved "https://registry.yarnpkg.com/@triton-one/yellowstone-grpc/-/yellowstone-grpc-0.6.0.tgz#9e6376cec8a42284c23dc195df2c3423c87c4f27"
   integrity sha512-rgdZM2N3U9/d/QKOI5PP+9rSHUl2oSI5Uwzvuss8y/mtTaHFjbOMpXpQXviIeDkusOa+mef4wLYrbjEZCwTXiw==
+  dependencies:
+    "@grpc/grpc-js" "^1.8.0"
+
+"@triton-one/yellowstone-grpc@1.3.0":
+  version "1.3.0"
+  resolved "https://registry.yarnpkg.com/@triton-one/yellowstone-grpc/-/yellowstone-grpc-1.3.0.tgz#7caa7006b525149b4780d1295c7d4c34bc6a6ff6"
+  integrity sha512-tuwHtoYzvqnahsMrecfNNkQceCYwgiY0qKS8RwqtaxvDEgjm0E+0bXwKz2eUD3ZFYifomJmRKDmSBx9yQzAeMQ==
   dependencies:
     "@grpc/grpc-js" "^1.8.0"
 
