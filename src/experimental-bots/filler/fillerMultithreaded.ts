@@ -426,6 +426,7 @@ export class FillerMultithreaded {
 		);
 
 		await this.userMap.subscribe();
+		await this.userStatsMap.subscribe([]);
 
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()

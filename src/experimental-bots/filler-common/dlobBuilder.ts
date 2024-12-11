@@ -25,6 +25,7 @@ import {
 	ZERO,
 	OrderTriggerCondition,
 	PositionDirection,
+	UserStatus,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -164,12 +165,12 @@ class DLOBBuilder {
 				) {
 					return;
 				}
-				dlob.insertOrder(order, pubkey, this.slotSubscriber.getSlot());
+				dlob.insertOrder(order, pubkey, this.slotSubscriber.getSlot(), false);
 				counter++;
 			});
 		});
 		for (const swiftNode of this.swiftOrders.values()) {
-			dlob.insertSwiftOrder(swiftNode.order, swiftNode.userAccount);
+			dlob.insertSwiftOrder(swiftNode.order, swiftNode.userAccount, false);
 			counter++;
 		}
 		logger.debug(`${logPrefix} Built DLOB with ${counter} orders`);
@@ -379,6 +380,7 @@ class DLOBBuilder {
 				return serializeNodeToFill(
 					node,
 					makerBuffers,
+					this.userAccountData.get(node.node.userAccount!)?.status === UserStatus.PROTECTED_MAKER,
 					buffer,
 					this.swiftUserAuthorities.get(node.node.userAccount!)
 				);

@@ -244,11 +244,12 @@ const serializeTriggerOrderNode = (
 export const serializeNodeToFill = (
 	node: NodeToFillWithContext,
 	makerAccountDatas: Map<string, Buffer>,
+	isUserProtectedMaker: boolean,
 	userAccountData?: Buffer,
 	authority?: string
 ): SerializedNodeToFill => {
 	return {
-		node: serializeDLOBNode(node.node, userAccountData),
+		node: serializeDLOBNode(node.node, isUserProtectedMaker, userAccountData),
 		makerNodes: node.makerNodes.map((node) => {
 			// @ts-ignore
 			return serializeDLOBNode(node, makerAccountDatas.get(node.userAccount));
@@ -261,6 +262,7 @@ export const serializeNodeToFill = (
 
 const serializeDLOBNode = (
 	node: DLOBNode,
+	isUserProtectedMaker: boolean,
 	userAccountData?: Buffer
 ): SerializedDLOBNode => {
 	if (node instanceof OrderNode) {
@@ -273,6 +275,7 @@ const serializeDLOBNode = (
 			haveFilled: node.haveFilled,
 			haveTrigger: 'haveTrigger' in node ? node.haveTrigger : undefined,
 			isSwift: 'isSwift' in node ? node.isSwift : undefined,
+			isUserProtectedMaker
 		};
 	} else {
 		throw new Error(
@@ -309,13 +312,13 @@ const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
 	const order = deserializeOrder(node.order);
 	switch (node.type) {
 		case 'TakingLimitOrderNode':
-			return new TakingLimitOrderNode(order, node.userAccount);
+			return new TakingLimitOrderNode(order, node.userAccount, node.isUserProtectedMaker);
 		case 'RestingLimitOrderNode':
-			return new RestingLimitOrderNode(order, node.userAccount);
+			return new RestingLimitOrderNode(order, node.userAccount, node.isUserProtectedMaker);
 		case 'FloatingLimitOrderNode':
-			return new FloatingLimitOrderNode(order, node.userAccount);
+			return new FloatingLimitOrderNode(order, node.userAccount, node.isUserProtectedMaker);
 		case 'MarketOrderNode':
-			return new MarketOrderNode(order, node.userAccount);
+			return new MarketOrderNode(order, node.userAccount, node.isUserProtectedMaker);
 		case 'SwiftOrderNode':
 			return new SwiftOrderNode(order, node.userAccount);
 		default:

@@ -125,6 +125,7 @@ export type SerializedDLOBNode = {
 	fallbackAskSource?: FallbackLiquiditySource;
 	fallbackBidSource?: FallbackLiquiditySource;
 	isSwift?: boolean;
+	isUserProtectedMaker: boolean;
 };
 
 export type FallbackLiquiditySource = 'serum' | 'phoenix' | 'openbook';
