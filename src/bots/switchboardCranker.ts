@@ -13,8 +13,9 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 	PublicKey,
+	TransactionInstruction,
 } from '@solana/web3.js';
-import { getVersionedTransaction, sleepMs } from '../utils';
+import { chunks, getVersionedTransaction, shuffle, sleepMs } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
 
 setGlobalDispatcher(
@@ -24,7 +25,7 @@ setGlobalDispatcher(
 );
 
 // ref: https://solscan.io/tx/Z5X334CFBmzbzxXHgfa49UVbMdLZf7nJdDCekjaZYinpykVqgTm47VZphazocMjYe1XJtEyeiL6QgrmvLeMesMA
-const MIN_CU_LIMIT = 350_000;
+const MIN_CU_LIMIT = 700_000;
 
 export class SwitchboardCrankerBot implements Bot {
 	public name: string;
@@ -106,11 +107,12 @@ export class SwitchboardCrankerBot implements Bot {
 	}
 
 	async runCrankLoop() {
-		for (const alias in this.crankConfigs.pullFeedConfigs) {
+		const pullFeedAliases = chunks(
+			shuffle(Object.keys(this.crankConfigs.pullFeedConfigs)),
+			2
+		);
+		for (const aliasChunk of pullFeedAliases) {
 			try {
-				const pubkey = new PublicKey(
-					this.crankConfigs.pullFeedConfigs[alias].pubkey
-				);
 				const ixs = [
 					ComputeBudgetProgram.setComputeUnitLimit({
 						units: MIN_CU_LIMIT,
@@ -122,23 +124,17 @@ export class SwitchboardCrankerBot implements Bot {
 				} else {
 					const priorityFees =
 						this.priorityFeeSubscriber?.getHeliusPriorityFeeLevel() || 0;
-					logger.info(`Priority fee for ${alias}: ${priorityFees}`);
 					ixs.push(
 						ComputeBudgetProgram.setComputeUnitPrice({
 							microLamports: Math.floor(priorityFees),
 						})
 					);
 				}
-				const pullIx =
-					await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
-						pubkey,
-						this.slothashSubscriber.currentSlothash
-					);
-				if (!pullIx) {
-					logger.error(`No pullIx for ${alias}`);
-					continue;
-				}
-				ixs.push(pullIx);
+
+				const pullIxs = (
+					await Promise.all(aliasChunk.map((alias) => this.getPullIx(alias)))
+				).filter((ix) => ix !== undefined) as TransactionInstruction[];
+				ixs.push(...pullIxs);
 
 				const tx = getVersionedTransaction(
 					this.driftClient.wallet.publicKey,
@@ -163,7 +159,7 @@ export class SwitchboardCrankerBot implements Bot {
 						.sendTransaction(tx)
 						.then((txSigAndSlot: TxSigAndSlot) => {
 							logger.info(
-								`Posted update sb atomic tx for ${alias}: ${txSigAndSlot.txSig}`
+								`Posted update sb atomic tx for ${aliasChunk}: ${txSigAndSlot.txSig}`
 							);
 						})
 						.catch((e) => {
@@ -171,9 +167,25 @@ export class SwitchboardCrankerBot implements Bot {
 						});
 				}
 			} catch (e) {
-				logger.error(`Error processing alias ${alias}: ${e}`);
+				logger.error(`Error processing alias ${aliasChunk}: ${e}`);
 			}
 		}
+	}
+
+	async getPullIx(alias: string): Promise<TransactionInstruction | undefined> {
+		const pubkey = new PublicKey(
+			this.crankConfigs.pullFeedConfigs[alias].pubkey
+		);
+		const pullIx =
+			await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
+				pubkey,
+				this.slothashSubscriber.currentSlothash
+			);
+		if (!pullIx) {
+			logger.error(`No pullIx for ${alias}`);
+			return;
+		}
+		return pullIx;
 	}
 
 	async healthCheck(): Promise<boolean> {
