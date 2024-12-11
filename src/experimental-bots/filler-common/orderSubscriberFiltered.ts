@@ -160,7 +160,7 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 							Buffer.from([]),
 							key,
 							'delete',
-							marketIndex,
+							marketIndex
 						);
 					});
 					delete this.userMarkets[key];
@@ -180,7 +180,7 @@ class OrderSubscriberFiltered extends OrderSubscriber {
 		buffer: Buffer,
 		key: string,
 		msgType: 'update' | 'delete',
-		marketIndex: number,
+		marketIndex: number
 	) {
 		const userAccountUpdate: UserAccountUpdate = {
 			type: msgType,

@@ -24,16 +24,10 @@ import {
 	UserStatsAccount,
 	isVariant,
 	StateAccount,
-	PRICE_PRECISION,
 	DriftEnv,
 	SwiftOrderNode,
 } from '@drift-labs/sdk';
-import {
-	ComputeBudgetProgram,
-	Connection,
-	LAMPORTS_PER_SOL,
-	PublicKey,
-} from '@solana/web3.js';
+import { ComputeBudgetProgram, Connection, PublicKey } from '@solana/web3.js';
 import {
 	SerializedUserAccount,
 	SerializedOrder,
@@ -275,7 +269,7 @@ const serializeDLOBNode = (
 			haveFilled: node.haveFilled,
 			haveTrigger: 'haveTrigger' in node ? node.haveTrigger : undefined,
 			isSwift: 'isSwift' in node ? node.isSwift : undefined,
-			isUserProtectedMaker
+			isUserProtectedMaker,
 		};
 	} else {
 		throw new Error(
@@ -312,13 +306,29 @@ const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
 	const order = deserializeOrder(node.order);
 	switch (node.type) {
 		case 'TakingLimitOrderNode':
-			return new TakingLimitOrderNode(order, node.userAccount, node.isUserProtectedMaker);
+			return new TakingLimitOrderNode(
+				order,
+				node.userAccount,
+				node.isUserProtectedMaker
+			);
 		case 'RestingLimitOrderNode':
-			return new RestingLimitOrderNode(order, node.userAccount, node.isUserProtectedMaker);
+			return new RestingLimitOrderNode(
+				order,
+				node.userAccount,
+				node.isUserProtectedMaker
+			);
 		case 'FloatingLimitOrderNode':
-			return new FloatingLimitOrderNode(order, node.userAccount, node.isUserProtectedMaker);
+			return new FloatingLimitOrderNode(
+				order,
+				node.userAccount,
+				node.isUserProtectedMaker
+			);
 		case 'MarketOrderNode':
-			return new MarketOrderNode(order, node.userAccount, node.isUserProtectedMaker);
+			return new MarketOrderNode(
+				order,
+				node.userAccount,
+				node.isUserProtectedMaker
+			);
 		case 'SwiftOrderNode':
 			return new SwiftOrderNode(order, node.userAccount);
 		default:
@@ -456,28 +466,8 @@ export const spawnChild = (
 	return child;
 };
 
-export const getPriorityFeeInstruction = (
-	priorityFeeMicroLamports: number,
-	solPrice: BN,
-	fillerRewardEstimate?: BN,
-	feeMultiplier = 1.0
-) => {
-	let microLamports = priorityFeeMicroLamports;
-	if (fillerRewardEstimate !== undefined) {
-		const fillerRewardMicroLamports = Math.floor(
-			fillerRewardEstimate
-				.mul(PRICE_PRECISION)
-				.mul(new BN(LAMPORTS_PER_SOL))
-				.div(solPrice)
-				.div(QUOTE_PRECISION)
-				.toNumber() * feeMultiplier
-		);
-		logger.info(`
-			fillerRewardEstimate microLamports: ${fillerRewardMicroLamports}
-			priority fee subscriber micro lamports: ${priorityFeeMicroLamports}`);
-
-		microLamports = Math.max(microLamports, fillerRewardMicroLamports);
-	}
+export const getPriorityFeeInstruction = (priorityFeeMicroLamports: number) => {
+	const microLamports = priorityFeeMicroLamports;
 	return ComputeBudgetProgram.setComputeUnitPrice({
 		microLamports,
 	});

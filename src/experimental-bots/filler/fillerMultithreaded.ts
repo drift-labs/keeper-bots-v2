@@ -1,9 +1,7 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
-	BASE_PRECISION,
 	BlockhashSubscriber,
 	BN,
-	BulkAccountLoader,
 	DataAndSlot,
 	decodeUser,
 	DLOBNode,
@@ -23,15 +21,14 @@ import {
 	MarketType,
 	NodeToFill,
 	PerpMarkets,
-	PRICE_PRECISION,
 	PriorityFeeSubscriberMap,
 	QUOTE_PRECISION,
 	ReferrerInfo,
+	ReferrerMap,
 	SlotSubscriber,
 	TxSigAndSlot,
 	UserAccount,
 	UserMap,
-	UserStatsMap,
 } from '@drift-labs/sdk';
 import { FillerMultiThreadedConfig, GlobalConfig } from '../../config';
 import { BundleSender } from '../../bundleSender';
@@ -76,7 +73,6 @@ import {
 	spawnChild,
 	deserializeNodeToFill,
 	deserializeOrder,
-	getUserFeeTier,
 	getPriorityFeeInstruction,
 } from '../filler-common/utils';
 import {
@@ -186,8 +182,8 @@ export class FillerMultithreaded {
 	private subaccount: number;
 
 	private fillTxId: number = 0;
-	private userStatsMap: UserStatsMap;
 	private userMap: UserMap;
+	private referrerMap: ReferrerMap;
 	private throttledNodes = new Map<string, number>();
 	private fillingNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
@@ -312,15 +308,8 @@ export class FillerMultithreaded {
 			additionalFilters: [getUserWithoutOrderFilter()],
 			skipInitialLoad: true,
 		});
+		this.referrerMap = new ReferrerMap(this.driftClient, true);
 
-		this.userStatsMap = new UserStatsMap(
-			this.driftClient,
-			new BulkAccountLoader(
-				new Connection(this.driftClient.connection.rpcEndpoint),
-				'confirmed',
-				0
-			)
-		);
 		this.blockhashSubscriber = new BlockhashSubscriber({
 			connection: driftClient.connection,
 		});
@@ -426,7 +415,7 @@ export class FillerMultithreaded {
 		);
 
 		await this.userMap.subscribe();
-		await this.userStatsMap.subscribe([]);
+		await this.referrerMap.subscribe();
 
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
@@ -1627,7 +1616,6 @@ export class FillerMultithreaded {
 				takerUserSlot,
 				referrerInfo,
 				marketType,
-				fillerRewardEstimate,
 				takerStatsPubKey,
 				isSwift,
 				authority,
@@ -1654,10 +1642,7 @@ export class FillerMultithreaded {
 								nodeToFill.node.order!.marketIndex!
 							)!.high *
 								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-						),
-						this.driftClient.getOracleDataForPerpMarket(0).price,
-						this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
-						this.globalConfig.priorityFeeMultiplier
+						)
 					)
 				);
 			}
@@ -1885,7 +1870,6 @@ export class FillerMultithreaded {
 			takerUserSlot,
 			referrerInfo,
 			marketType,
-			fillerRewardEstimate,
 			takerStatsPubKey,
 			isSwift,
 			authority,
@@ -1909,10 +1893,7 @@ export class FillerMultithreaded {
 							nodeToFill.node.order!.marketIndex!
 						)!.high *
 							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-					),
-					this.driftClient.getOracleDataForPerpMarket(0).price,
-					this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
-					this.globalConfig.priorityFeeMultiplier
+					)
 				)
 			);
 		}
@@ -1952,7 +1933,7 @@ export class FillerMultithreaded {
 				))
 			);
 		}
-		await this.driftClient.getFillPerpOrderIx(
+		const fillIx = await this.driftClient.getFillPerpOrderIx(
 			new PublicKey(nodeToFill.node.userAccount!),
 			takerUser!,
 			nodeToFill.node.order!,
@@ -1961,6 +1942,7 @@ export class FillerMultithreaded {
 			this.subaccount,
 			isSwift
 		);
+		ixs.push(fillIx);
 
 		const user = this.driftClient.getUser(this.subaccount);
 		if (this.revertOnFailure) {
@@ -2376,7 +2358,6 @@ export class FillerMultithreaded {
 		takerUserSlot: number;
 		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
-		fillerRewardEstimate: BN;
 		isSwift: boolean | undefined;
 		authority?: PublicKey;
 	}> {
@@ -2414,9 +2395,10 @@ export class FillerMultithreaded {
 					Buffer.from(makerInfoMap.get(makerAccount)!.data)
 				);
 				const makerAuthority = makerUserAccount.authority;
-				const makerUserStats = (
-					await this.userStatsMap!.mustGet(makerAuthority.toString())
-				).userStatsAccountPublicKey;
+				const makerUserStats = getUserStatsAccountPublicKey(
+					this.driftClient.program.programId,
+					new PublicKey(makerAuthority)
+				);
 				makerInfos.push({
 					slot: this.slotSubscriber.getSlot(),
 					data: {
@@ -2445,24 +2427,7 @@ export class FillerMultithreaded {
 					this.driftClient.program.programId,
 					takerUserAccount!.authority
 			  ).toString();
-		const referrerInfo = (
-			await this.userStatsMap!.mustGet(authority)
-		).getReferrerInfo();
-
-		const fillerReward = this.calculateFillerRewardEstimate(
-			getUserFeeTier(
-				MarketType.PERP,
-				this.driftClient.getStateAccount(),
-				(await this.userStatsMap.mustGet(authority)).getAccount()
-			),
-			// eslint-disable-next-line @typescript-eslint/no-non-null-asserted-optional-chain
-			nodeToFill.node
-				.order!.price.mul(nodeToFill.node.order!.baseAssetAmount)
-				.mul(QUOTE_PRECISION)
-				.div(PRICE_PRECISION)
-				.div(BASE_PRECISION)
-				.sub(nodeToFill.node.order!.quoteAssetAmountFilled)
-		);
+		const referrerInfo = await this.referrerMap.mustGet(authority);
 
 		return Promise.resolve({
 			makerInfos,
@@ -2475,7 +2440,6 @@ export class FillerMultithreaded {
 			takerUserSlot: this.slotSubscriber.getSlot(),
 			referrerInfo,
 			marketType: nodeToFill.node.order!.marketType,
-			fillerRewardEstimate: fillerReward,
 			isSwift: nodeToFill.node.isSwift,
 			authority: nodeToFill.authority
 				? new PublicKey(nodeToFill.authority)

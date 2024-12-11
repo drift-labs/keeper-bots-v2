@@ -380,7 +380,8 @@ class DLOBBuilder {
 				return serializeNodeToFill(
 					node,
 					makerBuffers,
-					this.userAccountData.get(node.node.userAccount!)?.status === UserStatus.PROTECTED_MAKER,
+					this.userAccountData.get(node.node.userAccount!)?.status ===
+						UserStatus.PROTECTED_MAKER,
 					buffer,
 					this.swiftUserAuthorities.get(node.node.userAccount!)
 				);

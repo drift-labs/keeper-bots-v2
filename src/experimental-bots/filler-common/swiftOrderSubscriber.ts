@@ -21,7 +21,7 @@ export type SwiftOrderSubscriberConfig = {
 
 export class SwiftOrderSubscriber {
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
-	private readonly heartbeatIntervalMs = 30000;
+	private readonly heartbeatIntervalMs = 60000;
 	private ws: WebSocket | null = null;
 	subscribed: boolean = false;
 
