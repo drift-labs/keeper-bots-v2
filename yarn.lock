@@ -1043,11 +1043,7 @@
     bn.js "^5.1.2"
     buffer-layout "^1.2.0"
 
-<<<<<<< HEAD
-"@project-serum/serum@0.13.65", "@project-serum/serum@^0.13.38":
-=======
-"@project-serum/serum@0.13.65", "@project-serum/serum@^0.13.65":
->>>>>>> master
+"@project-serum/serum@0.13.65":
   version "0.13.65"
   resolved "https://registry.yarnpkg.com/@project-serum/serum/-/serum-0.13.65.tgz#6d3cf07912f13985765237f053cca716fe84b0b0"
   integrity sha512-BHRqsTqPSfFB5p+MgI2pjvMBAQtO8ibTK2fYY96boIFkCI3TTwXDt2gUmspeChKO2pqHr5aKevmexzAcXxrSRA==
