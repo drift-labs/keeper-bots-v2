@@ -108,6 +108,17 @@ export type PythCrankerBotConfig = BaseBotConfig & {
 	};
 };
 
+export type PythLazerCrankerBot = BaseBotConfig & {
+	slotStalenessThresholdRestart: number;
+	txSuccessRateThreshold: number;
+	intervalMs: number;
+	updateConfigs: {
+		[key: string]: {
+			feedId: number;
+		};
+	};
+};
+
 export type SwitchboardCrankerBotConfig = BaseBotConfig & {
 	intervalMs: number;
 	queuePubkey: string;
