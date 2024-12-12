@@ -108,7 +108,7 @@ export type PythCrankerBotConfig = BaseBotConfig & {
 	};
 };
 
-export type PythLazerCrankerBot = BaseBotConfig & {
+export type PythLazerCrankerBotConfig = BaseBotConfig & {
 	slotStalenessThresholdRestart: number;
 	txSuccessRateThreshold: number;
 	intervalMs: number;
@@ -146,6 +146,7 @@ export type BotConfigMap = {
 	userIdleFlipper?: BaseBotConfig;
 	markTwapCrank?: BaseBotConfig;
 	pythCranker?: PythCrankerBotConfig;
+	pythLazerCranker?: PythLazerCrankerBotConfig;
 	switchboardCranker?: SwitchboardCrankerBotConfig;
 	swiftTaker?: BaseBotConfig;
 	swiftMaker?: BaseBotConfig;

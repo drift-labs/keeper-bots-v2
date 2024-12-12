@@ -75,6 +75,7 @@ import { webhookMessage } from './webhook';
 import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 import { PythCrankerBot } from './bots/pythCranker';
 import { SwitchboardCrankerBot } from './bots/switchboardCranker';
+import { PythLazerCrankerBot } from './bots/pythLazerCranker';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -555,6 +556,21 @@ const runBot = async () => {
 			new PythCrankerBot(
 				config.global,
 				config.botConfigs!.pythCranker!,
+				driftClient,
+				priorityFeeSubscriber,
+				bundleSender,
+				[]
+			)
+		);
+	}
+	if (configHasBot(config, 'pythLazerCranker')) {
+		needPythPriceSubscriber = true;
+		needPriorityFeeSubscriber = true;
+		needDriftStateWatcher = true;
+		bots.push(
+			new PythLazerCrankerBot(
+				config.global,
+				config.botConfigs!.pythLazerCranker!,
 				driftClient,
 				priorityFeeSubscriber,
 				bundleSender,

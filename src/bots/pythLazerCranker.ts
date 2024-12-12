@@ -1,6 +1,6 @@
 import { Bot } from '../types';
 import { logger } from '../logger';
-import { GlobalConfig, PythLazerCrankerBot } from '../config';
+import { GlobalConfig, PythLazerCrankerBotConfig } from '../config';
 import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSolanaReceiver';
 import {
 	BlockhashSubscriber,
@@ -29,7 +29,7 @@ setGlobalDispatcher(
 
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.5;
 
-export class PythLazerCranker implements Bot {
+export class PythLazerCrankerBot implements Bot {
 	private wsClient: PythLazerClient;
 	private pythOracleClient: OracleClient;
 	readonly decodeFunc: (name: string, data: Buffer) => PriceUpdateAccount;
@@ -47,7 +47,7 @@ export class PythLazerCranker implements Bot {
 
 	constructor(
 		private globalConfig: GlobalConfig,
-		private crankConfigs: PythLazerCrankerBot,
+		private crankConfigs: PythLazerCrankerBotConfig,
 		private driftClient: DriftClient,
 		private priorityFeeSubscriber?: PriorityFeeSubscriber,
 		private bundleSender?: BundleSender,
