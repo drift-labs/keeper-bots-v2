@@ -4,7 +4,6 @@ import { GlobalConfig, PythLazerCrankerBot } from '../config';
 import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSolanaReceiver';
 import {
 	BlockhashSubscriber,
-	BN,
 	DriftClient,
 	getOracleClient,
 	getPythLazerOraclePublicKey,
