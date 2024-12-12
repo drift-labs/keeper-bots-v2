@@ -126,16 +126,7 @@ export class PythLazerCranker implements Bot {
 						}
 						break;
 					}
-					case 'binary': {
-						if (
-							'solana' in message.value &&
-							message.value.solana?.toString('hex')
-						) {
-							this.feedIdChunkToPriceMessage.set(
-								priceFeedIds,
-								message.value.solana.toString('hex')
-							);
-						}
+					default: {
 						break;
 					}
 				}
