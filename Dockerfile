@@ -1,5 +1,5 @@
 FROM node:20.18.1 AS builder
-RUN npm install -g bun husky
+RUN npm install -g husky
 
 COPY package.json yarn.lock ./
 
