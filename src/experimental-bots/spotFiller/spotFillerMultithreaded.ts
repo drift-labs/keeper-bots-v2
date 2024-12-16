@@ -1933,6 +1933,7 @@ export class SpotFillerMultithreaded {
 		}
 		return true;
 	}
+
 	protected async registerTxSigToConfirm(
 		txSig: TransactionSignature,
 		now: number,

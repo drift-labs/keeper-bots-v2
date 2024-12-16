@@ -106,6 +106,16 @@ export class SwitchboardCrankerBot implements Bot {
 		return recentBlockhash.blockhash;
 	}
 
+	private shouldBuildForBundle(): boolean {
+		if (!this.globalConfig.useJito) {
+			return false;
+		}
+		if (!this.bundleSender?.connected()) {
+			return false;
+		}
+		return true;
+	}
+
 	async runCrankLoop() {
 		const pullFeedAliases = chunks(
 			shuffle(Object.keys(this.crankConfigs.pullFeedConfigs)),
@@ -119,7 +129,8 @@ export class SwitchboardCrankerBot implements Bot {
 					}),
 				];
 
-				if (this.globalConfig.useJito) {
+				const shouldBuildForBundle = this.shouldBuildForBundle();
+				if (shouldBuildForBundle) {
 					ixs.push(this.bundleSender!.getTipIx());
 				} else {
 					const priorityFees =
@@ -143,7 +154,7 @@ export class SwitchboardCrankerBot implements Bot {
 					await this.getBlockhashForTx()
 				);
 
-				if (this.globalConfig.useJito) {
+				if (shouldBuildForBundle) {
 					tx.sign([
 						// @ts-ignore;
 						this.driftClient.wallet.payer,
