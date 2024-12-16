@@ -31,7 +31,7 @@ import {
 	UserStatsMap,
 } from '@drift-labs/sdk';
 import { FillerMultiThreadedConfig, GlobalConfig } from '../../config';
-import { BundleSender } from '../../bundleSender';
+import { JITO_METRIC_TYPES, BundleSender } from '../../bundleSender';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
@@ -154,12 +154,6 @@ enum METRIC_TYPES {
 	estimated_tx_cu_histogram = 'estimated_tx_cu_histogram',
 	simulate_tx_duration_histogram = 'simulate_tx_duration_histogram',
 	expired_nodes_set_size = 'expired_nodes_set_size',
-
-	jito_bundles_accepted = 'jito_bundles_accepted',
-	jito_bundles_simulation_failure = 'jito_simulation_failure',
-	jito_dropped_bundle = 'jito_dropped_bundle',
-	jito_landed_tips = 'jito_landed_tips',
-	jito_bundle_count = 'jito_bundle_count',
 }
 
 const getNodeToTriggerSignature = (node: SerializedNodeToTrigger): string => {
@@ -237,6 +231,7 @@ export class FillerMultithreaded {
 	protected pendingTxSigsLoopRateLimitedCounter?: CounterValue;
 	protected evictedPendingTxSigsToConfirmCounter?: CounterValue;
 	protected expiredNodesSetSize?: GaugeValue;
+	protected jitoConnectedGauge?: GaugeValue;
 	protected jitoBundlesAcceptedGauge?: GaugeValue;
 	protected jitoBundlesSimulationFailureGauge?: GaugeValue;
 	protected jitoDroppedBundleGauge?: GaugeValue;
@@ -692,24 +687,28 @@ export class FillerMultithreaded {
 			METRIC_TYPES.expired_nodes_set_size,
 			'Count of nodes that are expired'
 		);
+		this.jitoConnectedGauge = this.metrics.addGauge(
+			JITO_METRIC_TYPES.jito_connected,
+			'Whether the jito bundle sender is connected'
+		);
 		this.jitoBundlesAcceptedGauge = this.metrics.addGauge(
-			METRIC_TYPES.jito_bundles_accepted,
+			JITO_METRIC_TYPES.jito_bundles_accepted,
 			'Count of jito bundles that were accepted'
 		);
 		this.jitoBundlesSimulationFailureGauge = this.metrics.addGauge(
-			METRIC_TYPES.jito_bundles_simulation_failure,
+			JITO_METRIC_TYPES.jito_bundles_simulation_failure,
 			'Count of jito bundles that failed simulation'
 		);
 		this.jitoDroppedBundleGauge = this.metrics.addGauge(
-			METRIC_TYPES.jito_dropped_bundle,
+			JITO_METRIC_TYPES.jito_dropped_bundle,
 			'Count of jito bundles that were dropped'
 		);
 		this.jitoLandedTipsGauge = this.metrics.addGauge(
-			METRIC_TYPES.jito_landed_tips,
+			JITO_METRIC_TYPES.jito_landed_tips,
 			'Gauge of historic bundle tips that landed'
 		);
 		this.jitoBundleCount = this.metrics.addGauge(
-			METRIC_TYPES.jito_bundle_count,
+			JITO_METRIC_TYPES.jito_bundle_count,
 			'Count of jito bundles that were sent, and their status'
 		);
 
@@ -733,6 +732,15 @@ export class FillerMultithreaded {
 		const user = this.driftClient.getUser(this.subaccount);
 		const bundleStats = this.bundleSender?.getBundleStats();
 		if (bundleStats) {
+			this.jitoConnectedGauge?.setLatestValue(
+				this.bundleSender?.connected() ? 1 : 0,
+				{
+					...metricAttrFromUserAccount(
+						user.userAccountPublicKey,
+						user.getUserAccount()
+					),
+				}
+			);
 			this.jitoBundlesAcceptedGauge?.setLatestValue(bundleStats.accepted, {
 				...metricAttrFromUserAccount(
 					user.userAccountPublicKey,

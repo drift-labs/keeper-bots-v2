@@ -29,6 +29,15 @@ const MAX_TXS_TO_CHECK = 50;
 const RECONNECT_DELAY_MS = 5000;
 const RECONNECT_RESET_DELAY_MS = 30000;
 
+export enum JITO_METRIC_TYPES {
+	jito_connected = 'jito_connected',
+	jito_bundles_accepted = 'jito_bundles_accepted',
+	jito_bundles_simulation_failure = 'jito_simulation_failure',
+	jito_dropped_bundle = 'jito_dropped_bundle',
+	jito_landed_tips = 'jito_landed_tips',
+	jito_bundle_count = 'jito_bundle_count',
+}
+
 export type TipStream = {
 	time: string;
 	ts: number; // millisecond timestamp
