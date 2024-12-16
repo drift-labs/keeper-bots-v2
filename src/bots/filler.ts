@@ -1453,15 +1453,16 @@ export class FillerBot extends TxThreaded implements Bot {
 				marketType,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			logger.info(
-				logMessageForNodeToFill(
-					nodeToFill,
-					takerUserPubKey,
-					takerUserSlot,
-					makerInfos,
-					this.getMaxSlot(),
-					`Filling multi maker perp node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`
-				)
+			logMessageForNodeToFill(
+				nodeToFill,
+				takerUserPubKey,
+				takerUserSlot,
+				makerInfos,
+				this.getMaxSlot(),
+				fillTxId,
+				'multiMakerPerpFill',
+				this.revertOnFailure ?? false,
+				false
 			);
 
 			if (!isVariant(marketType, 'perp')) {
@@ -1645,7 +1646,7 @@ export class FillerBot extends TxThreaded implements Bot {
 		const nodesSent: Array<NodeToFill> = [];
 		const fillTxId = this.fillTxId++;
 
-		for (const [idx, nodeToFill] of nodesToFill.entries()) {
+		for (const [_idx, nodeToFill] of nodesToFill.entries()) {
 			let ixs: Array<TransactionInstruction> = [
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000,
@@ -1681,15 +1682,16 @@ export class FillerBot extends TxThreaded implements Bot {
 				marketType,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			logger.info(
-				logMessageForNodeToFill(
-					nodeToFill,
-					takerUserPubKey,
-					takerUserSlot,
-					makerInfos,
-					this.getMaxSlot(),
-					`Filling perp node ${idx} (fillTxId: ${fillTxId})`
-				)
+			logMessageForNodeToFill(
+				nodeToFill,
+				takerUserPubKey,
+				takerUserSlot,
+				makerInfos,
+				this.getMaxSlot(),
+				fillTxId,
+				'fillPerpNode',
+				this.revertOnFailure ?? false,
+				false
 			);
 			this.logSlots();
 

@@ -1764,17 +1764,17 @@ export class SpotFillerBot implements Bot {
 				marketType,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			logger.info(
-				logMessageForNodeToFill(
-					nodeToFill,
-					takerUserPubKey,
-					takerUserSlot,
-					makerInfos,
-					this.getMaxSlot(),
-					`Filling multi maker spot node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`,
-					spotPrecision,
-					'SHOULD_NOT_HAVE_NO_MAKERS'
-				)
+			logMessageForNodeToFill(
+				nodeToFill,
+				takerUserPubKey,
+				takerUserSlot,
+				makerInfos,
+				this.getMaxSlot(),
+				fillTxId,
+				'multiMakerSpotFill',
+				this.revertOnFailure ?? false,
+				false,
+				spotPrecision
 			);
 
 			if (!isVariant(marketType, 'spot')) {
@@ -2015,17 +2015,17 @@ export class SpotFillerBot implements Bot {
 			}
 		}
 
-		logger.info(
-			logMessageForNodeToFill(
-				nodeToFill,
-				takerUserPubKey,
-				takerUserSlot,
-				makerInfos,
-				this.getMaxSlot(),
-				`Filling spot node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`,
-				spotMarketPrecision,
-				fallbackSource as string
-			)
+		logMessageForNodeToFill(
+			nodeToFill,
+			takerUserPubKey,
+			takerUserSlot,
+			makerInfos,
+			this.getMaxSlot(),
+			fillTxId,
+			'fillSpotNode',
+			this.revertOnFailure ?? false,
+			false,
+			spotMarketPrecision
 		);
 
 		const ixs = [

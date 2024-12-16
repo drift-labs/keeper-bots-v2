@@ -1141,6 +1141,7 @@ export class FillerMultithreaded {
 			}
 			return slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
 		}
+		// TODO: check that BundleSender is available
 		return true;
 	}
 
@@ -1170,13 +1171,8 @@ export class FillerMultithreaded {
 			`${logPrefix} Filtered down to ${filteredTriggerableNodes.length} triggerable nodes...`
 		);
 
-		const buildForBundle = this.shouldBuildForBundle();
-
 		try {
-			await this.executeTriggerablePerpNodes(
-				filteredTriggerableNodes,
-				!!buildForBundle
-			);
+			await this.executeTriggerablePerpNodes(filteredTriggerableNodes);
 		} catch (e) {
 			if (e instanceof Error) {
 				logger.error(
@@ -1208,10 +1204,7 @@ export class FillerMultithreaded {
 		return true;
 	}
 
-	async executeTriggerablePerpNodes(
-		nodesToTrigger: SerializedNodeToTrigger[],
-		buildForBundle: boolean
-	) {
+	async executeTriggerablePerpNodes(nodesToTrigger: SerializedNodeToTrigger[]) {
 		const user = this.driftClient.getUser(this.subaccount);
 		for (const nodeToTrigger of nodesToTrigger) {
 			let ixs = [
@@ -1220,21 +1213,24 @@ export class FillerMultithreaded {
 				}),
 			];
 
+			const priorityFeePrice = Math.floor(
+				Math.max(
+					...nodesToTrigger.map((node: SerializedNodeToTrigger) => {
+						return this.priorityFeeSubscriber.getPriorityFees(
+							'perp',
+							node.node.order.marketIndex
+						)!.medium;
+					})
+				) * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+			);
+			const buildForBundle = this.shouldBuildForBundle();
+
 			if (buildForBundle) {
 				ixs.push(this.bundleSender!.getTipIx());
 			} else {
 				ixs.push(
 					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: Math.floor(
-							Math.max(
-								...nodesToTrigger.map((node: SerializedNodeToTrigger) => {
-									return this.priorityFeeSubscriber.getPriorityFees(
-										'perp',
-										node.node.order.marketIndex
-									)!.medium;
-								})
-							) * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-						),
+						microLamports: priorityFeePrice,
 					})
 				);
 			}
@@ -1255,11 +1251,16 @@ export class FillerMultithreaded {
 			if (this.pythPriceSubscriber) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
 				ixs.push(...pythIxs);
+				// do not strip the last ix if we have pyth ixs
 				removeLastIxPostSim = false;
 			}
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
 			if (this.seenTriggerableOrders.has(nodeSignature)) {
+				if (!this.pythPriceSubscriber) {
+					// no pyth subscriber, tx will be empty
+					return;
+				}
 				logger.info(
 					`${logPrefix} already triggered order (account: ${
 						nodeToTrigger.node.userAccount
@@ -1288,7 +1289,7 @@ export class FillerMultithreaded {
 
 			const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
 			if (txSize > PACKET_DATA_SIZE) {
-				logger.info(`tx too large, removing pyth ixs.`);
+				logger.warn(`tx too large, removing pyth ixs.`);
 				ixs = removePythIxs(ixs);
 			}
 
@@ -1320,7 +1321,7 @@ export class FillerMultithreaded {
 			});
 
 			logger.info(
-				`executeTriggerablePerpNodesForMarket (${nodeSignature}) estimated CUs: ${simResult.cuEstimate}, finalIxCount: ${ixs.length}). revertTx: ${this.revertOnFailure}}`
+				`executeTriggerablePerpNodesForMarket (${nodeSignature}) estimated CUs: ${simResult.cuEstimate}, finalIxCount: ${ixs.length}). revertTx: ${this.revertOnFailure}}, buildForBundle: ${buildForBundle}`
 			);
 
 			if (simResult.simError) {
@@ -1340,9 +1341,10 @@ export class FillerMultithreaded {
 							.sendTransaction(simResult.tx)
 							.then((txSig) => {
 								logger.info(
-									`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
+									`${logPrefix} Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} Tx: ${
+										txSig.txSig
+									}`
 								);
-								logger.info(`${logPrefix} Tx: ${txSig.txSig}`);
 							})
 							.catch((error) => {
 								nodeToTrigger.node.haveTrigger = false;
@@ -1407,13 +1409,8 @@ export class FillerMultithreaded {
 			`${logPrefix} Filtered down to ${filteredFillableNodes.length} fillable nodes...`
 		);
 
-		const buildForBundle = this.shouldBuildForBundle();
-
 		try {
-			await this.executeFillablePerpNodes(
-				filteredFillableNodes,
-				!!buildForBundle
-			);
+			await this.executeFillablePerpNodes(filteredFillableNodes);
 		} catch (e) {
 			if (e instanceof Error) {
 				logger.error(
@@ -1491,10 +1488,7 @@ export class FillerMultithreaded {
 		return true;
 	}
 
-	async executeFillablePerpNodes(
-		nodesToFill: NodeToFillWithBuffer[],
-		buildForBundle: boolean
-	) {
+	async executeFillablePerpNodes(nodesToFill: NodeToFillWithBuffer[]) {
 		for (const node of nodesToFill) {
 			if (this.seenFillableOrders.has(getNodeToFillSignature(node))) {
 				logger.debug(
@@ -1505,29 +1499,21 @@ export class FillerMultithreaded {
 				);
 				continue;
 			}
+
 			this.seenFillableOrders.add(getNodeToFillSignature(node));
 			if (node.makerNodes.length > 1) {
-				this.tryFillMultiMakerPerpNodes(node, buildForBundle);
+				this.tryFillMultiMakerPerpNodes(node);
 			} else {
-				this.tryFillPerpNode(node, buildForBundle);
+				this.tryFillPerpNode(node);
 			}
 		}
 	}
 
-	protected async tryFillMultiMakerPerpNodes(
-		nodeToFill: NodeToFillWithBuffer,
-		buildForBundle: boolean
-	) {
+	protected async tryFillMultiMakerPerpNodes(nodeToFill: NodeToFillWithBuffer) {
 		const fillTxId = this.fillTxId++;
 
 		let nodeWithMakerSet = nodeToFill;
-		while (
-			!(await this.fillMultiMakerPerpNodes(
-				fillTxId,
-				nodeWithMakerSet,
-				buildForBundle
-			))
-		) {
+		while (!(await this.fillMultiMakerPerpNodes(fillTxId, nodeWithMakerSet))) {
 			const newMakerSet = nodeWithMakerSet.makerNodes
 				.sort(() => 0.5 - Math.random())
 				.slice(0, Math.ceil(nodeWithMakerSet.makerNodes.length / 2));
@@ -1548,8 +1534,7 @@ export class FillerMultithreaded {
 
 	private async fillMultiMakerPerpNodes(
 		fillTxId: number,
-		nodeToFill: NodeToFillWithBuffer,
-		buildForBundle: boolean
+		nodeToFill: NodeToFillWithBuffer
 	): Promise<boolean> {
 		let ixs: Array<TransactionInstruction> = [
 			ComputeBudgetProgram.setComputeUnitLimit({
@@ -1578,18 +1563,20 @@ export class FillerMultithreaded {
 				removeLastIxPostSim = false;
 			}
 
+			const priorityFeePrice = Math.floor(
+				this.priorityFeeSubscriber.getPriorityFees(
+					'perp',
+					nodeToFill.node.order!.marketIndex!
+				)!.high * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+			);
+			const buildForBundle = this.shouldBuildForBundle();
+
 			if (buildForBundle) {
 				ixs.push(this.bundleSender!.getTipIx());
 			} else {
 				ixs.push(
 					getPriorityFeeInstruction(
-						Math.floor(
-							this.priorityFeeSubscriber.getPriorityFees(
-								'perp',
-								nodeToFill.node.order!.marketIndex!
-							)!.high *
-								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-						),
+						priorityFeePrice,
 						this.driftClient.getOracleDataForPerpMarket(0).price,
 						this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
 						this.globalConfig.priorityFeeMultiplier
@@ -1597,15 +1584,16 @@ export class FillerMultithreaded {
 				);
 			}
 
-			logger.info(
-				logMessageForNodeToFill(
-					nodeToFill,
-					takerUserPubKey,
-					takerUserSlot,
-					makerInfos,
-					this.slotSubscriber.getSlot(),
-					`${logPrefix} Filling multi maker perp node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`
-				)
+			logMessageForNodeToFill(
+				nodeToFill,
+				takerUserPubKey,
+				takerUserSlot,
+				makerInfos,
+				this.slotSubscriber.getSlot(),
+				fillTxId,
+				'multiMakerFill',
+				this.revertOnFailure ?? false,
+				removeLastIxPostSim ?? false
 			);
 
 			if (!isVariant(marketType, 'perp')) {
@@ -1648,7 +1636,7 @@ export class FillerMultithreaded {
 					true,
 					this.lookupTableAccounts
 				);
-				if (txSize > PACKET_DATA_SIZE) {
+				if (txSize > PACKET_DATA_SIZE && this.pythPriceSubscriber) {
 					logger.info(`tx too large, removing pyth ixs.
 							keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
 							total number of maker positions: ${makerInfos.reduce(
@@ -1780,10 +1768,15 @@ export class FillerMultithreaded {
 		return true;
 	}
 
-	protected async tryFillPerpNode(
-		nodeToFill: NodeToFillWithBuffer,
-		buildForBundle: boolean
-	) {
+	protected async tryFillPerpNode(nodeToFill: NodeToFillWithBuffer) {
+		const priorityFeePrice = Math.floor(
+			this.priorityFeeSubscriber.getPriorityFees(
+				'perp',
+				nodeToFill.node.order!.marketIndex!
+			)!.high * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+		);
+		const buildForBundle = this.shouldBuildForBundle();
+
 		let ixs = [
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,
@@ -1813,13 +1806,7 @@ export class FillerMultithreaded {
 		} else {
 			ixs.push(
 				getPriorityFeeInstruction(
-					Math.floor(
-						this.priorityFeeSubscriber.getPriorityFees(
-							'perp',
-							nodeToFill.node.order!.marketIndex!
-						)!.high *
-							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-					),
+					priorityFeePrice,
 					this.driftClient.getOracleDataForPerpMarket(0).price,
 					this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
 					this.globalConfig.priorityFeeMultiplier
@@ -1827,15 +1814,16 @@ export class FillerMultithreaded {
 			);
 		}
 
-		logger.info(
-			logMessageForNodeToFill(
-				nodeToFill,
-				takerUserPubKey,
-				takerUserSlot,
-				makerInfos,
-				this.slotSubscriber.getSlot(),
-				`Filling perp node (fillTxId: ${fillTxId})`
-			)
+		logMessageForNodeToFill(
+			nodeToFill,
+			takerUserPubKey,
+			takerUserSlot,
+			makerInfos,
+			this.slotSubscriber.getSlot(),
+			fillTxId,
+			'single',
+			this.revertOnFailure ?? false,
+			removeLastIxPostSim ?? false
 		);
 
 		if (!isVariant(marketType, 'perp')) {
@@ -2054,10 +2042,21 @@ export class FillerMultithreaded {
 					chunk_size = marketIds.length / 2;
 				}
 				const settlePnlPromises: Array<Promise<TxSigAndSlot>> = [];
-				const buildForBundle = this.shouldBuildForBundle();
 				for (let i = 0; i < marketIds.length; i += chunk_size) {
 					const marketIdChunks = marketIds.slice(i, i + chunk_size);
 					try {
+						const priorityFeePrice = Math.floor(
+							Math.max(
+								...marketIdChunks.map((marketId) => {
+									return this.priorityFeeSubscriber.getPriorityFees(
+										'perp',
+										marketId
+									)!.medium;
+								})
+							) * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+						);
+						const buildForBundle = this.shouldBuildForBundle();
+
 						const ixs = [
 							ComputeBudgetProgram.setComputeUnitLimit({
 								units: 1_400_000, // will be overridden by simulateTx
@@ -2069,17 +2068,7 @@ export class FillerMultithreaded {
 						} else {
 							ixs.push(
 								ComputeBudgetProgram.setComputeUnitPrice({
-									microLamports: Math.floor(
-										Math.max(
-											...marketIdChunks.map((marketId) => {
-												return this.priorityFeeSubscriber.getPriorityFees(
-													'perp',
-													marketId
-												)!.medium;
-											})
-										) *
-											this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-									),
+									microLamports: priorityFeePrice,
 								})
 							);
 						}
@@ -2106,7 +2095,6 @@ export class FillerMultithreaded {
 							cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 							doSimulation: this.simulateTxForCUEstimate,
 							recentBlockhash: await this.getBlockhashForTx(),
-							removeLastIxPostSim: this.revertOnFailure,
 						});
 						this.simulateTxHistogram?.record(simResult.simTxDuration, {
 							type: 'settlePnl',

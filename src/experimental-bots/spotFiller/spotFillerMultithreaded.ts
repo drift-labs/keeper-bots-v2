@@ -976,17 +976,17 @@ export class SpotFillerMultithreaded {
 				marketType,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			logger.info(
-				logMessageForNodeToFill(
-					nodeToFill,
-					takerUserPubKey,
-					takerUserSlot,
-					makerInfos,
-					this.slotSubscriber.getSlot(),
-					`Filling multi maker spot node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`,
-					spotPrecision,
-					'SHOULD_NOT_HAVE_NO_MAKERS'
-				)
+			logMessageForNodeToFill(
+				nodeToFill,
+				takerUserPubKey,
+				takerUserSlot,
+				makerInfos,
+				this.slotSubscriber.getSlot(),
+				fillTxId,
+				'multiMakerSpotFill',
+				this.revertOnFailure ?? false,
+				false,
+				spotPrecision
 			);
 
 			if (!isVariant(marketType, 'spot')) {
@@ -1205,17 +1205,17 @@ export class SpotFillerMultithreaded {
 			}
 		}
 
-		logger.info(
-			logMessageForNodeToFill(
-				nodeToFill,
-				takerUserPubKey,
-				takerUserSlot,
-				makerInfos,
-				this.slotSubscriber.getSlot(),
-				`Filling spot node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`,
-				spotMarketPrecision,
-				fallbackSource as string
-			)
+		logMessageForNodeToFill(
+			nodeToFill,
+			takerUserPubKey,
+			takerUserSlot,
+			makerInfos,
+			this.slotSubscriber.getSlot(),
+			fillTxId,
+			'fillSpotNode',
+			this.revertOnFailure ?? false,
+			false,
+			spotMarketPrecision
 		);
 
 		const ixs = [
