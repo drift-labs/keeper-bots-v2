@@ -1141,7 +1141,9 @@ export class FillerMultithreaded {
 			}
 			return slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
 		}
-		// TODO: check that BundleSender is available
+		if (!this.bundleSender?.connected()) {
+			return false;
+		}
 		return true;
 	}
 
@@ -2095,6 +2097,7 @@ export class FillerMultithreaded {
 							cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
 							doSimulation: this.simulateTxForCUEstimate,
 							recentBlockhash: await this.getBlockhashForTx(),
+							removeLastIxPostSim: this.revertOnFailure,
 						});
 						this.simulateTxHistogram?.record(simResult.simTxDuration, {
 							type: 'settlePnl',

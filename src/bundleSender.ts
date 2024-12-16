@@ -136,6 +136,18 @@ export class BundleSender {
 		return this.nextJitoLeader.nextLeaderSlot - this.slotSubscriber.getSlot();
 	}
 
+	connected(): boolean {
+		return (
+			// tip stream connected
+			this.ws !== undefined &&
+			this.ws.readyState === WebSocket.OPEN &&
+			// searcher client connected
+			this.searcherClient !== undefined &&
+			// next jito leader is set
+			this.nextJitoLeader !== undefined
+		);
+	}
+
 	getBundleStats(): BundleStats {
 		return this.bundleStats;
 	}
@@ -350,6 +362,8 @@ export class BundleSender {
 
 			await sleepMs(this.getBackoffTimeForReconnectAttempts());
 			await this.connectSearcherClient();
+		} finally {
+			this.reconnecting = false;
 		}
 	}
 
