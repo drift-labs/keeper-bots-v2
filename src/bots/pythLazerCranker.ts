@@ -98,11 +98,12 @@ export class PythLazerCrankerBot implements Bot {
 		const updateConfigs = this.crankConfigs.updateConfigs;
 
 		let subscriptionId = 1;
-		for (const configChunk of chunks(Object.keys(updateConfigs), 3)) {
+		for (const configChunk of chunks(Object.keys(updateConfigs), 2)) {
 			const priceFeedIds: number[] = configChunk.map((alias) => {
 				return updateConfigs[alias].feedId;
 			});
-			this.wsClient.ws.addEventListener('open', () => {
+
+			const sendMessage = () =>
 				this.wsClient.send({
 					type: 'subscribe',
 					subscriptionId,
@@ -113,7 +114,14 @@ export class PythLazerCrankerBot implements Bot {
 					channel: 'fixed_rate@200ms',
 					jsonBinaryEncoding: 'hex',
 				});
-			});
+			if (this.wsClient.ws.readyState != 1) {
+				this.wsClient.ws.addEventListener('open', () => {
+					sendMessage();
+				});
+			} else {
+				sendMessage();
+			}
+
 			this.wsClient.addMessageListener((message) => {
 				switch (message.type) {
 					case 'json': {
@@ -182,10 +190,6 @@ export class PythLazerCrankerBot implements Bot {
 			feedIds,
 			priceMessage,
 		] of this.feedIdChunkToPriceMessage.entries()) {
-			const pythLazerIxs = this.driftClient.getPostPythLazerOracleUpdateIxs(
-				feedIds,
-				priceMessage
-			);
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000,
@@ -226,6 +230,11 @@ export class PythLazerCrankerBot implements Bot {
 					})
 				);
 			}
+			const pythLazerIxs = this.driftClient.getPostPythLazerOracleUpdateIxs(
+				feedIds,
+				priceMessage,
+				ixs
+			);
 			ixs.push(...pythLazerIxs);
 			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
