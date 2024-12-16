@@ -168,19 +168,19 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.12.13":
-  version "0.12.13"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.12.13.tgz#5b728e12b523350b89db710498c32ee4a12b2443"
-  integrity sha512-iXtZ5/Ln7SVHi8gS+NAVY4y394jvynb7ueccEAbru38OTfsrB4J/ejepAQrs7x3dz8bjARoHpmZod5lD18YQAw==
+"@drift-labs/jit-proxy@0.12.14":
+  version "0.12.14"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.12.14.tgz#32960ae671cf54c96edc4889d73a41385ea76803"
+  integrity sha512-0WpbZiKOdU9H+J2js50/kGxkzfFVu8Gs+beEeKNwKOmBzWdwO6cMxeuqg29Yk+EHcXBYbqT9gvMan17t9wBYpA==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.104.0-beta.23"
+    "@drift-labs/sdk" "2.104.0-beta.27"
     "@solana/web3.js" "1.91.7"
 
-"@drift-labs/sdk@2.104.0-beta.23":
-  version "2.104.0-beta.23"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.104.0-beta.23.tgz#7d20bde8079aafcfa42448aaa6f88b9de40751d4"
-  integrity sha512-1xok0cxi6v63Y6jD4i3TDJ1SH7TNbaFvdSmGylNaa8b50B04Q3oPI64jKOJoy9ECdyWt2wDkOxEvw6YusGGwJA==
+"@drift-labs/sdk@2.104.0-beta.27":
+  version "2.104.0-beta.27"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.104.0-beta.27.tgz#2d018171b76599096467902f14e780b8b90ca17e"
+  integrity sha512-USZQzxjcc1iIx/TN3dEVV4/g32BcFkliilKhg5rufmGWUjbxqDjvsvQes2o5DCZMicYtEJw461wLdJdzq1GJWQ==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -196,6 +196,7 @@
     "@switchboard-xyz/on-demand" "1.2.42"
     "@triton-one/yellowstone-grpc" "1.3.0"
     anchor-bankrun "0.3.0"
+    nanoid "3.3.4"
     node-cache "5.1.2"
     rpc-websockets "7.5.1"
     solana-bankrun "0.3.1"
@@ -4046,6 +4047,11 @@ nanoid@3.3.3:
   version "3.3.3"
   resolved "https://registry.yarnpkg.com/nanoid/-/nanoid-3.3.3.tgz#fd8e8b7aa761fe807dba2d1b98fb7241bb724a25"
   integrity sha512-p1sjXuopFs0xg+fPASzQ28agW1oHD7xDsd9Xkf3T15H3c/cifrFHVwrh74PdoklAPi+i7MdRsE47vm2r6JoB+w==
+
+nanoid@3.3.4:
+  version "3.3.4"
+  resolved "https://registry.yarnpkg.com/nanoid/-/nanoid-3.3.4.tgz#730b67e3cd09e2deacf03c027c81c9d9dbc5e8ab"
+  integrity sha512-MqBkQh/OHTS2egovRtLk45wEyNXwF+cokD+1YPf9u5VfJiRdAiRwB2froX5Co9Rh20xs4siNPm8naNotSD6RBw==
 
 natural-compare-lite@^1.4.0:
   version "1.4.0"

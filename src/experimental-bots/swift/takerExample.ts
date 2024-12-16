@@ -6,6 +6,8 @@ import {
 	MarketType,
 	PositionDirection,
 	digestSignature,
+	generateSwiftUuid,
+	BN,
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
 import * as axios from 'axios';
@@ -63,6 +65,8 @@ export class SwiftTaker {
 					auctionDuration: 30,
 				}),
 				subAccountId: 0,
+				slot: new BN(slot),
+				uuid: generateSwiftUuid(),
 				stopLossOrderParams: null,
 				takeProfitOrderParams: null,
 			};

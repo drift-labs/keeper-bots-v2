@@ -147,8 +147,6 @@ export class SwiftMaker {
 					}
 
 					const ixs = await this.driftClient.getPlaceAndMakeSwiftPerpOrderIxs(
-						Buffer.from(order['swift_message'], 'base64'),
-						Buffer.from(order['swift_signature'], 'base64'),
 						swiftOrderParamsBuf,
 						Buffer.from(order['order_signature'], 'base64'),
 						decodeUTF8(order['uuid']),
