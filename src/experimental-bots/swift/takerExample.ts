@@ -36,7 +36,7 @@ export class SwiftTaker {
 	}
 
 	async startInterval() {
-		const marketIndexes = [0, 1, 2, 3, 4, 5];
+		const marketIndexes = [0, 1, 2, 3, 5, 6];
 		this.interval = setInterval(async () => {
 			await sleepMs(Math.random() * 1000); // Randomize for different grafana metrics
 			const slot = await this.driftClient.connection.getSlot();
