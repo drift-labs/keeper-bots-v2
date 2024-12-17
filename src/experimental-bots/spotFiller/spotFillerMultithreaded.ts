@@ -37,7 +37,7 @@ import {
 } from '@solana/web3.js';
 import { LRUCache } from 'lru-cache';
 import { FillerMultiThreadedConfig, GlobalConfig } from '../../config';
-import { BundleSender } from '../../bundleSender';
+import { BundleSender, JITO_METRIC_TYPES } from '../../bundleSender';
 import { logger } from '../../logger';
 import {
 	CounterValue,
@@ -244,6 +244,7 @@ export class SpotFillerMultithreaded {
 	protected pendingTxSigsLoopRateLimitedCounter?: CounterValue;
 	protected evictedPendingTxSigsToConfirmCounter?: CounterValue;
 	protected expiredNodesSetSize?: GaugeValue;
+	protected jitoConnectedGauge?: GaugeValue;
 	protected jitoBundlesAcceptedGauge?: GaugeValue;
 	protected jitoBundlesSimulationFailureGauge?: GaugeValue;
 	protected jitoDroppedBundleGauge?: GaugeValue;
@@ -976,17 +977,17 @@ export class SpotFillerMultithreaded {
 				marketType,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			logger.info(
-				logMessageForNodeToFill(
-					nodeToFill,
-					takerUserPubKey,
-					takerUserSlot,
-					makerInfos,
-					this.slotSubscriber.getSlot(),
-					`Filling multi maker spot node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`,
-					spotPrecision,
-					'SHOULD_NOT_HAVE_NO_MAKERS'
-				)
+			logMessageForNodeToFill(
+				nodeToFill,
+				takerUserPubKey,
+				takerUserSlot,
+				makerInfos,
+				this.slotSubscriber.getSlot(),
+				fillTxId,
+				'multiMakerSpotFill',
+				this.revertOnFailure ?? false,
+				false,
+				spotPrecision
 			);
 
 			if (!isVariant(marketType, 'spot')) {
@@ -1205,17 +1206,17 @@ export class SpotFillerMultithreaded {
 			}
 		}
 
-		logger.info(
-			logMessageForNodeToFill(
-				nodeToFill,
-				takerUserPubKey,
-				takerUserSlot,
-				makerInfos,
-				this.slotSubscriber.getSlot(),
-				`Filling spot node with ${nodeToFill.makerNodes.length} makers (fillTxId: ${fillTxId})`,
-				spotMarketPrecision,
-				fallbackSource as string
-			)
+		logMessageForNodeToFill(
+			nodeToFill,
+			takerUserPubKey,
+			takerUserSlot,
+			makerInfos,
+			this.slotSubscriber.getSlot(),
+			fillTxId,
+			'fillSpotNode',
+			this.revertOnFailure ?? false,
+			false,
+			spotMarketPrecision
 		);
 
 		const ixs = [
@@ -1546,24 +1547,28 @@ export class SpotFillerMultithreaded {
 			METRIC_TYPES.expired_nodes_set_size,
 			'Count of nodes that are expired'
 		);
+		this.jitoConnectedGauge = this.metrics.addGauge(
+			JITO_METRIC_TYPES.jito_connected,
+			'Whether the jito bundle sender is connected'
+		);
 		this.jitoBundlesAcceptedGauge = this.metrics.addGauge(
-			METRIC_TYPES.jito_bundles_accepted,
+			JITO_METRIC_TYPES.jito_bundles_accepted,
 			'Count of jito bundles that were accepted'
 		);
 		this.jitoBundlesSimulationFailureGauge = this.metrics.addGauge(
-			METRIC_TYPES.jito_bundles_simulation_failure,
+			JITO_METRIC_TYPES.jito_bundles_simulation_failure,
 			'Count of jito bundles that failed simulation'
 		);
 		this.jitoDroppedBundleGauge = this.metrics.addGauge(
-			METRIC_TYPES.jito_dropped_bundle,
+			JITO_METRIC_TYPES.jito_dropped_bundle,
 			'Count of jito bundles that were dropped'
 		);
 		this.jitoLandedTipsGauge = this.metrics.addGauge(
-			METRIC_TYPES.jito_landed_tips,
+			JITO_METRIC_TYPES.jito_landed_tips,
 			'Gauge of historic bundle tips that landed'
 		);
 		this.jitoBundleCount = this.metrics.addGauge(
-			METRIC_TYPES.jito_bundle_count,
+			JITO_METRIC_TYPES.jito_bundle_count,
 			'Count of jito bundles that were sent, and their status'
 		);
 
@@ -1923,8 +1928,12 @@ export class SpotFillerMultithreaded {
 			}
 			return slotsUntilJito < SLOTS_UNTIL_JITO_LEADER_TO_SEND;
 		}
+		if (!this.bundleSender?.connected()) {
+			return false;
+		}
 		return true;
 	}
+
 	protected async registerTxSigToConfirm(
 		txSig: TransactionSignature,
 		now: number,
