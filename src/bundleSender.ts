@@ -18,6 +18,7 @@ import { BundleResult } from 'jito-ts/dist/gen/block-engine/bundle';
 import { LRUCache } from 'lru-cache';
 import WebSocket from 'ws';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
+import { sleepMs } from './utils';
 
 export const jitoBundlePriceEndpoint =
 	'ws://bundles-api-rest.jito.wtf/api/v1/bundles/tip_stream';
@@ -26,8 +27,16 @@ const logPrefix = '[BundleSender]';
 const MS_DELAY_BEFORE_CHECK_INCLUSION = 30_000;
 const MAX_TXS_TO_CHECK = 50;
 const RECONNECT_DELAY_MS = 5000;
-const MAX_RECONNECT_ATTEMPTS = 3;
 const RECONNECT_RESET_DELAY_MS = 30000;
+
+export enum JITO_METRIC_TYPES {
+	jito_connected = 'jito_connected',
+	jito_bundles_accepted = 'jito_bundles_accepted',
+	jito_bundles_simulation_failure = 'jito_simulation_failure',
+	jito_dropped_bundle = 'jito_dropped_bundle',
+	jito_landed_tips = 'jito_landed_tips',
+	jito_bundle_count = 'jito_bundle_count',
+}
 
 export type TipStream = {
 	time: string;
@@ -85,6 +94,7 @@ export class BundleSender {
 	private checkingSentTxs = false;
 	private reconnectAttempts = 0;
 	private lastReconnectTime = 0;
+	private reconnecting = false;
 
 	// if there is a big difference, probably jito ws connection is bad, should resub
 	private bundlesSent = 0;
@@ -133,6 +143,18 @@ export class BundleSender {
 			return undefined;
 		}
 		return this.nextJitoLeader.nextLeaderSlot - this.slotSubscriber.getSlot();
+	}
+
+	connected(): boolean {
+		return (
+			// tip stream connected
+			this.ws !== undefined &&
+			this.ws.readyState === WebSocket.OPEN &&
+			// searcher client connected
+			this.searcherClient !== undefined &&
+			// next jito leader is set
+			this.nextJitoLeader !== undefined
+		);
 	}
 
 	getBundleStats(): BundleStats {
@@ -269,21 +291,34 @@ export class BundleSender {
 		connect();
 	}
 
+	private getBackoffTimeForReconnectAttempts(): number {
+		return Math.min(
+			RECONNECT_DELAY_MS * this.reconnectAttempts,
+			RECONNECT_RESET_DELAY_MS
+		);
+	}
+
 	private async connectSearcherClient() {
 		const now = Date.now();
+
+		logger.info(
+			`${logPrefix}: connecting searcherClient. lastReconnectTime: ${
+				now - this.lastReconnectTime
+			}ms ago. reconnecting: ${this.reconnecting}. reconnectAttempts: ${
+				this.reconnectAttempts
+			}`
+		);
+		if (this.reconnecting) {
+			logger.info(`${logPrefix}: already reconnecting, skipping...`);
+			return;
+		}
 
 		if (now - this.lastReconnectTime > RECONNECT_RESET_DELAY_MS) {
 			this.reconnectAttempts = 0;
 		}
 
-		if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-			logger.error(
-				`${logPrefix}: Max reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached. Waiting ${RECONNECT_RESET_DELAY_MS}ms before trying again`
-			);
-			return;
-		}
-
 		try {
+			this.reconnecting = true;
 			this.searcherClient = searcherClient(
 				this.jitoBlockEngineUrl,
 				this.jitoAuthKeypair,
@@ -314,9 +349,7 @@ export class BundleSender {
 					this.reconnectAttempts++;
 					this.lastReconnectTime = Date.now();
 
-					await new Promise((resolve) =>
-						setTimeout(resolve, RECONNECT_DELAY_MS)
-					);
+					await sleepMs(this.getBackoffTimeForReconnectAttempts());
 					await this.connectSearcherClient();
 				}
 			);
@@ -326,6 +359,8 @@ export class BundleSender {
 
 			const tipAccounts = await this.searcherClient.getTipAccounts();
 			this.jitoTipAccounts = tipAccounts.map((k) => new PublicKey(k));
+
+			this.reconnecting = false;
 		} catch (e) {
 			const err = e as Error;
 			logger.error(
@@ -334,8 +369,10 @@ export class BundleSender {
 			this.reconnectAttempts++;
 			this.lastReconnectTime = Date.now();
 
-			await new Promise((resolve) => setTimeout(resolve, RECONNECT_DELAY_MS));
+			await sleepMs(this.getBackoffTimeForReconnectAttempts());
 			await this.connectSearcherClient();
+		} finally {
+			this.reconnecting = false;
 		}
 	}
 
@@ -454,7 +491,7 @@ export class BundleSender {
 					this.failBundleCount
 				}, totalLandedTxs: ${this.countLandedBundles}, totalDroppedTxs: ${
 					this.countDroppedbundles
-				}, currentTipAmount: ${this.calculateCurrentTipAmount()}, lastJitoTipStream: ${JSON.stringify(
+				}, currentTipAmount: ${this.calculateCurrentTipLamports()}, lastJitoTipStream: ${JSON.stringify(
 					this.lastTipStream
 				)} bundle stats: ${JSON.stringify(this.bundleStats)}`
 			);
@@ -486,12 +523,12 @@ export class BundleSender {
 
 	/**
 	 *
-	 * @returns current tip based on running score
+	 * @returns current tip based on running score in lamports
 	 */
-	calculateCurrentTipAmount() {
+	public calculateCurrentTipLamports(): number {
 		return Math.floor(
 			Math.max(
-				(this.lastTipStream?.landed_tips_25th_percentile ?? 0) *
+				(this.lastTipStream?.landed_tips_50th_percentile ?? 0) *
 					LAMPORTS_PER_SOL,
 				this.minBundleTip,
 				Math.min(
@@ -519,7 +556,7 @@ export class BundleSender {
 				];
 		}
 		if (tipAmount === undefined) {
-			tipAmount = this.calculateCurrentTipAmount();
+			tipAmount = this.calculateCurrentTipLamports();
 		}
 		const tipIx = SystemProgram.transfer({
 			fromPubkey: this.tipPayerKeypair.publicKey,
@@ -581,7 +618,7 @@ export class BundleSender {
 				];
 			b = b.addTipTx(
 				this.tipPayerKeypair!,
-				this.calculateCurrentTipAmount(),
+				this.calculateCurrentTipLamports(),
 				tipAccountToUse!,
 				signedTxs[0].message.recentBlockhash
 			);
