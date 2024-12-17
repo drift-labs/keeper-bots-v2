@@ -274,6 +274,9 @@ export class FillerMultithreaded {
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
+		if (!this.globalConfig.useJito && runtimeSpec.driftEnv === 'mainnet-beta') {
+			throw new Error('Jito is required for spot multithreaded filler');
+		}
 		this.name = config.botId;
 		this.config = config;
 		this.dryRun = config.dryRun;
@@ -1668,8 +1671,6 @@ export class FillerMultithreaded {
 				);
 				ixs.push(
 					...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
-						Buffer.from(swiftOrderMessageParams['swift_message'], 'base64'),
-						Buffer.from(swiftOrderMessageParams['swift_signature'], 'base64'),
 						Buffer.from(swiftOrderMessageParams['order_message'], 'base64'),
 						Buffer.from(swiftOrderMessageParams['order_signature'], 'base64'),
 						nodeToFill.node.order!.marketIndex,
@@ -1876,7 +1877,7 @@ export class FillerMultithreaded {
 		} = await this.getNodeFillInfo(nodeToFill);
 
 		let removeLastIxPostSim = this.revertOnFailure;
-		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
+		if (this.pythPriceSubscriber && makerInfos.length <= 2 && !isSwift) {
 			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
 			ixs.push(...pythIxs);
 			removeLastIxPostSim = false;
@@ -1919,8 +1920,6 @@ export class FillerMultithreaded {
 			);
 			ixs.push(
 				...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
-					Buffer.from(swiftOrderMessageParams['swift_message'], 'base64'),
-					Buffer.from(swiftOrderMessageParams['swift_signature'], 'base64'),
 					Buffer.from(swiftOrderMessageParams['order_message'], 'base64'),
 					Buffer.from(swiftOrderMessageParams['order_signature'], 'base64'),
 					nodeToFill.node.order!.marketIndex,

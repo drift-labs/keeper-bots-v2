@@ -20,7 +20,7 @@ export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
 	private ws: WebSocket | null = null;
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
-	private readonly heartbeatIntervalMs = 30000;
+	private readonly heartbeatIntervalMs = 80_000;
 	constructor(
 		private driftClient: DriftClient,
 		private userMap: UserMap,
@@ -147,8 +147,6 @@ export class SwiftMaker {
 					}
 
 					const ixs = await this.driftClient.getPlaceAndMakeSwiftPerpOrderIxs(
-						Buffer.from(order['swift_message'], 'base64'),
-						Buffer.from(order['swift_signature'], 'base64'),
 						swiftOrderParamsBuf,
 						Buffer.from(order['order_signature'], 'base64'),
 						decodeUTF8(order['uuid']),
@@ -216,7 +214,7 @@ export class SwiftMaker {
 			clearTimeout(this.heartbeatTimeout);
 		}
 		this.heartbeatTimeout = setTimeout(() => {
-			console.warn('No heartbeat received within 30 seconds, reconnecting...');
+			console.warn('No heartbeat received within 60 seconds, reconnecting...');
 			this.reconnect();
 		}, this.heartbeatIntervalMs);
 	}

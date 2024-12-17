@@ -390,7 +390,11 @@ export class MakerBidAskTwapCrank implements Bot {
 					simResult.simError
 				)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 			);
-			handleSimResultError(simResult, [], `[${this.name}]`);
+			handleSimResultError(
+				simResult,
+				[],
+				`[${this.name}] (market: ${marketIndex})`
+			);
 			return;
 		} else {
 			return simResult.tx;
@@ -509,19 +513,6 @@ export class MakerBidAskTwapCrank implements Bot {
 					);
 				}
 
-				let pythIxsPushed = false;
-				if (
-					this.pythPriceSubscriber &&
-					isOneOfVariant(
-						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-						['pythPull', 'pyth1KPull', 'pyth1MPull', 'pythStableCoinPull']
-					)
-				) {
-					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
-					ixs.push(...pythIxs);
-					pythIxsPushed = true;
-				}
-
 				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
 
 				const bidMakers = this.dlob!.getBestMakers({
@@ -544,6 +535,36 @@ export class MakerBidAskTwapCrank implements Bot {
 				logger.info(
 					`[${this.name}] loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
 				);
+
+				let pythIxsPushed = false;
+				if (
+					this.pythPriceSubscriber &&
+					isOneOfVariant(
+						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+						['pythPull', 'pyth1KPull', 'pyth1MPull', 'pythStableCoinPull']
+					)
+				) {
+					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
+					ixs.push(...pythIxs);
+					pythIxsPushed = true;
+				} else if (
+					isVariant(
+						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+						'switchboardOnDemand'
+					)
+				) {
+					const switchboardIx =
+						await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
+							this.driftClient.getPerpMarketAccount(mi)!.amm.oracle,
+							undefined,
+							askMakers.length + bidMakers.length > 3 ? 2 : 3
+						);
+					if (switchboardIx) ixs.push(switchboardIx);
+					else
+						logger.error(
+							`[${this.name}] failed to get switchboardIx for market: ${mi}`
+						);
+				}
 
 				const concatenatedList = [
 					...this.getCombinedList(bidMakers),

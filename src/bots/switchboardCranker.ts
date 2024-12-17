@@ -13,8 +13,9 @@ import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
 	PublicKey,
+	TransactionInstruction,
 } from '@solana/web3.js';
-import { simulateAndGetTxWithCUs, sleepMs } from '../utils';
+import { chunks, getVersionedTransaction, shuffle, sleepMs } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
 
 setGlobalDispatcher(
@@ -23,7 +24,8 @@ setGlobalDispatcher(
 	})
 );
 
-const SIM_CU_ESTIMATE_MULTIPLIER = 1.5;
+// ref: https://solscan.io/tx/Z5X334CFBmzbzxXHgfa49UVbMdLZf7nJdDCekjaZYinpykVqgTm47VZphazocMjYe1XJtEyeiL6QgrmvLeMesMA
+const MIN_CU_LIMIT = 700_000;
 
 export class SwitchboardCrankerBot implements Bot {
 	public name: string;
@@ -51,7 +53,7 @@ export class SwitchboardCrankerBot implements Bot {
 		this.slothashSubscriber = new SlothashSubscriber(
 			this.driftClient.connection,
 			{
-				commitment: 'processed',
+				commitment: 'confirmed',
 			}
 		);
 	}
@@ -63,6 +65,15 @@ export class SwitchboardCrankerBot implements Bot {
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
 		await this.slothashSubscriber.subscribe();
+
+		this.priorityFeeSubscriber?.updateAddresses([
+			...Object.entries(this.crankConfigs.pullFeedConfigs).map(
+				([_alias, config]) => {
+					return new PublicKey(config.pubkey);
+				}
+			),
+			...this.crankConfigs.writableAccounts.map((acc) => new PublicKey(acc)),
+		]);
 	}
 
 	async reset(): Promise<void> {
@@ -96,73 +107,85 @@ export class SwitchboardCrankerBot implements Bot {
 	}
 
 	async runCrankLoop() {
-		for (const alias in this.crankConfigs.pullFeedConfigs) {
+		const pullFeedAliases = chunks(
+			shuffle(Object.keys(this.crankConfigs.pullFeedConfigs)),
+			2
+		);
+		for (const aliasChunk of pullFeedAliases) {
 			try {
-				const pubkey = new PublicKey(
-					this.crankConfigs.pullFeedConfigs[alias].pubkey
-				);
 				const ixs = [
 					ComputeBudgetProgram.setComputeUnitLimit({
-						units: 1_400_000,
+						units: MIN_CU_LIMIT,
 					}),
 				];
 
 				if (this.globalConfig.useJito) {
 					ixs.push(this.bundleSender!.getTipIx());
 				} else {
+					const priorityFees =
+						this.priorityFeeSubscriber?.getHeliusPriorityFeeLevel() || 0;
 					ixs.push(
 						ComputeBudgetProgram.setComputeUnitPrice({
-							microLamports: Math.floor(
-								this.priorityFeeSubscriber?.getCustomStrategyResult() || 0
-							),
+							microLamports: Math.floor(priorityFees),
 						})
 					);
 				}
-				const pullIx =
-					await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
-						pubkey,
-						this.slothashSubscriber.currentSlothash
-					);
-				if (!pullIx) {
-					logger.error(`No pullIx for ${alias}`);
-					continue;
-				}
-				ixs.push(pullIx);
-				const simResult = await simulateAndGetTxWithCUs({
+
+				const pullIxs = (
+					await Promise.all(aliasChunk.map((alias) => this.getPullIx(alias)))
+				).filter((ix) => ix !== undefined) as TransactionInstruction[];
+				ixs.push(...pullIxs);
+
+				const tx = getVersionedTransaction(
+					this.driftClient.wallet.publicKey,
 					ixs,
-					connection: this.driftClient.connection,
-					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: this.lookupTableAccounts,
-					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-					doSimulation: true,
-					recentBlockhash: await this.getBlockhashForTx(),
-				});
+					this.lookupTableAccounts,
+					await this.getBlockhashForTx()
+				);
 
 				if (this.globalConfig.useJito) {
-					simResult.tx.sign([
+					tx.sign([
 						// @ts-ignore;
 						this.driftClient.wallet.payer,
 					]);
 					this.bundleSender?.sendTransactions(
-						[simResult.tx],
+						[tx],
 						undefined,
 						undefined,
 						false
 					);
 				} else {
 					this.driftClient
-						.sendTransaction(simResult.tx)
+						.sendTransaction(tx)
 						.then((txSigAndSlot: TxSigAndSlot) => {
-							logger.info(`Posted update sb atomic tx: ${txSigAndSlot.txSig}`);
+							logger.info(
+								`Posted update sb atomic tx for ${aliasChunk}: ${txSigAndSlot.txSig}`
+							);
 						})
 						.catch((e) => {
 							console.log(e);
 						});
 				}
 			} catch (e) {
-				logger.error(`Error processing alias ${alias}: ${e}`);
+				logger.error(`Error processing alias ${aliasChunk}: ${e}`);
 			}
 		}
+	}
+
+	async getPullIx(alias: string): Promise<TransactionInstruction | undefined> {
+		const pubkey = new PublicKey(
+			this.crankConfigs.pullFeedConfigs[alias].pubkey
+		);
+		const pullIx =
+			await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
+				pubkey,
+				this.slothashSubscriber.currentSlothash
+			);
+		if (!pullIx) {
+			logger.error(`No pullIx for ${alias}`);
+			return;
+		}
+		return pullIx;
 	}
 
 	async healthCheck(): Promise<boolean> {

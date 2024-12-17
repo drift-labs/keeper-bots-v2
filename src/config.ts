@@ -116,6 +116,7 @@ export type SwitchboardCrankerBotConfig = BaseBotConfig & {
 			pubkey: string;
 		};
 	};
+	writableAccounts: string[];
 };
 
 export type BotConfigMap = {
@@ -239,7 +240,7 @@ const defaultConfig: Partial<Config> = {
 		txConfirmationEndpoint: process.env.TX_CONFIRMATION_ENDPOINT,
 		priorityFeeMethod: process.env.PRIORITY_FEE_METHOD ?? 'solana',
 		maxPriorityFeeMicroLamports: parseInt(
-			process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ?? '10000'
+			process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ?? '1000000'
 		),
 		priorityFeeMultiplier: 1.0,
 		keeperPrivateKey: process.env.KEEPER_PRIVATE_KEY,
@@ -339,7 +340,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			maxPriorityFeeMicroLamports: parseInt(
 				opts.maxPriorityFeeMicroLamports ??
 					process.env.MAX_PRIORITY_FEE_MICRO_LAMPORTS ??
-					'10000'
+					'1000000'
 			),
 			priorityFeeMultiplier: parseFloat(opts.priorityFeeMultiplier ?? '1.0'),
 			keeperPrivateKey: opts.privateKey ?? process.env.KEEPER_PRIVATE_KEY,

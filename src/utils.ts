@@ -447,7 +447,7 @@ export function isSetComputeUnitsIx(ix: TransactionInstruction): boolean {
 }
 
 const PLACEHOLDER_BLOCKHASH = 'Fdum64WVeej6DeL85REV9NvfSxEJNPZ74DBk7A8kTrKP';
-function getVersionedTransaction(
+export function getVersionedTransaction(
 	payerKey: PublicKey,
 	ixs: Array<TransactionInstruction>,
 	lookupTableAccounts: AddressLookupTableAccount[],

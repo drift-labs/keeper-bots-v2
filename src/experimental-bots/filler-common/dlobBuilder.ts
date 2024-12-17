@@ -26,6 +26,7 @@ import {
 	OrderTriggerCondition,
 	PositionDirection,
 	UserStatus,
+	isUserProtectedMaker,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -165,7 +166,12 @@ class DLOBBuilder {
 				) {
 					return;
 				}
-				dlob.insertOrder(order, pubkey, this.slotSubscriber.getSlot(), false);
+				this.dlob.insertOrder(
+					order,
+					pubkey,
+					this.slotSubscriber.getSlot(),
+					isUserProtectedMaker(userAccount)
+				);
 				counter++;
 			});
 		});
@@ -183,6 +189,7 @@ class DLOBBuilder {
 		const {
 			swiftOrderParams,
 			subAccountId: takerSubaccountId,
+			slot,
 		}: SwiftOrderParamsMessage = this.driftClient.program.coder.types.decode(
 			'SwiftOrderParamsMessage',
 			Buffer.from(orderData['order_message'], 'base64')
@@ -198,13 +205,8 @@ class DLOBBuilder {
 			takerUserPubkey.toString(),
 			orderData['taker_authority']
 		);
-		const swiftMessage = this.driftClient.decodeSwiftServerMessage(
-			Buffer.from(orderData['swift_message'], 'base64')
-		);
 
-		const maxSlot = swiftMessage.slot.addn(
-			swiftOrderParams.auctionDuration ?? 0
-		);
+		const maxSlot = slot.addn(swiftOrderParams.auctionDuration ?? 0);
 		if (maxSlot.toNumber() < this.slotSubscriber.getSlot()) {
 			logger.warn(
 				`${logPrefix} Received expired swift order with uuid: ${uuid}`
@@ -216,7 +218,7 @@ class DLOBBuilder {
 			status: 'open',
 			orderType: OrderType.MARKET,
 			orderId: uuid,
-			slot: swiftMessage.slot,
+			slot,
 			marketIndex: swiftOrderParams.marketIndex,
 			marketType: MarketType.PERP,
 			baseAssetAmount: swiftOrderParams.baseAssetAmount,
@@ -365,6 +367,7 @@ class DLOBBuilder {
 			.map((node) => {
 				const buffer = this.getUserBuffer(node.node.userAccount!);
 				if (!buffer && !node.node.isSwift) {
+					console.log(node.node);
 					console.log(`Received node to fill without user account`);
 					return undefined;
 				}

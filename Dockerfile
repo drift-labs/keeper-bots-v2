@@ -1,4 +1,4 @@
-FROM public.ecr.aws/bitnami/node:18
+FROM public.ecr.aws/bitnami/node:20.18.1
 RUN apt-get install git
 ENV NODE_ENV=production
 RUN npm install -g typescript
