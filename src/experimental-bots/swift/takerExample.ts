@@ -1,5 +1,4 @@
 import {
-	BASE_PRECISION,
 	DriftClient,
 	getMarketOrderParams,
 	isVariant,
@@ -37,7 +36,7 @@ export class SwiftTaker {
 	}
 
 	async startInterval() {
-		const marketIndexes = [0, 1, 2, 3, 4, 5, 6];
+		const marketIndexes = [0, 1, 2, 3, 4, 5];
 		this.interval = setInterval(async () => {
 			await sleepMs(Math.random() * 1000); // Randomize for different grafana metrics
 			const slot = await this.driftClient.connection.getSlot();
@@ -57,7 +56,9 @@ export class SwiftTaker {
 					marketIndex,
 					marketType: MarketType.PERP,
 					direction,
-					baseAssetAmount: BASE_PRECISION,
+					baseAssetAmount:
+						this.driftClient.getPerpMarketAccount(marketIndex)!.amm
+							.minOrderSize,
 					auctionStartPrice: isVariant(direction, 'long')
 						? lowPrice
 						: highPrice,
