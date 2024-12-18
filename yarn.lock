@@ -168,19 +168,19 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.12.17":
-  version "0.12.17"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.12.17.tgz#b1adfbdf586bbef31c5ef7adf6719a214f424d97"
-  integrity sha512-N3PJp3npOWBgYsKX2tWpfL+wCyk7stFM9GRu87sGDwmUSkvTah7Mj9r5xG1UxmDp8Gyo5alMprdsoDW8bsX3Ug==
+"@drift-labs/jit-proxy@0.12.18":
+  version "0.12.18"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.12.18.tgz#4bf92ca697eeabbfb2b4d1330694b01809bee617"
+  integrity sha512-RaIHYLwXn6TTM/1S7DhUYm0Py3JbE9+RVvlRpb7lU3pcYHwvLwzgee/fBBwss2VE+1LS2W2Z+AikkNJHi3AiRA==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.104.0-beta.30"
+    "@drift-labs/sdk" "2.104.0-beta.31"
     "@solana/web3.js" "1.91.7"
 
-"@drift-labs/sdk@2.104.0-beta.30":
-  version "2.104.0-beta.30"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.104.0-beta.30.tgz#7906065e0df019c27d14967f3a7019091abb802c"
-  integrity sha512-lwIeXozTHv1sZjS/yu+RZXlz2pTC+DA5YXqpOqfwgk6roUaXcr9t7T7rjs3YVe6Uv3C465UHMAcWRNRZOIBIIA==
+"@drift-labs/sdk@2.104.0-beta.31":
+  version "2.104.0-beta.31"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.104.0-beta.31.tgz#495b7f94a2a008423823583ff159697736341f0a"
+  integrity sha512-XfL3HS+OGWQsoQADEOKiqUZSMPzfhYqbZiwQc+segJg8Uyhxlb7hihzp7wBmZdS9eZRdrjCm5GuI3imC3q+w0g==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -191,6 +191,7 @@
     "@pythnetwork/client" "2.5.3"
     "@pythnetwork/price-service-sdk" "1.7.1"
     "@pythnetwork/pyth-solana-receiver" "0.7.0"
+    "@solana/buffer-layout" "4.0.1"
     "@solana/spl-token" "0.3.7"
     "@solana/web3.js" "1.92.3"
     "@switchboard-xyz/on-demand" "1.2.42"
@@ -1185,7 +1186,7 @@
     bigint-buffer "^1.1.5"
     bignumber.js "^9.0.1"
 
-"@solana/buffer-layout@^4.0.0", "@solana/buffer-layout@^4.0.1":
+"@solana/buffer-layout@4.0.1", "@solana/buffer-layout@^4.0.0", "@solana/buffer-layout@^4.0.1":
   version "4.0.1"
   resolved "https://registry.yarnpkg.com/@solana/buffer-layout/-/buffer-layout-4.0.1.tgz#b996235eaec15b1e0b5092a8ed6028df77fa6c15"
   integrity sha512-E1ImOIAD1tBZFRdjeM4/pzTiTApC0AOBGwyAMS4fwIodCWArzJ3DWdoh8cKxeFM2fElkxBh2Aqts1BPC373rHA==
