@@ -704,10 +704,12 @@ export function logMessageForNodeToFill(
 	takerUserSlot: number,
 	makerInfos: Array<DataAndSlot<MakerInfo>>,
 	currSlot: number,
-	prefix?: string,
-	basePrecision: BN = BASE_PRECISION,
-	fallbackSource = 'vAMM'
-): string {
+	fillId: number,
+	fillType: string,
+	revertOnFailure: boolean,
+	removeLastIxPreSim: boolean,
+	basePrecision: BN = BASE_PRECISION
+) {
 	const takerNode = node.node;
 	const takerOrder = takerNode.order;
 	if (!takerOrder) {
@@ -720,53 +722,73 @@ export function logMessageForNodeToFill(
 		);
 	}
 
-	let msg = '';
-	if (prefix) {
-		msg += `${prefix}\n`;
-	}
+	// json log might be inefficient, but makes log parsing easier
+	logger.info(
+		'fill attempt: ' +
+			JSON.stringify({
+				marketIndex: takerOrder.marketIndex,
+				marketType: getVariant(takerOrder.marketType),
+				taker: takerUser,
+				takerOrderId: takerOrder.orderId,
+				takerOrderDirection: getVariant(takerOrder.direction),
+				takerSlot: takerUserSlot,
+				currSlot,
+				takerBaseAssetAmountFilled: convertToNumber(
+					takerOrder.baseAssetAmountFilled,
+					basePrecision
+				),
+				takerBaseAssetAmount: convertToNumber(
+					takerOrder.baseAssetAmount,
+					basePrecision
+				),
+				takerPrice: convertToNumber(takerOrder.price, PRICE_PRECISION),
+				takerOrderPrice: getVariant(takerOrder.orderType),
+				takerOrderPriceOffset:
+					takerOrder.oraclePriceOffset / PRICE_PRECISION.toNumber(),
+				makers: makerInfos.length,
+				fillType,
+				fillId,
+				revertOnFailure,
+				removeLastIxPreSim,
+			})
+	);
 
-	msg += `taker on market ${takerOrder.marketIndex}: ${takerUser}-${
-		takerOrder.orderId
-	} (takerSlot: ${takerUserSlot}, currSlot: ${currSlot}) ${getVariant(
-		takerOrder.direction
-	)} ${convertToNumber(
-		takerOrder.baseAssetAmountFilled,
-		basePrecision
-	)}/${convertToNumber(
-		takerOrder.baseAssetAmount,
-		basePrecision
-	)} @ ${convertToNumber(
-		takerOrder.price,
-		PRICE_PRECISION
-	)} (orderType: ${getVariant(takerOrder.orderType)})\n`;
-	msg += `makers:\n`;
 	if (makerInfos.length > 0) {
 		for (let i = 0; i < makerInfos.length; i++) {
 			const maker = makerInfos[i].data;
 			const makerSlot = makerInfos[i].slot;
 			const makerOrder = maker.order!;
-			msg += `  [${i}] market ${
-				makerOrder.marketIndex
-			}: ${maker.maker.toBase58()}-${
-				makerOrder.orderId
-			} (makerSlot: ${makerSlot}) ${getVariant(
-				makerOrder.direction
-			)} ${convertToNumber(
-				makerOrder.baseAssetAmountFilled,
-				basePrecision
-			)}/${convertToNumber(
-				makerOrder.baseAssetAmount,
-				basePrecision
-			)} @ ${convertToNumber(makerOrder.price, PRICE_PRECISION)} (offset: ${
-				makerOrder.oraclePriceOffset / PRICE_PRECISION.toNumber()
-			}) (orderType: ${
-				node.node.isSwift ? 'swift' : getVariant(makerOrder.orderType)
-			})\n`;
+			logger.info(
+				'fill attempt maker: ' +
+					JSON.stringify({
+						marketIndex: makerOrder.marketIndex,
+						marketType: getVariant(makerOrder.marketType),
+						makerIdx: i,
+						maker: maker.maker.toBase58(),
+						makerSlot: makerSlot,
+						makerOrderId: makerOrder.orderId,
+						makerOrderType: getVariant(makerOrder.orderType),
+						makerOrderMarketIndex: makerOrder.marketIndex,
+						makerOrderDirection: getVariant(makerOrder.direction),
+						makerOrderBaseAssetAmountFilled: convertToNumber(
+							makerOrder.baseAssetAmountFilled,
+							basePrecision
+						),
+						makerOrderBaseAssetAmount: convertToNumber(
+							makerOrder.baseAssetAmount,
+							basePrecision
+						),
+						makerOrderPrice: convertToNumber(makerOrder.price, PRICE_PRECISION),
+						makerOrderPriceOffset:
+							makerOrder.oraclePriceOffset / PRICE_PRECISION.toNumber(),
+						fillType,
+						fillId,
+						revertOnFailure,
+						removeLastIxPreSim,
+					})
+			);
 		}
-	} else {
-		msg += `  ${fallbackSource}`;
 	}
-	return msg;
 }
 
 export function getTransactionAccountMetas(
