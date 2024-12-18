@@ -98,7 +98,7 @@ export class PythLazerCrankerBot implements Bot {
 		const updateConfigs = this.crankConfigs.updateConfigs;
 
 		let subscriptionId = 1;
-		for (const configChunk of chunks(Object.keys(updateConfigs), 2)) {
+		for (const configChunk of chunks(Object.keys(updateConfigs), 11)) {
 			const priceFeedIds: number[] = configChunk.map((alias) => {
 				return updateConfigs[alias].feedId;
 			});
@@ -230,11 +230,12 @@ export class PythLazerCrankerBot implements Bot {
 					})
 				);
 			}
-			const pythLazerIxs = this.driftClient.getPostPythLazerOracleUpdateIxs(
-				feedIds,
-				priceMessage,
-				ixs
-			);
+			const pythLazerIxs =
+				await this.driftClient.getPostPythLazerOracleUpdateIxs(
+					feedIds,
+					priceMessage,
+					ixs
+				);
 			ixs.push(...pythLazerIxs);
 			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
