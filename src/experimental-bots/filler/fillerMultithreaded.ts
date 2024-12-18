@@ -1640,11 +1640,7 @@ export class FillerMultithreaded {
 			if (buildForBundle) {
 				ixs.push(this.bundleSender!.getTipIx());
 			} else {
-				ixs.push(
-					getPriorityFeeInstruction(
-						priorityFeePrice,
-					)
-				);
+				ixs.push(getPriorityFeeInstruction(priorityFeePrice));
 			}
 
 			logMessageForNodeToFill(
@@ -1889,11 +1885,7 @@ export class FillerMultithreaded {
 		if (buildForBundle) {
 			ixs.push(this.bundleSender!.getTipIx());
 		} else {
-			ixs.push(
-				getPriorityFeeInstruction(
-					priorityFeePrice,
-				)
-			);
+			ixs.push(getPriorityFeeInstruction(priorityFeePrice));
 		}
 
 		logMessageForNodeToFill(
