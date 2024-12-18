@@ -111,18 +111,21 @@ export type SerializedNodeToFill = {
 	fallbackBidSource?: FallbackLiquiditySource;
 	node: SerializedDLOBNode;
 	makerNodes: SerializedDLOBNode[];
+	authority?: string;
 };
 
 export type SerializedDLOBNode = {
 	type: string;
 	order: SerializedOrder;
-	userAccountData: Buffer;
+	userAccountData?: Buffer;
 	userAccount: string;
 	sortValue: string;
 	haveFilled: boolean;
 	haveTrigger?: boolean;
 	fallbackAskSource?: FallbackLiquiditySource;
 	fallbackBidSource?: FallbackLiquiditySource;
+	isSwift?: boolean;
+	isUserProtectedMaker: boolean;
 };
 
 export type FallbackLiquiditySource = 'serum' | 'phoenix' | 'openbook';
@@ -132,10 +135,11 @@ export type NodeToFillWithContext = NodeToFill & {
 };
 
 export type NodeToFillWithBuffer = {
-	userAccountData: Buffer;
+	userAccountData?: Buffer;
 	makerAccountData: string;
 	node: DLOBNode;
 	fallbackAskSource?: FallbackLiquiditySource;
 	fallbackBidSource?: FallbackLiquiditySource;
 	makerNodes: DLOBNode[];
+	authority?: string;
 };

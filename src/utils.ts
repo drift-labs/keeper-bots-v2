@@ -576,6 +576,7 @@ export async function simulateAndGetTxWithCUs(
 		throw new Error(`Failed to get units consumed from simulateTransaction`);
 	}
 
+	console.log(resp.value);
 	const simTxLogs = resp.value.logs;
 	const cuEstimate = resp.value.unitsConsumed!;
 	const cusToUse = Math.max(

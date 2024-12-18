@@ -15,12 +15,20 @@ import {
 	PhoenixSubscriber,
 	BN,
 	ClockSubscriber,
-	PhoenixV1FulfillmentConfigAccount,
 	OpenbookV2Subscriber,
-	OpenbookV2FulfillmentConfigAccount,
+	SwiftOrderParamsMessage,
+	getUserAccountPublicKey,
+	SwiftOrderNode,
+	Order,
+	OrderType,
+	getAuctionPrice,
+	ZERO,
+	OrderTriggerCondition,
+	PositionDirection,
+	UserStatus,
 	isUserProtectedMaker,
 } from '@drift-labs/sdk';
-import { Connection } from '@solana/web3.js';
+import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
 import parseArgs from 'minimist';
 import { logger } from '../../logger';
@@ -36,6 +44,7 @@ import {
 	serializeNodeToTrigger,
 } from './utils';
 import { initializeSpotFulfillmentAccounts, sleepMs } from '../../utils';
+import { LRUCache } from 'lru-cache';
 
 const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
 
@@ -54,16 +63,27 @@ class DLOBBuilder {
 	// only used for spot filler
 	private phoenixSubscribers?: Map<number, PhoenixSubscriber>;
 	private openbookSubscribers?: Map<number, OpenbookV2Subscriber>;
-	private phoenixFulfillmentConfigMap?: Map<
-		number,
-		PhoenixV1FulfillmentConfigAccount
-	>;
-	private openbookFulfillmentConfigMap?: Map<
-		number,
-		OpenbookV2FulfillmentConfigAccount
-	>;
-
 	private clockSubscriber: ClockSubscriber;
+
+	private swiftUserAuthorities = new Map<string, string>();
+
+	// Swift orders to keep track of
+	private swiftOrders = new LRUCache<number, SwiftOrderNode>({
+		max: 5000,
+		dispose: (_, key) => {
+			console.log('disposing', key);
+			if (typeof process.send === 'function') {
+				process.send({
+					type: 'swiftOrderParamsMessage',
+					data: {
+						uuid: key,
+						type: 'delete',
+					},
+				});
+			}
+			return;
+		},
+	});
 
 	constructor(
 		driftClient: DriftClient,
@@ -81,14 +101,6 @@ class DLOBBuilder {
 		if (marketTypeString.toLowerCase() === 'spot') {
 			this.phoenixSubscribers = new Map<number, PhoenixSubscriber>();
 			this.openbookSubscribers = new Map<number, OpenbookV2Subscriber>();
-			this.phoenixFulfillmentConfigMap = new Map<
-				number,
-				PhoenixV1FulfillmentConfigAccount
-			>();
-			this.openbookFulfillmentConfigMap = new Map<
-				number,
-				OpenbookV2FulfillmentConfigAccount
-			>();
 		}
 
 		this.clockSubscriber = new ClockSubscriber(driftClient.connection, {
@@ -108,8 +120,6 @@ class DLOBBuilder {
 
 	private async initializeSpotMarkets() {
 		({
-			phoenixFulfillmentConfigs: this.phoenixFulfillmentConfigMap,
-			openbookFulfillmentConfigs: this.openbookFulfillmentConfigMap,
 			phoenixSubscribers: this.phoenixSubscribers,
 			openbookSubscribers: this.openbookSubscribers,
 		} = await initializeSpotFulfillmentAccounts(
@@ -146,7 +156,7 @@ class DLOBBuilder {
 		logger.debug(
 			`${logPrefix} Building DLOB with ${this.userAccountData.size} users`
 		);
-		this.dlob = new DLOB();
+		const dlob = new DLOB();
 		let counter = 0;
 		this.userAccountData.forEach((userAccount, pubkey) => {
 			userAccount.orders.forEach((order) => {
@@ -165,8 +175,87 @@ class DLOBBuilder {
 				counter++;
 			});
 		});
+		for (const swiftNode of this.swiftOrders.values()) {
+			dlob.insertSwiftOrder(swiftNode.order, swiftNode.userAccount, false);
+			counter++;
+		}
 		logger.debug(`${logPrefix} Built DLOB with ${counter} orders`);
-		return this.dlob;
+		this.dlob = dlob;
+		return dlob;
+	}
+
+	public async insertSwiftOrder(orderData: any, uuid: number) {
+		// Deserialize and store
+		const {
+			swiftOrderParams,
+			subAccountId: takerSubaccountId,
+			slot,
+		}: SwiftOrderParamsMessage = this.driftClient.program.coder.types.decode(
+			'SwiftOrderParamsMessage',
+			Buffer.from(orderData['order_message'], 'base64')
+		);
+
+		const takerAuthority = new PublicKey(orderData['taker_authority']);
+		const takerUserPubkey = await getUserAccountPublicKey(
+			this.driftClient.program.programId,
+			takerAuthority,
+			takerSubaccountId
+		);
+		this.swiftUserAuthorities.set(
+			takerUserPubkey.toString(),
+			orderData['taker_authority']
+		);
+
+		const maxSlot = slot.addn(swiftOrderParams.auctionDuration ?? 0);
+		if (maxSlot.toNumber() < this.slotSubscriber.getSlot()) {
+			logger.warn(
+				`${logPrefix} Received expired swift order with uuid: ${uuid}`
+			);
+			return;
+		}
+
+		const swiftOrder: Order = {
+			status: 'open',
+			orderType: OrderType.MARKET,
+			orderId: uuid,
+			slot,
+			marketIndex: swiftOrderParams.marketIndex,
+			marketType: MarketType.PERP,
+			baseAssetAmount: swiftOrderParams.baseAssetAmount,
+			auctionDuration: swiftOrderParams.auctionDuration!,
+			auctionStartPrice: swiftOrderParams.auctionStartPrice!,
+			auctionEndPrice: swiftOrderParams.auctionEndPrice!,
+			immediateOrCancel: true,
+			direction: swiftOrderParams.direction,
+			postOnly: false,
+			oraclePriceOffset: swiftOrderParams.oraclePriceOffset ?? 0,
+			// Rest are not required for DLOB
+			price: ZERO,
+			maxTs: ZERO,
+			triggerPrice: ZERO,
+			triggerCondition: OrderTriggerCondition.ABOVE,
+			existingPositionDirection: PositionDirection.LONG,
+			reduceOnly: false,
+			baseAssetAmountFilled: ZERO,
+			quoteAssetAmountFilled: ZERO,
+			quoteAssetAmount: ZERO,
+			userOrderId: 0,
+		};
+		swiftOrder.price = getAuctionPrice(
+			swiftOrder,
+			this.slotSubscriber.getSlot(),
+			this.driftClient.getOracleDataForPerpMarket(swiftOrder.marketIndex).price
+		);
+
+		const swiftOrderNode = new SwiftOrderNode(
+			swiftOrder,
+			takerUserPubkey.toString()
+		);
+
+		const ttl = (maxSlot.toNumber() - this.slotSubscriber.getSlot()) * 500;
+		this.swiftOrders.set(uuid, swiftOrderNode, {
+			ttl,
+		});
 	}
 
 	public getNodesToTriggerAndNodesToFill(): [
@@ -277,21 +366,28 @@ class DLOBBuilder {
 		return nodesToFill
 			.map((node) => {
 				const buffer = this.getUserBuffer(node.node.userAccount!);
-				if (!buffer) {
+				if (!buffer && !node.node.isSwift) {
+					console.log(node.node);
+					console.log(`Received node to fill without user account`);
 					return undefined;
 				}
 				const makerBuffers = new Map<string, Buffer>();
 				for (const makerNode of node.makerNodes) {
-					// @ts-ignore
-					const makerBuffer = this.getUserBuffer(makerNode.userAccount);
+					const makerBuffer = this.getUserBuffer(makerNode.userAccount!);
 
 					if (!makerBuffer) {
 						return undefined;
 					}
-					// @ts-ignore
-					makerBuffers.set(makerNode.userAccount, makerBuffer);
+					makerBuffers.set(makerNode.userAccount!, makerBuffer);
 				}
-				return serializeNodeToFill(node, buffer, makerBuffers);
+				return serializeNodeToFill(
+					node,
+					makerBuffers,
+					this.userAccountData.get(node.node.userAccount!)?.status ===
+						UserStatus.PROTECTED_MAKER,
+					buffer,
+					this.swiftUserAuthorities.get(node.node.userAccount!)
+				);
 			})
 			.filter((node): node is SerializedNodeToFill => node !== undefined);
 	}
@@ -424,12 +520,14 @@ const main = async () => {
 	}
 
 	process.on('message', (msg: any) => {
-		// console.log("received msg");
 		if (!msg.data || typeof msg.data.type === 'undefined') {
 			logger.warn(`${logPrefix} Received message without data.type field.`);
 			return;
 		}
 		switch (msg.data.type) {
+			case 'swiftOrderParamsMessage':
+				dlobBuilder.insertSwiftOrder(msg.data.swiftOrder, msg.data.uuid);
+				break;
 			case 'update':
 				dlobBuilder.deserializeAndUpdateUserAccountData(
 					msg.data.userAccount,
