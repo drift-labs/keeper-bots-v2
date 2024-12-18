@@ -82,6 +82,7 @@ import {
 	calculateAccountValueUsd,
 	checkIfAccountExists,
 	handleSimResultError,
+	isSolLstToken,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
 } from '../utils';
@@ -1259,10 +1260,17 @@ export class LiquidatorBot implements Bot {
 		let outMarket: SpotMarketAccount | undefined;
 		let inMarket: SpotMarketAccount | undefined;
 		let amountIn: BN | undefined;
+		const spotMarketIsSolLst = isSolLstToken(spotMarketIndex);
 		if (isVariant(orderDirection, 'long')) {
-			// sell USDC, buy spotMarketIndex
-			inMarket = this.driftClient.getSpotMarketAccount(0);
-			outMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
+			if (spotMarketIsSolLst) {
+				// sell SOL, buy the LST
+				inMarket = this.driftClient.getSpotMarketAccount(1);
+				outMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
+			} else {
+				// sell USDC, buy spotMarketIndex
+				inMarket = this.driftClient.getSpotMarketAccount(0);
+				outMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
+			}
 			if (!inMarket || !outMarket) {
 				logger.error('failed to get spot markets');
 				return undefined;
@@ -1274,9 +1282,15 @@ export class LiquidatorBot implements Bot {
 				.mul(inPrecision)
 				.div(PRICE_PRECISION.mul(outPrecision));
 		} else {
-			// sell spotMarketIndex, buy USDC
-			inMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
-			outMarket = this.driftClient.getSpotMarketAccount(0);
+			if (spotMarketIsSolLst) {
+				// sell spotMarketIndex, buy SOL
+				inMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
+				outMarket = this.driftClient.getSpotMarketAccount(1);
+			} else {
+				// sell spotMarketIndex, buy USDC
+				inMarket = this.driftClient.getSpotMarketAccount(spotMarketIndex);
+				outMarket = this.driftClient.getSpotMarketAccount(0);
+			}
 			amountIn = baseAmountIn;
 		}
 
