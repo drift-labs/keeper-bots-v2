@@ -1553,3 +1553,14 @@ export function getMarketsAndOracleInfosToLoad(
 			spotIndexes && spotIndexes.length > 0 ? spotIndexes : undefined,
 	};
 }
+
+export function isSolLstToken(spotMarketIndex: number): boolean {
+	return [
+		2, // mSOL
+		6, // jitoSOL
+		8, // bSOL
+		16, // INF
+		17, // dSOL
+		25, // BNSOL
+	].includes(spotMarketIndex);
+}
