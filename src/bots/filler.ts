@@ -1466,7 +1466,9 @@ export class FillerBot extends TxThreaded implements Bot {
 						units: 1_400_000,
 					}),
 				];
-				if (!buildForBundle) {
+				if (buildForBundle) {
+					ixs.push(this.bundleSender!.getTipIx());
+				} else {
 					ixs.push(
 						ComputeBudgetProgram.setComputeUnitPrice({
 							microLamports: Math.floor(
