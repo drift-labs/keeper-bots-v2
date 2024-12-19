@@ -1546,12 +1546,6 @@ export class FillerMultithreaded {
 		fillTxId: number,
 		nodeToFill: NodeToFillWithBuffer
 	): Promise<boolean> {
-		let ixs: Array<TransactionInstruction> = [
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 1_400_000,
-			}),
-		];
-
 		try {
 			const {
 				makerInfos,
@@ -1563,60 +1557,69 @@ export class FillerMultithreaded {
 				fillerRewardEstimate,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			let removeLastIxPostSim = this.revertOnFailure;
-			if (
-				this.pythPriceSubscriber &&
-				((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)
-			) {
-				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
-				ixs.push(...pythIxs);
-				removeLastIxPostSim = false;
-			}
-
-			const priorityFeePrice = Math.floor(
-				this.priorityFeeSubscriber.getPriorityFees(
-					'perp',
-					nodeToFill.node.order!.marketIndex!
-				)!.high * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-			);
 			const buildForBundle = this.shouldBuildForBundle();
-
-			if (buildForBundle) {
-				ixs.push(this.bundleSender!.getTipIx());
-			} else {
-				ixs.push(
-					getPriorityFeeInstruction(
-						priorityFeePrice,
-						this.driftClient.getOracleDataForPerpMarket(0).price,
-						this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
-						this.globalConfig.priorityFeeMultiplier
-					)
-				);
-			}
-
-			logMessageForNodeToFill(
-				nodeToFill,
-				takerUserPubKey,
-				takerUserSlot,
-				makerInfos,
-				this.slotSubscriber.getSlot(),
-				fillTxId,
-				'multiMakerFill',
-				this.revertOnFailure ?? false,
-				removeLastIxPostSim ?? false
-			);
-
-			if (!isVariant(marketType, 'perp')) {
-				throw new Error('expected perp market type');
-			}
-
 			let makerInfosToUse = makerInfos;
+
 			const buildTxWithMakerInfos = async (
 				makers: DataAndSlot<MakerInfo>[]
 			): Promise<SimulateAndGetTxWithCUsResponse | undefined> => {
 				if (makers.length === 0) {
 					return undefined;
 				}
+
+				let ixs: Array<TransactionInstruction> = [
+					ComputeBudgetProgram.setComputeUnitLimit({
+						units: 1_400_000,
+					}),
+				];
+
+				let removeLastIxPostSim = this.revertOnFailure;
+				if (
+					this.pythPriceSubscriber &&
+					((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)
+				) {
+					const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+					ixs.push(...pythIxs);
+					removeLastIxPostSim = false;
+				}
+
+				const priorityFeePrice = Math.floor(
+					this.priorityFeeSubscriber.getPriorityFees(
+						'perp',
+						nodeToFill.node.order!.marketIndex!
+					)!.high *
+						this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+				);
+
+				if (buildForBundle) {
+					ixs.push(this.bundleSender!.getTipIx());
+				} else {
+					ixs.push(
+						getPriorityFeeInstruction(
+							priorityFeePrice,
+							this.driftClient.getOracleDataForPerpMarket(0).price,
+							this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
+							this.globalConfig.priorityFeeMultiplier
+						)
+					);
+				}
+
+				logMessageForNodeToFill(
+					nodeToFill,
+					takerUserPubKey,
+					takerUserSlot,
+					makerInfos,
+					this.slotSubscriber.getSlot(),
+					fillTxId,
+					'multiMakerFill',
+					this.revertOnFailure ?? false,
+					removeLastIxPostSim ?? false
+				);
+
+				if (!isVariant(marketType, 'perp')) {
+					throw new Error('expected perp market type');
+				}
+
 				ixs.push(
 					await this.driftClient.getFillPerpOrderIx(
 						await getUserAccountPublicKey(
