@@ -1427,22 +1427,6 @@ export class FillerBot extends TxThreaded implements Bot {
 		nodeToFill: NodeToFill,
 		buildForBundle: boolean
 	): Promise<boolean> {
-		const ixs: Array<TransactionInstruction> = [
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 1_400_000,
-			}),
-		];
-		if (!buildForBundle) {
-			ixs.push(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult() *
-							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-					),
-				})
-			);
-		}
-
 		try {
 			const {
 				makerInfos,
@@ -1477,6 +1461,21 @@ export class FillerBot extends TxThreaded implements Bot {
 				ixs: Array<TransactionInstruction>;
 				simResult: SimulateAndGetTxWithCUsResponse;
 			}> => {
+				const ixs: Array<TransactionInstruction> = [
+					ComputeBudgetProgram.setComputeUnitLimit({
+						units: 1_400_000,
+					}),
+				];
+				if (!buildForBundle) {
+					ixs.push(
+						ComputeBudgetProgram.setComputeUnitPrice({
+							microLamports: Math.floor(
+								this.priorityFeeSubscriber.getCustomStrategyResult() *
+									this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+							),
+						})
+					);
+				}
 				ixs.push(
 					await this.driftClient.getFillPerpOrderIx(
 						await getUserAccountPublicKey(

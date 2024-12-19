@@ -948,25 +948,6 @@ export class SpotFillerMultithreaded {
 				)!.decimals
 			)
 		);
-		const ixs: Array<TransactionInstruction> = [
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 1_400_000,
-			}),
-		];
-		if (buildForBundle) {
-			ixs.push(this.bundleSender!.getTipIx());
-		} else {
-			ixs.push(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getPriorityFees(
-							'spot',
-							nodeToFill.node.order!.marketIndex
-						)!.high
-					),
-				})
-			);
-		}
 
 		try {
 			const {
@@ -1002,6 +983,27 @@ export class SpotFillerMultithreaded {
 				if (makers.length === 0) {
 					return undefined;
 				}
+
+				const ixs: Array<TransactionInstruction> = [
+					ComputeBudgetProgram.setComputeUnitLimit({
+						units: 1_400_000,
+					}),
+				];
+				if (buildForBundle) {
+					ixs.push(this.bundleSender!.getTipIx());
+				} else {
+					ixs.push(
+						ComputeBudgetProgram.setComputeUnitPrice({
+							microLamports: Math.floor(
+								this.priorityFeeSubscriber.getPriorityFees(
+									'spot',
+									nodeToFill.node.order!.marketIndex
+								)!.high
+							),
+						})
+					);
+				}
+
 				ixs.push(
 					await this.driftClient.getFillSpotOrderIx(
 						new PublicKey(takerUserPubKey),
