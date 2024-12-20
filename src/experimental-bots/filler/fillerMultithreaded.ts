@@ -54,6 +54,7 @@ import {
 } from '../filler-common/types';
 import { assert } from 'console';
 import {
+	chunks,
 	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
@@ -107,6 +108,7 @@ import {
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
+import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
 
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -120,7 +122,7 @@ const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana
 const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 export const CONFIRM_TX_INTERVAL_MS = 5_000;
-const SIM_CU_ESTIMATE_MULTIPLIER = 1.35;
+const SIM_CU_ESTIMATE_MULTIPLIER = 3;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
 export const TX_CONFIRMATION_BATCH_SIZE = 100;
 export const CACHED_BLOCKHASH_OFFSET = 5;
@@ -258,6 +260,10 @@ export class FillerMultithreaded {
 	protected latestPythVaas?: Map<string, string>; // priceFeedId -> vaa
 	protected marketIndexesToPriceIds = new Map<number, string>();
 
+	protected pythLazerClient?: PythLazerClient;
+	protected latestPythLazerUpdates?: Map<string, string>; // priceFeedId -> vaa
+	protected marketIndexesToPythLazerGroups?: Map<number, number[]>; // priceFeedId -> vaa
+
 	constructor(
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
@@ -266,6 +272,7 @@ export class FillerMultithreaded {
 		runtimeSpec: RuntimeSpec,
 		bundleSender?: BundleSender,
 		pythPriceSubscriber?: PythPriceFeedSubscriber,
+		pythLazerClient?: PythLazerClient,
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
@@ -392,6 +399,64 @@ export class FillerMultithreaded {
 			max: 10_000,
 			ttl: TX_TIMEOUT_THRESHOLD_MS,
 			ttlResolution: 1000,
+		});
+
+		// Pyth lazer
+		this.pythLazerClient = pythLazerClient;
+		this.latestPythLazerUpdates = new Map();
+		this.marketIndexesToPythLazerGroups = new Map();
+		let subscriptionId = 0;
+		const subscribeToPythLazer = () => {
+			for (const marketIndexes of chunks(this.marketIndexesFlattened, 6)) {
+				const markets = PerpMarkets[this.globalConfig.driftEnv!]
+					.filter((market) => marketIndexes.includes(market.marketIndex))
+					.filter((market) => market.pythLazerId !== undefined);
+				const pythLazerIds = markets.map((m) => m.pythLazerId!);
+				marketIndexes.forEach(
+					(marketIndex) =>
+						this.marketIndexesToPythLazerGroups?.set(marketIndex, pythLazerIds)
+				);
+
+				this.pythLazerClient?.send({
+					type: 'subscribe',
+					subscriptionId,
+					priceFeedIds: pythLazerIds,
+					properties: ['price'],
+					chains: ['solana'],
+					deliveryFormat: 'json',
+					channel: 'fixed_rate@200ms',
+					jsonBinaryEncoding: 'hex',
+				});
+				subscriptionId++;
+			}
+		};
+
+		if (this.pythLazerClient?.ws.readyState === 1) {
+			subscribeToPythLazer();
+		} else {
+			this.pythLazerClient?.ws.addEventListener('open', () => {
+				subscribeToPythLazer();
+			});
+		}
+
+		this.pythLazerClient?.addMessageListener((message) => {
+			switch (message.type) {
+				case 'json': {
+					if (message.value.type == 'streamUpdated') {
+						if (message.value?.solana?.data) {
+							const data = message.value?.solana?.data;
+							const pythLazerIds = message.value.parsed!.priceFeeds.map(
+								(priceFeed) => priceFeed.priceFeedId
+							);
+							this.latestPythLazerUpdates?.set(
+								JSON.stringify(pythLazerIds),
+								data
+							);
+						}
+					}
+					break;
+				}
+			}
 		});
 	}
 
@@ -1032,7 +1097,9 @@ export class FillerMultithreaded {
 	}
 
 	private async getPythIxsFromNode(
-		node: NodeToFillWithBuffer | SerializedNodeToTrigger
+		node: NodeToFillWithBuffer | SerializedNodeToTrigger,
+		precedingIdxs: TransactionInstruction[] = [],
+		isSwift = false
 	): Promise<TransactionInstruction[]> {
 		const marketIndex = node.node.order?.marketIndex;
 		if (marketIndex === undefined) {
@@ -1051,15 +1118,50 @@ export class FillerMultithreaded {
 		if (!this.pythPriceSubscriber) {
 			throw new Error('Pyth price subscriber not initialized');
 		}
-		const pythIxs = await getAllPythOracleUpdateIxs(
-			this.runtimeSpec.driftEnv as DriftEnv,
-			marketIndex,
-			MarketType.PERP,
-			this.pythPriceSubscriber!,
-			this.driftClient,
-			this.globalConfig.numNonActiveOraclesToPush ?? 0,
-			this.marketIndexesFlattened
-		);
+
+		let pythIxs: TransactionInstruction[] = [];
+		if (
+			isVariant(
+				this.driftClient.getPerpMarketAccount(marketIndex)?.amm.oracleSource,
+				'pythLazer'
+			)
+		) {
+			const pythLazerIds =
+				this.marketIndexesToPythLazerGroups?.get(marketIndex);
+			if (!pythLazerIds) {
+				logger.error(
+					`Pyth lazer ids not found for marketIndex: ${marketIndex}`
+				);
+				return pythIxs;
+			}
+
+			const latestLazerUpdate = this.latestPythLazerUpdates?.get(
+				JSON.stringify(pythLazerIds)
+			);
+			if (!latestLazerUpdate) {
+				logger.error(
+					`Latest lazer update not found for marketIndex: ${marketIndex}, pythLazerIds: ${pythLazerIds}`
+				);
+				return pythIxs;
+			}
+
+			pythIxs = await this.driftClient.getPostPythLazerOracleUpdateIxs(
+				pythLazerIds,
+				latestLazerUpdate,
+				precedingIdxs
+			);
+		} else if (!isSwift) {
+			pythIxs = await getAllPythOracleUpdateIxs(
+				this.runtimeSpec.driftEnv as DriftEnv,
+				marketIndex,
+				MarketType.PERP,
+				this.pythPriceSubscriber!,
+				this.driftClient,
+				this.globalConfig.numNonActiveOraclesToPush ?? 0,
+				this.marketIndexesFlattened
+			);
+		}
+
 		return pythIxs;
 	}
 
@@ -1312,7 +1414,11 @@ export class FillerMultithreaded {
 
 			let removeLastIxPostSim = this.revertOnFailure;
 			if (this.pythPriceSubscriber) {
-				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
+				const pythIxs = await this.getPythIxsFromNode(
+					nodeToTrigger,
+					ixs,
+					false
+				);
 				ixs.push(...pythIxs);
 				// do not strip the last ix if we have pyth ixs
 				removeLastIxPostSim = false;
@@ -1344,6 +1450,7 @@ export class FillerMultithreaded {
 				);
 
 				if (this.revertOnFailure) {
+					console.log(user.userAccountPublicKey.toString());
 					ixs.push(
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
@@ -1607,6 +1714,20 @@ export class FillerMultithreaded {
 		];
 
 		try {
+			const priorityFeePrice = Math.floor(
+				this.priorityFeeSubscriber.getPriorityFees(
+					'perp',
+					nodeToFill.node.order!.marketIndex!
+				)!.high * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+			);
+			const buildForBundle = this.shouldBuildForBundle();
+
+			if (buildForBundle) {
+				ixs.push(this.bundleSender!.getTipIx());
+			} else {
+				ixs.push(getPriorityFeeInstruction(priorityFeePrice));
+			}
+
 			const {
 				makerInfos,
 				takerUser,
@@ -1624,23 +1745,9 @@ export class FillerMultithreaded {
 				this.pythPriceSubscriber &&
 				((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)
 			) {
-				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+				const pythIxs = await this.getPythIxsFromNode(nodeToFill, ixs, isSwift);
 				ixs.push(...pythIxs);
 				removeLastIxPostSim = false;
-			}
-
-			const priorityFeePrice = Math.floor(
-				this.priorityFeeSubscriber.getPriorityFees(
-					'perp',
-					nodeToFill.node.order!.marketIndex!
-				)!.high * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-			);
-			const buildForBundle = this.shouldBuildForBundle();
-
-			if (buildForBundle) {
-				ixs.push(this.bundleSender!.getTipIx());
-			} else {
-				ixs.push(getPriorityFeeInstruction(priorityFeePrice));
 			}
 
 			logMessageForNodeToFill(
@@ -1705,6 +1812,7 @@ export class FillerMultithreaded {
 				const user = this.driftClient.getUser(this.subaccount);
 
 				if (this.revertOnFailure) {
+					console.log(user.userAccountPublicKey.toString());
 					ixs.push(
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
@@ -1861,6 +1969,13 @@ export class FillerMultithreaded {
 				units: 1_400_000,
 			}),
 		];
+
+		if (buildForBundle) {
+			ixs.push(this.bundleSender!.getTipIx());
+		} else {
+			ixs.push(getPriorityFeeInstruction(priorityFeePrice));
+		}
+
 		const fillTxId = this.fillTxId++;
 
 		const {
@@ -1876,16 +1991,10 @@ export class FillerMultithreaded {
 		} = await this.getNodeFillInfo(nodeToFill);
 
 		let removeLastIxPostSim = this.revertOnFailure;
-		if (this.pythPriceSubscriber && makerInfos.length <= 2 && !isSwift) {
-			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
+			const pythIxs = await this.getPythIxsFromNode(nodeToFill, ixs, isSwift);
 			ixs.push(...pythIxs);
 			removeLastIxPostSim = false;
-		}
-
-		if (buildForBundle) {
-			ixs.push(this.bundleSender!.getTipIx());
-		} else {
-			ixs.push(getPriorityFeeInstruction(priorityFeePrice));
 		}
 
 		logMessageForNodeToFill(
@@ -1935,6 +2044,7 @@ export class FillerMultithreaded {
 
 		const user = this.driftClient.getUser(this.subaccount);
 		if (this.revertOnFailure) {
+			console.log(user.userAccountPublicKey.toString());
 			ixs.push(
 				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 			);

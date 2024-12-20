@@ -40,6 +40,7 @@ import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { SwiftMaker } from './swift/makerExample';
 import { SwiftTaker } from './swift/takerExample';
 import * as net from 'net';
+import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
 
 setGlobalDispatcher(
 	new Agent({
@@ -229,6 +230,19 @@ const runBot = async () => {
 		);
 	}
 
+	let pythLazerClient: PythLazerClient | undefined;
+	if (config.global.hermesEndpoint) {
+		if (!config.global.lazerEndpoint || !config.global.lazerToken) {
+			throw new Error(
+				'Must set environment variables LAZER_ENDPOINT and LAZER_TOKEN'
+			);
+		}
+		pythLazerClient = new PythLazerClient(
+			config.global.lazerEndpoint,
+			config.global.lazerToken
+		);
+	}
+
 	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 		getMarketsAndOraclesForSubscription(
 			config.global.driftEnv || 'mainnet-beta'
@@ -334,6 +348,7 @@ const runBot = async () => {
 			},
 			bundleSender,
 			pythPriceSubscriber,
+			pythLazerClient,
 			[]
 		);
 		bots.push(fillerMultithreaded);

@@ -750,6 +750,7 @@ export function logMessageForNodeToFill(
 				fillId,
 				revertOnFailure,
 				removeLastIxPreSim,
+				isSwift: node.node.isSwift,
 			})
 	);
 
@@ -1066,8 +1067,9 @@ export function validRebalanceSettledPnlThreshold(
 export const getPythPriceFeedIdForMarket = (
 	marketIndex: number,
 	markets: Array<SpotMarketConfig | PerpMarketConfig>,
-	throwOnNotFound = true
-): string | undefined => {
+	throwOnNotFound = true,
+	lazer = false
+): string | number | undefined => {
 	const market = markets.find((market) => market.marketIndex === marketIndex);
 	if (!market) {
 		if (throwOnNotFound) {
@@ -1077,7 +1079,7 @@ export const getPythPriceFeedIdForMarket = (
 			return undefined;
 		}
 	}
-	return market.pythFeedId;
+	return lazer ? market.pythLazerId : market.pythFeedId;
 };
 
 export const getPythUpdateIxsForVaa = async (
@@ -1165,12 +1167,15 @@ export const getAllPythOracleUpdateIxs = async (
 		.filter((feedId) => feedId !== undefined)
 		.map((feedId) => {
 			if (!feedId) return;
-			const vaa = pythPriceSubscriber.getLatestCachedVaa(feedId);
+			const vaa = pythPriceSubscriber.getLatestCachedVaa(feedId as string);
 			if (!vaa) {
 				logger.debug('No VAA found for feedId', feedId);
 				return;
 			}
-			return driftClient.getPostPythPullOracleUpdateAtomicIxs(vaa, feedId);
+			return driftClient.getPostPythPullOracleUpdateAtomicIxs(
+				vaa,
+				feedId as string
+			);
 		})
 		.filter((ix) => ix !== undefined) as Promise<TransactionInstruction[]>[];
 	const postOracleUpdateIxs = await Promise.all(postOracleUpdateIxsPromises);
