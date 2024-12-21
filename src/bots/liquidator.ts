@@ -2390,6 +2390,11 @@ export class LiquidatorBot implements Bot {
 		subAccountToLiqPerp: number,
 		baseAmountToLiquidate: BN
 	): Promise<boolean> {
+		// TODO: remove this once the markets are settled properly
+		if ([37, 49].includes(perpMarketIndex)) {
+			return false;
+		}
+
 		let txSent = false;
 		const ix = await this.driftClient.getLiquidatePerpIx(
 			user.userAccountPublicKey,
