@@ -1706,6 +1706,12 @@ export class FillerMultithreaded {
 		fillTxId: number,
 		nodeToFill: NodeToFillWithBuffer
 	): Promise<boolean> {
+		const ixs = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000, // will be overridden by simulateTx
+			}),
+		];
+
 		try {
 			const priorityFeePrice = Math.floor(
 				this.priorityFeeSubscriber.getPriorityFees(
@@ -1813,14 +1819,7 @@ export class FillerMultithreaded {
 				if (buildForBundle) {
 					ixs.push(this.bundleSender!.getTipIx());
 				} else {
-					ixs.push(
-						getPriorityFeeInstruction(
-							priorityFeePrice,
-							this.driftClient.getOracleDataForPerpMarket(0).price,
-							this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
-							this.globalConfig.priorityFeeMultiplier
-						)
-					);
+					ixs.push(getPriorityFeeInstruction(priorityFeePrice));
 				}
 
 				logMessageForNodeToFill(
