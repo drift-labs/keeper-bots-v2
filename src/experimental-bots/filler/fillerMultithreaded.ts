@@ -416,7 +416,6 @@ export class FillerMultithreaded {
 					(marketIndex) =>
 						this.marketIndexesToPythLazerGroups?.set(marketIndex, pythLazerIds)
 				);
-
 				this.pythLazerClient?.send({
 					type: 'subscribe',
 					subscriptionId,

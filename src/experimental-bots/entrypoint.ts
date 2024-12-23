@@ -230,19 +230,6 @@ const runBot = async () => {
 		);
 	}
 
-	let pythLazerClient: PythLazerClient | undefined;
-	if (config.global.hermesEndpoint) {
-		if (!config.global.lazerEndpoint || !config.global.lazerToken) {
-			throw new Error(
-				'Must set environment variables LAZER_ENDPOINT and LAZER_TOKEN'
-			);
-		}
-		pythLazerClient = new PythLazerClient(
-			config.global.lazerEndpoint,
-			config.global.lazerToken
-		);
-	}
-
 	const { perpMarketIndexes, spotMarketIndexes, oracleInfos } =
 		getMarketsAndOraclesForSubscription(
 			config.global.driftEnv || 'mainnet-beta'
@@ -318,6 +305,19 @@ const runBot = async () => {
 	if (configHasBot(config, 'fillerMultithreaded')) {
 		if (!config.botConfigs?.fillerMultithreaded) {
 			throw new Error('fillerMultithreaded bot config not found');
+		}
+
+		let pythLazerClient: PythLazerClient | undefined;
+		if (config.global.driftEnv! === 'devnet') {
+			if (!config.global.lazerEndpoint || !config.global.lazerToken) {
+				throw new Error(
+					'Must set environment variables LAZER_ENDPOINT and LAZER_TOKEN'
+				);
+			}
+			pythLazerClient = new PythLazerClient(
+				config.global.lazerEndpoint,
+				config.global.lazerToken
+			);
 		}
 
 		// Ensure that there are no duplicate market indexes in the Array<number[]> marketIndexes config
