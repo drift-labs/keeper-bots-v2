@@ -1741,23 +1741,6 @@ export class SpotFillerBot implements Bot {
 		buildForBundle: boolean,
 		spotPrecision: BN
 	): Promise<boolean> {
-		const ixs: Array<TransactionInstruction> = [
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 1_400_000,
-			}),
-		];
-		if (buildForBundle) {
-			ixs.push(this.bundleSender!.getTipIx());
-		} else {
-			ixs.push(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult()
-					),
-				})
-			);
-		}
-
 		try {
 			const {
 				makerInfos,
@@ -1788,6 +1771,23 @@ export class SpotFillerBot implements Bot {
 			const buildTxWithMakerInfos = async (
 				makers: DataAndSlot<MakerInfo>[]
 			): Promise<SimulateAndGetTxWithCUsResponse> => {
+				const ixs: Array<TransactionInstruction> = [
+					ComputeBudgetProgram.setComputeUnitLimit({
+						units: 1_400_000,
+					}),
+				];
+				if (buildForBundle) {
+					ixs.push(this.bundleSender!.getTipIx());
+				} else {
+					ixs.push(
+						ComputeBudgetProgram.setComputeUnitPrice({
+							microLamports: Math.floor(
+								this.priorityFeeSubscriber.getCustomStrategyResult()
+							),
+						})
+					);
+				}
+
 				ixs.push(
 					await this.driftClient.getFillSpotOrderIx(
 						new PublicKey(takerUserPubKey),

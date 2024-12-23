@@ -184,6 +184,7 @@ const runBot = async () => {
 			confirmationStrategy: ConfirmationStrategy.Polling,
 			additionalConnections,
 			trackTxLandRate: config.global.trackTxLandRate,
+			throwOnTimeoutError: false,
 		});
 	} else if (txSenderType === 'while-valid') {
 		txSender = new WhileValidTxSender({
@@ -209,6 +210,7 @@ const runBot = async () => {
 			additionalConnections,
 			trackTxLandRate: config.global.trackTxLandRate,
 			confirmationStrategy,
+			throwOnTimeoutError: false,
 		});
 	}
 
