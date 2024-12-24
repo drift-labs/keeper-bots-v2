@@ -73,6 +73,7 @@ import {
 	deserializeOrder,
 	serializeNodeToFill,
 	spawnChild,
+	isTsRuntime,
 } from '../filler-common/utils';
 import {
 	CACHED_BLOCKHASH_OFFSET,
@@ -98,6 +99,7 @@ import { getErrorCode } from '../../error';
 import { webhookMessage } from '../../webhook';
 import { selectMakers } from '../../makerSelection';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
+import path from 'path';
 
 enum METRIC_TYPES {
 	try_fill_duration_histogram = 'try_fill_duration_histogram',
@@ -457,8 +459,10 @@ export class SpotFillerMultithreaded {
 				`--market-type=${this.config.marketType}`,
 				`--market-indexes=${marketIndexes.map(String)}`,
 			];
+
+			const dlobBuilderFileName = 'dlobBuilder' + isTsRuntime() ? '.ts' : '.js';
 			const dlobBuilderProcess = spawnChild(
-				'./src/experimental-bots/filler-common/dlobBuilder.ts',
+				path.join(__dirname, '../filler-common', dlobBuilderFileName),
 				dlobBuilderArgs,
 				'dlobBuilder',
 				(msg: any) => {
@@ -549,8 +553,10 @@ export class SpotFillerMultithreaded {
 			}
 		};
 
+		const orderSubscriberFileName =
+			'orderSubscriberFiltered' + isTsRuntime() ? '.ts' : '.js';
 		const orderSubscriberProcess = spawnChild(
-			'./src/experimental-bots/filler-common/orderSubscriberFiltered.ts',
+			path.join(__dirname, '../filler-common', orderSubscriberFileName),
 			orderSubscriberArgs,
 			'orderSubscriber',
 			(msg: any) => {

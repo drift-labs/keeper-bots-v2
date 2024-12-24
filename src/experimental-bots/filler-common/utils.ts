@@ -472,3 +472,13 @@ export const getPriorityFeeInstruction = (priorityFeeMicroLamports: number) => {
 		microLamports,
 	});
 };
+
+export const isTsRuntime = (): boolean => {
+	// @ts-ignore - This is how to check for tsx unfortunately https://github.com/privatenumber/tsx/issues/49
+	const isTsx: boolean = process._preload_modules.some((m: string) =>
+		m.includes('tsx')
+	);
+	const isTsNode = process.argv.some((arg) => arg.includes('ts-node'));
+	const isBun = process.versions.bun !== undefined;
+	return isTsNode || isTsx || isBun;
+};
