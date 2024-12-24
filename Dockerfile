@@ -1,16 +1,21 @@
-FROM public.ecr.aws/bitnami/node:20.18.1
-RUN apt-get install git
-ENV NODE_ENV=production
-RUN npm install -g typescript
-RUN npm install -g ts-node
+FROM node:20.18.1 AS builder
+RUN npm install -g husky
+
+COPY package.json yarn.lock ./
 
 WORKDIR /app
 
 COPY . .
 RUN yarn install
-RUN yarn build
-RUN yarn install --production
+RUN node esbuild.config.js
+
+FROM node:20.18.1-alpine
+# 'bigint-buffer' native lib for performance
+RUN apk add python3 make g++ --virtual .build &&\
+    npm install -C /lib bigint-buffer &&\
+    apk del .build
+COPY --from=builder /app/lib/ ./lib/
 
 EXPOSE 9464
 
-CMD [ "yarn", "start:all" ]
+CMD ["node", "./lib/index.js"]
