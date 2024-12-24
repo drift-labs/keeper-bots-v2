@@ -110,7 +110,7 @@ export class TxThreaded {
 
 		// {@link ./threads/txThread.ts}
 		this.txThreadProcess = spawnChildWithRetry(
-			path.join(__dirname, './threads', txThreadFileName),
+			path.join(__dirname, './bots/common/threads', txThreadFileName),
 			[`--rpc=${rpcEndpoint}`, `--send-tx=false`], // initially disable transactions
 			'txThread',
 			(_msg: Serializable, _sendHandle: SendHandle) => {
