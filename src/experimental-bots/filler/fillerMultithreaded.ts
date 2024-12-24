@@ -75,6 +75,7 @@ import {
 	deserializeNodeToFill,
 	deserializeOrder,
 	getPriorityFeeInstruction,
+	isTsRuntime,
 } from '../filler-common/utils';
 import {
 	CounterValue,
@@ -109,6 +110,8 @@ import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
+import path from 'path';
+
 
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -504,8 +507,9 @@ export class FillerMultithreaded {
 				`--market-type=${this.config.marketType}`,
 				`--market-indexes=${marketIndexes.map(String)}`,
 			];
+			const dlobBuilderFileName = 'dlobBuilder' + isTsRuntime() ? '.ts' : '.js';
 			const dlobBuilderProcess = spawnChild(
-				'./src/experimental-bots/filler-common/dlobBuilder.ts',
+				path.join(__dirname, '../filler-common', dlobBuilderFileName),
 				dlobBuilderArgs,
 				'dlobBuilder',
 				(msg: any) => {
@@ -596,8 +600,10 @@ export class FillerMultithreaded {
 			}
 		};
 
+		const orderSubscriberFileName =
+			'orderSubscriberFiltered' + isTsRuntime() ? '.ts' : '.js';
 		const orderSubscriberProcess = spawnChild(
-			'./src/experimental-bots/filler-common/orderSubscriberFiltered.ts',
+			path.join(__dirname, '../filler-common', orderSubscriberFileName),
 			orderSubscriberArgs,
 			'orderSubscriber',
 			(msg: any) => {
@@ -623,8 +629,10 @@ export class FillerMultithreaded {
 		);
 
 		// Swift Subscriber process
+		const swiftOrderSubscriberFileName =
+			'swiftOrderSubscriber' + isTsRuntime() ? '.ts' : '.js';
 		const swiftOrderSubscriberProcess = spawnChild(
-			'./src/experimental-bots/filler-common/swiftOrderSubscriber.ts',
+			path.join(__dirname, '../filler-common', swiftOrderSubscriberFileName),
 			orderSubscriberArgs,
 			'swiftOrderSubscriber',
 			(msg: any) => {
