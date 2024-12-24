@@ -1518,7 +1518,9 @@ export function getMarketsAndOracleInfosToLoad(
 			if (!perpMarketConfig) {
 				throw new Error(`Perp market config for ${idx} not found`);
 			}
-			const oracleKey = perpMarketConfig.oracle.toBase58();
+			const oracleKey =
+				perpMarketConfig.oracle.toBase58() +
+				getVariant(perpMarketConfig.oracleSource);
 			if (!oraclesTracked.has(oracleKey)) {
 				logger.info(`Tracking oracle ${oracleKey} for perp market ${idx}`);
 				oracleInfos.push({
