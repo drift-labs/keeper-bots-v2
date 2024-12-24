@@ -112,7 +112,6 @@ import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
 import path from 'path';
 
-
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;
 
@@ -507,9 +506,10 @@ export class FillerMultithreaded {
 				`--market-type=${this.config.marketType}`,
 				`--market-indexes=${marketIndexes.map(String)}`,
 			];
-			const dlobBuilderFileName = 'dlobBuilder' + isTsRuntime() ? '.ts' : '.js';
+			const dlobBuilderFileName =
+				'dlobBuilder' + (isTsRuntime() ? '.ts' : '.js');
 			const dlobBuilderProcess = spawnChild(
-				path.join(__dirname, '../filler-common', dlobBuilderFileName),
+				path.join(__dirname, './filler-common', dlobBuilderFileName),
 				dlobBuilderArgs,
 				'dlobBuilder',
 				(msg: any) => {
@@ -601,9 +601,9 @@ export class FillerMultithreaded {
 		};
 
 		const orderSubscriberFileName =
-			'orderSubscriberFiltered' + isTsRuntime() ? '.ts' : '.js';
+			'orderSubscriberFiltered' + (isTsRuntime() ? '.ts' : '.js');
 		const orderSubscriberProcess = spawnChild(
-			path.join(__dirname, '../filler-common', orderSubscriberFileName),
+			path.join(__dirname, './filler-common', orderSubscriberFileName),
 			orderSubscriberArgs,
 			'orderSubscriber',
 			(msg: any) => {
@@ -629,48 +629,52 @@ export class FillerMultithreaded {
 		);
 
 		// Swift Subscriber process
-		const swiftOrderSubscriberFileName =
-			'swiftOrderSubscriber' + isTsRuntime() ? '.ts' : '.js';
-		const swiftOrderSubscriberProcess = spawnChild(
-			path.join(__dirname, '../filler-common', swiftOrderSubscriberFileName),
-			orderSubscriberArgs,
-			'swiftOrderSubscriber',
-			(msg: any) => {
-				switch (msg.type) {
-					case 'swiftOrderParamsMessage':
-						if (msg.data.type === 'swiftOrderParamsMessage') {
-							this.swiftOrderMessages.set(msg.data.uuid, msg.data.swiftOrder);
-							routeMessageToDlobBuilder(msg);
-						} else if (msg.data.type === 'delete') {
-							console.log(`received delete message for ${msg.data.uuid}`);
-							this.swiftOrderMessages.delete(msg.data.uuid);
-						}
-						break;
-					case 'health':
-						this.swiftOrderSubscriberHealth = msg.data.healthy;
-						break;
+		if (this.globalConfig.driftEnv === 'devnet') {
+			const swiftOrderSubscriberFileName =
+				'swiftOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
+			const swiftOrderSubscriberProcess = spawnChild(
+				path.join(__dirname, './filler-common', swiftOrderSubscriberFileName),
+				orderSubscriberArgs,
+				'swiftOrderSubscriber',
+				(msg: any) => {
+					switch (msg.type) {
+						case 'swiftOrderParamsMessage':
+							if (msg.data.type === 'swiftOrderParamsMessage') {
+								this.swiftOrderMessages.set(msg.data.uuid, msg.data.swiftOrder);
+								routeMessageToDlobBuilder(msg);
+							} else if (msg.data.type === 'delete') {
+								console.log(`received delete message for ${msg.data.uuid}`);
+								this.swiftOrderMessages.delete(msg.data.uuid);
+							}
+							break;
+						case 'health':
+							this.swiftOrderSubscriberHealth = msg.data.healthy;
+							break;
+					}
 				}
-			}
-		);
+			);
 
-		swiftOrderSubscriberProcess.on('exit', (code) => {
-			logger.error(`swiftOrderSubscriber exited with code ${code}`);
-			process.exit(code || 1);
-		});
-
-		process.on('SIGINT', () => {
-			logger.info(`${logPrefix} Received SIGINT, killing children`);
-			this.dlobBuilders.forEach((value: DLOBBuilderWithProcess, _: number) => {
-				value.process.kill();
+			swiftOrderSubscriberProcess.on('exit', (code) => {
+				logger.error(`swiftOrderSubscriber exited with code ${code}`);
+				process.exit(code || 1);
 			});
-			orderSubscriberProcess.kill();
-			swiftOrderSubscriberProcess.kill();
-			process.exit(0);
-		});
 
-		logger.info(
-			`swiftOrderSubscriber process spawned with pid: ${swiftOrderSubscriberProcess.pid}`
-		);
+			process.on('SIGINT', () => {
+				logger.info(`${logPrefix} Received SIGINT, killing children`);
+				this.dlobBuilders.forEach(
+					(value: DLOBBuilderWithProcess, _: number) => {
+						value.process.kill();
+					}
+				);
+				orderSubscriberProcess.kill();
+				swiftOrderSubscriberProcess.kill();
+				process.exit(0);
+			});
+
+			logger.info(
+				`swiftOrderSubscriber process spawned with pid: ${swiftOrderSubscriberProcess.pid}`
+			);
+		}
 
 		this.intervalIds.push(
 			setInterval(
