@@ -1,9 +1,7 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
-	BASE_PRECISION,
 	BlockhashSubscriber,
 	BN,
-	BulkAccountLoader,
 	DataAndSlot,
 	decodeUser,
 	DLOBNode,
@@ -12,6 +10,8 @@ import {
 	FeeTier,
 	getOrderSignature,
 	getUserAccountPublicKey,
+	getUserStatsAccountPublicKey,
+	getUserWithoutOrderFilter,
 	isFillableByVAMM,
 	isOneOfVariant,
 	isOrderExpired,
@@ -21,14 +21,14 @@ import {
 	MarketType,
 	NodeToFill,
 	PerpMarkets,
-	PRICE_PRECISION,
 	PriorityFeeSubscriberMap,
 	QUOTE_PRECISION,
 	ReferrerInfo,
+	ReferrerMap,
 	SlotSubscriber,
 	TxSigAndSlot,
 	UserAccount,
-	UserStatsMap,
+	UserMap,
 } from '@drift-labs/sdk';
 import { FillerMultiThreadedConfig, GlobalConfig } from '../../config';
 import { JITO_METRIC_TYPES, BundleSender } from '../../bundleSender';
@@ -54,6 +54,7 @@ import {
 } from '../filler-common/types';
 import { assert } from 'console';
 import {
+	chunks,
 	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
@@ -73,7 +74,6 @@ import {
 	spawnChild,
 	deserializeNodeToFill,
 	deserializeOrder,
-	getUserFeeTier,
 	getPriorityFeeInstruction,
 } from '../filler-common/utils';
 import {
@@ -108,6 +108,7 @@ import {
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
+import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
 
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -121,7 +122,7 @@ const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana
 const MAX_POSITIONS_PER_USER = 8;
 export const SETTLE_POSITIVE_PNL_COOLDOWN_MS = 60_000;
 export const CONFIRM_TX_INTERVAL_MS = 5_000;
-const SIM_CU_ESTIMATE_MULTIPLIER = 1.35;
+const SIM_CU_ESTIMATE_MULTIPLIER = 3;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
 export const TX_CONFIRMATION_BATCH_SIZE = 100;
 export const CACHED_BLOCKHASH_OFFSET = 5;
@@ -177,7 +178,8 @@ export class FillerMultithreaded {
 	private subaccount: number;
 
 	private fillTxId: number = 0;
-	private userStatsMap: UserStatsMap;
+	private userMap: UserMap;
+	private referrerMap: ReferrerMap;
 	private throttledNodes = new Map<string, number>();
 	private fillingNodes = new Map<string, number>();
 	private triggeringNodes = new Map<string, number>();
@@ -191,7 +193,11 @@ export class FillerMultithreaded {
 
 	private dlobHealthy = true;
 	private orderSubscriberHealthy = true;
+	private swiftOrderSubscriberHealth = true;
 	private simulateTxForCUEstimate?: boolean;
+
+	// Swift orders
+	private swiftOrderMessages: Map<number, any> = new Map();
 
 	private intervalIds: NodeJS.Timeout[] = [];
 
@@ -254,6 +260,10 @@ export class FillerMultithreaded {
 	protected latestPythVaas?: Map<string, string>; // priceFeedId -> vaa
 	protected marketIndexesToPriceIds = new Map<number, string>();
 
+	protected pythLazerClient?: PythLazerClient;
+	protected latestPythLazerUpdates?: Map<string, string>; // priceFeedId -> vaa
+	protected marketIndexesToPythLazerGroups?: Map<number, number[]>; // priceFeedId -> vaa
+
 	constructor(
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
@@ -262,6 +272,7 @@ export class FillerMultithreaded {
 		runtimeSpec: RuntimeSpec,
 		bundleSender?: BundleSender,
 		pythPriceSubscriber?: PythPriceFeedSubscriber,
+		pythLazerClient?: PythLazerClient,
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
@@ -290,14 +301,20 @@ export class FillerMultithreaded {
 		}
 		this.lookupTableAccounts = lookupTableAccounts;
 
-		this.userStatsMap = new UserStatsMap(
-			this.driftClient,
-			new BulkAccountLoader(
-				new Connection(this.driftClient.connection.rpcEndpoint),
-				'confirmed',
-				0
-			)
-		);
+		this.userMap = new UserMap({
+			driftClient,
+			fastDecode: true,
+			includeIdle: false,
+			subscriptionConfig: {
+				type: 'websocket',
+				resubTimeoutMs: 10_000,
+				commitment: 'processed',
+			},
+			additionalFilters: [getUserWithoutOrderFilter()],
+			skipInitialLoad: true,
+		});
+		this.referrerMap = new ReferrerMap(this.driftClient, true);
+
 		this.blockhashSubscriber = new BlockhashSubscriber({
 			connection: driftClient.connection,
 		});
@@ -383,6 +400,63 @@ export class FillerMultithreaded {
 			ttl: TX_TIMEOUT_THRESHOLD_MS,
 			ttlResolution: 1000,
 		});
+
+		// Pyth lazer
+		this.pythLazerClient = pythLazerClient;
+		this.latestPythLazerUpdates = new Map();
+		this.marketIndexesToPythLazerGroups = new Map();
+		let subscriptionId = 0;
+		const subscribeToPythLazer = () => {
+			for (const marketIndexes of chunks(this.marketIndexesFlattened, 6)) {
+				const markets = PerpMarkets[this.globalConfig.driftEnv!]
+					.filter((market) => marketIndexes.includes(market.marketIndex))
+					.filter((market) => market.pythLazerId !== undefined);
+				const pythLazerIds = markets.map((m) => m.pythLazerId!);
+				marketIndexes.forEach(
+					(marketIndex) =>
+						this.marketIndexesToPythLazerGroups?.set(marketIndex, pythLazerIds)
+				);
+				this.pythLazerClient?.send({
+					type: 'subscribe',
+					subscriptionId,
+					priceFeedIds: pythLazerIds,
+					properties: ['price'],
+					chains: ['solana'],
+					deliveryFormat: 'json',
+					channel: 'fixed_rate@200ms',
+					jsonBinaryEncoding: 'hex',
+				});
+				subscriptionId++;
+			}
+		};
+
+		if (this.pythLazerClient?.ws.readyState === 1) {
+			subscribeToPythLazer();
+		} else {
+			this.pythLazerClient?.ws.addEventListener('open', () => {
+				subscribeToPythLazer();
+			});
+		}
+
+		this.pythLazerClient?.addMessageListener((message) => {
+			switch (message.type) {
+				case 'json': {
+					if (message.value.type == 'streamUpdated') {
+						if (message.value?.solana?.data) {
+							const data = message.value?.solana?.data;
+							const pythLazerIds = message.value.parsed!.priceFeeds.map(
+								(priceFeed) => priceFeed.priceFeedId
+							);
+							this.latestPythLazerUpdates?.set(
+								JSON.stringify(pythLazerIds),
+								data
+							);
+						}
+					}
+					break;
+				}
+			}
+		});
 	}
 
 	async init() {
@@ -401,6 +475,9 @@ export class FillerMultithreaded {
 		logger.info(
 			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
 		);
+
+		await this.userMap.subscribe();
+		await this.referrerMap.subscribe();
 
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
@@ -541,17 +618,50 @@ export class FillerMultithreaded {
 			process.exit(code || 1);
 		});
 
+		logger.info(
+			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
+		);
+
+		// Swift Subscriber process
+		const swiftOrderSubscriberProcess = spawnChild(
+			'./src/experimental-bots/filler-common/swiftOrderSubscriber.ts',
+			orderSubscriberArgs,
+			'swiftOrderSubscriber',
+			(msg: any) => {
+				switch (msg.type) {
+					case 'swiftOrderParamsMessage':
+						if (msg.data.type === 'swiftOrderParamsMessage') {
+							this.swiftOrderMessages.set(msg.data.uuid, msg.data.swiftOrder);
+							routeMessageToDlobBuilder(msg);
+						} else if (msg.data.type === 'delete') {
+							console.log(`received delete message for ${msg.data.uuid}`);
+							this.swiftOrderMessages.delete(msg.data.uuid);
+						}
+						break;
+					case 'health':
+						this.swiftOrderSubscriberHealth = msg.data.healthy;
+						break;
+				}
+			}
+		);
+
+		swiftOrderSubscriberProcess.on('exit', (code) => {
+			logger.error(`swiftOrderSubscriber exited with code ${code}`);
+			process.exit(code || 1);
+		});
+
 		process.on('SIGINT', () => {
 			logger.info(`${logPrefix} Received SIGINT, killing children`);
 			this.dlobBuilders.forEach((value: DLOBBuilderWithProcess, _: number) => {
 				value.process.kill();
 			});
 			orderSubscriberProcess.kill();
+			swiftOrderSubscriberProcess.kill();
 			process.exit(0);
 		});
 
 		logger.info(
-			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
+			`swiftOrderSubscriber process spawned with pid: ${swiftOrderSubscriberProcess.pid}`
 		);
 
 		this.intervalIds.push(
@@ -725,7 +835,14 @@ export class FillerMultithreaded {
 		if (!this.orderSubscriberHealthy) {
 			logger.error(`${logPrefix} Order subscriber not healthy`);
 		}
-		return this.dlobHealthy && this.orderSubscriberHealthy;
+		if (!this.swiftOrderSubscriberHealth) {
+			logger.error(`${logPrefix} Swift order subscriber not healthy`);
+		}
+		return (
+			this.dlobHealthy &&
+			this.orderSubscriberHealthy &&
+			this.swiftOrderSubscriberHealth
+		);
 	}
 
 	protected recordJitoBundleStats() {
@@ -979,7 +1096,9 @@ export class FillerMultithreaded {
 	}
 
 	private async getPythIxsFromNode(
-		node: NodeToFillWithBuffer | SerializedNodeToTrigger
+		node: NodeToFillWithBuffer | SerializedNodeToTrigger,
+		precedingIdxs: TransactionInstruction[] = [],
+		isSwift = false
 	): Promise<TransactionInstruction[]> {
 		const marketIndex = node.node.order?.marketIndex;
 		if (marketIndex === undefined) {
@@ -998,15 +1117,50 @@ export class FillerMultithreaded {
 		if (!this.pythPriceSubscriber) {
 			throw new Error('Pyth price subscriber not initialized');
 		}
-		const pythIxs = await getAllPythOracleUpdateIxs(
-			this.runtimeSpec.driftEnv as DriftEnv,
-			marketIndex,
-			MarketType.PERP,
-			this.pythPriceSubscriber!,
-			this.driftClient,
-			this.globalConfig.numNonActiveOraclesToPush ?? 0,
-			this.marketIndexesFlattened
-		);
+
+		let pythIxs: TransactionInstruction[] = [];
+		if (
+			isVariant(
+				this.driftClient.getPerpMarketAccount(marketIndex)?.amm.oracleSource,
+				'pythLazer'
+			)
+		) {
+			const pythLazerIds =
+				this.marketIndexesToPythLazerGroups?.get(marketIndex);
+			if (!pythLazerIds) {
+				logger.error(
+					`Pyth lazer ids not found for marketIndex: ${marketIndex}`
+				);
+				return pythIxs;
+			}
+
+			const latestLazerUpdate = this.latestPythLazerUpdates?.get(
+				JSON.stringify(pythLazerIds)
+			);
+			if (!latestLazerUpdate) {
+				logger.error(
+					`Latest lazer update not found for marketIndex: ${marketIndex}, pythLazerIds: ${pythLazerIds}`
+				);
+				return pythIxs;
+			}
+
+			pythIxs = await this.driftClient.getPostPythLazerOracleUpdateIxs(
+				pythLazerIds,
+				latestLazerUpdate,
+				precedingIdxs
+			);
+		} else if (!isSwift) {
+			pythIxs = await getAllPythOracleUpdateIxs(
+				this.runtimeSpec.driftEnv as DriftEnv,
+				marketIndex,
+				MarketType.PERP,
+				this.pythPriceSubscriber!,
+				this.driftClient,
+				this.globalConfig.numNonActiveOraclesToPush ?? 0,
+				this.marketIndexesFlattened
+			);
+		}
+
 		return pythIxs;
 	}
 
@@ -1259,7 +1413,11 @@ export class FillerMultithreaded {
 
 			let removeLastIxPostSim = this.revertOnFailure;
 			if (this.pythPriceSubscriber) {
-				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
+				const pythIxs = await this.getPythIxsFromNode(
+					nodeToTrigger,
+					ixs,
+					false
+				);
 				ixs.push(...pythIxs);
 				// do not strip the last ix if we have pyth ixs
 				removeLastIxPostSim = false;
@@ -1291,6 +1449,7 @@ export class FillerMultithreaded {
 				);
 
 				if (this.revertOnFailure) {
+					console.log(user.userAccountPublicKey.toString());
 					ixs.push(
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
@@ -1405,6 +1564,7 @@ export class FillerMultithreaded {
 		const deserializedNodesToFill = serializedNodesToFill.map(
 			deserializeNodeToFill
 		);
+		// console.log(deserializedNodesToFill);
 
 		const seenFillableNodes = new Set<string>();
 		const filteredFillableNodes = deserializedNodesToFill.filter((node) => {
@@ -1546,7 +1706,27 @@ export class FillerMultithreaded {
 		fillTxId: number,
 		nodeToFill: NodeToFillWithBuffer
 	): Promise<boolean> {
+		const ixs = [
+			ComputeBudgetProgram.setComputeUnitLimit({
+				units: 1_400_000, // will be overridden by simulateTx
+			}),
+		];
+
 		try {
+			const priorityFeePrice = Math.floor(
+				this.priorityFeeSubscriber.getPriorityFees(
+					'perp',
+					nodeToFill.node.order!.marketIndex!
+				)!.high * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+			);
+			const buildForBundle = this.shouldBuildForBundle();
+
+			if (buildForBundle) {
+				ixs.push(this.bundleSender!.getTipIx());
+			} else {
+				ixs.push(getPriorityFeeInstruction(priorityFeePrice));
+			}
+
 			const {
 				makerInfos,
 				takerUser,
@@ -1554,10 +1734,55 @@ export class FillerMultithreaded {
 				takerUserSlot,
 				referrerInfo,
 				marketType,
-				fillerRewardEstimate,
+				takerStatsPubKey,
+				isSwift,
+				authority,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			const buildForBundle = this.shouldBuildForBundle();
+			let removeLastIxPostSim = this.revertOnFailure;
+			if (
+				this.pythPriceSubscriber &&
+				((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)
+			) {
+				const pythIxs = await this.getPythIxsFromNode(nodeToFill, ixs, isSwift);
+				ixs.push(...pythIxs);
+				removeLastIxPostSim = false;
+			}
+
+			logMessageForNodeToFill(
+				nodeToFill,
+				takerUserPubKey,
+				takerUserSlot,
+				makerInfos,
+				this.slotSubscriber.getSlot(),
+				fillTxId,
+				'multiMakerFill',
+				this.revertOnFailure ?? false,
+				removeLastIxPostSim ?? false
+			);
+
+			if (!isVariant(marketType, 'perp')) {
+				throw new Error('expected perp market type');
+			}
+
+			if (isSwift) {
+				const swiftOrderMessageParams = this.swiftOrderMessages.get(
+					nodeToFill.node.order!.orderId
+				);
+				ixs.push(
+					...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
+						Buffer.from(swiftOrderMessageParams['order_message'], 'base64'),
+						Buffer.from(swiftOrderMessageParams['order_signature'], 'base64'),
+						nodeToFill.node.order!.marketIndex,
+						{
+							taker: new PublicKey(takerUserPubKey),
+							takerStats: takerStatsPubKey,
+							takerUserAccount: takerUser,
+						},
+						authority
+					))
+				);
+			}
 			let makerInfosToUse = makerInfos;
 
 			const buildTxWithMakerInfos = async (
@@ -1594,14 +1819,7 @@ export class FillerMultithreaded {
 				if (buildForBundle) {
 					ixs.push(this.bundleSender!.getTipIx());
 				} else {
-					ixs.push(
-						getPriorityFeeInstruction(
-							priorityFeePrice,
-							this.driftClient.getOracleDataForPerpMarket(0).price,
-							this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
-							this.globalConfig.priorityFeeMultiplier
-						)
-					);
+					ixs.push(getPriorityFeeInstruction(priorityFeePrice));
 				}
 
 				logMessageForNodeToFill(
@@ -1624,14 +1842,15 @@ export class FillerMultithreaded {
 					await this.driftClient.getFillPerpOrderIx(
 						await getUserAccountPublicKey(
 							this.driftClient.program.programId,
-							takerUser.authority,
-							takerUser.subAccountId
+							takerUser!.authority,
+							takerUser!.subAccountId
 						),
-						takerUser,
+						takerUser!,
 						nodeToFill.node.order!,
 						makers.map((m) => m.data),
 						referrerInfo,
-						this.subaccount
+						this.subaccount,
+						isSwift
 					)
 				);
 
@@ -1639,6 +1858,7 @@ export class FillerMultithreaded {
 				const user = this.driftClient.getUser(this.subaccount);
 
 				if (this.revertOnFailure) {
+					console.log(user.userAccountPublicKey.toString());
 					ixs.push(
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
@@ -1663,7 +1883,7 @@ export class FillerMultithreaded {
 								takerUser.perpPositions.length + takerUser.spotPositions.length
 							}
 							marketIndex: ${nodeToFill.node.order!.marketIndex}
-							taker has position in market: ${takerUser.perpPositions.some(
+							taker has position in market: ${takerUser!.perpPositions.some(
 								(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
 							)}
 							makers have position in market: ${makerInfos.some((maker) =>
@@ -1795,6 +2015,13 @@ export class FillerMultithreaded {
 				units: 1_400_000,
 			}),
 		];
+
+		if (buildForBundle) {
+			ixs.push(this.bundleSender!.getTipIx());
+		} else {
+			ixs.push(getPriorityFeeInstruction(priorityFeePrice));
+		}
+
 		const fillTxId = this.fillTxId++;
 
 		const {
@@ -1804,27 +2031,16 @@ export class FillerMultithreaded {
 			takerUserSlot,
 			referrerInfo,
 			marketType,
-			fillerRewardEstimate,
+			takerStatsPubKey,
+			isSwift,
+			authority,
 		} = await this.getNodeFillInfo(nodeToFill);
 
 		let removeLastIxPostSim = this.revertOnFailure;
 		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
-			const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+			const pythIxs = await this.getPythIxsFromNode(nodeToFill, ixs, isSwift);
 			ixs.push(...pythIxs);
 			removeLastIxPostSim = false;
-		}
-
-		if (buildForBundle) {
-			ixs.push(this.bundleSender!.getTipIx());
-		} else {
-			ixs.push(
-				getPriorityFeeInstruction(
-					priorityFeePrice,
-					this.driftClient.getOracleDataForPerpMarket(0).price,
-					this.config.bidToFillerReward ? fillerRewardEstimate : undefined,
-					this.globalConfig.priorityFeeMultiplier
-				)
-			);
 		}
 
 		logMessageForNodeToFill(
@@ -1843,22 +2059,38 @@ export class FillerMultithreaded {
 			throw new Error('expected perp market type');
 		}
 
-		const ix = await this.driftClient.getFillPerpOrderIx(
-			await getUserAccountPublicKey(
-				this.driftClient.program.programId,
-				takerUser.authority,
-				takerUser.subAccountId
-			),
-			takerUser,
+		if (isSwift) {
+			const swiftOrderMessageParams = this.swiftOrderMessages.get(
+				nodeToFill.node.order!.orderId
+			);
+			ixs.push(
+				...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
+					Buffer.from(swiftOrderMessageParams['order_message'], 'base64'),
+					Buffer.from(swiftOrderMessageParams['order_signature'], 'base64'),
+					nodeToFill.node.order!.marketIndex,
+					{
+						taker: new PublicKey(takerUserPubKey),
+						takerStats: takerStatsPubKey,
+						takerUserAccount: takerUser,
+					},
+					authority
+				))
+			);
+		}
+		const fillIx = await this.driftClient.getFillPerpOrderIx(
+			new PublicKey(nodeToFill.node.userAccount!),
+			takerUser!,
 			nodeToFill.node.order!,
 			makerInfos.map((m) => m.data),
 			referrerInfo,
-			this.subaccount
+			this.subaccount,
+			isSwift
 		);
+		ixs.push(fillIx);
 
-		ixs.push(ix);
 		const user = this.driftClient.getUser(this.subaccount);
 		if (this.revertOnFailure) {
+			console.log(user.userAccountPublicKey.toString());
 			ixs.push(
 				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 			);
@@ -1866,28 +2098,36 @@ export class FillerMultithreaded {
 
 		const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
 		if (txSize > PACKET_DATA_SIZE) {
-			logger.info(`tx too large, removing pyth ixs.
-						keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
-						total number of maker positions: ${makerInfos.reduce(
-							(acc, maker) =>
-								acc +
-								(maker.data.makerUserAccount.perpPositions.length +
-									maker.data.makerUserAccount.spotPositions.length),
-							0
-						)}
-						total taker positions: ${
-							takerUser.perpPositions.length + takerUser.spotPositions.length
-						}
-						marketIndex: ${nodeToFill.node.order!.marketIndex}
-						taker has position in market: ${takerUser.perpPositions.some(
-							(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
-						)}
-						makers have position in market: ${makerInfos.some((maker) =>
-							maker.data.makerUserAccount.perpPositions.some(
-								(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
-							)
-						)}
-						`);
+			const lutAccounts = this.lookupTableAccounts[0].state.addresses.map((a) =>
+				a.toBase58()
+			);
+			logger.info(`tx too large: ${txSize} bytes, removing pyth ixs.
+				keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
+				keys not in LUT: ${ixs
+					.map((ix) => ix.keys.map((key) => key.pubkey.toString()))
+					.flat()
+					.filter((key) => !lutAccounts.includes(key))}
+				total number of maker positions: ${makerInfos.reduce(
+					(acc, maker) =>
+						acc +
+						(maker.data.makerUserAccount.perpPositions.length +
+							maker.data.makerUserAccount.spotPositions.length),
+					0
+				)}
+				total taker positions: ${
+					takerUser.perpPositions.length + takerUser.spotPositions.length
+				}
+				marketIndex: ${nodeToFill.node.order!.marketIndex}
+				taker has position in market: ${takerUser.perpPositions.some(
+					(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
+				)}
+				makers have position in market: ${makerInfos.some((maker) =>
+					maker.data.makerUserAccount.perpPositions.some(
+						(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
+					)
+				)}
+				`);
+
 			ixs = removePythIxs(ixs);
 		}
 
@@ -2260,10 +2500,12 @@ export class FillerMultithreaded {
 		makerInfos: Array<DataAndSlot<MakerInfo>>;
 		takerUserPubKey: string;
 		takerUser: UserAccount;
+		takerStatsPubKey: PublicKey;
 		takerUserSlot: number;
 		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
-		fillerRewardEstimate: BN;
+		isSwift: boolean | undefined;
+		authority?: PublicKey;
 	}> {
 		const makerInfos: Array<DataAndSlot<MakerInfo>> = [];
 
@@ -2299,9 +2541,10 @@ export class FillerMultithreaded {
 					Buffer.from(makerInfoMap.get(makerAccount)!.data)
 				);
 				const makerAuthority = makerUserAccount.authority;
-				const makerUserStats = (
-					await this.userStatsMap!.mustGet(makerAuthority.toString())
-				).userStatsAccountPublicKey;
+				const makerUserStats = getUserStatsAccountPublicKey(
+					this.driftClient.program.programId,
+					new PublicKey(makerAuthority)
+				);
 				makerInfos.push({
 					slot: this.slotSubscriber.getSlot(),
 					data: {
@@ -2315,39 +2558,38 @@ export class FillerMultithreaded {
 		}
 
 		const takerUserPubKey = nodeToFill.node.userAccount!.toString();
-		const takerUserAccount = decodeUser(
-			// @ts-ignore
-			Buffer.from(nodeToFill.userAccountData.data)
-		);
-		const referrerInfo = (
-			await this.userStatsMap!.mustGet(takerUserAccount.authority.toString())
-		).getReferrerInfo();
 
-		const fillerReward = this.calculateFillerRewardEstimate(
-			getUserFeeTier(
-				MarketType.PERP,
-				this.driftClient.getStateAccount(),
-				(
-					await this.userStatsMap.mustGet(takerUserAccount.authority.toString())
-				).getAccount()
-			),
-			// eslint-disable-next-line @typescript-eslint/no-non-null-asserted-optional-chain
-			nodeToFill.node
-				.order!.price.mul(nodeToFill.node.order!.baseAssetAmount)
-				.mul(QUOTE_PRECISION)
-				.div(PRICE_PRECISION)
-				.div(BASE_PRECISION)
-				.sub(nodeToFill.node.order!.quoteAssetAmountFilled)
-		);
+		// @ts-ignore
+		const takerUserAccount = nodeToFill.userAccountData?.data
+			? decodeUser(
+					// @ts-ignore
+					Buffer.from(nodeToFill.userAccountData.data)
+			  )
+			: (await this.userMap.mustGet(takerUserPubKey)).getUserAccount();
+
+		const authority = nodeToFill.authority
+			? nodeToFill.authority
+			: getUserStatsAccountPublicKey(
+					this.driftClient.program.programId,
+					takerUserAccount!.authority
+			  ).toString();
+		const referrerInfo = await this.referrerMap.mustGet(authority);
 
 		return Promise.resolve({
 			makerInfos,
 			takerUserPubKey,
 			takerUser: takerUserAccount,
+			takerStatsPubKey: getUserStatsAccountPublicKey(
+				this.driftClient.program.programId,
+				new PublicKey(authority)
+			),
 			takerUserSlot: this.slotSubscriber.getSlot(),
 			referrerInfo,
 			marketType: nodeToFill.node.order!.marketType,
-			fillerRewardEstimate: fillerReward,
+			isSwift: nodeToFill.node.isSwift,
+			authority: nodeToFill.authority
+				? new PublicKey(nodeToFill.authority)
+				: undefined,
 		});
 	}
 

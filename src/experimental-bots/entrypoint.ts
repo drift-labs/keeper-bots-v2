@@ -39,6 +39,8 @@ import { setGlobalDispatcher, Agent } from 'undici';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { SwiftMaker } from './swift/makerExample';
 import { SwiftTaker } from './swift/takerExample';
+import * as net from 'net';
+import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
 
 setGlobalDispatcher(
 	new Agent({
@@ -307,6 +309,19 @@ const runBot = async () => {
 			throw new Error('fillerMultithreaded bot config not found');
 		}
 
+		let pythLazerClient: PythLazerClient | undefined;
+		if (config.global.driftEnv! === 'devnet') {
+			if (!config.global.lazerEndpoint || !config.global.lazerToken) {
+				throw new Error(
+					'Must set environment variables LAZER_ENDPOINT and LAZER_TOKEN'
+				);
+			}
+			pythLazerClient = new PythLazerClient(
+				config.global.lazerEndpoint,
+				config.global.lazerToken
+			);
+		}
+
 		// Ensure that there are no duplicate market indexes in the Array<number[]> marketIndexes config
 		const marketIndexes = new Set<number>();
 		for (const marketIndexList of config.botConfigs.fillerMultithreaded
@@ -335,6 +350,7 @@ const runBot = async () => {
 			},
 			bundleSender,
 			pythPriceSubscriber,
+			pythLazerClient,
 			[]
 		);
 		bots.push(fillerMultithreaded);
@@ -423,46 +439,50 @@ const runBot = async () => {
 
 	// start http server listening to /health endpoint using http package
 	const startupTime = Date.now();
-	http
-		.createServer(async (req, res) => {
-			if (req.url === '/health') {
-				if (config.global.testLiveness) {
-					if (Date.now() > startupTime + 60 * 1000) {
-						res.writeHead(500);
-						res.end('Testing liveness test fail');
-						return;
-					}
-				}
-
-				/* @ts-ignore */
-				if (!driftClient.connection._rpcWebSocketConnected) {
-					logger.error(`Connection rpc websocket disconnected`);
+	const createServerCallback = async (req: any, res: any) => {
+		if (req.url === '/health') {
+			if (config.global.testLiveness) {
+				if (Date.now() > startupTime + 60 * 1000) {
 					res.writeHead(500);
-					res.end(`Connection rpc websocket disconnected`);
+					res.end('Testing liveness test fail');
 					return;
 				}
-
-				// check all bots if they're live
-				for (const bot of bots) {
-					const healthCheck = await promiseTimeout(bot.healthCheck(), 1000);
-					if (!healthCheck) {
-						logger.error(`Health check failed for bot`);
-						res.writeHead(503);
-						res.end(`Bot is not healthy`);
-						return;
-					}
-				}
-
-				// liveness check passed
-				res.writeHead(200);
-				res.end('OK');
-			} else {
-				res.writeHead(404);
-				res.end('Not found');
 			}
-		})
-		.listen(healthCheckPort);
-	logger.info(`Health check server listening on port ${healthCheckPort}`);
+
+			/* @ts-ignore */
+			if (!driftClient.connection._rpcWebSocketConnected) {
+				logger.error(`Connection rpc websocket disconnected`);
+				res.writeHead(500);
+				res.end(`Connection rpc websocket disconnected`);
+				return;
+			}
+
+			// check all bots if they're live
+			for (const bot of bots) {
+				const healthCheck = await promiseTimeout(bot.healthCheck(), 1000);
+				if (!healthCheck) {
+					logger.error(`Health check failed for bot`);
+					res.writeHead(503);
+					res.end(`Bot is not healthy`);
+					return;
+				}
+			}
+
+			// liveness check passed
+			res.writeHead(200);
+			res.end('OK');
+		} else {
+			res.writeHead(404);
+			res.end('Not found');
+		}
+	};
+
+	let healthCheckPortToUse = Number(healthCheckPort);
+	while (await isPortInUse(healthCheckPortToUse)) {
+		healthCheckPortToUse++;
+	}
+	http.createServer(createServerCallback).listen(healthCheckPortToUse);
+	logger.info(`Server listening on port ${healthCheckPortToUse}`);
 };
 
 recursiveTryCatch(() => runBot());
@@ -475,4 +495,27 @@ async function recursiveTryCatch(f: () => void) {
 		await sleepMs(15000);
 		await recursiveTryCatch(f);
 	}
+}
+
+function isPortInUse(port: number, host = '127.0.0.1'): Promise<boolean> {
+	return new Promise((resolve) => {
+		const server = net.createServer();
+
+		server.once('error', (err) => {
+			if (
+				err.name?.includes('EADDRINUSE') ||
+				err.message?.includes('EADDRINUSE')
+			) {
+				resolve(true);
+			} else {
+				resolve(false);
+			}
+		});
+
+		server.once('listening', () => {
+			server.close(() => resolve(false));
+		});
+
+		server.listen(port, host);
+	});
 }

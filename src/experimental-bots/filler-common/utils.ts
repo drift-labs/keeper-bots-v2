@@ -24,17 +24,10 @@ import {
 	UserStatsAccount,
 	isVariant,
 	StateAccount,
-	PRICE_PRECISION,
 	DriftEnv,
-	isUserProtectedMaker,
-	decodeUser,
+	SwiftOrderNode,
 } from '@drift-labs/sdk';
-import {
-	ComputeBudgetProgram,
-	Connection,
-	LAMPORTS_PER_SOL,
-	PublicKey,
-} from '@solana/web3.js';
+import { ComputeBudgetProgram, Connection, PublicKey } from '@solana/web3.js';
 import {
 	SerializedUserAccount,
 	SerializedOrder,
@@ -244,23 +237,27 @@ const serializeTriggerOrderNode = (
 
 export const serializeNodeToFill = (
 	node: NodeToFillWithContext,
-	userAccountData: Buffer,
-	makerAccountDatas: Map<string, Buffer>
+	makerAccountDatas: Map<string, Buffer>,
+	isUserProtectedMaker: boolean,
+	userAccountData?: Buffer,
+	authority?: string
 ): SerializedNodeToFill => {
 	return {
-		node: serializeDLOBNode(node.node, userAccountData),
+		node: serializeDLOBNode(node.node, isUserProtectedMaker, userAccountData),
 		makerNodes: node.makerNodes.map((node) => {
 			// @ts-ignore
 			return serializeDLOBNode(node, makerAccountDatas.get(node.userAccount));
 		}),
 		fallbackAskSource: node.fallbackAskSource,
 		fallbackBidSource: node.fallbackBidSource,
+		authority,
 	};
 };
 
 const serializeDLOBNode = (
 	node: DLOBNode,
-	userAccountData: Buffer
+	isUserProtectedMaker: boolean,
+	userAccountData?: Buffer
 ): SerializedDLOBNode => {
 	if (node instanceof OrderNode) {
 		return {
@@ -271,6 +268,8 @@ const serializeDLOBNode = (
 			sortValue: node.sortValue.toString('hex'),
 			haveFilled: node.haveFilled,
 			haveTrigger: 'haveTrigger' in node ? node.haveTrigger : undefined,
+			isSwift: 'isSwift' in node ? node.isSwift : undefined,
+			isUserProtectedMaker,
 		};
 	} else {
 		throw new Error(
@@ -298,37 +297,40 @@ export const deserializeNodeToFill = (
 		makerNodes: serializedNode.makerNodes.map(deserializeDLOBNode),
 		fallbackAskSource: serializedNode.fallbackAskSource,
 		fallbackBidSource: serializedNode.fallbackBidSource,
+		authority: serializedNode.authority,
 	};
 	return node;
 };
 
 const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
-	// @ts-ignore
-	const userAccount = decodeUser(Buffer.from(node.userAccountData.data));
 	const order = deserializeOrder(node.order);
-	const isProtectedMaker = isUserProtectedMaker(userAccount);
-
 	switch (node.type) {
 		case 'TakingLimitOrderNode':
 			return new TakingLimitOrderNode(
 				order,
 				node.userAccount,
-				isProtectedMaker
+				node.isUserProtectedMaker
 			);
 		case 'RestingLimitOrderNode':
 			return new RestingLimitOrderNode(
 				order,
 				node.userAccount,
-				isProtectedMaker
+				node.isUserProtectedMaker
 			);
 		case 'FloatingLimitOrderNode':
 			return new FloatingLimitOrderNode(
 				order,
 				node.userAccount,
-				isProtectedMaker
+				node.isUserProtectedMaker
 			);
 		case 'MarketOrderNode':
-			return new MarketOrderNode(order, node.userAccount, isProtectedMaker);
+			return new MarketOrderNode(
+				order,
+				node.userAccount,
+				node.isUserProtectedMaker
+			);
+		case 'SwiftOrderNode':
+			return new SwiftOrderNode(order, node.userAccount);
 		default:
 			throw new Error(`Invalid node type: ${node.type}`);
 	}
@@ -464,28 +466,8 @@ export const spawnChild = (
 	return child;
 };
 
-export const getPriorityFeeInstruction = (
-	priorityFeeMicroLamports: number,
-	solPrice: BN,
-	fillerRewardEstimate?: BN,
-	feeMultiplier = 1.0
-) => {
-	let microLamports = priorityFeeMicroLamports;
-	if (fillerRewardEstimate !== undefined) {
-		const fillerRewardMicroLamports = Math.floor(
-			fillerRewardEstimate
-				.mul(PRICE_PRECISION)
-				.mul(new BN(LAMPORTS_PER_SOL))
-				.div(solPrice)
-				.div(QUOTE_PRECISION)
-				.toNumber() * feeMultiplier
-		);
-		logger.info(`
-			fillerRewardEstimate microLamports: ${fillerRewardMicroLamports}
-			priority fee subscriber micro lamports: ${priorityFeeMicroLamports}`);
-
-		microLamports = Math.max(microLamports, fillerRewardMicroLamports);
-	}
+export const getPriorityFeeInstruction = (priorityFeeMicroLamports: number) => {
+	const microLamports = priorityFeeMicroLamports;
 	return ComputeBudgetProgram.setComputeUnitPrice({
 		microLamports,
 	});
