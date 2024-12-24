@@ -9,16 +9,16 @@ const commonConfig = {
     // minify: true, makes messy debug/error output
     treeShaking: true,
     legalComments: 'none',
-    mainFields: ['module', 'main'],
     metafile: true,
     format: 'cjs',
     external: [
-        'bigint-buffer'
+        'bigint-buffer',
+        '@triton-one/yellowstone-grpc'
     ]
 };
 
 (async () => {
-    let entryPoints = await glob("./src/*.ts", { filesOnly: true });
+    let entryPoints = await glob("./src/**/*.ts");
     await esbuild.build({
         ...commonConfig,
         entryPoints,
