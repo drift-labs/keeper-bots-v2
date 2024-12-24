@@ -365,7 +365,8 @@ export class MakerBidAskTwapCrank implements Bot {
 
 	private async buildTransaction(
 		marketIndex: number,
-		ixs: TransactionInstruction[]
+		ixs: TransactionInstruction[],
+		doSimulation = true
 	): Promise<VersionedTransaction | undefined> {
 		const recentBlockhash =
 			await this.driftClient.connection.getLatestBlockhash('confirmed');
@@ -377,7 +378,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				lookupTableAccounts: this.lookupTableAccounts,
 				cuLimitMultiplier: CU_EST_MULTIPLIER,
 				minCuLimit: TWAP_CRANK_MIN_CU,
-				doSimulation: true,
+				doSimulation,
 				recentBlockhash: recentBlockhash.blockhash,
 			});
 		logger.info(
@@ -390,7 +391,11 @@ export class MakerBidAskTwapCrank implements Bot {
 					simResult.simError
 				)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
 			);
-			handleSimResultError(simResult, [], `[${this.name}]`);
+			handleSimResultError(
+				simResult,
+				[],
+				`[${this.name}] (market: ${marketIndex})`
+			);
 			return;
 		} else {
 			return simResult.tx;
@@ -472,9 +477,15 @@ export class MakerBidAskTwapCrank implements Bot {
 			let txsToBundle: VersionedTransaction[] = [];
 
 			for (const mi of crankMarkets) {
+				const usingSwitchboardOnDemand = isVariant(
+					this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+					'switchboardOnDemand'
+				);
 				const ixs = [
 					ComputeBudgetProgram.setComputeUnitLimit({
-						units: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
+						units: usingSwitchboardOnDemand
+							? 350_000 // switchboard simulation is unreliable, use hardcoded CU limit
+							: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
 					}),
 				];
 
@@ -543,12 +554,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
 					ixs.push(...pythIxs);
 					pythIxsPushed = true;
-				} else if (
-					isVariant(
-						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-						'switchboardOnDemand'
-					)
-				) {
+				} else if (usingSwitchboardOnDemand) {
 					const switchboardIx =
 						await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
 							this.driftClient.getPerpMarketAccount(mi)!.amm.oracle,
@@ -592,7 +598,11 @@ export class MakerBidAskTwapCrank implements Bot {
 					if (isFirstTxInBundle) {
 						ixs.push(this.bundleSender!.getTipIx());
 					}
-					const txToSend = await this.buildTransaction(mi, ixs);
+					const txToSend = await this.buildTransaction(
+						mi,
+						ixs,
+						!usingSwitchboardOnDemand
+					);
 					if (txToSend) {
 						// @ts-ignore;
 						txToSend.sign(jitoSigners);
@@ -601,7 +611,11 @@ export class MakerBidAskTwapCrank implements Bot {
 						logger.error(`[${this.name}] failed to build tx for market: ${mi}`);
 					}
 				} else {
-					const txToSend = await this.buildTransaction(mi, ixs);
+					const txToSend = await this.buildTransaction(
+						mi,
+						ixs,
+						!usingSwitchboardOnDemand
+					);
 					if (txToSend) {
 						await this.sendSingleTx(mi, txToSend);
 					} else {

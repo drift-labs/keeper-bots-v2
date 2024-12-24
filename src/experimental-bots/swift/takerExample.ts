@@ -1,11 +1,12 @@
 import {
-	BASE_PRECISION,
 	DriftClient,
 	getMarketOrderParams,
 	isVariant,
 	MarketType,
 	PositionDirection,
 	digestSignature,
+	generateSwiftUuid,
+	BN,
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
 import * as axios from 'axios';
@@ -35,7 +36,7 @@ export class SwiftTaker {
 	}
 
 	async startInterval() {
-		const marketIndexes = [0, 1, 2, 3, 4, 5, 6];
+		const marketIndexes = [0, 1, 2, 3, 5, 6];
 		this.interval = setInterval(async () => {
 			await sleepMs(Math.random() * 1000); // Randomize for different grafana metrics
 			const slot = await this.driftClient.connection.getSlot();
@@ -55,14 +56,18 @@ export class SwiftTaker {
 					marketIndex,
 					marketType: MarketType.PERP,
 					direction,
-					baseAssetAmount: BASE_PRECISION,
+					baseAssetAmount:
+						this.driftClient.getPerpMarketAccount(marketIndex)!.amm
+							.minOrderSize,
 					auctionStartPrice: isVariant(direction, 'long')
 						? lowPrice
 						: highPrice,
 					auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
-					auctionDuration: 30,
+					auctionDuration: 200,
 				}),
 				subAccountId: 0,
+				slot: new BN(slot),
+				uuid: generateSwiftUuid(),
 				stopLossOrderParams: null,
 				takeProfitOrderParams: null,
 			};

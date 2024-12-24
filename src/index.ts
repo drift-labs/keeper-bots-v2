@@ -75,6 +75,7 @@ import { webhookMessage } from './webhook';
 import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 import { PythCrankerBot } from './bots/pythCranker';
 import { SwitchboardCrankerBot } from './bots/switchboardCranker';
+import { PythLazerCrankerBot } from './bots/pythLazerCranker';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -342,6 +343,7 @@ const runBot = async () => {
 			confirmationStrategy,
 			additionalConnections,
 			trackTxLandRate: config.global.trackTxLandRate,
+			throwOnTimeoutError: false,
 		});
 	} else if (txSenderType === 'while-valid') {
 		txSender = new WhileValidTxSender({
@@ -368,6 +370,7 @@ const runBot = async () => {
 			skipConfirmation,
 			additionalConnections,
 			trackTxLandRate: config.global.trackTxLandRate,
+			throwOnTimeoutError: false,
 		});
 	}
 
@@ -555,6 +558,19 @@ const runBot = async () => {
 			new PythCrankerBot(
 				config.global,
 				config.botConfigs!.pythCranker!,
+				driftClient,
+				priorityFeeSubscriber,
+				bundleSender,
+				[]
+			)
+		);
+	}
+	if (configHasBot(config, 'pythLazerCranker')) {
+		needPriorityFeeSubscriber = true;
+		bots.push(
+			new PythLazerCrankerBot(
+				config.global,
+				config.botConfigs!.pythLazerCranker!,
 				driftClient,
 				priorityFeeSubscriber,
 				bundleSender,
