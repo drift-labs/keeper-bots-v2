@@ -463,7 +463,12 @@ export class SpotFillerMultithreaded {
 			const dlobBuilderFileName =
 				'dlobBuilder' + (isTsRuntime() ? '.ts' : '.js');
 			const dlobBuilderProcess = spawnChild(
-				path.join(__dirname, './filler-common', dlobBuilderFileName),
+				path.join(
+					__dirname,
+					isTsRuntime() ? '..' : '.',
+					'filler-common',
+					dlobBuilderFileName
+				),
 				dlobBuilderArgs,
 				'dlobBuilder',
 				(msg: any) => {
@@ -557,7 +562,12 @@ export class SpotFillerMultithreaded {
 		const orderSubscriberFileName =
 			'orderSubscriberFiltered' + (isTsRuntime() ? '.ts' : '.js');
 		const orderSubscriberProcess = spawnChild(
-			path.join(__dirname, './filler-common', orderSubscriberFileName),
+			path.join(
+				__dirname,
+				isTsRuntime() ? '..' : '.',
+				'filler-common',
+				orderSubscriberFileName
+			),
 			orderSubscriberArgs,
 			'orderSubscriber',
 			(msg: any) => {
