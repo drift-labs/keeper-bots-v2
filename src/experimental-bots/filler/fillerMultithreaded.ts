@@ -482,13 +482,7 @@ export class FillerMultithreaded {
 			const dlobBuilderFileName =
 				'dlobBuilder' + (isTsRuntime() ? '.ts' : '.js');
 			const dlobBuilderProcess = spawnChild(
-				path.join(
-					process.cwd(),
-					'src',
-					'experimental-bots',
-					'filler-common',
-					dlobBuilderFileName
-				),
+				path.join(__dirname, '../filler-common', dlobBuilderFileName),
 				dlobBuilderArgs,
 				'dlobBuilder',
 				(msg: any) => {
@@ -582,13 +576,7 @@ export class FillerMultithreaded {
 		const orderSubscriberFileName =
 			'orderSubscriberFiltered' + (isTsRuntime() ? '.ts' : '.js');
 		const orderSubscriberProcess = spawnChild(
-			path.join(
-				process.cwd(),
-				'src',
-				'experimental-bots',
-				'filler-common',
-				orderSubscriberFileName
-			),
+			path.join(__dirname, '../filler-common', orderSubscriberFileName),
 			orderSubscriberArgs,
 			'orderSubscriber',
 			(msg: any) => {
@@ -618,13 +606,7 @@ export class FillerMultithreaded {
 			const swiftOrderSubscriberFileName =
 				'swiftOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
 			const swiftOrderSubscriberProcess = spawnChild(
-				path.join(
-					process.cwd(),
-					'src',
-					'experimental-bots',
-					'filler-common',
-					swiftOrderSubscriberFileName
-				),
+				path.join(__dirname, '../filler-common', swiftOrderSubscriberFileName),
 				orderSubscriberArgs,
 				'swiftOrderSubscriber',
 				(msg: any) => {
