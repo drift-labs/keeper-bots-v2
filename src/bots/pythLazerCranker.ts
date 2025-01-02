@@ -5,10 +5,7 @@ import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSo
 import {
 	BlockhashSubscriber,
 	DriftClient,
-	getOracleClient,
 	getPythLazerOraclePublicKey,
-	OracleClient,
-	OracleSource,
 	PriorityFeeSubscriber,
 	TxSigAndSlot,
 } from '@drift-labs/sdk';
@@ -19,7 +16,7 @@ import {
 } from '@solana/web3.js';
 import { chunks, simulateAndGetTxWithCUs, sleepMs } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
-import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
+import { PythLazerSubscriber } from '../pythLazerSubscriber';
 
 setGlobalDispatcher(
 	new Agent({
@@ -30,20 +27,16 @@ setGlobalDispatcher(
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.5;
 
 export class PythLazerCrankerBot implements Bot {
-	private wsClient: PythLazerClient;
-	private pythOracleClient: OracleClient;
+	private pythLazerClient: PythLazerSubscriber;
 	readonly decodeFunc: (name: string, data: Buffer) => PriceUpdateAccount;
 
 	public name: string;
 	public dryRun: boolean;
 	private intervalMs: number;
-	private feedIdChunkToPriceMessage: Map<number[], string> = new Map();
 	public defaultIntervalMs = 30_000;
 
 	private blockhashSubscriber: BlockhashSubscriber;
 	private health: boolean = true;
-	private slotStalenessThresholdRestart: number = 300;
-	private txSuccessRateThreshold: number = 0.5;
 
 	constructor(
 		private globalConfig: GlobalConfig,
@@ -64,16 +57,20 @@ export class PythLazerCrankerBot implements Bot {
 			throw new Error('Only devnet drift env is supported');
 		}
 
-		const hermesEndpointParts = globalConfig.hermesEndpoint.split('?token=');
-		this.wsClient = new PythLazerClient(
-			hermesEndpointParts[0],
-			hermesEndpointParts[1]
+		const updateConfigs = this.crankConfigs.updateConfigs;
+		const feedIdChunks = chunks(Object.keys(updateConfigs), 11).map((chunk) =>
+			chunk.map((alias) => {
+				return updateConfigs[alias].feedId;
+			})
 		);
 
-		this.pythOracleClient = getOracleClient(
-			OracleSource.PYTH_LAZER,
-			driftClient.connection,
-			driftClient.program
+		if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
+			throw new Error('Missing lazerEndpoint or lazerToken in global config');
+		}
+		this.pythLazerClient = new PythLazerSubscriber(
+			this.globalConfig.lazerEndpoint,
+			this.globalConfig.lazerToken,
+			feedIdChunks
 		);
 		this.decodeFunc =
 			this.driftClient.program.account.pythLazerOracle.coder.accounts.decodeUnchecked.bind(
@@ -83,9 +80,6 @@ export class PythLazerCrankerBot implements Bot {
 		this.blockhashSubscriber = new BlockhashSubscriber({
 			connection: driftClient.connection,
 		});
-		this.txSuccessRateThreshold = crankConfigs.txSuccessRateThreshold;
-		this.slotStalenessThresholdRestart =
-			crankConfigs.slotStalenessThresholdRestart;
 	}
 
 	async init(): Promise<void> {
@@ -95,62 +89,15 @@ export class PythLazerCrankerBot implements Bot {
 			await this.driftClient.fetchMarketLookupTableAccount()
 		);
 
-		const updateConfigs = this.crankConfigs.updateConfigs;
-
-		let subscriptionId = 1;
-		for (const configChunk of chunks(Object.keys(updateConfigs), 11)) {
-			const priceFeedIds: number[] = configChunk.map((alias) => {
-				return updateConfigs[alias].feedId;
-			});
-
-			const sendMessage = () =>
-				this.wsClient.send({
-					type: 'subscribe',
-					subscriptionId,
-					priceFeedIds,
-					properties: ['price'],
-					chains: ['solana'],
-					deliveryFormat: 'json',
-					channel: 'fixed_rate@200ms',
-					jsonBinaryEncoding: 'hex',
-				});
-			if (this.wsClient.ws.readyState != 1) {
-				this.wsClient.ws.addEventListener('open', () => {
-					sendMessage();
-				});
-			} else {
-				sendMessage();
-			}
-
-			this.wsClient.addMessageListener((message) => {
-				switch (message.type) {
-					case 'json': {
-						if (message.value.type == 'streamUpdated') {
-							if (message.value.solana?.data)
-								this.feedIdChunkToPriceMessage.set(
-									priceFeedIds,
-									message.value.solana.data
-								);
-						}
-						break;
-					}
-					default: {
-						break;
-					}
-				}
-			});
-			subscriptionId++;
-		}
+		await this.pythLazerClient.subscribe();
 
 		this.priorityFeeSubscriber?.updateAddresses(
-			Object.keys(this.feedIdChunkToPriceMessage)
-				.flat()
-				.map((feedId) =>
-					getPythLazerOraclePublicKey(
-						this.driftClient.program.programId,
-						Number(feedId)
-					)
+			this.pythLazerClient.allSubscribedIds.map((feedId) =>
+				getPythLazerOraclePublicKey(
+					this.driftClient.program.programId,
+					Number(feedId)
 				)
+			)
 		);
 	}
 
@@ -158,7 +105,7 @@ export class PythLazerCrankerBot implements Bot {
 		logger.info(`Resetting ${this.name} bot`);
 		this.blockhashSubscriber.unsubscribe();
 		await this.driftClient.unsubscribe();
-		this.wsClient.ws.close();
+		this.pythLazerClient.unsubscribe();
 	}
 
 	async startIntervalLoop(intervalMs = this.intervalMs): Promise<void> {
@@ -187,9 +134,10 @@ export class PythLazerCrankerBot implements Bot {
 
 	async runCrankLoop() {
 		for (const [
-			feedIds,
+			feedIdsStr,
 			priceMessage,
-		] of this.feedIdChunkToPriceMessage.entries()) {
+		] of this.pythLazerClient.feedIdChunkToPriceMessage.entries()) {
+			const feedIds = this.pythLazerClient.getPriceFeedIdsFromHash(feedIdsStr);
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000,
