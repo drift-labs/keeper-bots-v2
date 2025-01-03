@@ -261,7 +261,7 @@ const serializeDLOBNode = (
 ): SerializedDLOBNode => {
 	if (node instanceof OrderNode) {
 		return {
-			type: node.constructor.name,
+			type: getOrderNodeType(node),
 			userAccountData: userAccountData,
 			order: serializeOrder(node.order),
 			userAccount: node.userAccount,
@@ -275,6 +275,22 @@ const serializeDLOBNode = (
 		throw new Error(
 			'Node is not an OrderNode or does not implement DLOBNode interface correctly.'
 		);
+	}
+};
+
+const getOrderNodeType = (node: OrderNode): string => {
+	if (node instanceof TakingLimitOrderNode) {
+		return 'TakingLimitOrderNode';
+	} else if (node instanceof RestingLimitOrderNode) {
+		return 'RestingLimitOrderNode';
+	} else if (node instanceof FloatingLimitOrderNode) {
+		return 'FloatingLimitOrderNode';
+	} else if (node instanceof MarketOrderNode) {
+		return 'MarketOrderNode';
+	} else if (node instanceof SwiftOrderNode) {
+		return 'SwiftOrderNode';
+	} else {
+		throw new Error('Invalid node type');
 	}
 };
 
