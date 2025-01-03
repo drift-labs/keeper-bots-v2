@@ -92,6 +92,13 @@ const errorCodesToSuppress = [
 	6010, // Error Number: 6010. Error Message: User Has No Position In Market.
 ];
 
+enum UserBucket {
+	CAN_BE_LIQUIDATED = 'canBeLiquidated',
+	UNHEALTHY_HIGH = 'unhealthyHigh',
+	UNHEALTHY_MEDIUM = 'unhealthyMedium',
+	UNHEALTHY_LOW = 'unhealthyLow',
+}
+
 const BPS_PRECISION = 10000;
 const LIQUIDATE_THROTTLE_BACKOFF = 5000; // the time to wait before trying to liquidate a throttled user again
 
@@ -213,6 +220,34 @@ export class LiquidatorBot implements Bot {
 
 	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
+	private usersCanBeLiquidated: Array<{
+		user: User;
+		userKey: string;
+		marginRequirement: BN;
+		canBeLiquidated: boolean;
+		health: number;
+	}> = [];
+	private usersUnhealthyHigh: Array<{
+		user: User;
+		userKey: string;
+		marginRequirement: BN;
+		canBeLiquidated: boolean;
+		health: number;
+	}> = [];
+	private usersUnhealthyMedium: Array<{
+		user: User;
+		userKey: string;
+		marginRequirement: BN;
+		canBeLiquidated: boolean;
+		health: number;
+	}> = [];
+	private usersUnhealthyLow: Array<{
+		user: User;
+		userKey: string;
+		marginRequirement: BN;
+		canBeLiquidated: boolean;
+		health: number;
+	}> = [];
 	/**
 	 * Max percentage of collateral to spend on liquidating a single position.
 	 */
@@ -628,6 +663,7 @@ export class LiquidatorBot implements Bot {
 	}
 
 	public async startIntervalLoop(intervalMs?: number): Promise<void> {
+		this.intializeBucketUsers();
 		this.tryLiquidateStart();
 		const intervalId = setInterval(
 			this.tryLiquidateStart.bind(this),
@@ -2459,57 +2495,185 @@ export class LiquidatorBot implements Bot {
 		return txSent;
 	}
 
-	private findSortedUsers(): {
-		usersCanBeLiquidated: Array<{
-			user: User;
-			userKey: string;
-			marginRequirement: BN;
-			canBeLiquidated: boolean;
-		}>;
-		checkedUsers: number;
-		liquidatableUsers: number;
-	} {
-		const usersCanBeLiquidated = new Array<{
-			user: User;
-			userKey: string;
-			marginRequirement: BN;
-			canBeLiquidated: boolean;
-		}>();
-
-		let checkedUsers = 0;
-		let liquidatableUsers = 0;
+	private intializeBucketUsers(): void {
 		for (const user of this.userMap!.values()) {
-			checkedUsers++;
-			const { canBeLiquidated, marginRequirement } = user.canBeLiquidated();
+			const { canBeLiquidated, marginRequirement, totalCollateral } =
+				user.canBeLiquidated();
+			const health = user.getHealth(totalCollateral, marginRequirement);
+			const userKey = user.userAccountPublicKey.toBase58();
 			if (canBeLiquidated || user.isBeingLiquidated()) {
-				liquidatableUsers++;
-				const userKey = user.userAccountPublicKey.toBase58();
 				if (this.excludedAccounts.has(userKey)) {
 					// Debug log precisely because the intent is to avoid noise
 					logger.debug(
 						`Skipping liquidation for ${userKey} due to configuration`
 					);
 				} else {
-					usersCanBeLiquidated.push({
+					this.usersCanBeLiquidated.push({
 						user,
 						userKey,
 						marginRequirement,
 						canBeLiquidated,
+						health,
 					});
 				}
+			} else if (health >= 20) {
+				this.usersUnhealthyHigh.push({
+					user,
+					userKey,
+					marginRequirement,
+					canBeLiquidated: false,
+					health,
+				});
+			} else if (health >= 5) {
+				this.usersUnhealthyMedium.push({
+					user,
+					userKey,
+					marginRequirement,
+					canBeLiquidated: false,
+					health,
+				});
+			} else {
+				this.usersUnhealthyLow.push({
+					user,
+					userKey,
+					marginRequirement,
+					canBeLiquidated: false,
+					health,
+				});
 			}
 		}
 
 		// sort the usersCanBeLiquidated by marginRequirement, largest to smallest
-		usersCanBeLiquidated.sort((a, b) => {
+		this.usersCanBeLiquidated.sort((a, b) => {
 			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
 		});
+		this.usersUnhealthyHigh.sort((a, b) => {
+			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
+		});
+		this.usersUnhealthyMedium.sort((a, b) => {
+			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
+		});
+		this.usersUnhealthyLow.sort((a, b) => {
+			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
+		});
+	}
 
-		return {
-			usersCanBeLiquidated,
-			checkedUsers,
-			liquidatableUsers,
+	private async updateUserBucket(
+		user: {
+			user: User;
+			userKey: string;
+			marginRequirement: BN;
+			canBeLiquidated: boolean;
+			health: number;
+		},
+		currentBucket: UserBucket
+	): Promise<void> {
+		const { canBeLiquidated, marginRequirement, totalCollateral } =
+			user.user.canBeLiquidated();
+		const newHealth = user.user.getHealth(totalCollateral, marginRequirement);
+
+		// Determine which bucket the user should be in
+		let targetBucket: UserBucket;
+
+		if (canBeLiquidated || user.user.isBeingLiquidated()) {
+			targetBucket = UserBucket.CAN_BE_LIQUIDATED;
+		} else if (newHealth >= 20) {
+			targetBucket = UserBucket.UNHEALTHY_HIGH;
+		} else if (newHealth >= 5) {
+			targetBucket = UserBucket.UNHEALTHY_MEDIUM;
+		} else {
+			targetBucket = UserBucket.UNHEALTHY_LOW;
+		}
+
+		// If bucket hasn't changed, no need to update
+		if (targetBucket === currentBucket) {
+			return;
+		}
+
+		// Remove from current bucket
+		let currentArray: Array<typeof user>;
+		switch (currentBucket) {
+			case UserBucket.CAN_BE_LIQUIDATED:
+				currentArray = this.usersCanBeLiquidated;
+				break;
+			case UserBucket.UNHEALTHY_HIGH:
+				currentArray = this.usersUnhealthyHigh;
+				break;
+			case UserBucket.UNHEALTHY_MEDIUM:
+				currentArray = this.usersUnhealthyMedium;
+				break;
+			case UserBucket.UNHEALTHY_LOW:
+				currentArray = this.usersUnhealthyLow;
+				break;
+		}
+
+		const index = currentArray.findIndex((u) => u.userKey === user.userKey);
+		if (index !== -1) {
+			currentArray.splice(index, 1);
+		}
+
+		const updatedUser = {
+			...user,
+			marginRequirement,
+			canBeLiquidated,
+			health: newHealth,
 		};
+
+		switch (targetBucket) {
+			case UserBucket.CAN_BE_LIQUIDATED:
+				this.usersCanBeLiquidated.push(updatedUser);
+				break;
+			case UserBucket.UNHEALTHY_HIGH:
+				this.usersUnhealthyHigh.push(updatedUser);
+				break;
+			case UserBucket.UNHEALTHY_MEDIUM:
+				this.usersUnhealthyMedium.push(updatedUser);
+				break;
+			case UserBucket.UNHEALTHY_LOW:
+				this.usersUnhealthyLow.push(updatedUser);
+				break;
+		}
+
+		logger.debug(
+			`Moved user ${user.userKey} from ${currentBucket} to ${targetBucket} (health: ${newHealth})`
+		);
+	}
+
+	private async checkBucket(bucketName: UserBucket): Promise<void> {
+		const bucket = (() => {
+			switch (bucketName) {
+				case UserBucket.CAN_BE_LIQUIDATED:
+					return this.usersCanBeLiquidated;
+				case UserBucket.UNHEALTHY_HIGH:
+					return this.usersUnhealthyHigh;
+				case UserBucket.UNHEALTHY_MEDIUM:
+					return this.usersUnhealthyMedium;
+				case UserBucket.UNHEALTHY_LOW:
+					return this.usersUnhealthyLow;
+			}
+		})();
+
+		// Create a copy of the array since we'll be modifying it during iteration
+		const usersToCheck = [...bucket];
+
+		for (const user of usersToCheck) {
+			await this.updateUserBucket(user, bucketName);
+		}
+
+		// we rerun the sorts of every bucket after we update the bucket
+		// TODO: we can optimize this by only sorting the bucket that was updated
+		this.usersCanBeLiquidated.sort((a, b) => {
+			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
+		});
+		this.usersUnhealthyHigh.sort((a, b) => {
+			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
+		});
+		this.usersUnhealthyMedium.sort((a, b) => {
+			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
+		});
+		this.usersUnhealthyLow.sort((a, b) => {
+			return b.marginRequirement.gt(a.marginRequirement) ? 1 : -1;
+		});
 	}
 
 	private async tryLiquidate(): Promise<{
@@ -2525,8 +2689,33 @@ export class LiquidatorBot implements Bot {
 			liquidateSpotSent: number;
 		};
 	}> {
-		const { usersCanBeLiquidated, checkedUsers, liquidatableUsers } =
-			this.findSortedUsers();
+		// Simulates CPU clock cycles that prioritize unhealthy users:
+		// 		80% of time check very unhealthy users,
+		// 		8% of time check almost unhealthy users,
+		// 		2% of time check healthy users
+		// 		10% of time check liquidatable users
+		const random = Math.random();
+		let bucket: UserBucket;
+		if (random < 0.8) {
+			bucket = UserBucket.UNHEALTHY_LOW;
+		} else if (random < 0.88) {
+			bucket = UserBucket.UNHEALTHY_MEDIUM;
+		} else if (random < 0.9) {
+			bucket = UserBucket.UNHEALTHY_HIGH;
+		} else {
+			bucket = UserBucket.CAN_BE_LIQUIDATED;
+		}
+
+		const start = Date.now();
+		await this.checkBucket(bucket);
+		const end = Date.now();
+		logger.info(`Checked bucket ${bucket} in ${end - start}ms`);
+
+		const checkedUsersCount =
+			this.usersCanBeLiquidated.length +
+			this.usersUnhealthyHigh.length +
+			this.usersUnhealthyMedium.length +
+			this.usersUnhealthyLow.length;
 
 		let untrackedPerpMarket = 0;
 		let untrackedSpotMarket = 0;
@@ -2540,7 +2729,7 @@ export class LiquidatorBot implements Bot {
 			userKey,
 			marginRequirement: _marginRequirement,
 			canBeLiquidated,
-		} of usersCanBeLiquidated) {
+		} of this.usersCanBeLiquidated) {
 			const userAcc = user.getUserAccount();
 			const auth = userAcc.authority.toBase58();
 
@@ -2808,8 +2997,8 @@ export class LiquidatorBot implements Bot {
 		}
 		return {
 			ran: true,
-			checkedUsers,
-			liquidatableUsers,
+			checkedUsers: checkedUsersCount,
+			liquidatableUsers: this.usersCanBeLiquidated.length,
 			skipReason: {
 				untrackedPerpMarket,
 				untrackedSpotMarket,
