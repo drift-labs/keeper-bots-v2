@@ -526,20 +526,25 @@ export class BundleSender {
 	 * @returns current tip based on running score in lamports
 	 */
 	public calculateCurrentTipLamports(): number {
-		return Math.floor(
-			Math.max(
-				(this.lastTipStream?.landed_tips_50th_percentile ?? 0) *
-					LAMPORTS_PER_SOL,
-				this.minBundleTip,
-				Math.min(
-					this.maxBundleTip,
-					Math.pow(
-						this.failBundleCount / this.maxFailBundleCount,
-						this.tipMultiplier
-					) * this.maxBundleTip
-				)
-			)
+		// Calculate tip from tip stream
+		const tipStreamLamports =
+			(this.lastTipStream?.landed_tips_50th_percentile ?? 0) * LAMPORTS_PER_SOL;
+
+		// Calculate tip from failure count
+		const failureBasedTip =
+			Math.pow(
+				this.failBundleCount / this.maxFailBundleCount,
+				this.tipMultiplier
+			) * this.maxBundleTip;
+
+		// Take the larger of the two tips, but cap at maxBundleTip
+		const tip = Math.min(
+			this.maxBundleTip,
+			Math.max(tipStreamLamports, failureBasedTip)
 		);
+
+		// Ensure we never go below minBundleTip
+		return Math.floor(Math.max(this.minBundleTip, tip));
 	}
 
 	/**
