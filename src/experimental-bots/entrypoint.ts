@@ -40,7 +40,6 @@ import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { SwiftMaker } from './swift/makerExample';
 import { SwiftTaker } from './swift/takerExample';
 import * as net from 'net';
-import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
 
 setGlobalDispatcher(
 	new Agent({
@@ -308,20 +307,6 @@ const runBot = async () => {
 		if (!config.botConfigs?.fillerMultithreaded) {
 			throw new Error('fillerMultithreaded bot config not found');
 		}
-
-		let pythLazerClient: PythLazerClient | undefined;
-		if (config.global.driftEnv! === 'devnet') {
-			if (!config.global.lazerEndpoint || !config.global.lazerToken) {
-				throw new Error(
-					'Must set environment variables LAZER_ENDPOINT and LAZER_TOKEN'
-				);
-			}
-			pythLazerClient = new PythLazerClient(
-				config.global.lazerEndpoint,
-				config.global.lazerToken
-			);
-		}
-
 		// Ensure that there are no duplicate market indexes in the Array<number[]> marketIndexes config
 		const marketIndexes = new Set<number>();
 		for (const marketIndexList of config.botConfigs.fillerMultithreaded
@@ -350,7 +335,6 @@ const runBot = async () => {
 			},
 			bundleSender,
 			pythPriceSubscriber,
-			pythLazerClient,
 			[]
 		);
 		bots.push(fillerMultithreaded);

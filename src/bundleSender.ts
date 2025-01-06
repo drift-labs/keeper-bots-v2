@@ -21,7 +21,7 @@ import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { sleepMs } from './utils';
 
 export const jitoBundlePriceEndpoint =
-	'ws://bundles-api-rest.jito.wtf/api/v1/bundles/tip_stream';
+	'wss://bundles.jito.wtf/api/v1/bundles/tip_stream';
 
 const logPrefix = '[BundleSender]';
 const MS_DELAY_BEFORE_CHECK_INCLUSION = 30_000;

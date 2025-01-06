@@ -109,7 +109,7 @@ import {
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
-import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
+import { PythLazerSubscriber } from '../../pythLazerSubscriber';
 import path from 'path';
 
 const logPrefix = '[Filler]';
@@ -262,9 +262,8 @@ export class FillerMultithreaded {
 	protected latestPythVaas?: Map<string, string>; // priceFeedId -> vaa
 	protected marketIndexesToPriceIds = new Map<number, string>();
 
-	protected pythLazerClient?: PythLazerClient;
-	protected latestPythLazerUpdates?: Map<string, string>; // priceFeedId -> vaa
-	protected marketIndexesToPythLazerGroups?: Map<number, number[]>; // priceFeedId -> vaa
+	protected pythLazerClient?: PythLazerSubscriber;
+	protected marketIndexesToPythLazerGroups?: Map<number, number[]> = new Map(); // priceFeedId -> pythLazerIdChunk
 
 	constructor(
 		globalConfig: GlobalConfig,
@@ -274,7 +273,6 @@ export class FillerMultithreaded {
 		runtimeSpec: RuntimeSpec,
 		bundleSender?: BundleSender,
 		pythPriceSubscriber?: PythPriceFeedSubscriber,
-		pythLazerClient?: PythLazerClient,
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
@@ -403,67 +401,42 @@ export class FillerMultithreaded {
 			ttlResolution: 1000,
 		});
 
-		// Pyth lazer
-		this.pythLazerClient = pythLazerClient;
-		this.latestPythLazerUpdates = new Map();
-		this.marketIndexesToPythLazerGroups = new Map();
-		let subscriptionId = 0;
-		const subscribeToPythLazer = () => {
-			for (const marketIndexes of chunks(this.marketIndexesFlattened, 6)) {
-				const markets = PerpMarkets[this.globalConfig.driftEnv!]
-					.filter((market) => marketIndexes.includes(market.marketIndex))
-					.filter((market) => market.pythLazerId !== undefined);
-				const pythLazerIds = markets.map((m) => m.pythLazerId!);
-				marketIndexes.forEach(
-					(marketIndex) =>
-						this.marketIndexesToPythLazerGroups?.set(marketIndex, pythLazerIds)
-				);
-				this.pythLazerClient?.send({
-					type: 'subscribe',
-					subscriptionId,
-					priceFeedIds: pythLazerIds,
-					properties: ['price'],
-					chains: ['solana'],
-					deliveryFormat: 'json',
-					channel: 'fixed_rate@200ms',
-					jsonBinaryEncoding: 'hex',
-				});
-				subscriptionId++;
+		// Pyth lazer: remember to remove devnet guard
+		if (this.globalConfig.driftEnv == 'devnet') {
+			if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
+				throw new Error('Missing lazerEndpoint or lazerToken in global config');
 			}
-		};
 
-		if (this.pythLazerClient?.ws.readyState === 1) {
-			subscribeToPythLazer();
-		} else {
-			this.pythLazerClient?.ws.addEventListener('open', () => {
-				subscribeToPythLazer();
-			});
-		}
-
-		this.pythLazerClient?.addMessageListener((message) => {
-			switch (message.type) {
-				case 'json': {
-					if (message.value.type == 'streamUpdated') {
-						if (message.value?.solana?.data) {
-							const data = message.value?.solana?.data;
-							const pythLazerIds = message.value.parsed!.priceFeeds.map(
-								(priceFeed) => priceFeed.priceFeedId
-							);
-							this.latestPythLazerUpdates?.set(
-								JSON.stringify(pythLazerIds),
-								data
-							);
-						}
+			this.marketIndexesToPythLazerGroups = new Map();
+			const markets = PerpMarkets[this.globalConfig.driftEnv!]
+				.filter((market) =>
+					this.marketIndexesFlattened.includes(market.marketIndex)
+				)
+				.filter((market) => market.pythLazerId !== undefined);
+			const pythLazerIds = markets.map((m) => m.pythLazerId!);
+			const pythLazerIdsChunks = chunks(pythLazerIds, 6);
+			this.pythLazerClient = new PythLazerSubscriber(
+				this.globalConfig.lazerEndpoint,
+				this.globalConfig.lazerToken,
+				pythLazerIdsChunks
+			);
+			pythLazerIdsChunks.forEach((chunk) =>
+				chunk.forEach((id) => {
+					const marketIndex = markets.find((m) => m.pythLazerId == id)
+						?.marketIndex;
+					if (marketIndex == undefined) {
+						throw new Error(`Market index not found for pyth lazer id: ${id}`);
 					}
-					break;
-				}
-			}
-		});
+					this.marketIndexesToPythLazerGroups?.set(marketIndex, chunk);
+				})
+			);
+		}
 	}
 
 	async init() {
 		await this.blockhashSubscriber.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
+		await this.pythLazerClient?.subscribe();
 
 		const feedIds: string[] = PerpMarkets[this.globalConfig.driftEnv!]
 			.map((m) => m.pythFeedId)
@@ -509,7 +482,12 @@ export class FillerMultithreaded {
 			const dlobBuilderFileName =
 				'dlobBuilder' + (isTsRuntime() ? '.ts' : '.js');
 			const dlobBuilderProcess = spawnChild(
-				path.join(__dirname, './filler-common', dlobBuilderFileName),
+				path.join(
+					__dirname,
+					isTsRuntime() ? '..' : '.',
+					'filler-common',
+					dlobBuilderFileName
+				),
 				dlobBuilderArgs,
 				'dlobBuilder',
 				(msg: any) => {
@@ -603,7 +581,12 @@ export class FillerMultithreaded {
 		const orderSubscriberFileName =
 			'orderSubscriberFiltered' + (isTsRuntime() ? '.ts' : '.js');
 		const orderSubscriberProcess = spawnChild(
-			path.join(__dirname, './filler-common', orderSubscriberFileName),
+			path.join(
+				__dirname,
+				isTsRuntime() ? '..' : '.',
+				'filler-common',
+				orderSubscriberFileName
+			),
 			orderSubscriberArgs,
 			'orderSubscriber',
 			(msg: any) => {
@@ -633,7 +616,12 @@ export class FillerMultithreaded {
 			const swiftOrderSubscriberFileName =
 				'swiftOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
 			const swiftOrderSubscriberProcess = spawnChild(
-				path.join(__dirname, './filler-common', swiftOrderSubscriberFileName),
+				path.join(
+					__dirname,
+					isTsRuntime() ? '..' : '.',
+					'filler-common',
+					swiftOrderSubscriberFileName
+				),
 				orderSubscriberArgs,
 				'swiftOrderSubscriber',
 				(msg: any) => {
@@ -1146,9 +1134,8 @@ export class FillerMultithreaded {
 				return pythIxs;
 			}
 
-			const latestLazerUpdate = this.latestPythLazerUpdates?.get(
-				JSON.stringify(pythLazerIds)
-			);
+			const latestLazerUpdate =
+				this.pythLazerClient?.getLatestPriceMessage(pythLazerIds);
 			if (!latestLazerUpdate) {
 				logger.error(
 					`Latest lazer update not found for marketIndex: ${marketIndex}, pythLazerIds: ${pythLazerIds}`
@@ -1791,7 +1778,8 @@ export class FillerMultithreaded {
 							takerStats: takerStatsPubKey,
 							takerUserAccount: takerUser,
 						},
-						authority
+						authority,
+						ixs
 					))
 				);
 			}
@@ -2085,7 +2073,8 @@ export class FillerMultithreaded {
 						takerStats: takerStatsPubKey,
 						takerUserAccount: takerUser,
 					},
-					authority
+					authority,
+					ixs
 				))
 			);
 		}
@@ -2102,7 +2091,6 @@ export class FillerMultithreaded {
 
 		const user = this.driftClient.getUser(this.subaccount);
 		if (this.revertOnFailure) {
-			console.log(user.userAccountPublicKey.toString());
 			ixs.push(
 				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 			);
