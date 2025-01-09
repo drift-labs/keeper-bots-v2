@@ -71,7 +71,7 @@ export class SwiftTaker {
 				stopLossOrderParams: null,
 				takeProfitOrderParams: null,
 			};
-			const signature =
+			const { orderParams: message, signature } =
 				this.driftClient.signSwiftOrderParamsMessage(orderMessage);
 
 			const hash = digestSignature(Uint8Array.from(signature));
@@ -84,9 +84,7 @@ export class SwiftTaker {
 				{
 					market_index: marketIndex,
 					market_type: 'perp',
-					message: this.driftClient
-						.encodeSwiftOrderParamsMessage(orderMessage)
-						.toString('base64'),
+					message: message.toString(),
 					signature: signature.toString('base64'),
 					taker_pubkey: this.driftClient.wallet.publicKey.toBase58(),
 				},
