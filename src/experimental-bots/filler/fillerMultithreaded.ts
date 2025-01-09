@@ -1770,9 +1770,9 @@ export class FillerMultithreaded {
 					nodeToFill.node.order!.orderId
 				);
 				const signedSwiftOrderParams: SignedSwiftOrderParams = {
-					orderParams: Buffer.from(swiftOrderMessageParams['message']),
+					orderParams: Buffer.from(swiftOrderMessageParams['order_message']),
 					signature: Buffer.from(
-						swiftOrderMessageParams['signature'],
+						swiftOrderMessageParams['order_signature'],
 						'base64'
 					),
 				};
@@ -2071,8 +2071,11 @@ export class FillerMultithreaded {
 				nodeToFill.node.order!.orderId
 			);
 			const signedSwiftOrderMessageParams: SignedSwiftOrderParams = {
-				orderParams: Buffer.from(swiftOrderMessageParams['message']),
-				signature: Buffer.from(swiftOrderMessageParams['signature'], 'base64'),
+				orderParams: Buffer.from(swiftOrderMessageParams['order_message']),
+				signature: Buffer.from(
+					swiftOrderMessageParams['order_signature'],
+					'base64'
+				),
 			};
 			ixs.push(
 				...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
