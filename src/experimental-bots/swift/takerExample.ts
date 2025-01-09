@@ -84,7 +84,7 @@ export class SwiftTaker {
 				{
 					market_index: marketIndex,
 					market_type: 'perp',
-					message,
+					message: message.toString(),
 					signature: signature.toString('base64'),
 					taker_pubkey: this.driftClient.wallet.publicKey.toBase58(),
 				},
