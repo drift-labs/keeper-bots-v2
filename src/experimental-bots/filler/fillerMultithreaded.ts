@@ -111,6 +111,7 @@ import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 import { PythLazerSubscriber } from '../../pythLazerSubscriber';
 import path from 'path';
+import { SignedSwiftOrderParams } from '@drift-labs/sdk/lib/node/swift/types';
 
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -1768,10 +1769,16 @@ export class FillerMultithreaded {
 				const swiftOrderMessageParams = this.swiftOrderMessages.get(
 					nodeToFill.node.order!.orderId
 				);
+				const signedSwiftOrderParams: SignedSwiftOrderParams = {
+					orderParams: Buffer.from(swiftOrderMessageParams['order_message']),
+					signature: Buffer.from(
+						swiftOrderMessageParams['order_signature'],
+						'base64'
+					),
+				};
 				ixs.push(
 					...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
-						Buffer.from(swiftOrderMessageParams['order_message'], 'base64'),
-						Buffer.from(swiftOrderMessageParams['order_signature'], 'base64'),
+						signedSwiftOrderParams,
 						nodeToFill.node.order!.marketIndex,
 						{
 							taker: new PublicKey(takerUserPubKey),
@@ -2063,10 +2070,16 @@ export class FillerMultithreaded {
 			const swiftOrderMessageParams = this.swiftOrderMessages.get(
 				nodeToFill.node.order!.orderId
 			);
+			const signedSwiftOrderMessageParams: SignedSwiftOrderParams = {
+				orderParams: Buffer.from(swiftOrderMessageParams['order_message']),
+				signature: Buffer.from(
+					swiftOrderMessageParams['order_signature'],
+					'base64'
+				),
+			};
 			ixs.push(
 				...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
-					Buffer.from(swiftOrderMessageParams['order_message'], 'base64'),
-					Buffer.from(swiftOrderMessageParams['order_signature'], 'base64'),
+					signedSwiftOrderMessageParams,
 					nodeToFill.node.order!.marketIndex,
 					{
 						taker: new PublicKey(takerUserPubKey),
