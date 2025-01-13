@@ -98,6 +98,7 @@ import { selectMakers } from '../makerSelection';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+import { FallbackLiquiditySource } from '../experimental-bots/filler-common/types';
 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
@@ -161,8 +162,6 @@ function getMakerNodeFromNodeToFill(
 
 	return nodeToFill.makerNodes[0];
 }
-
-export type FallbackLiquiditySource = 'phoenix' | 'openbook';
 
 export type NodesToFillWithContext = {
 	nodesToFill: NodeToFill[];
@@ -1760,6 +1759,7 @@ export class SpotFillerBot implements Bot {
 				'multiMakerSpotFill',
 				this.revertOnFailure ?? false,
 				false,
+				undefined,
 				spotPrecision
 			);
 
@@ -1965,7 +1965,7 @@ export class SpotFillerBot implements Bot {
 		)!;
 		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
 
-		if (nodeToFill.makerNodes.length > 1) {
+		if (nodeToFill.makerNodes.length > 0) {
 			// do multi maker fills in a separate tx since they're larger
 			return this.tryFillMultiMakerSpotNode(
 				fillTxId,
@@ -1979,55 +1979,48 @@ export class SpotFillerBot implements Bot {
 			? fallbackBidSource
 			: fallbackAskSource;
 
-		const {
-			makerInfos,
-			takerUser,
-			takerUserPubKey,
-			takerUserSlot,
-			marketType,
-		} = await this.getNodeFillInfo(nodeToFill);
+		const { takerUser, takerUserPubKey, takerUserSlot, marketType } =
+			await this.getNodeFillInfo(nodeToFill);
 
 		if (!isVariant(marketType, 'spot')) {
 			throw new Error('expected spot market type');
 		}
 
-		const makerInfo = makerInfos.length > 0 ? makerInfos[0].data : undefined;
 		let fulfillmentConfig:
 			| PhoenixV1FulfillmentConfigAccount
 			| OpenbookV2FulfillmentConfigAccount
 			| undefined = undefined;
-		if (makerInfo === undefined) {
-			if (fallbackSource === 'phoenix') {
-				const cfg = this.phoenixFulfillmentConfigMap.get(
-					nodeToFill.node.order!.marketIndex
-				);
-				if (cfg && isVariant(cfg.status, 'enabled')) {
-					fulfillmentConfig = cfg;
-				}
-			} else if (fallbackSource === 'openbook') {
-				const cfg = this.openbookFulfillmentConfigMap.get(
-					nodeToFill.node.order!.marketIndex
-				);
-				if (cfg && isVariant(cfg.status, 'enabled')) {
-					fulfillmentConfig = cfg;
-				}
-			} else {
-				logger.error(
-					`makerInfo doesnt exist and unknown fallback source: ${fallbackSource} (fillTxId: ${fillTxId})`
-				);
+		if (fallbackSource === 'phoenix') {
+			const cfg = this.phoenixFulfillmentConfigMap.get(
+				nodeToFill.node.order!.marketIndex
+			);
+			if (cfg && isVariant(cfg.status, 'enabled')) {
+				fulfillmentConfig = cfg;
 			}
+		} else if (fallbackSource === 'openbook') {
+			const cfg = this.openbookFulfillmentConfigMap.get(
+				nodeToFill.node.order!.marketIndex
+			);
+			if (cfg && isVariant(cfg.status, 'enabled')) {
+				fulfillmentConfig = cfg;
+			}
+		} else {
+			logger.error(
+				`unknown fallback source: ${fallbackSource} (fillTxId: ${fillTxId})`
+			);
 		}
 
 		logMessageForNodeToFill(
 			nodeToFill,
 			takerUserPubKey,
 			takerUserSlot,
-			makerInfos,
+			[],
 			this.getMaxSlot(),
 			fillTxId,
 			'fillSpotNode',
 			this.revertOnFailure ?? false,
 			false,
+			fallbackSource,
 			spotMarketPrecision
 		);
 
@@ -2055,8 +2048,7 @@ export class SpotFillerBot implements Bot {
 				new PublicKey(takerUserPubKey),
 				takerUser,
 				nodeToFill.node.order,
-				fulfillmentConfig,
-				makerInfo
+				fulfillmentConfig
 			)
 		);
 

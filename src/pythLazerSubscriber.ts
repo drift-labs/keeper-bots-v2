@@ -19,10 +19,10 @@ export class PythLazerSubscriber {
 	) {}
 
 	async subscribe() {
-		this.pythLazerClient = new PythLazerClient(this.endpoint, this.token);
+		this.pythLazerClient = new PythLazerClient([this.endpoint], this.token);
 		let subscriptionId = 1;
 		let totalSlept = 0;
-		if (this.pythLazerClient.ws.readyState !== this.pythLazerClient.ws.OPEN) {
+		if (this.pythLazerClient.wsp !== this.pythLazerClient.wsp) {
 			await sleepMs(1000);
 			totalSlept += 1000;
 			if (totalSlept > 5000) {
@@ -33,16 +33,6 @@ export class PythLazerSubscriber {
 		for (const priceFeedIds of this.priceFeedIdsArrays) {
 			this.allSubscribedIds.push(...priceFeedIds);
 			this.feedIdHashToFeedIds.set(this.hash(priceFeedIds), priceFeedIds);
-			this.pythLazerClient.send({
-				type: 'subscribe',
-				subscriptionId,
-				priceFeedIds,
-				properties: ['price'],
-				chains: ['solana'],
-				deliveryFormat: 'json',
-				channel: 'fixed_rate@200ms',
-				jsonBinaryEncoding: 'hex',
-			});
 			this.pythLazerClient.addMessageListener((message) => {
 				this.receivingData = true;
 				clearTimeout(this.timeoutId);
@@ -62,6 +52,16 @@ export class PythLazerSubscriber {
 					}
 				}
 				this.setTimeout();
+			});
+			this.pythLazerClient.subscribe({
+				type: 'subscribe',
+				subscriptionId,
+				priceFeedIds,
+				properties: ['price'],
+				chains: ['solana'],
+				deliveryFormat: 'json',
+				channel: 'fixed_rate@200ms',
+				jsonBinaryEncoding: 'hex',
 			});
 			subscriptionId++;
 		}
@@ -88,7 +88,7 @@ export class PythLazerSubscriber {
 
 	async unsubscribe() {
 		this.isUnsubscribing = true;
-		this.pythLazerClient?.ws.close();
+		this.pythLazerClient?.shutdown();
 		this.pythLazerClient = undefined;
 		clearTimeout(this.timeoutId);
 		this.timeoutId = undefined;

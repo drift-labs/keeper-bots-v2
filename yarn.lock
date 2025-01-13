@@ -42,7 +42,7 @@
   dependencies:
     regenerator-runtime "^0.14.0"
 
-"@babel/runtime@^7.17.2":
+"@babel/runtime@^7.17.2", "@babel/runtime@^7.25.0":
   version "7.26.0"
   resolved "https://registry.yarnpkg.com/@babel/runtime/-/runtime-7.26.0.tgz#8600c2f595f277c60815256418b85356a65173c1"
   integrity sha512-FDSOghenHTiToteC/QRlv2q3DhPZ/oOXTBoirfWNx1Cx3TMVcGWQtMMmQcSvb/JjpNeGzx8Pq/b4fKEJuWm1sw==
@@ -175,19 +175,19 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.12.46":
-  version "0.12.46"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.12.46.tgz#e7463d7c1fa59fa330f0fc12abf80eb0c09668dd"
-  integrity sha512-hcrDFSIqCI1Kvb8po+iajPN9qPqGGuz+A2yVI+PHvwtwOpTGr2Q7ZC/JmE6NL4WOpaMJKOZmPt8E3dEgKUCfTA==
+"@drift-labs/jit-proxy@0.12.47":
+  version "0.12.47"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.12.47.tgz#88dbe15ea2fc5bbde820614865d57430c6519768"
+  integrity sha512-/unleSpo8YTm4hv/wlEcp5+Ku5PNWRX8suFw8VWWzzDVrYHd6sOjEuUQ2OccPZTgmZQWMMjhZ6E/3OVUqihsnw==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.107.0-beta.2"
+    "@drift-labs/sdk" "2.107.0-beta.3"
     "@solana/web3.js" "1.91.7"
 
-"@drift-labs/sdk@2.107.0-beta.2":
-  version "2.107.0-beta.2"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.107.0-beta.2.tgz#519a2f19ec85df7dd54703b6e3a7e59f86ff35e8"
-  integrity sha512-q36E4Qo9jhS11n/8fEK6OLTY7aPjjNrLTvbU6KVCdlhaWfAWmXbNr+r8wFFNAL2CcbjJg85yjTbsNCVuVPiA6g==
+"@drift-labs/sdk@2.107.0-beta.3":
+  version "2.107.0-beta.3"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.107.0-beta.3.tgz#176c4493323b99e8639605d39eb4a4fee0db84a2"
+  integrity sha512-pRWTRpAVYAhJZI+5WxrAzSMnU+1IiJXuTPanY9eNZZUn9S//RRc3CXigM/ogeGPaOolizBZDejwy2Igz7h22JQ==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -507,6 +507,11 @@
   version "1.2.1"
   resolved "https://registry.yarnpkg.com/@humanwhocodes/object-schema/-/object-schema-1.2.1.tgz#b520529ec21d8e5945a1851dfd1c32e94e39ff45"
   integrity sha512-ZnQMnLV4e7hDlUvw8H+U8ASL02SS2Gn6+9Ac3wGGLIe7+je2AeAOxPY+izIPJDfFDb7eDjev0Us8MO1iFRN8hA==
+
+"@isaacs/ttlcache@^1.4.1":
+  version "1.4.1"
+  resolved "https://registry.yarnpkg.com/@isaacs/ttlcache/-/ttlcache-1.4.1.tgz#21fb23db34e9b6220c6ba023a0118a2dd3461ea2"
+  integrity sha512-RQgQ4uQ+pLbqXfOmieB91ejmLwvSgv9nLx6sT6sD83s7umBypgg+OIBOBbEUiJXrfpnp9j0mRhYYdzp9uqq3lA==
 
 "@jridgewell/resolve-uri@^3.0.3":
   version "3.1.1"
@@ -1265,12 +1270,16 @@
   dependencies:
     bn.js "^5.2.1"
 
-"@pythnetwork/pyth-lazer-sdk@^0.1.1":
-  version "0.1.1"
-  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-0.1.1.tgz#5242c04f9b4f6ee0d3cc1aad228dfcb85b5e6498"
-  integrity sha512-/Zr9qbNi9YZb9Nl3ilkUKgeSQovevsXV57pIGrw04NFUmK4Ua92o2SyK8RRaqcw8zYtiDbseU1CgWHCfGYjRRQ==
+"@pythnetwork/pyth-lazer-sdk@0.2.0":
+  version "0.2.0"
+  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-0.2.0.tgz#7de5a245ae3ebea177e8932307c39484ff95f59f"
+  integrity sha512-TDdmvI89TcMj135kzU8pXGahC7J3HCqOaJ8Dsft70hyOoDP5px3fNSwDMNvW2bPhjyKC5P4M/I4SQ9QxRkvNpg==
   dependencies:
+    "@isaacs/ttlcache" "^1.4.1"
+    "@solana/buffer-layout" "^4.0.1"
+    "@solana/web3.js" "^1.98.0"
     isomorphic-ws "^5.0.0"
+    ts-log "^2.2.7"
     ws "^8.18.0"
 
 "@pythnetwork/pyth-solana-receiver@0.7.0":
@@ -1689,6 +1698,27 @@
     node-fetch "^2.7.0"
     rpc-websockets "^9.0.0"
     superstruct "^1.0.4"
+
+"@solana/web3.js@^1.98.0":
+  version "1.98.0"
+  resolved "https://registry.yarnpkg.com/@solana/web3.js/-/web3.js-1.98.0.tgz#21ecfe8198c10831df6f0cfde7f68370d0405917"
+  integrity sha512-nz3Q5OeyGFpFCR+erX2f6JPt3sKhzhYcSycBCSPkWjzSVDh/Rr1FqTVMRe58FKO16/ivTUcuJjeS5MyBvpkbzA==
+  dependencies:
+    "@babel/runtime" "^7.25.0"
+    "@noble/curves" "^1.4.2"
+    "@noble/hashes" "^1.4.0"
+    "@solana/buffer-layout" "^4.0.1"
+    agentkeepalive "^4.5.0"
+    bigint-buffer "^1.1.5"
+    bn.js "^5.2.1"
+    borsh "^0.7.0"
+    bs58 "^4.0.1"
+    buffer "6.0.3"
+    fast-stable-stringify "^1.0.0"
+    jayson "^4.1.1"
+    node-fetch "^2.7.0"
+    rpc-websockets "^9.0.2"
+    superstruct "^2.0.2"
 
 "@solana/web3.js@~1.77.3":
   version "1.77.4"
@@ -5195,6 +5225,11 @@ ts-log@^2.2.4:
   version "2.2.5"
   resolved "https://registry.yarnpkg.com/ts-log/-/ts-log-2.2.5.tgz#aef3252f1143d11047e2cb6f7cfaac7408d96623"
   integrity sha512-PGcnJoTBnVGy6yYNFxWVNkdcAuAMstvutN9MgDJIV6L0oG8fB+ZNNy1T+wJzah8RPGor1mZuPQkVfXNDpy9eHA==
+
+ts-log@^2.2.7:
+  version "2.2.7"
+  resolved "https://registry.yarnpkg.com/ts-log/-/ts-log-2.2.7.tgz#4f4512144898b77c9984e91587076fcb8518688e"
+  integrity sha512-320x5Ggei84AxzlXp91QkIGSw5wgaLT6GeAH0KsqDmRZdVWW2OiSeVvElVoatk3f7nicwXlElXsoFkARiGE2yg==
 
 ts-node@10.9.1:
   version "10.9.1"
