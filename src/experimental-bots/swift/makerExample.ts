@@ -115,6 +115,7 @@ export class SwiftMaker {
 					const order = JSON.parse(message['order']);
 					console.info(`received order. uuid: ${order['uuid']}`);
 
+					const swiftOrderParamsBufHex = Buffer.from(order['order_message']);
 					const swiftOrderParamsBuf = Buffer.from(
 						order['order_message'],
 						'hex'
@@ -148,7 +149,7 @@ export class SwiftMaker {
 
 					const ixs = await this.driftClient.getPlaceAndMakeSwiftPerpOrderIxs(
 						{
-							orderParams: swiftOrderParamsBuf,
+							orderParams: swiftOrderParamsBufHex,
 							signature: Buffer.from(order['order_signature'], 'base64'),
 						},
 						decodeUTF8(order['uuid']),
