@@ -839,23 +839,12 @@ export class LiquidatorBot implements Bot {
 
 	private async jupiterSpotSwap(
 		orderDirection: PositionDirection,
-		spotMarketIndex: number,
+		inMarketIndex: number,
+		outMarketIndex: number,
 		quote: QuoteResponse,
 		slippageBps: number,
 		subAccountId: number
 	) {
-		let outMarketIndex: number;
-		let inMarketIndex: number;
-		if (isVariant(orderDirection, 'long')) {
-			// sell USDC, buy spotMarketIndex
-			inMarketIndex = 0;
-			outMarketIndex = spotMarketIndex;
-		} else {
-			// sell spotMarketIndex, buy USDC
-			inMarketIndex = spotMarketIndex;
-			outMarketIndex = 0;
-		}
-
 		const swapIx = await this.driftClient.getJupiterSwapIxV6({
 			jupiterClient: this.jupiterClient!,
 			outMarketIndex,
@@ -893,7 +882,7 @@ export class LiquidatorBot implements Bot {
 			logger.error(
 				`Error trying to ${getVariant(
 					orderDirection
-				)} spot position for market ${spotMarketIndex} on jupiter, subaccount start ${subAccountId}, simError: ${JSON.stringify(
+				)} on inMarketIndex ${inMarketIndex}, outMarketIndex ${outMarketIndex} on jupiter, subaccount start ${subAccountId}, simError: ${JSON.stringify(
 					simResult.simError
 				)}`
 			);
@@ -905,9 +894,7 @@ export class LiquidatorBot implements Bot {
 			);
 
 			logger.info(
-				`closed spot position for market ${spotMarketIndex.toString()} on subaccount ${subAccountId}: ${
-					resp.txSig
-				} `
+				`closed spot position inMarketIndex ${inMarketIndex}, outMarketIndex ${outMarketIndex} on subaccount ${subAccountId}: ${resp.txSig} `
 			);
 		}
 	}
@@ -1234,7 +1221,10 @@ export class LiquidatorBot implements Bot {
 		orderDirection: PositionDirection,
 		baseAmountIn: BN,
 		slippageBps: number
-	): Promise<QuoteResponse | undefined> {
+	): Promise<
+		| { quote: QuoteResponse; inMarketIndex: number; outMarketIndex: number }
+		| undefined
+	> {
 		if (!this.jupiterClient) {
 			return undefined;
 		}
@@ -1347,7 +1337,11 @@ export class LiquidatorBot implements Bot {
 				);
 				return undefined;
 			} else {
-				return quote;
+				return {
+					quote,
+					inMarketIndex: inMarket.marketIndex,
+					outMarketIndex: outMarket.marketIndex,
+				};
 			}
 		} else {
 			// selling spotMarketIndex, want max out
@@ -1358,7 +1352,11 @@ export class LiquidatorBot implements Bot {
 				);
 				return undefined;
 			} else {
-				return quote;
+				return {
+					quote,
+					inMarketIndex: inMarket.marketIndex,
+					outMarketIndex: outMarket.marketIndex,
+				};
 			}
 		}
 	}
@@ -1610,8 +1608,9 @@ export class LiquidatorBot implements Bot {
 			} else {
 				await this.jupiterSpotSwap(
 					orderParams.direction,
-					position.marketIndex,
-					jupQuote,
+					jupQuote.inMarketIndex,
+					jupQuote.outMarketIndex,
+					jupQuote.quote,
 					slippageBps,
 					userAccount.subAccountId
 				);
