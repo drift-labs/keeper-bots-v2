@@ -1303,7 +1303,7 @@ export class LiquidatorBot implements Bot {
 				outputMint: outMarket.mint,
 				amount: amountIn.abs(),
 				slippageBps: slippageBps,
-				maxAccounts: 10,
+				maxAccounts: 45,
 				excludeDexes: ['Raydium CLMM'],
 			});
 		} catch (e) {
