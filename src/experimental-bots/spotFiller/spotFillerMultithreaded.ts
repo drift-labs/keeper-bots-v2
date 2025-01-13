@@ -907,7 +907,7 @@ export class SpotFillerMultithreaded {
 					continue;
 				}
 				this.seenFillableOrders.add(getNodeToFillSignature(node));
-				if (node.makerNodes.length > 1) {
+				if (node.makerNodes.length > 0) {
 					this.tryFillMultiMakerSpotNodes(node, !!buildForBundle);
 				} else {
 					this.tryFillSpotNode(node, !!buildForBundle);
@@ -985,6 +985,7 @@ export class SpotFillerMultithreaded {
 				'multiMakerSpotFill',
 				this.revertOnFailure ?? false,
 				false,
+				undefined,
 				spotPrecision
 			);
 
@@ -1182,13 +1183,8 @@ export class SpotFillerMultithreaded {
 		)!;
 		const spotMarketPrecision = TEN.pow(new BN(spotMarket.decimals));
 
-		const {
-			makerInfos,
-			takerUser,
-			takerUserPubKey,
-			takerUserSlot,
-			marketType,
-		} = await this.getNodeFillInfo(nodeToFill);
+		const { takerUser, takerUserPubKey, takerUserSlot, marketType } =
+			await this.getNodeFillInfo(nodeToFill);
 
 		if (!isVariant(marketType, 'spot')) {
 			throw new Error('expected spot market type');
@@ -1198,43 +1194,41 @@ export class SpotFillerMultithreaded {
 			? nodeToFill.fallbackBidSource
 			: nodeToFill.fallbackAskSource;
 
-		const makerInfo = makerInfos.length > 0 ? makerInfos[0].data : undefined;
 		let fulfillmentConfig:
 			| PhoenixV1FulfillmentConfigAccount
 			| OpenbookV2FulfillmentConfigAccount
 			| undefined = undefined;
-		if (makerInfo === undefined) {
-			if (fallbackSource === 'phoenix') {
-				const cfg = this.phoenixFulfillmentConfigMap.get(
-					nodeToFill.node.order!.marketIndex
-				);
-				if (cfg && isVariant(cfg.status, 'enabled')) {
-					fulfillmentConfig = cfg;
-				}
-			} else if (fallbackSource === 'openbook') {
-				const cfg = this.openbookFulfillmentConfigMap.get(
-					nodeToFill.node.order!.marketIndex
-				);
-				if (cfg && isVariant(cfg.status, 'enabled')) {
-					fulfillmentConfig = cfg;
-				}
-			} else {
-				logger.error(
-					`makerInfo doesnt exist and unknown fallback source: ${fallbackSource} (fillTxId: ${fillTxId})`
-				);
+		if (fallbackSource === 'phoenix') {
+			const cfg = this.phoenixFulfillmentConfigMap.get(
+				nodeToFill.node.order!.marketIndex
+			);
+			if (cfg && isVariant(cfg.status, 'enabled')) {
+				fulfillmentConfig = cfg;
 			}
+		} else if (fallbackSource === 'openbook') {
+			const cfg = this.openbookFulfillmentConfigMap.get(
+				nodeToFill.node.order!.marketIndex
+			);
+			if (cfg && isVariant(cfg.status, 'enabled')) {
+				fulfillmentConfig = cfg;
+			}
+		} else {
+			logger.error(
+				`makerInfo doesnt exist and unknown fallback source: ${fallbackSource} (fillTxId: ${fillTxId})`
+			);
 		}
 
 		logMessageForNodeToFill(
 			nodeToFill,
 			takerUserPubKey,
 			takerUserSlot,
-			makerInfos,
+			[],
 			this.slotSubscriber.getSlot(),
 			fillTxId,
 			'fillSpotNode',
 			this.revertOnFailure ?? false,
 			false,
+			fallbackSource,
 			spotMarketPrecision
 		);
 
@@ -1267,7 +1261,7 @@ export class SpotFillerMultithreaded {
 				takerUser,
 				nodeToFill.node.order,
 				fulfillmentConfig,
-				makerInfo,
+				undefined,
 				undefined,
 				user.userAccountPublicKey
 			)

@@ -65,6 +65,7 @@ import {
 } from '@solana/web3.js';
 import { webhookMessage } from './webhook';
 import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
+import { FallbackLiquiditySource } from './experimental-bots/filler-common/types';
 
 // devnet only
 export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
@@ -707,6 +708,7 @@ export function logMessageForNodeToFill(
 	fillType: string,
 	revertOnFailure: boolean,
 	removeLastIxPreSim: boolean,
+	fallbackSource?: FallbackLiquiditySource,
 	basePrecision: BN = BASE_PRECISION
 ) {
 	const takerNode = node.node;
@@ -750,6 +752,7 @@ export function logMessageForNodeToFill(
 				revertOnFailure,
 				removeLastIxPreSim,
 				isSwift: node.node.isSwift,
+				fallbackSource,
 			})
 	);
 
