@@ -1141,7 +1141,8 @@ export const getAllPythOracleUpdateIxs = async (
 		? driftClient.getPerpMarketAccount(marketIndex)?.amm.oracleSource
 		: driftClient.getSpotMarketAccount(marketIndex)?.oracleSource;
 
-	if (isVariant(oracleSource, 'pythPull')) {
+	const oracleSourceStr = getVariant(oracleSource).toLowerCase();
+	if (oracleSourceStr.includes('pyth') && oracleSourceStr.includes('pull')) {
 		const feedId = getPythPriceFeedIdForMarket(marketIndex, markets, false);
 		const vaa = pythPriceSubscriber.getLatestCachedVaa(feedId as string);
 		if (!vaa) {
