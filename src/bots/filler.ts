@@ -32,6 +32,9 @@ import {
 	QUOTE_PRECISION,
 	ClockSubscriber,
 	DriftEnv,
+	OraclePriceData,
+	StateAccount,
+	getUserStatsAccountPublicKey,
 	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -97,6 +100,7 @@ import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { TxThreaded } from './common/txThreaded';
+import { NodeToTriggerWithMakers } from 'src/experimental-bots/filler-common/types';
 import { PythLazerSubscriber } from '../pythLazerSubscriber';
 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
@@ -775,7 +779,7 @@ export class FillerBot extends TxThreaded implements Bot {
 		dlob: DLOB
 	): {
 		nodesToFill: Array<NodeToFill>;
-		nodesToTrigger: Array<NodeToTrigger>;
+		nodesToTrigger: Array<NodeToTriggerWithMakers>;
 	} {
 		const marketIndex = market.marketIndex;
 
@@ -786,6 +790,14 @@ export class FillerBot extends TxThreaded implements Bot {
 		const vBid = calculateBidPrice(market, oraclePriceData);
 
 		const fillSlot = this.getMaxSlot();
+		const nodesToTrigger = this.findTriggerableNodesWithMakers(
+			dlob,
+			marketIndex,
+			fillSlot,
+			oraclePriceData,
+			MarketType.PERP,
+			this.driftClient.getStateAccount()
+		);
 
 		return {
 			nodesToFill: dlob.findNodesToFill(
@@ -799,13 +811,7 @@ export class FillerBot extends TxThreaded implements Bot {
 				this.driftClient.getStateAccount(),
 				this.driftClient.getPerpMarketAccount(marketIndex)!
 			),
-			nodesToTrigger: dlob.findNodesToTrigger(
-				marketIndex,
-				fillSlot,
-				oraclePriceData.price,
-				MarketType.PERP,
-				this.driftClient.getStateAccount()
-			),
+			nodesToTrigger,
 		};
 	}
 
@@ -1881,10 +1887,10 @@ export class FillerBot extends TxThreaded implements Bot {
 
 	protected filterPerpNodesForMarket(
 		fillableNodes: Array<NodeToFill>,
-		triggerableNodes: Array<NodeToTrigger>
+		triggerableNodes: Array<NodeToTriggerWithMakers>
 	): {
 		filteredFillableNodes: Array<NodeToFill>;
-		filteredTriggerableNodes: Array<NodeToTrigger>;
+		filteredTriggerableNodes: Array<NodeToTriggerWithMakers>;
 	} {
 		const seenFillableNodes = new Set<string>();
 		const filteredFillableNodes = fillableNodes.filter((node) => {
@@ -1920,7 +1926,7 @@ export class FillerBot extends TxThreaded implements Bot {
 	}
 
 	protected async executeTriggerablePerpNodesForMarket(
-		triggerableNodes: Array<NodeToTrigger>,
+		triggerableNodes: Array<NodeToTriggerWithMakers>,
 		buildForBundle: boolean
 	) {
 		for (const nodeToTrigger of triggerableNodes) {
@@ -1929,9 +1935,11 @@ export class FillerBot extends TxThreaded implements Bot {
 				nodeToTrigger.node.userAccount.toString()
 			);
 			logger.info(
-				`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}, slot: ${
+				`Processing node: account=${nodeToTrigger.node.userAccount.toString()}, slot=${
 					user.slot
-				}) order ${nodeToTrigger.node.order.orderId.toString()}`
+				}, orderId=${nodeToTrigger.node.order.orderId.toString()}, isFillable=${
+					nodeToTrigger.isFillable
+				}, numMakers=${nodeToTrigger.makers?.length ?? 0}`
 			);
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
@@ -1969,6 +1977,46 @@ export class FillerBot extends TxThreaded implements Bot {
 					nodeToTrigger.node.order
 				)
 			);
+
+			if (nodeToTrigger.isFillable) {
+				logger.info(
+					`Node is fillable - processing ${nodeToTrigger.makers.length} makers`
+				);
+				const makerInfos = await Promise.all(
+					nodeToTrigger.makers.map(async (m) => {
+						const maker = new PublicKey(m);
+						logger.info(`Getting maker info for ${maker.toString()}`);
+						const { data } = await this.getUserAccountAndSlotFromMap(
+							maker.toString()
+						);
+						const makerUserAccount = data;
+						const makerAuthority = makerUserAccount.authority;
+						const makerStats = getUserStatsAccountPublicKey(
+							this.driftClient.program.programId,
+							makerAuthority
+						);
+						logger.info(
+							`Got maker info: authority=${makerAuthority}, slot=${user.slot}`
+						);
+						return {
+							maker,
+							makerStats,
+							makerUserAccount,
+						};
+					})
+				);
+
+				logger.info(
+					`Adding fill perp order ix for ${makerInfos.length} makers`
+				);
+				const fillIx = await this.driftClient.getFillPerpOrderIx(
+					new PublicKey(nodeToTrigger.node.userAccount),
+					user.data,
+					nodeToTrigger.node.order,
+					makerInfos
+				);
+				ixs.push(fillIx);
+			}
 
 			if (this.revertOnFailure) {
 				ixs.push(await this.driftClient.getRevertFillIx());
@@ -2296,6 +2344,74 @@ export class FillerBot extends TxThreaded implements Bot {
 		return true;
 	}
 
+	public findTriggerableNodesWithMakers(
+		dlob: DLOB,
+		marketIndex: number,
+		slot: number,
+		oraclePriceData: OraclePriceData,
+		marketType: MarketType,
+		stateAccount: StateAccount
+	): NodeToTriggerWithMakers[] {
+		const baseTriggerable = dlob.findNodesToTrigger(
+			marketIndex,
+			slot,
+			oraclePriceData.price,
+			marketType,
+			stateAccount
+		);
+
+		const triggerWithMaker: NodeToTriggerWithMakers[] = [];
+
+		for (const nodeObj of baseTriggerable) {
+			const order = nodeObj.node.order;
+			let isFillable = false;
+
+			if (
+				isVariant(order.orderType, 'market') ||
+				isVariant(order.orderType, 'triggerMarket')
+			) {
+				isFillable = true;
+			} else if (isVariant(order.orderType, 'triggerLimit')) {
+				if (
+					isVariant(order.triggerCondition, 'triggeredAbove') ||
+					isVariant(order.triggerCondition, 'above')
+				) {
+					isFillable = order.price.lte(oraclePriceData.price);
+				} else if (
+					isVariant(order.triggerCondition, 'triggeredBelow') ||
+					isVariant(order.triggerCondition, 'below')
+				) {
+					isFillable = order.price.gte(oraclePriceData.price);
+				}
+			}
+
+			const NUM_MAKERS = 4;
+			if (isFillable) {
+				const makers = dlob.getBestMakers({
+					marketIndex,
+					marketType,
+					direction: order.direction,
+					slot,
+					oraclePriceData,
+					numMakers: NUM_MAKERS,
+				});
+				triggerWithMaker.push({
+					...nodeObj,
+					isFillable,
+					makers,
+				});
+			} else {
+				triggerWithMaker.push({
+					...nodeObj,
+					isFillable,
+					makers: [],
+				});
+			}
+		}
+
+		return triggerWithMaker;
+	}
+
 	protected async tryFill() {
 		const startTime = Date.now();
 		let ran = false;
@@ -2325,7 +2441,7 @@ export class FillerBot extends TxThreaded implements Bot {
 
 				// 1) get all fillable nodes
 				let fillableNodes: Array<NodeToFill> = [];
-				let triggerableNodes: Array<NodeToTrigger> = [];
+				let triggerableNodes: Array<NodeToTriggerWithMakers> = [];
 				for (const market of this.driftClient.getPerpMarketAccounts()) {
 					try {
 						const { nodesToFill, nodesToTrigger } = this.getPerpNodesForMarket(
