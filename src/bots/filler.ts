@@ -1729,9 +1729,10 @@ export class FillerBot extends TxThreaded implements Bot {
 			let removeLastIxPostSim = this.revertOnFailure;
 			if (
 				this.pythPriceSubscriber &&
+				this.pythLazerSubscriber &&
 				((makerInfos.length == 2 && !referrerInfo) || makerInfos.length < 2)
 			) {
-				const pythIxs = await this.getPythIxsFromNode(nodeToFill);
+				const pythIxs = await this.getPythIxsFromNode(nodeToFill, ixs);
 				ixs.push(...pythIxs);
 				removeLastIxPostSim = false;
 			}
@@ -1956,7 +1957,7 @@ export class FillerBot extends TxThreaded implements Bot {
 
 			let removeLastIxPostSim = this.revertOnFailure;
 			if (this.pythPriceSubscriber) {
-				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger);
+				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger, ixs);
 				ixs.push(...pythIxs);
 				removeLastIxPostSim = false;
 			}
