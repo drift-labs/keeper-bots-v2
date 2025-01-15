@@ -3,7 +3,6 @@ import {
 	UserAccount,
 	SpotPosition,
 	PerpPosition,
-	NodeToTrigger,
 	TriggerOrderNode,
 	DLOBNode,
 	OrderNode,
@@ -39,6 +38,7 @@ import {
 	SerializedDLOBNode,
 	NodeToFillWithBuffer,
 	NodeToFillWithContext,
+	NodeToTriggerWithMakers,
 } from './types';
 import { ChildProcess, fork } from 'child_process';
 import { logger } from '../../logger';
@@ -213,11 +213,14 @@ const deserializePerpPosition = (
 };
 
 export const serializeNodeToTrigger = (
-	node: NodeToTrigger,
-	userAccountData: Buffer
+	node: NodeToTriggerWithMakers,
+	userAccountData: Buffer,
+	makers: PublicKey[]
 ): SerializedNodeToTrigger => {
 	return {
 		node: serializeTriggerOrderNode(node.node, userAccountData),
+		isFillable: node.isFillable,
+		makers: makers.map((maker) => maker.toString()),
 	};
 };
 
@@ -322,7 +325,7 @@ export const deserializeNodeToFill = (
 	return node;
 };
 
-const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
+export const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
 	const order = deserializeOrder(node.order);
 	switch (node.type) {
 		case 'TakingLimitOrderNode':

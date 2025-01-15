@@ -1414,36 +1414,86 @@ export class FillerMultithreaded {
 			}
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
-			if (this.seenTriggerableOrders.has(nodeSignature)) {
-				if (!this.pythPriceSubscriber) {
-					// no pyth subscriber, tx will be empty
-					return;
-				}
-				logger.info(
-					`${logPrefix} already triggered order (account: ${
-						nodeToTrigger.node.userAccount
-					}, order ${nodeToTrigger.node.order.orderId.toString()}.
-					Just going to pull oracles`
-				);
-			} else {
+			if (!this.seenTriggerableOrders.has(nodeSignature)) {
 				this.seenTriggerableOrders.add(nodeSignature);
 				this.triggeringNodes.set(nodeSignature, Date.now());
+				const deserializedOrder = deserializeOrder(nodeToTrigger.node.order);
+				logger.info(
+					`${logPrefix} adding trigger order ix for user ${
+						nodeToTrigger.node.userAccount
+					} order ${deserializedOrder.orderId.toString()}`
+				);
 
 				ixs.push(
 					await this.driftClient.getTriggerOrderIx(
 						new PublicKey(nodeToTrigger.node.userAccount),
 						userAccount,
-						deserializeOrder(nodeToTrigger.node.order),
+						deserializedOrder,
 						user.userAccountPublicKey
 					)
 				);
+				if (nodeToTrigger.isFillable) {
+					logger.info(
+						`${logPrefix} order is fillable, processing ${nodeToTrigger.makers.length} makers`
+					);
+					// TODO: Check for Swift?
+					const makerInfos = await Promise.all(
+						nodeToTrigger.makers.map(async (m) => {
+							const maker = new PublicKey(m);
+							logger.info(
+								`${logPrefix} getting maker info for ${maker.toString()}`
+							);
+							const user = await this.userMap!.mustGetWithSlot(
+								m,
+								this.driftClient.userAccountSubscriptionConfig
+							);
+							const makerUserAccount = user.data.getUserAccount();
+							const makerAuthority = makerUserAccount.authority;
+							const makerStats = getUserStatsAccountPublicKey(
+								this.driftClient.program.programId,
+								makerAuthority
+							);
+							return {
+								maker,
+								makerStats,
+								makerUserAccount,
+							};
+						})
+					);
+
+					logger.info(
+						`${logPrefix} adding fill perp order ix for ${makerInfos.length} makers`
+					);
+					const fillIx = await this.driftClient.getFillPerpOrderIx(
+						new PublicKey(nodeToTrigger.node.userAccount),
+						user.getUserAccount(),
+						deserializedOrder,
+						makerInfos,
+						undefined,
+						this.subaccount
+					);
+					ixs.push(fillIx);
+				}
 
 				if (this.revertOnFailure) {
-					console.log(user.userAccountPublicKey.toString());
+					logger.info(
+						`${logPrefix} adding revert fill ix for user ${user.userAccountPublicKey.toString()}`
+					);
 					ixs.push(
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
 				}
+			} else {
+				if (!this.pythPriceSubscriber) {
+					logger.info(`${logPrefix} no pyth price subscriber, returning`);
+					return;
+				}
+				logger.info(
+					`${logPrefix} already triggered order (account: ${
+						nodeToTrigger.node.userAccount
+					}, order ${nodeToTrigger.node.order.orderId.toString()}).
+         Just going to pull oracles`
+				);
 			}
 
 			const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
