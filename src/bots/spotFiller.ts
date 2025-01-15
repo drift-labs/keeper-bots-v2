@@ -1,5 +1,4 @@
 import {
-	DriftEnv,
 	DriftClient,
 	SpotMarketAccount,
 	MakerInfo,
@@ -69,7 +68,6 @@ import {
 } from './common/txLogParse';
 import { FillerConfig, GlobalConfig } from '../config';
 import {
-	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getNodeToTriggerSignature,
@@ -97,7 +95,6 @@ import {
 import { selectMakers } from '../makerSelection';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
-import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { FallbackLiquiditySource } from '../experimental-bots/filler-common/types';
 
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
@@ -319,7 +316,6 @@ export class SpotFillerBot implements Bot {
 	protected minGasBalanceToFill: number;
 	protected rebalanceSettledPnlThreshold: BN;
 
-	protected pythPriceSubscriber?: PythPriceFeedSubscriber;
 	protected lookupTableAccounts: AddressLookupTableAccount[];
 
 	constructor(
@@ -331,7 +327,6 @@ export class SpotFillerBot implements Bot {
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
 		bundleSender?: BundleSender,
-		pythPriceSubscriber?: PythPriceFeedSubscriber,
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
@@ -389,7 +384,6 @@ export class SpotFillerBot implements Bot {
 			`${this.name}: rebalancing enabled: ${this.jupiterClient !== undefined}`
 		);
 
-		this.pythPriceSubscriber = pythPriceSubscriber;
 		this.lookupTableAccounts = lookupTableAccounts;
 
 		this.userMap = userMap;
@@ -1705,27 +1699,6 @@ export class SpotFillerBot implements Bot {
 					this.clearThrottledNode(getNodeToFillSignature(nodeSent));
 				});
 		}
-	}
-
-	private async getPythIxsFromNode(
-		node: NodeToFill | NodeToTrigger
-	): Promise<TransactionInstruction[]> {
-		const marketIndex = node.node.order?.marketIndex;
-		if (marketIndex === undefined) {
-			throw new Error('Market index not found on node');
-		}
-		if (!this.pythPriceSubscriber) {
-			throw new Error('Pyth price subscriber not initialized');
-		}
-		const pythIxs = await getAllPythOracleUpdateIxs(
-			this.runtimeSpec.driftEnv as DriftEnv,
-			marketIndex,
-			MarketType.SPOT,
-			this.pythPriceSubscriber!,
-			this.driftClient,
-			this.globalConfig.numNonActiveOraclesToPush ?? 0
-		);
-		return pythIxs;
 	}
 
 	/**

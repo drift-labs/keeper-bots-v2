@@ -262,9 +262,7 @@ export class FillerMultithreaded {
 	protected pythPriceSubscriber?: PythPriceFeedSubscriber;
 	protected latestPythVaas?: Map<string, string>; // priceFeedId -> vaa
 	protected marketIndexesToPriceIds = new Map<number, string>();
-
-	protected pythLazerClient?: PythLazerSubscriber;
-	protected marketIndexesToPythLazerGroups?: Map<number, number[]> = new Map(); // priceFeedId -> pythLazerIdChunk
+	protected pythLazerSubscriber?: PythLazerSubscriber;
 
 	constructor(
 		globalConfig: GlobalConfig,
@@ -408,7 +406,6 @@ export class FillerMultithreaded {
 				throw new Error('Missing lazerEndpoint or lazerToken in global config');
 			}
 
-			this.marketIndexesToPythLazerGroups = new Map();
 			const markets = PerpMarkets[this.globalConfig.driftEnv!]
 				.filter((market) =>
 					this.marketIndexesFlattened.includes(market.marketIndex)
@@ -416,20 +413,11 @@ export class FillerMultithreaded {
 				.filter((market) => market.pythLazerId !== undefined);
 			const pythLazerIds = markets.map((m) => m.pythLazerId!);
 			const pythLazerIdsChunks = chunks(pythLazerIds, 6);
-			this.pythLazerClient = new PythLazerSubscriber(
+			this.pythLazerSubscriber = new PythLazerSubscriber(
 				this.globalConfig.lazerEndpoint,
 				this.globalConfig.lazerToken,
-				pythLazerIdsChunks
-			);
-			pythLazerIdsChunks.forEach((chunk) =>
-				chunk.forEach((id) => {
-					const marketIndex = markets.find((m) => m.pythLazerId == id)
-						?.marketIndex;
-					if (marketIndex == undefined) {
-						throw new Error(`Market index not found for pyth lazer id: ${id}`);
-					}
-					this.marketIndexesToPythLazerGroups?.set(marketIndex, chunk);
-				})
+				pythLazerIdsChunks,
+				this.globalConfig.driftEnv
 			);
 		}
 	}
@@ -437,7 +425,7 @@ export class FillerMultithreaded {
 	async init() {
 		await this.blockhashSubscriber.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
-		await this.pythLazerClient?.subscribe();
+		await this.pythLazerSubscriber?.subscribe();
 
 		const feedIds: string[] = PerpMarkets[this.globalConfig.driftEnv!]
 			.map((m) => m.pythFeedId)
@@ -1098,7 +1086,7 @@ export class FillerMultithreaded {
 
 	private async getPythIxsFromNode(
 		node: NodeToFillWithBuffer | SerializedNodeToTrigger,
-		precedingIdxs: TransactionInstruction[] = [],
+		precedingIxs: TransactionInstruction[] = [],
 		isSwift = false
 	): Promise<TransactionInstruction[]> {
 		const marketIndex = node.node.order?.marketIndex;
@@ -1127,7 +1115,7 @@ export class FillerMultithreaded {
 			)
 		) {
 			const pythLazerIds =
-				this.marketIndexesToPythLazerGroups?.get(marketIndex);
+				this.pythLazerSubscriber?.getPriceFeedIdsFromMarketIndex(marketIndex);
 			if (!pythLazerIds) {
 				logger.error(
 					`Pyth lazer ids not found for marketIndex: ${marketIndex}`
@@ -1136,7 +1124,9 @@ export class FillerMultithreaded {
 			}
 
 			const latestLazerUpdate =
-				this.pythLazerClient?.getLatestPriceMessage(pythLazerIds);
+				this.pythLazerSubscriber?.getLatestPriceMessageForMarketIndex(
+					marketIndex
+				);
 			if (!latestLazerUpdate) {
 				logger.error(
 					`Latest lazer update not found for marketIndex: ${marketIndex}, pythLazerIds: ${pythLazerIds}`
@@ -1147,7 +1137,7 @@ export class FillerMultithreaded {
 			pythIxs = await this.driftClient.getPostPythLazerOracleUpdateIxs(
 				pythLazerIds,
 				latestLazerUpdate,
-				precedingIdxs
+				precedingIxs
 			);
 		} else if (!isSwift) {
 			pythIxs = await getAllPythOracleUpdateIxs(
@@ -1156,8 +1146,8 @@ export class FillerMultithreaded {
 				MarketType.PERP,
 				this.pythPriceSubscriber!,
 				this.driftClient,
-				this.globalConfig.numNonActiveOraclesToPush ?? 0,
-				this.marketIndexesFlattened
+				this.pythLazerSubscriber,
+				precedingIxs
 			);
 		}
 
