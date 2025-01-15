@@ -32,6 +32,7 @@ import {
 	QUOTE_PRECISION,
 	ClockSubscriber,
 	DriftEnv,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -75,6 +76,7 @@ import {
 import { getErrorCode } from '../error';
 import {
 	SimulateAndGetTxWithCUsResponse,
+	chunks,
 	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
@@ -95,6 +97,7 @@ import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { TxThreaded } from './common/txThreaded';
+import { PythLazerSubscriber } from '../pythLazerSubscriber';
 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
@@ -235,6 +238,7 @@ export class FillerBot extends TxThreaded implements Bot {
 	protected rebalanceSettledPnlThreshold: BN;
 
 	pythPriceSubscriber?: PythPriceFeedSubscriber;
+	pythLazerSubscriber?: PythLazerSubscriber;
 
 	constructor(
 		slotSubscriber: SlotSubscriber,
@@ -362,6 +366,25 @@ export class FillerBot extends TxThreaded implements Bot {
 		});
 
 		this.signerPubkey = this.driftClient.wallet.publicKey.toBase58();
+
+		// Pyth lazer: remember to remove devnet guard
+		if (this.globalConfig.driftEnv == 'devnet') {
+			if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
+				throw new Error('Missing lazerEndpoint or lazerToken in global config');
+			}
+
+			const markets = PerpMarkets[this.globalConfig.driftEnv!].filter(
+				(market) => market.pythLazerId !== undefined
+			);
+			const pythLazerIds = markets.map((m) => m.pythLazerId!);
+			const pythLazerIdsChunks = chunks(pythLazerIds, 5);
+			this.pythLazerSubscriber = new PythLazerSubscriber(
+				this.globalConfig.lazerEndpoint,
+				this.globalConfig.lazerToken,
+				pythLazerIdsChunks,
+				this.globalConfig.driftEnv
+			);
+		}
 	}
 
 	protected initializeMetrics(metricsPort?: number) {
@@ -512,6 +535,7 @@ export class FillerBot extends TxThreaded implements Bot {
 		);
 
 		await this.clockSubscriber.subscribe();
+		await this.pythLazerSubscriber?.subscribe();
 
 		this.lutAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
@@ -1382,7 +1406,8 @@ export class FillerBot extends TxThreaded implements Bot {
 	}
 
 	private async getPythIxsFromNode(
-		node: NodeToFill | NodeToTrigger
+		node: NodeToFill | NodeToTrigger,
+		precedingIxs: TransactionInstruction[] = []
 	): Promise<TransactionInstruction[]> {
 		const marketIndex = node.node.order?.marketIndex;
 		if (marketIndex === undefined) {
@@ -1411,7 +1436,8 @@ export class FillerBot extends TxThreaded implements Bot {
 			MarketType.PERP,
 			this.pythPriceSubscriber!,
 			this.driftClient,
-			this.globalConfig.numNonActiveOraclesToPush ?? 0
+			this.pythLazerSubscriber,
+			precedingIxs
 		);
 		return pythIxs;
 	}

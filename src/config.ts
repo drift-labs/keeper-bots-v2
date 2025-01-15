@@ -161,7 +161,6 @@ export interface GlobalConfig {
 	hermesEndpoint?: string;
 	lazerEndpoint?: string;
 	lazerToken?: string;
-	numNonActiveOraclesToPush?: number;
 
 	// Optional to specify markets loaded by drift client
 	perpMarketsToLoad?: Array<number>;
@@ -247,7 +246,6 @@ const defaultConfig: Partial<Config> = {
 
 		endpoint: process.env.ENDPOINT!,
 		hermesEndpoint: process.env.HERMES_ENDPOINT,
-		numNonActiveOraclesToPush: 0,
 		wsEndpoint: process.env.WS_ENDPOINT,
 		heliusEndpoint: process.env.HELIUS_ENDPOINT,
 		additionalSendTxEndpoints: [],
