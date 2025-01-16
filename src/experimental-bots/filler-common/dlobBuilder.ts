@@ -386,48 +386,21 @@ class DLOBBuilder {
 
 		for (const nodeObj of baseTriggerable) {
 			const order = nodeObj.node.order;
-			let isFillable = false;
 
-			if (
-				isVariant(order.orderType, 'market') ||
-				isVariant(order.orderType, 'triggerMarket')
-			) {
-				isFillable = true;
-			} else if (isVariant(order.orderType, 'triggerLimit')) {
-				if (
-					isVariant(order.triggerCondition, 'triggeredAbove') ||
-					isVariant(order.triggerCondition, 'above')
-				) {
-					isFillable = order.price.lte(oraclePriceData.price);
-				} else if (
-					isVariant(order.triggerCondition, 'triggeredBelow') ||
-					isVariant(order.triggerCondition, 'below')
-				) {
-					isFillable = order.price.gte(oraclePriceData.price);
-				}
-			}
-
-			if (isFillable) {
-				const makers = dlob.getBestMakers({
-					marketIndex,
-					marketType,
-					direction: order.direction,
-					slot,
-					oraclePriceData,
-					numMakers: NUM_MAKERS,
-				});
-				triggerWithMaker.push({
-					...nodeObj,
-					isFillable,
-					makers,
-				});
-			} else {
-				triggerWithMaker.push({
-					...nodeObj,
-					isFillable,
-					makers: [],
-				});
-			}
+			const makers = dlob.getBestMakers({
+				marketIndex,
+				marketType,
+				direction: isVariant(order.direction, 'long')
+					? PositionDirection.SHORT
+					: PositionDirection.LONG,
+				slot,
+				oraclePriceData,
+				numMakers: NUM_MAKERS,
+			});
+			triggerWithMaker.push({
+				...nodeObj,
+				makers,
+			});
 		}
 
 		return triggerWithMaker;

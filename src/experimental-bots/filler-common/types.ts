@@ -97,7 +97,6 @@ export type SerializedPerpPosition = {
 
 export type SerializedNodeToTrigger = {
 	node: SerializedTriggerOrderNode;
-	isFillable: boolean;
 	makers: string[];
 };
 
@@ -149,6 +148,5 @@ export type NodeToFillWithBuffer = {
 };
 
 export type NodeToTriggerWithMakers = NodeToTrigger & {
-	isFillable: boolean;
 	makers: PublicKey[];
 };

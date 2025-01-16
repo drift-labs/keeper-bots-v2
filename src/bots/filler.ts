@@ -35,6 +35,7 @@ import {
 	OraclePriceData,
 	StateAccount,
 	getUserStatsAccountPublicKey,
+	PositionDirection,
 	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
@@ -100,7 +101,7 @@ import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { TxThreaded } from './common/txThreaded';
-import { NodeToTriggerWithMakers } from 'src/experimental-bots/filler-common/types';
+import { NodeToTriggerWithMakers } from '../experimental-bots/filler-common/types';
 import { PythLazerSubscriber } from '../pythLazerSubscriber';
 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
@@ -122,6 +123,7 @@ export const CACHED_BLOCKHASH_OFFSET = 5;
 const DUMP_TXS_IN_SIM = false;
 
 const EXPIRE_ORDER_BUFFER_SEC = 60; // add extra time before trying to expire orders (want to avoid 6252 error due to clock drift)
+const NUM_MAKERS = 4; // number of makers to pull for triggerable orders
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
@@ -1937,9 +1939,9 @@ export class FillerBot extends TxThreaded implements Bot {
 			logger.info(
 				`Processing node: account=${nodeToTrigger.node.userAccount.toString()}, slot=${
 					user.slot
-				}, orderId=${nodeToTrigger.node.order.orderId.toString()}, isFillable=${
-					nodeToTrigger.isFillable
-				}, numMakers=${nodeToTrigger.makers?.length ?? 0}`
+				}, orderId=${nodeToTrigger.node.order.orderId.toString()}, numMakers=${
+					nodeToTrigger.makers?.length ?? 0
+				}`
 			);
 
 			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
@@ -1978,45 +1980,35 @@ export class FillerBot extends TxThreaded implements Bot {
 				)
 			);
 
-			if (nodeToTrigger.isFillable) {
-				logger.info(
-					`Node is fillable - processing ${nodeToTrigger.makers.length} makers`
-				);
-				const makerInfos = await Promise.all(
-					nodeToTrigger.makers.map(async (m) => {
-						const maker = new PublicKey(m);
-						logger.info(`Getting maker info for ${maker.toString()}`);
-						const { data } = await this.getUserAccountAndSlotFromMap(
-							maker.toString()
-						);
-						const makerUserAccount = data;
-						const makerAuthority = makerUserAccount.authority;
-						const makerStats = getUserStatsAccountPublicKey(
-							this.driftClient.program.programId,
-							makerAuthority
-						);
-						logger.info(
-							`Got maker info: authority=${makerAuthority}, slot=${user.slot}`
-						);
-						return {
-							maker,
-							makerStats,
-							makerUserAccount,
-						};
-					})
-				);
+			logger.info(`Triggrable node has ${nodeToTrigger.makers.length} makers`);
+			const makerInfos = await Promise.all(
+				nodeToTrigger.makers.map(async (m) => {
+					const maker = new PublicKey(m);
+					logger.info(`Getting maker info for ${maker.toString()}`);
+					const { data } = await this.getUserAccountAndSlotFromMap(
+						maker.toString()
+					);
+					const makerUserAccount = data;
+					const makerAuthority = makerUserAccount.authority;
+					const makerStats = getUserStatsAccountPublicKey(
+						this.driftClient.program.programId,
+						makerAuthority
+					);
+					return {
+						maker,
+						makerStats,
+						makerUserAccount,
+					};
+				})
+			);
 
-				logger.info(
-					`Adding fill perp order ix for ${makerInfos.length} makers`
-				);
-				const fillIx = await this.driftClient.getFillPerpOrderIx(
-					new PublicKey(nodeToTrigger.node.userAccount),
-					user.data,
-					nodeToTrigger.node.order,
-					makerInfos
-				);
-				ixs.push(fillIx);
-			}
+			const fillIx = await this.driftClient.getFillPerpOrderIx(
+				new PublicKey(nodeToTrigger.node.userAccount),
+				user.data,
+				nodeToTrigger.node.order,
+				makerInfos
+			);
+			ixs.push(fillIx);
 
 			if (this.revertOnFailure) {
 				ixs.push(await this.driftClient.getRevertFillIx());
@@ -2359,54 +2351,31 @@ export class FillerBot extends TxThreaded implements Bot {
 			marketType,
 			stateAccount
 		);
+		if (baseTriggerable.length > 0) {
+			logger.info(
+				`Found ${baseTriggerable.length} nodes to trigger for market ${marketIndex}`
+			);
+		}
 
 		const triggerWithMaker: NodeToTriggerWithMakers[] = [];
 
 		for (const nodeObj of baseTriggerable) {
 			const order = nodeObj.node.order;
-			let isFillable = false;
 
-			if (
-				isVariant(order.orderType, 'market') ||
-				isVariant(order.orderType, 'triggerMarket')
-			) {
-				isFillable = true;
-			} else if (isVariant(order.orderType, 'triggerLimit')) {
-				if (
-					isVariant(order.triggerCondition, 'triggeredAbove') ||
-					isVariant(order.triggerCondition, 'above')
-				) {
-					isFillable = order.price.lte(oraclePriceData.price);
-				} else if (
-					isVariant(order.triggerCondition, 'triggeredBelow') ||
-					isVariant(order.triggerCondition, 'below')
-				) {
-					isFillable = order.price.gte(oraclePriceData.price);
-				}
-			}
-
-			const NUM_MAKERS = 4;
-			if (isFillable) {
-				const makers = dlob.getBestMakers({
-					marketIndex,
-					marketType,
-					direction: order.direction,
-					slot,
-					oraclePriceData,
-					numMakers: NUM_MAKERS,
-				});
-				triggerWithMaker.push({
-					...nodeObj,
-					isFillable,
-					makers,
-				});
-			} else {
-				triggerWithMaker.push({
-					...nodeObj,
-					isFillable,
-					makers: [],
-				});
-			}
+			const makers = dlob.getBestMakers({
+				marketIndex,
+				marketType,
+				direction: isVariant(order.direction, 'long')
+					? PositionDirection.SHORT
+					: PositionDirection.LONG,
+				slot,
+				oraclePriceData,
+				numMakers: NUM_MAKERS,
+			});
+			triggerWithMaker.push({
+				...nodeObj,
+				makers,
+			});
 		}
 
 		return triggerWithMaker;
