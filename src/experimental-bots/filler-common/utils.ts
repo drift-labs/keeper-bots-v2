@@ -219,7 +219,6 @@ export const serializeNodeToTrigger = (
 ): SerializedNodeToTrigger => {
 	return {
 		node: serializeTriggerOrderNode(node.node, userAccountData),
-		isFillable: node.isFillable,
 		makers: makers.map((maker) => maker.toString()),
 	};
 };
