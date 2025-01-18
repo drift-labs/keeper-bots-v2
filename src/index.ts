@@ -680,7 +680,6 @@ const runBot = async () => {
 				priorityFeeSubscriber,
 				blockhashSubscriber,
 				bundleSender,
-				pythPriceSubscriber,
 				[]
 			)
 		);

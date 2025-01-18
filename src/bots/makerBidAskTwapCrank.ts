@@ -12,6 +12,7 @@ import {
 	DriftMarketInfo,
 	isOneOfVariant,
 	getVariant,
+	PerpMarkets,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -31,6 +32,7 @@ import {
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
 import {
+	chunks,
 	getAllPythOracleUpdateIxs,
 	getDriftPriorityFeeEndpoint,
 	handleSimResultError,
@@ -38,6 +40,7 @@ import {
 	SimulateAndGetTxWithCUsResponse,
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
+import { PythLazerSubscriber } from '../pythLazerSubscriber';
 import { PythPullClient } from '@drift-labs/sdk';
 import { BundleSender } from '../bundleSender';
 
@@ -176,6 +179,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 	private pythPriceSubscriber?: PythPriceFeedSubscriber;
+	private pythLazerSubscriber?: PythLazerSubscriber;
 	private pythPullOracleClient: PythPullClient;
 	private pythHealthy: boolean = true;
 	private lookupTableAccounts: AddressLookupTableAccount[];
@@ -204,9 +208,30 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.lookupTableAccounts = lookupTableAccounts;
 		this.pythPullOracleClient = new PythPullClient(this.driftClient.connection);
 		this.bundleSender = bundleSender;
+
+		// Pyth lazer: remember to remove devnet guard
+		if (this.globalConfig.driftEnv == 'devnet') {
+			if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
+				throw new Error('Missing lazerEndpoint or lazerToken in global config');
+			}
+
+			const markets = PerpMarkets[this.globalConfig.driftEnv!].filter(
+				(market) => market.pythLazerId !== undefined
+			);
+			const pythLazerIds = markets.map((m) => m.pythLazerId!);
+			const pythLazerIdsChunks = chunks(pythLazerIds, 10);
+			this.pythLazerSubscriber = new PythLazerSubscriber(
+				this.globalConfig.lazerEndpoint,
+				this.globalConfig.lazerToken,
+				pythLazerIdsChunks,
+				this.globalConfig.driftEnv
+			);
+		}
 	}
 
 	public async init() {
+		await this.pythLazerSubscriber?.subscribe();
+
 		logger.info(`[${this.name}] initing, runOnce: ${this.runOnce}`);
 		this.lookupTableAccounts.push(
 			await this.driftClient.fetchMarketLookupTableAccount()
@@ -403,7 +428,8 @@ export class MakerBidAskTwapCrank implements Bot {
 	}
 
 	private async getPythIxsFromTwapCrankInfo(
-		crankMarketIndex: number
+		crankMarketIndex: number,
+		precedingIxs: TransactionInstruction[] = []
 	): Promise<TransactionInstruction[]> {
 		if (crankMarketIndex === undefined) {
 			throw new Error('Market index not found on node');
@@ -417,7 +443,8 @@ export class MakerBidAskTwapCrank implements Bot {
 			MarketType.PERP,
 			this.pythPriceSubscriber!,
 			this.driftClient,
-			this.globalConfig.numNonActiveOraclesToPush ?? 0
+			this.pythLazerSubscriber,
+			precedingIxs
 		);
 		return pythIxs;
 	}
@@ -548,10 +575,16 @@ export class MakerBidAskTwapCrank implements Bot {
 					this.pythPriceSubscriber &&
 					isOneOfVariant(
 						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-						['pythPull', 'pyth1KPull', 'pyth1MPull', 'pythStableCoinPull']
+						[
+							'pythPull',
+							'pyth1KPull',
+							'pyth1MPull',
+							'pythStableCoinPull',
+							'pythLazer',
+						]
 					)
 				) {
-					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi);
+					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi, ixs);
 					ixs.push(...pythIxs);
 					pythIxsPushed = true;
 				} else if (usingSwitchboardOnDemand) {

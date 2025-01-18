@@ -4,8 +4,12 @@ import { GlobalConfig, PythLazerCrankerBotConfig } from '../config';
 import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSolanaReceiver';
 import {
 	BlockhashSubscriber,
+	DevnetPerpMarkets,
+	DevnetSpotMarkets,
 	DriftClient,
 	getPythLazerOraclePublicKey,
+	MainnetPerpMarkets,
+	MainnetSpotMarkets,
 	PriorityFeeSubscriber,
 	TxSigAndSlot,
 } from '@drift-labs/sdk';
@@ -57,12 +61,21 @@ export class PythLazerCrankerBot implements Bot {
 			throw new Error('Only devnet drift env is supported');
 		}
 
-		const updateConfigs = this.crankConfigs.updateConfigs;
-		const feedIdChunks = chunks(Object.keys(updateConfigs), 11).map((chunk) =>
-			chunk.map((alias) => {
-				return updateConfigs[alias].feedId;
-			})
-		);
+		const spotMarkets =
+			this.globalConfig.driftEnv === 'mainnet-beta'
+				? DevnetSpotMarkets
+				: MainnetSpotMarkets;
+		const perpMarkets =
+			this.globalConfig.driftEnv === 'mainnet-beta'
+				? DevnetPerpMarkets
+				: MainnetPerpMarkets;
+
+		const allFeedIds = [
+			...spotMarkets.map((market) => market.pythLazerId),
+			...perpMarkets.map((market) => market.pythLazerId),
+		].filter((id) => id !== undefined) as number[];
+		const allFeedIdsSet = new Set(allFeedIds);
+		const feedIdChunks = chunks(Array.from(allFeedIdsSet), 11);
 
 		if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
 			throw new Error('Missing lazerEndpoint or lazerToken in global config');

@@ -66,6 +66,7 @@ import {
 import { webhookMessage } from './webhook';
 import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 import { FallbackLiquiditySource } from './experimental-bots/filler-common/types';
+import { PythLazerSubscriber } from './pythLazerSubscriber';
 
 // devnet only
 export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(
@@ -1126,62 +1127,50 @@ export const getStaleOracleMarketIndexes = (
 
 export const getAllPythOracleUpdateIxs = async (
 	driftEnv: DriftEnv,
-	activeMarketIndex: number,
+	marketIndex: number,
 	marketType: MarketType,
 	pythPriceSubscriber: PythPriceFeedSubscriber,
 	driftClient: DriftClient,
-	numNonActiveOraclesToTryAndPush: number,
-	marketIndexesToConsider: number[] = []
-) => {
-	let markets: (PerpMarketConfig | SpotMarketConfig)[];
-	if (isVariant(marketType, 'perp')) {
-		markets =
-			driftEnv === 'mainnet-beta'
-				? PerpMarkets['mainnet-beta']
-				: PerpMarkets['devnet'];
+	pythLazerSubscriber?: PythLazerSubscriber,
+	precedingIxs: TransactionInstruction[] = []
+): Promise<TransactionInstruction[]> => {
+	const markets = isVariant(marketType, 'perp')
+		? PerpMarkets[driftEnv]
+		: SpotMarkets[driftEnv];
+	const oracleSource = isVariant(marketType, 'perp')
+		? driftClient.getPerpMarketAccount(marketIndex)?.amm.oracleSource
+		: driftClient.getSpotMarketAccount(marketIndex)?.oracleSource;
+
+	const oracleSourceStr = getVariant(oracleSource).toLowerCase();
+	if (oracleSourceStr.includes('pyth') && oracleSourceStr.includes('pull')) {
+		const feedId = getPythPriceFeedIdForMarket(marketIndex, markets, false);
+		const vaa = pythPriceSubscriber.getLatestCachedVaa(feedId as string);
+		if (!vaa) {
+			logger.debug('No VAA found for feedId', feedId);
+			return [];
+		}
+		return await driftClient.getPostPythPullOracleUpdateAtomicIxs(
+			vaa,
+			feedId as string
+		);
 	} else {
-		markets =
-			driftEnv === 'mainnet-beta'
-				? SpotMarkets['mainnet-beta']
-				: SpotMarkets['devnet'];
-	}
-	if (marketIndexesToConsider.length > 0) {
-		markets = markets.filter((market) =>
-			marketIndexesToConsider.includes(market.marketIndex)
+		const updateMessage =
+			pythLazerSubscriber?.getLatestPriceMessageForMarketIndex(marketIndex);
+		const feedIds =
+			pythLazerSubscriber?.getPriceFeedIdsFromMarketIndex(marketIndex);
+		if (!updateMessage || !feedIds) {
+			logger.debug(
+				'No update message or feed ids found for marketIndex',
+				marketIndex
+			);
+			return [];
+		}
+		return await driftClient.getPostPythLazerOracleUpdateIxs(
+			feedIds,
+			updateMessage,
+			precedingIxs
 		);
 	}
-
-	const primaryFeedId = getPythPriceFeedIdForMarket(
-		activeMarketIndex,
-		markets,
-		false
-	);
-	marketIndexesToConsider =
-		marketIndexesToConsider ?? markets.map((market) => market.marketIndex);
-	const staleFeedIds = getStaleOracleMarketIndexes(
-		driftClient,
-		markets,
-		marketType,
-		numNonActiveOraclesToTryAndPush
-	).map((index) => getPythPriceFeedIdForMarket(index, markets, false));
-
-	const postOracleUpdateIxsPromises = [primaryFeedId, ...staleFeedIds]
-		.filter((feedId) => feedId !== undefined)
-		.map((feedId) => {
-			if (!feedId) return;
-			const vaa = pythPriceSubscriber.getLatestCachedVaa(feedId as string);
-			if (!vaa) {
-				logger.debug('No VAA found for feedId', feedId);
-				return;
-			}
-			return driftClient.getPostPythPullOracleUpdateAtomicIxs(
-				vaa,
-				feedId as string
-			);
-		})
-		.filter((ix) => ix !== undefined) as Promise<TransactionInstruction[]>[];
-	const postOracleUpdateIxs = await Promise.all(postOracleUpdateIxsPromises);
-	return postOracleUpdateIxs.flat();
 };
 
 export function canFillSpotMarket(spotMarket: SpotMarketAccount): boolean {

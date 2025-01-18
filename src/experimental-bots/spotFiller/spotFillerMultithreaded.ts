@@ -6,7 +6,6 @@ import {
 	NodeToFill,
 	JupiterClient,
 	BulkAccountLoader,
-	DriftEnv,
 	isVariant,
 	DLOBNode,
 	getOrderSignature,
@@ -50,7 +49,6 @@ import {
 import {
 	MEMO_PROGRAM_ID,
 	SimulateAndGetTxWithCUsResponse,
-	getAllPythOracleUpdateIxs,
 	getFillSignatureFromUserAccountAndOrderId,
 	getNodeToFillSignature,
 	getTransactionAccountMetas,
@@ -613,28 +611,6 @@ export class SpotFillerMultithreaded {
 				setInterval(this.recordJitoBundleStats.bind(this), 10_000)
 			);
 		}
-	}
-
-	private async getPythIxsFromNode(
-		node: NodeToFillWithBuffer | SerializedNodeToTrigger
-	): Promise<TransactionInstruction[]> {
-		const marketIndex = node.node.order?.marketIndex;
-		if (marketIndex === undefined) {
-			throw new Error('Market index not found on node');
-		}
-		if (!this.pythPriceSubscriber) {
-			throw new Error('Pyth price subscriber not initialized');
-		}
-		const pythIxs = await getAllPythOracleUpdateIxs(
-			this.runtimeSpec.driftEnv as DriftEnv,
-			marketIndex,
-			MarketType.SPOT,
-			this.pythPriceSubscriber!,
-			this.driftClient,
-			this.globalConfig.numNonActiveOraclesToPush ?? 0,
-			this.marketIndexesFlattened
-		);
-		return pythIxs;
 	}
 
 	public async triggerNodes(

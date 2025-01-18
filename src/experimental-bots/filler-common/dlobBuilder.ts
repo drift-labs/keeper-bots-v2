@@ -166,7 +166,7 @@ class DLOBBuilder {
 				) {
 					return;
 				}
-				this.dlob.insertOrder(
+				dlob.insertOrder(
 					order,
 					pubkey,
 					this.slotSubscriber.getSlot(),
@@ -192,7 +192,7 @@ class DLOBBuilder {
 			slot,
 		}: SwiftOrderParamsMessage = this.driftClient.program.coder.types.decode(
 			'SwiftOrderParamsMessage',
-			Buffer.from(orderData['order_message'], 'base64')
+			Buffer.from(orderData['order_message'], 'hex')
 		);
 
 		const takerAuthority = new PublicKey(orderData['taker_authority']);
