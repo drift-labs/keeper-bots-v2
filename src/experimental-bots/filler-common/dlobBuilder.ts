@@ -166,7 +166,7 @@ class DLOBBuilder {
 				) {
 					return;
 				}
-				this.dlob.insertOrder(
+				dlob.insertOrder(
 					order,
 					pubkey,
 					this.slotSubscriber.getSlot(),
