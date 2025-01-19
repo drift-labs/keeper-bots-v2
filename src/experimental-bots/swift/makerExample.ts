@@ -124,10 +124,7 @@ export class SwiftMaker {
 						swiftOrderParams,
 						subAccountId: takerSubaccountId,
 					}: SwiftOrderParamsMessage =
-						this.driftClient.program.coder.types.decode(
-							'SwiftOrderParamsMessage',
-							swiftOrderParamsBuf
-						);
+						this.driftClient.decodeSwiftOrderParamsMessage(swiftOrderParamsBuf);
 
 					const takerAuthority = new PublicKey(order['taker_authority']);
 					const takerUserPubkey = await getUserAccountPublicKey(
@@ -138,6 +135,8 @@ export class SwiftMaker {
 					const takerUserAccount = (
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();
+
+					console.log(takerUserAccount.authority.toString());
 
 					const isOrderLong = isVariant(swiftOrderParams.direction, 'long');
 					if (!swiftOrderParams.price) {
@@ -182,6 +181,11 @@ export class SwiftMaker {
 						undefined,
 						await this.driftClient.connection.getLatestBlockhash()
 					);
+
+					const resp = await this.driftClient.connection.simulateTransaction(
+						tx
+					);
+					console.log(resp.value.logs);
 
 					this.driftClient.txSender
 						.sendVersionedTransaction(tx)
