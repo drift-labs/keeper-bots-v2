@@ -245,8 +245,12 @@ export const serializeNodeToFill = (
 	return {
 		node: serializeDLOBNode(node.node, isUserProtectedMaker, userAccountData),
 		makerNodes: node.makerNodes.map((node) => {
-			// @ts-ignore
-			return serializeDLOBNode(node, makerAccountDatas.get(node.userAccount));
+			return serializeDLOBNode(
+				node,
+				isUserProtectedMaker,
+				//@ts-ignore
+				makerAccountDatas.get(node.userAccount)
+			);
 		}),
 		fallbackAskSource: node.fallbackAskSource,
 		fallbackBidSource: node.fallbackBidSource,
