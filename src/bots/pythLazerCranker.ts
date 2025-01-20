@@ -63,12 +63,12 @@ export class PythLazerCrankerBot implements Bot {
 
 		const spotMarkets =
 			this.globalConfig.driftEnv === 'mainnet-beta'
-				? DevnetSpotMarkets
-				: MainnetSpotMarkets;
+				? MainnetSpotMarkets
+				: DevnetSpotMarkets;
 		const perpMarkets =
 			this.globalConfig.driftEnv === 'mainnet-beta'
-				? DevnetPerpMarkets
-				: MainnetPerpMarkets;
+				? MainnetPerpMarkets
+				: DevnetPerpMarkets;
 
 		const allFeedIds = [
 			...spotMarkets.map((market) => market.pythLazerId),
@@ -76,6 +76,8 @@ export class PythLazerCrankerBot implements Bot {
 		].filter((id) => id !== undefined) as number[];
 		const allFeedIdsSet = new Set(allFeedIds);
 		const feedIdChunks = chunks(Array.from(allFeedIdsSet), 11);
+
+		console.log(feedIdChunks);
 
 		if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
 			throw new Error('Missing lazerEndpoint or lazerToken in global config');
@@ -207,6 +209,12 @@ export class PythLazerCrankerBot implements Bot {
 				doSimulation: true,
 				recentBlockhash: await this.getBlockhashForTx(),
 			});
+			if (simResult.simError) {
+				logger.error(
+					`Error simulating pyth lazer oracles for ${feedIds}: ${simResult.simTxLogs}`
+				);
+				continue;
+			}
 			const startTime = Date.now();
 			this.driftClient
 				.sendTransaction(simResult.tx)
