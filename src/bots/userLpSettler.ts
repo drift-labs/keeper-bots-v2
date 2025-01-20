@@ -45,7 +45,7 @@ export class UserLpSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly runOnce: boolean;
-	public readonly defaultIntervalMs: number = 600000;
+	public readonly defaultIntervalMs: number = 30 * 60 * 1000;
 
 	private driftClient: DriftClient;
 	private lookupTableAccount?: AddressLookupTableAccount;
