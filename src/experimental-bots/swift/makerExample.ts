@@ -185,7 +185,9 @@ export class SwiftMaker {
 					const resp = await this.driftClient.connection.simulateTransaction(
 						tx
 					);
-					console.log(resp.value.logs);
+					if (resp.value.err) {
+						console.log(resp.value.logs);
+					}
 
 					this.driftClient.txSender
 						.sendVersionedTransaction(tx)
