@@ -287,7 +287,7 @@ export class PythCrankerBot implements Bot {
 		);
 		const onChainDataResults = (
 			await Promise.all(
-				feedIdsToCrankAddressChunks.map(async (feedIdsToCrankAddressChunk) => {
+				feedIdsToCrankAddressChunks.map((feedIdsToCrankAddressChunk) => {
 					return this.driftClient.connection.getMultipleAccountsInfo(
 						feedIdsToCrankAddressChunk
 					);
