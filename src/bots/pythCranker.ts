@@ -281,10 +281,19 @@ export class PythCrankerBot implements Bot {
 	}
 
 	async runCrankLoop() {
-		const onChainDataResults =
-			await this.driftClient.connection.getMultipleAccountsInfo(
-				this.feedIdsToCrank.map((f) => f.accountAddress)
-			);
+		const feedIdsToCrankAddressChunks = chunks(
+			this.feedIdsToCrank.map((f) => f.accountAddress),
+			50
+		);
+		const onChainDataResults = (
+			await Promise.all(
+				feedIdsToCrankAddressChunks.map((feedIdsToCrankAddressChunk) => {
+					return this.driftClient.connection.getMultipleAccountsInfo(
+						feedIdsToCrankAddressChunk
+					);
+				})
+			)
+		).flat();
 
 		const latestSlot = await this.driftClient.connection.getSlot();
 		let numFeedsSignalingRestart = 0;
