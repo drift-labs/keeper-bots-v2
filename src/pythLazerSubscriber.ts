@@ -6,6 +6,7 @@ export class PythLazerSubscriber {
 	private pythLazerClient?: PythLazerClient;
 	feedIdChunkToPriceMessage: Map<string, string> = new Map();
 	feedIdHashToFeedIds: Map<string, number[]> = new Map();
+	subscriptionIdsToFeedIdsHash: Map<number, string> = new Map();
 	allSubscribedIds: number[] = [];
 
 	timeoutId?: NodeJS.Timeout;
@@ -18,7 +19,7 @@ export class PythLazerSubscriber {
 		private endpoint: string,
 		private token: string,
 		private priceFeedIdsArrays: number[][],
-		private env: DriftEnv = 'devnet',
+		env: DriftEnv = 'devnet',
 		private resubTimeoutMs: number = 2000
 	) {
 		const markets = PerpMarkets[env].filter(
@@ -50,19 +51,24 @@ export class PythLazerSubscriber {
 			}
 		}
 		for (const priceFeedIds of this.priceFeedIdsArrays) {
+			const feedIdsHash = this.hash(priceFeedIds);
 			this.allSubscribedIds.push(...priceFeedIds);
-			this.feedIdHashToFeedIds.set(this.hash(priceFeedIds), priceFeedIds);
+			this.feedIdHashToFeedIds.set(feedIdsHash, priceFeedIds);
+			this.subscriptionIdsToFeedIdsHash.set(subscriptionId, feedIdsHash);
 			this.pythLazerClient.addMessageListener((message) => {
 				this.receivingData = true;
 				clearTimeout(this.timeoutId);
 				switch (message.type) {
 					case 'json': {
 						if (message.value.type == 'streamUpdated') {
-							if (message.value.solana?.data)
+							if (message.value.solana?.data) {
 								this.feedIdChunkToPriceMessage.set(
-									this.hash(priceFeedIds),
+									this.subscriptionIdsToFeedIdsHash.get(
+										message.value.subscriptionId
+									)!,
 									message.value.solana.data
 								);
+							}
 						}
 						break;
 					}
