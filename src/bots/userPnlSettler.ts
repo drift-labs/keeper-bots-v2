@@ -63,7 +63,7 @@ export class UserPnlSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly runOnce: boolean;
-	public readonly defaultIntervalMs: number = 300_000;
+	public readonly defaultIntervalMs: number = 15 * 60 * 1000;
 
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
