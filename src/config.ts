@@ -106,17 +106,14 @@ export type PythCrankerBotConfig = BaseBotConfig & {
 			earlyUpdate: PythUpdateConfigs;
 		};
 	};
+	onlyCrankUsedOracles?: boolean;
 };
 
 export type PythLazerCrankerBotConfig = BaseBotConfig & {
 	slotStalenessThresholdRestart: number;
 	txSuccessRateThreshold: number;
 	intervalMs: number;
-	updateConfigs: {
-		[key: string]: {
-			feedId: number;
-		};
-	};
+	onlyCrankUsedOracles?: boolean;
 };
 
 export type SwitchboardCrankerBotConfig = BaseBotConfig & {
