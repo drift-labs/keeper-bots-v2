@@ -190,8 +190,7 @@ class DLOBBuilder {
 			swiftOrderParams,
 			subAccountId: takerSubaccountId,
 			slot,
-		}: SwiftOrderParamsMessage = this.driftClient.program.coder.types.decode(
-			'SwiftOrderParamsMessage',
+		}: SwiftOrderParamsMessage = this.driftClient.decodeSwiftOrderParamsMessage(
 			Buffer.from(orderData['order_message'], 'hex')
 		);
 
