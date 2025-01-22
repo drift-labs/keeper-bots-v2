@@ -132,13 +132,33 @@ export class PythCrankerBot implements Bot {
 			.getPerpMarketAccounts()
 			.map((market) => market.marketIndex);
 		const perpMarketConfigs = PerpMarkets[this.globalConfig.driftEnv].filter(
-			(market) => perpMarketIndexes.includes(market.marketIndex)
+			(market) => {
+				const useMarket = this.crankConfigs.onlyCrankUsedOracles
+					? isOneOfVariant(market.oracleSource, [
+							'pythPull',
+							'pythPullStableCoin',
+							'pyth1MPull',
+							'pyth1KPull',
+					  ])
+					: true;
+				return perpMarketIndexes.includes(market.marketIndex) && useMarket;
+			}
 		);
 		const spotMarketIndexes = this.driftClient
 			.getSpotMarketAccounts()
 			.map((market) => market.marketIndex);
 		const spotMarketConfigs = SpotMarkets[this.globalConfig.driftEnv].filter(
-			(market) => spotMarketIndexes.includes(market.marketIndex)
+			(market) => {
+				const useMarket = this.crankConfigs.onlyCrankUsedOracles
+					? isOneOfVariant(market.oracleSource, [
+							'pythPull',
+							'pythStableCoinPull',
+							'pyth1MPull',
+							'pyth1KPull',
+					  ])
+					: true;
+				return spotMarketIndexes.includes(market.marketIndex) && useMarket;
+			}
 		);
 
 		for (const marketConfig of perpMarketConfigs) {
