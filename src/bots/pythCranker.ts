@@ -17,6 +17,7 @@ import {
 	DriftClient,
 	getOracleClient,
 	getPythPullOraclePublicKey,
+	getVariant,
 	isOneOfVariant,
 	ONE,
 	OracleClient,
@@ -133,13 +134,9 @@ export class PythCrankerBot implements Bot {
 			.map((market) => market.marketIndex);
 		const perpMarketConfigs = PerpMarkets[this.globalConfig.driftEnv].filter(
 			(market) => {
+				const oracleVariant = getVariant(market.oracleSource).toLowerCase();
 				const useMarket = this.crankConfigs.onlyCrankUsedOracles
-					? isOneOfVariant(market.oracleSource, [
-							'pythPull',
-							'pythPullStableCoin',
-							'pyth1MPull',
-							'pyth1KPull',
-					  ])
+					? oracleVariant.includes('pyth') && !oracleVariant.includes('pull')
 					: true;
 				return perpMarketIndexes.includes(market.marketIndex) && useMarket;
 			}
@@ -149,13 +146,9 @@ export class PythCrankerBot implements Bot {
 			.map((market) => market.marketIndex);
 		const spotMarketConfigs = SpotMarkets[this.globalConfig.driftEnv].filter(
 			(market) => {
+				const oracleVariant = getVariant(market.oracleSource).toLowerCase();
 				const useMarket = this.crankConfigs.onlyCrankUsedOracles
-					? isOneOfVariant(market.oracleSource, [
-							'pythPull',
-							'pythStableCoinPull',
-							'pyth1MPull',
-							'pyth1KPull',
-					  ])
+					? oracleVariant.includes('pyth') && !oracleVariant.includes('pull')
 					: true;
 				return spotMarketIndexes.includes(market.marketIndex) && useMarket;
 			}
