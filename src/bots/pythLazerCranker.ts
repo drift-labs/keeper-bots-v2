@@ -8,6 +8,7 @@ import {
 	DevnetSpotMarkets,
 	DriftClient,
 	getPythLazerOraclePublicKey,
+	getVariant,
 	MainnetPerpMarkets,
 	MainnetSpotMarkets,
 	PriorityFeeSubscriber,
@@ -53,13 +54,6 @@ export class PythLazerCrankerBot implements Bot {
 		this.name = crankConfigs.botId;
 		this.dryRun = crankConfigs.dryRun;
 		this.intervalMs = crankConfigs.intervalMs;
-		if (!globalConfig.hermesEndpoint) {
-			throw new Error('Missing hermesEndpoint in global config');
-		}
-
-		if (globalConfig.driftEnv != 'devnet') {
-			throw new Error('Only devnet drift env is supported');
-		}
 
 		const spotMarkets =
 			this.globalConfig.driftEnv === 'mainnet-beta'
@@ -70,13 +64,18 @@ export class PythLazerCrankerBot implements Bot {
 				? MainnetPerpMarkets
 				: DevnetPerpMarkets;
 
-		const allFeedIds = [
-			...spotMarkets.map((market) => market.pythLazerId),
-			...perpMarkets.map((market) => market.pythLazerId),
-		].filter((id) => id !== undefined) as number[];
+		const allFeedIds: number[] = [];
+		for (const market of [...spotMarkets, ...perpMarkets]) {
+			if (
+				(this.crankConfigs.onlyCrankUsedOracles &&
+					!getVariant(market.oracleSource).toLowerCase().includes('lazer')) ||
+				market.pythFeedId == undefined
+			)
+				continue;
+			allFeedIds.push(market.pythLazerId!);
+		}
 		const allFeedIdsSet = new Set(allFeedIds);
 		const feedIdChunks = chunks(Array.from(allFeedIdsSet), 11);
-
 		console.log(feedIdChunks);
 
 		if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
