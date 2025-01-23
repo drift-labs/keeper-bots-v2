@@ -234,6 +234,37 @@ const serializeTriggerOrderNode = (
 		sortValue: node.sortValue.toString('hex'),
 		haveFilled: node.haveFilled,
 		haveTrigger: node.haveTrigger,
+		isSwift: node.isSwift,
+		isUserProtectedMaker: node.isUserProtectedMaker,
+	};
+};
+
+export const deserializeNodeToTriggerWithMakers = (
+	serializedNode: SerializedNodeToTrigger
+): NodeToTriggerWithMakers => {
+	return {
+		node: deserializeTriggerOrderNode(serializedNode.node),
+		makers: serializedNode.makers.map((m) => new PublicKey(m)),
+	};
+};
+
+const deserializeTriggerOrderNode = (
+	serializedNode: SerializedTriggerOrderNode
+): TriggerOrderNode => {
+	const order = deserializeOrder(serializedNode.order);
+	return {
+		order,
+		userAccount: serializedNode.userAccount,
+		sortValue: new BN(serializedNode.sortValue, 'hex'),
+		haveFilled: serializedNode.haveFilled,
+		haveTrigger: serializedNode.haveTrigger,
+		isUserProtectedMaker: serializedNode.isUserProtectedMaker,
+		isSwift: serializedNode.isSwift,
+		isVammNode: () => false,
+		isBaseFilled: () => false,
+		getSortValue: () => new BN(0),
+		getLabel: () => '',
+		getPrice: () => new BN(0),
 	};
 };
 

@@ -107,6 +107,8 @@ export type SerializedTriggerOrderNode = {
 	sortValue: string;
 	haveFilled: boolean;
 	haveTrigger: boolean;
+	isSwift: boolean;
+	isUserProtectedMaker: boolean;
 };
 
 export type SerializedNodeToFill = {
