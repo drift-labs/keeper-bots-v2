@@ -3,7 +3,6 @@ import {
 	UserAccount,
 	SpotPosition,
 	PerpPosition,
-	NodeToTrigger,
 	TriggerOrderNode,
 	DLOBNode,
 	OrderNode,
@@ -39,6 +38,7 @@ import {
 	SerializedDLOBNode,
 	NodeToFillWithBuffer,
 	NodeToFillWithContext,
+	NodeToTriggerWithMakers,
 } from './types';
 import { ChildProcess, fork } from 'child_process';
 import { logger } from '../../logger';
@@ -213,11 +213,13 @@ const deserializePerpPosition = (
 };
 
 export const serializeNodeToTrigger = (
-	node: NodeToTrigger,
-	userAccountData: Buffer
+	node: NodeToTriggerWithMakers,
+	userAccountData: Buffer,
+	makers: PublicKey[]
 ): SerializedNodeToTrigger => {
 	return {
 		node: serializeTriggerOrderNode(node.node, userAccountData),
+		makers: makers.map((maker) => maker.toString()),
 	};
 };
 
@@ -232,6 +234,37 @@ const serializeTriggerOrderNode = (
 		sortValue: node.sortValue.toString('hex'),
 		haveFilled: node.haveFilled,
 		haveTrigger: node.haveTrigger,
+		isSwift: node.isSwift,
+		isUserProtectedMaker: node.isUserProtectedMaker,
+	};
+};
+
+export const deserializeNodeToTriggerWithMakers = (
+	serializedNode: SerializedNodeToTrigger
+): NodeToTriggerWithMakers => {
+	return {
+		node: deserializeTriggerOrderNode(serializedNode.node),
+		makers: serializedNode.makers.map((m) => new PublicKey(m)),
+	};
+};
+
+const deserializeTriggerOrderNode = (
+	serializedNode: SerializedTriggerOrderNode
+): TriggerOrderNode => {
+	const order = deserializeOrder(serializedNode.order);
+	return {
+		order,
+		userAccount: serializedNode.userAccount,
+		sortValue: new BN(serializedNode.sortValue, 'hex'),
+		haveFilled: serializedNode.haveFilled,
+		haveTrigger: serializedNode.haveTrigger,
+		isUserProtectedMaker: serializedNode.isUserProtectedMaker,
+		isSwift: serializedNode.isSwift,
+		isVammNode: () => false,
+		isBaseFilled: () => false,
+		getSortValue: () => new BN(0),
+		getLabel: () => '',
+		getPrice: () => new BN(0),
 	};
 };
 
@@ -322,7 +355,7 @@ export const deserializeNodeToFill = (
 	return node;
 };
 
-const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
+export const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
 	const order = deserializeOrder(node.order);
 	switch (node.type) {
 		case 'TakingLimitOrderNode':

@@ -7,6 +7,8 @@ import {
 	SpotBalanceType,
 	NodeToFill,
 	DLOBNode,
+	NodeToTrigger,
+	PublicKey,
 } from '@drift-labs/sdk';
 
 export type SerializedUserAccount = {
@@ -95,6 +97,7 @@ export type SerializedPerpPosition = {
 
 export type SerializedNodeToTrigger = {
 	node: SerializedTriggerOrderNode;
+	makers: string[];
 };
 
 export type SerializedTriggerOrderNode = {
@@ -104,6 +107,8 @@ export type SerializedTriggerOrderNode = {
 	sortValue: string;
 	haveFilled: boolean;
 	haveTrigger: boolean;
+	isSwift: boolean;
+	isUserProtectedMaker: boolean;
 };
 
 export type SerializedNodeToFill = {
@@ -142,4 +147,8 @@ export type NodeToFillWithBuffer = {
 	fallbackBidSource?: FallbackLiquiditySource;
 	makerNodes: DLOBNode[];
 	authority?: string;
+};
+
+export type NodeToTriggerWithMakers = NodeToTrigger & {
+	makers: PublicKey[];
 };
