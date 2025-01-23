@@ -49,7 +49,7 @@ import { initializeSpotFulfillmentAccounts, sleepMs } from '../../utils';
 import { LRUCache } from 'lru-cache';
 
 const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
-const NUM_MAKERS = 5; // number of makers to consider for triggerable nodes
+const NUM_MAKERS = 3; // number of makers to consider for triggerable nodes
 
 const logPrefix = '[DLOBBuilder]';
 class DLOBBuilder {
