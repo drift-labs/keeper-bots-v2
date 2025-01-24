@@ -79,7 +79,7 @@ import { PythCrankerBot } from './bots/pythCranker';
 import { SwitchboardCrankerBot } from './bots/switchboardCranker';
 import { PythLazerCrankerBot } from './bots/pythLazerCranker';
 import { JitMaker } from './bots/jitMaker';
-import { JitProxyClient, JitterShotgun } from '@drift-labs/jit-proxy/lib';
+import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -627,13 +627,14 @@ const runBot = async () => {
 			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
 		});
 
-		const jitter = new JitterShotgun({
+		const jitter = new JitterSniper({
 			auctionSubscriber,
 			driftClient,
 			jitProxyClient,
 			swiftOrderSubscriber,
 			slotSubscriber,
 		});
+		await jitter.subscribe();
 
 		bots.push(
 			new JitMaker(
