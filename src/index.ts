@@ -37,6 +37,8 @@ import {
 	WhileValidTxSender,
 	PerpMarkets,
 	configs,
+	AuctionSubscriber,
+	SwiftOrderSubscriber,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk';
 
@@ -76,6 +78,8 @@ import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 import { PythCrankerBot } from './bots/pythCranker';
 import { SwitchboardCrankerBot } from './bots/switchboardCranker';
 import { PythLazerCrankerBot } from './bots/pythLazerCranker';
+import { JitMaker } from './bots/jitMaker';
+import { JitProxyClient, JitterShotgun } from '@drift-labs/jit-proxy/lib';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -590,6 +594,54 @@ const runBot = async () => {
 				priorityFeeSubscriber,
 				bundleSender,
 				[]
+			)
+		);
+	}
+
+	if (configHasBot(config, 'jitMaker')) {
+		needPriorityFeeSubscriber = true;
+		needDriftStateWatcher = true;
+		needUserMapSubscribe = true;
+
+		const auctionSubscriber = new AuctionSubscriber({
+			driftClient,
+			resubTimeoutMs: 30_000,
+		});
+		let swiftOrderSubscriber: SwiftOrderSubscriber | undefined = undefined;
+		if (config.global.driftEnv === 'devnet') {
+			if (!config.botConfigs?.jitMaker?.marketIndexes) {
+				throw new Error('Market indexes must be specified for JIT Maker bot');
+			}
+			swiftOrderSubscriber = new SwiftOrderSubscriber({
+				driftEnv: 'devnet',
+				marketIndexes: config.botConfigs?.jitMaker?.marketIndexes,
+				keypair: new Keypair(),
+				driftClient,
+				userMap,
+			});
+		}
+
+		const jitProxyClient = new JitProxyClient({
+			// @ts-ignore
+			driftClient,
+			programId: new PublicKey(sdkConfig.JIT_PROXY_PROGRAM_ID!),
+		});
+
+		const jitter = new JitterShotgun({
+			auctionSubscriber,
+			driftClient,
+			jitProxyClient,
+			swiftOrderSubscriber,
+			slotSubscriber,
+		});
+
+		bots.push(
+			new JitMaker(
+				driftClient,
+				jitter,
+				config.botConfigs!.jitMaker!,
+				config.global.driftEnv,
+				priorityFeeSubscriber
 			)
 		);
 	}
