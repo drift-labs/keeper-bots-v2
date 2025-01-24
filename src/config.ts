@@ -13,6 +13,7 @@ import {
 	MarketType,
 	PerpMarkets,
 } from '@drift-labs/sdk';
+import { JitMakerConfig } from './bots/jitMaker';
 
 export type BaseBotConfig = {
 	botId: string;
@@ -147,6 +148,7 @@ export type BotConfigMap = {
 	switchboardCranker?: SwitchboardCrankerBotConfig;
 	swiftTaker?: BaseBotConfig;
 	swiftMaker?: BaseBotConfig;
+	jitMaker?: JitMakerConfig;
 };
 
 export interface GlobalConfig {
