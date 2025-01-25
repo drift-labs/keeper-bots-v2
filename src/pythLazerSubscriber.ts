@@ -71,7 +71,7 @@ export class PythLazerSubscriber {
 				}
 				this.setTimeout();
 			});
-			this.pythLazerClient.subscribe({
+			this.pythLazerClient.send({
 				type: 'subscribe',
 				subscriptionId,
 				priceFeedIds,
