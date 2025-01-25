@@ -74,46 +74,46 @@ export class SwiftMaker {
 							market_name: 'SOL-PERP',
 						})
 					);
-					ws.send(
-						JSON.stringify({
-							action: 'subscribe',
-							market_type: 'perp',
-							market_name: 'BTC-PERP',
-						})
-					);
-					ws.send(
-						JSON.stringify({
-							action: 'subscribe',
-							market_type: 'perp',
-							market_name: 'ETH-PERP',
-						})
-					);
-					ws.send(
-						JSON.stringify({
-							action: 'subscribe',
-							market_type: 'perp',
-							market_name: 'APT-PERP',
-						})
-					);
-					ws.send(
-						JSON.stringify({
-							action: 'subscribe',
-							market_type: 'perp',
-							market_name: 'MATIC-PERP',
-						})
-					);
-					ws.send(
-						JSON.stringify({
-							action: 'subscribe',
-							market_type: 'perp',
-							market_name: 'ARB-PERP',
-						})
-					);
+					// ws.send(
+					// 	JSON.stringify({
+					// 		action: 'subscribe',
+					// 		market_type: 'perp',
+					// 		market_name: 'BTC-PERP',
+					// 	})
+					// );
+					// ws.send(
+					// 	JSON.stringify({
+					// 		action: 'subscribe',
+					// 		market_type: 'perp',
+					// 		market_name: 'ETH-PERP',
+					// 	})
+					// );
+					// ws.send(
+					// 	JSON.stringify({
+					// 		action: 'subscribe',
+					// 		market_type: 'perp',
+					// 		market_name: 'APT-PERP',
+					// 	})
+					// );
+					// ws.send(
+					// 	JSON.stringify({
+					// 		action: 'subscribe',
+					// 		market_type: 'perp',
+					// 		market_name: 'MATIC-PERP',
+					// 	})
+					// );
+					// ws.send(
+					// 	JSON.stringify({
+					// 		action: 'subscribe',
+					// 		market_type: 'perp',
+					// 		market_name: 'ARB-PERP',
+					// 	})
+					// );
 				}
 
 				if (message['order'] && this.driftClient.isSubscribed) {
 					const order = JSON.parse(message['order']);
-					console.info(`received order. uuid: ${order['uuid']}`);
+					console.info(`uuid: ${order['uuid']} at ${Date.now()}`);
 
 					const swiftOrderParamsBufHex = Buffer.from(order['order_message']);
 					const swiftOrderParamsBuf = Buffer.from(

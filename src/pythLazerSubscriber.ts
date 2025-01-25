@@ -1,5 +1,4 @@
 import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
-import { sleepMs } from './utils';
 import { DriftEnv, PerpMarkets } from '@drift-labs/sdk';
 
 export class PythLazerSubscriber {
@@ -39,17 +38,11 @@ export class PythLazerSubscriber {
 	}
 
 	async subscribe() {
-		this.pythLazerClient = new PythLazerClient([this.endpoint], this.token);
+		this.pythLazerClient = await PythLazerClient.create(
+			[this.endpoint],
+			this.token
+		);
 		let subscriptionId = 1;
-		let totalSlept = 0;
-		if (this.pythLazerClient.wsp !== this.pythLazerClient.wsp) {
-			await sleepMs(1000);
-			totalSlept += 1000;
-			if (totalSlept > 5000) {
-				console.error(`Failed to connect to pyth lazer client`);
-				throw new Error('Failed to connect to pyth lazer client');
-			}
-		}
 		for (const priceFeedIds of this.priceFeedIdsArrays) {
 			const feedIdsHash = this.hash(priceFeedIds);
 			this.allSubscribedIds.push(...priceFeedIds);
@@ -82,7 +75,7 @@ export class PythLazerSubscriber {
 				type: 'subscribe',
 				subscriptionId,
 				priceFeedIds,
-				properties: ['price'],
+				properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
 				chains: ['solana'],
 				deliveryFormat: 'json',
 				channel: 'fixed_rate@200ms',

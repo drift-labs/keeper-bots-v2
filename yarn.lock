@@ -1271,10 +1271,10 @@
   dependencies:
     bn.js "^5.2.1"
 
-"@pythnetwork/pyth-lazer-sdk@0.2.0":
-  version "0.2.0"
-  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-0.2.0.tgz#7de5a245ae3ebea177e8932307c39484ff95f59f"
-  integrity sha512-TDdmvI89TcMj135kzU8pXGahC7J3HCqOaJ8Dsft70hyOoDP5px3fNSwDMNvW2bPhjyKC5P4M/I4SQ9QxRkvNpg==
+"@pythnetwork/pyth-lazer-sdk@0.3.2":
+  version "0.3.2"
+  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-0.3.2.tgz#5837ca483efe7f5380c2f079d9cd4cd20ec3704e"
+  integrity sha512-YpkbZvoq7aKGA0303QmDA8n9zS/7upQTOrhhi99+SUWXm3WI9PvmZilhYPp/hqHsXzKEieCwlfPqvO+nkCMXdQ==
   dependencies:
     "@isaacs/ttlcache" "^1.4.1"
     "@solana/buffer-layout" "^4.0.1"
