@@ -74,41 +74,41 @@ export class SwiftMaker {
 							market_name: 'SOL-PERP',
 						})
 					);
-					// ws.send(
-					// 	JSON.stringify({
-					// 		action: 'subscribe',
-					// 		market_type: 'perp',
-					// 		market_name: 'BTC-PERP',
-					// 	})
-					// );
-					// ws.send(
-					// 	JSON.stringify({
-					// 		action: 'subscribe',
-					// 		market_type: 'perp',
-					// 		market_name: 'ETH-PERP',
-					// 	})
-					// );
-					// ws.send(
-					// 	JSON.stringify({
-					// 		action: 'subscribe',
-					// 		market_type: 'perp',
-					// 		market_name: 'APT-PERP',
-					// 	})
-					// );
-					// ws.send(
-					// 	JSON.stringify({
-					// 		action: 'subscribe',
-					// 		market_type: 'perp',
-					// 		market_name: 'MATIC-PERP',
-					// 	})
-					// );
-					// ws.send(
-					// 	JSON.stringify({
-					// 		action: 'subscribe',
-					// 		market_type: 'perp',
-					// 		market_name: 'ARB-PERP',
-					// 	})
-					// );
+					ws.send(
+						JSON.stringify({
+							action: 'subscribe',
+							market_type: 'perp',
+							market_name: 'BTC-PERP',
+						})
+					);
+					ws.send(
+						JSON.stringify({
+							action: 'subscribe',
+							market_type: 'perp',
+							market_name: 'ETH-PERP',
+						})
+					);
+					ws.send(
+						JSON.stringify({
+							action: 'subscribe',
+							market_type: 'perp',
+							market_name: 'APT-PERP',
+						})
+					);
+					ws.send(
+						JSON.stringify({
+							action: 'subscribe',
+							market_type: 'perp',
+							market_name: 'MATIC-PERP',
+						})
+					);
+					ws.send(
+						JSON.stringify({
+							action: 'subscribe',
+							market_type: 'perp',
+							market_name: 'ARB-PERP',
+						})
+					);
 				}
 
 				if (message['order'] && this.driftClient.isSubscribed) {
@@ -166,7 +166,7 @@ export class SwiftMaker {
 							direction: isOrderLong
 								? PositionDirection.SHORT
 								: PositionDirection.LONG,
-							baseAssetAmount: swiftOrderParams.baseAssetAmount,
+							baseAssetAmount: swiftOrderParams.baseAssetAmount.divn(2),
 							price: isOrderLong
 								? swiftOrderParams.auctionStartPrice!.muln(99).divn(100)
 								: swiftOrderParams.auctionEndPrice!.muln(101).divn(100),
