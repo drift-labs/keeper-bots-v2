@@ -56,9 +56,9 @@ export class SwiftTaker {
 					marketIndex,
 					marketType: MarketType.PERP,
 					direction,
-					baseAssetAmount:
-						this.driftClient.getPerpMarketAccount(marketIndex)!.amm
-							.minOrderSize.muln(2),
+					baseAssetAmount: this.driftClient
+						.getPerpMarketAccount(marketIndex)!
+						.amm.minOrderSize.muln(2),
 					auctionStartPrice: isVariant(direction, 'long')
 						? lowPrice
 						: highPrice,
