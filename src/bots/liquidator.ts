@@ -856,18 +856,6 @@ export class LiquidatorBot implements Bot {
 				subAccountId
 			),
 		});
-		swapIx.ixs.unshift(
-			ComputeBudgetProgram.setComputeUnitPrice({
-				microLamports: Math.floor(
-					this.priorityFeeSubscriber!.getCustomStrategyResult()
-				),
-			})
-		);
-		swapIx.ixs.unshift(
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 1_400_000,
-			})
-		);
 		const lookupTables = [...swapIx.lookupTables, this.driftLookupTables!];
 		if (this.driftSpotLookupTables) {
 			lookupTables.push(this.driftSpotLookupTables);
