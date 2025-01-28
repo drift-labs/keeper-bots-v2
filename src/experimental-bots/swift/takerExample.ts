@@ -56,9 +56,9 @@ export class SwiftTaker {
 					marketIndex,
 					marketType: MarketType.PERP,
 					direction,
-					baseAssetAmount:
-						this.driftClient.getPerpMarketAccount(marketIndex)!.amm
-							.minOrderSize,
+					baseAssetAmount: this.driftClient
+						.getPerpMarketAccount(marketIndex)!
+						.amm.minOrderSize.muln(2),
 					auctionStartPrice: isVariant(direction, 'long')
 						? lowPrice
 						: highPrice,
@@ -80,6 +80,7 @@ export class SwiftTaker {
 			);
 
 			const response = await axios.default.post(
+				// 'http://0.0.0.0:3000/orders',
 				'https://master.swift.drift.trade/orders',
 				{
 					market_index: marketIndex,

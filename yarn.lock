@@ -175,19 +175,20 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.12.65":
-  version "0.12.65"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.12.65.tgz#8b5f6143fc14d1f03d63908c6657a453a818d026"
-  integrity sha512-NSsse5CWjMYlIVRWBs7g4IgejclWybUFOdxvczohVqyxXiIzQUhQeQwEQQL2TDTgc1XO+VxBFie4ZsrsoVAR+Q==
+"@drift-labs/jit-proxy@0.12.73":
+  version "0.12.73"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.12.73.tgz#1939da29bfb4966b4df5d6009c58e6c52965f86a"
+  integrity sha512-Z4iT5TFZxlua3qIsO/AxBIg+wJa7ZkqMACdp6Zq31q74I2Kt7ilhAXKCvNEuuoXXqOm3PFmYRgJvdCypBiSl7w==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.108.0-beta.3"
+    "@drift-labs/sdk" "2.108.0-beta.10"
     "@solana/web3.js" "1.91.7"
+    tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.108.0-beta.3":
-  version "2.108.0-beta.3"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.108.0-beta.3.tgz#c161d183f7700fa9e243f1ddfc34c1a828d08d49"
-  integrity sha512-lzX/rCWqak20p/O7UyUia1sULLs+ZynwTXHTPn5cQIaerO2Rx8AUEafrXaIJYp+5KBQdTwmXk8Dpow2H7voO6w==
+"@drift-labs/sdk@2.108.0-beta.10":
+  version "2.108.0-beta.10"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.108.0-beta.10.tgz#464a7ca5143df88e14b68dd34479c6e1a8fa5005"
+  integrity sha512-t6mpooky+Qw28mOcENnDSYdcumjP6p77krbds+wg8wT4jHdVLBk8eyJH2Jc898GVJMC2iq2HozvHYjAHb16yxw==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -1270,10 +1271,10 @@
   dependencies:
     bn.js "^5.2.1"
 
-"@pythnetwork/pyth-lazer-sdk@0.2.0":
-  version "0.2.0"
-  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-0.2.0.tgz#7de5a245ae3ebea177e8932307c39484ff95f59f"
-  integrity sha512-TDdmvI89TcMj135kzU8pXGahC7J3HCqOaJ8Dsft70hyOoDP5px3fNSwDMNvW2bPhjyKC5P4M/I4SQ9QxRkvNpg==
+"@pythnetwork/pyth-lazer-sdk@0.3.2":
+  version "0.3.2"
+  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-0.3.2.tgz#5837ca483efe7f5380c2f079d9cd4cd20ec3704e"
+  integrity sha512-YpkbZvoq7aKGA0303QmDA8n9zS/7upQTOrhhi99+SUWXm3WI9PvmZilhYPp/hqHsXzKEieCwlfPqvO+nkCMXdQ==
   dependencies:
     "@isaacs/ttlcache" "^1.4.1"
     "@solana/buffer-layout" "^4.0.1"
@@ -5272,7 +5273,7 @@ tsutils@^3.21.0:
   dependencies:
     tslib "^1.8.1"
 
-tweetnacl-util@0.15.1:
+tweetnacl-util@0.15.1, tweetnacl-util@^0.15.1:
   version "0.15.1"
   resolved "https://registry.yarnpkg.com/tweetnacl-util/-/tweetnacl-util-0.15.1.tgz#b80fcdb5c97bcc508be18c44a4be50f022eea00b"
   integrity sha512-RKJBIj8lySrShN4w6i/BonWp2Z/uxwC3h4y7xsRrpP59ZboCd0GpEVsOnMDYLMmKBpYhb5TgHzZXy7wTfYFBRw==

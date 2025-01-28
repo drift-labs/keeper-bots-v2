@@ -69,7 +69,7 @@ export class PythLazerCrankerBot implements Bot {
 			if (
 				(this.crankConfigs.onlyCrankUsedOracles &&
 					!getVariant(market.oracleSource).toLowerCase().includes('lazer')) ||
-				market.pythFeedId == undefined
+				market.pythLazerId == undefined
 			)
 				continue;
 			allFeedIds.push(market.pythLazerId!);

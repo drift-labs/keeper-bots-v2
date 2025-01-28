@@ -113,7 +113,7 @@ export class SwiftMaker {
 
 				if (message['order'] && this.driftClient.isSubscribed) {
 					const order = JSON.parse(message['order']);
-					console.info(`received order. uuid: ${order['uuid']}`);
+					console.info(`uuid: ${order['uuid']} at ${Date.now()}`);
 
 					const swiftOrderParamsBufHex = Buffer.from(order['order_message']);
 					const swiftOrderParamsBuf = Buffer.from(
@@ -166,7 +166,7 @@ export class SwiftMaker {
 							direction: isOrderLong
 								? PositionDirection.SHORT
 								: PositionDirection.LONG,
-							baseAssetAmount: swiftOrderParams.baseAssetAmount,
+							baseAssetAmount: swiftOrderParams.baseAssetAmount.divn(2),
 							price: isOrderLong
 								? swiftOrderParams.auctionStartPrice!.muln(99).divn(100)
 								: swiftOrderParams.auctionEndPrice!.muln(101).divn(100),

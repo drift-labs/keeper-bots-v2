@@ -20,6 +20,7 @@ import {
 	MakerInfo,
 	MarketType,
 	NodeToFill,
+	NodeToTrigger,
 	PerpMarkets,
 	PriorityFeeSubscriberMap,
 	QUOTE_PRECISION,
@@ -51,6 +52,7 @@ import {
 	NodeToFillWithBuffer,
 	SerializedNodeToTrigger,
 	SerializedNodeToFill,
+	NodeToTriggerWithMakers,
 } from '../filler-common/types';
 import { assert } from 'console';
 import {
@@ -73,9 +75,9 @@ import {
 import {
 	spawnChild,
 	deserializeNodeToFill,
-	deserializeOrder,
 	getPriorityFeeInstruction,
 	isTsRuntime,
+	deserializeNodeToTriggerWithMakers,
 } from '../filler-common/utils';
 import {
 	CounterValue,
@@ -1085,7 +1087,7 @@ export class FillerMultithreaded {
 	}
 
 	private async getPythIxsFromNode(
-		node: NodeToFillWithBuffer | SerializedNodeToTrigger,
+		node: NodeToFillWithBuffer | NodeToTrigger | SerializedNodeToTrigger,
 		precedingIxs: TransactionInstruction[] = [],
 		isSwift = false
 	): Promise<TransactionInstruction[]> {
@@ -1223,8 +1225,12 @@ export class FillerMultithreaded {
 		this.throttledNodes.set(signature, Date.now());
 	}
 
-	protected removeTriggeringNodes(node: SerializedNodeToTrigger) {
-		this.triggeringNodes.delete(getNodeToTriggerSignature(node));
+	protected removeTriggeringNodes(node: NodeToTriggerWithMakers) {
+		const nodeSignature = getOrderSignature(
+			node.node.order.orderId,
+			node.node.userAccount
+		);
+		this.triggeringNodes.delete(nodeSignature);
 	}
 
 	protected pruneThrottledNode() {
@@ -1358,9 +1364,41 @@ export class FillerMultithreaded {
 		return true;
 	}
 
-	async executeTriggerablePerpNodes(nodesToTrigger: SerializedNodeToTrigger[]) {
-		const user = this.driftClient.getUser(this.subaccount);
-		for (const nodeToTrigger of nodesToTrigger) {
+	protected async getUserAccountAndSlotFromMap(
+		key: string
+	): Promise<DataAndSlot<UserAccount>> {
+		const user = await this.userMap!.mustGetWithSlot(
+			key,
+			this.driftClient.userAccountSubscriptionConfig
+		);
+		return {
+			data: user.data.getUserAccount(),
+			slot: user.slot,
+		};
+	}
+
+	protected async executeTriggerablePerpNodes(
+		nodesToTrigger: SerializedNodeToTrigger[]
+	) {
+		const triggerableNodes = nodesToTrigger.map((node) =>
+			deserializeNodeToTriggerWithMakers(node)
+		);
+		const buildForBundle = this.shouldBuildForBundle();
+		const subaccountUser = this.driftClient.getUser(this.subaccount);
+
+		for (const nodeToTrigger of triggerableNodes) {
+			nodeToTrigger.node.haveTrigger = true;
+			const user = await this.getUserAccountAndSlotFromMap(
+				nodeToTrigger.node.userAccount.toString()
+			);
+			logger.info(
+				`multithreaded: Processing node: account=${nodeToTrigger.node.userAccount.toString()}, slot=${
+					user.slot
+				}, orderId=${nodeToTrigger.node.order.orderId.toString()}, numMakers=${
+					nodeToTrigger.makers?.length ?? 0
+				}`
+			);
+
 			let ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000,
@@ -1377,7 +1415,6 @@ export class FillerMultithreaded {
 					})
 				) * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 			);
-			const buildForBundle = this.shouldBuildForBundle();
 
 			if (buildForBundle) {
 				ixs.push(this.bundleSender!.getTipIx());
@@ -1389,66 +1426,80 @@ export class FillerMultithreaded {
 				);
 			}
 
-			nodeToTrigger.node.haveTrigger = true;
-			// @ts-ignore
-			const buffer = Buffer.from(nodeToTrigger.node.userAccountData.data);
-			// @ts-ignore
-			const userAccount = decodeUser(buffer);
-
-			logger.debug(
-				`${logPrefix} trying to trigger (account: ${
-					nodeToTrigger.node.userAccount
-				}, order ${nodeToTrigger.node.order.orderId.toString()}`
-			);
-
 			let removeLastIxPostSim = this.revertOnFailure;
 			if (this.pythPriceSubscriber) {
-				const pythIxs = await this.getPythIxsFromNode(
-					nodeToTrigger,
-					ixs,
-					false
-				);
+				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger, ixs);
 				ixs.push(...pythIxs);
-				// do not strip the last ix if we have pyth ixs
 				removeLastIxPostSim = false;
 			}
 
-			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
-			if (this.seenTriggerableOrders.has(nodeSignature)) {
-				if (!this.pythPriceSubscriber) {
-					// no pyth subscriber, tx will be empty
-					return;
-				}
-				logger.info(
-					`${logPrefix} already triggered order (account: ${
-						nodeToTrigger.node.userAccount
-					}, order ${nodeToTrigger.node.order.orderId.toString()}.
-					Just going to pull oracles`
-				);
-			} else {
+			const nodeSignature = getOrderSignature(
+				nodeToTrigger.node.order.orderId,
+				nodeToTrigger.node.userAccount
+			);
+			if (!this.seenTriggerableOrders.has(nodeSignature)) {
 				this.seenTriggerableOrders.add(nodeSignature);
 				this.triggeringNodes.set(nodeSignature, Date.now());
 
 				ixs.push(
 					await this.driftClient.getTriggerOrderIx(
 						new PublicKey(nodeToTrigger.node.userAccount),
-						userAccount,
-						deserializeOrder(nodeToTrigger.node.order),
-						user.userAccountPublicKey
+						user.data,
+						nodeToTrigger.node.order
 					)
 				);
 
+				const makerInfos = await Promise.all(
+					nodeToTrigger.makers.map(async (maker) => {
+						const { data } = await this.getUserAccountAndSlotFromMap(
+							maker.toString()
+						);
+						const makerUserAccount = data;
+						const makerAuthority = makerUserAccount.authority;
+						const makerStats = getUserStatsAccountPublicKey(
+							this.driftClient.program.programId,
+							makerAuthority
+						);
+						return {
+							maker,
+							makerStats,
+							makerUserAccount,
+						};
+					})
+				);
+
+				const fillIx = await this.driftClient.getFillPerpOrderIx(
+					new PublicKey(nodeToTrigger.node.userAccount),
+					user.data,
+					nodeToTrigger.node.order,
+					makerInfos,
+					undefined,
+					this.subaccount
+				);
+				ixs.push(fillIx);
+
 				if (this.revertOnFailure) {
-					console.log(user.userAccountPublicKey.toString());
 					ixs.push(
-						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
+						await this.driftClient.getRevertFillIx(
+							subaccountUser.userAccountPublicKey
+						)
 					);
 				}
+			} else {
+				if (!this.pythPriceSubscriber) {
+					logger.info(`No pyth price subscriber, skipping`);
+					return;
+				}
+				logger.info(
+					`Already triggered order ${nodeSignature}, only pulling oracles`
+				);
 			}
 
 			const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
 			if (txSize > PACKET_DATA_SIZE) {
-				logger.warn(`tx too large, removing pyth ixs.`);
+				logger.warn(
+					`Transaction too large (${txSize}), removing pyth instructions`
+				);
 				ixs = removePythIxs(ixs);
 			}
 
@@ -1466,28 +1517,28 @@ export class FillerMultithreaded {
 				type: 'trigger',
 				simError: simResult.simError !== null,
 				...metricAttrFromUserAccount(
-					user.userAccountPublicKey,
-					user.getUserAccount()
+					subaccountUser.userAccountPublicKey,
+					subaccountUser.getUserAccount()
 				),
 			});
 			this.estTxCuHistogram?.record(simResult.cuEstimate, {
 				type: 'trigger',
 				simError: simResult.simError !== null,
 				...metricAttrFromUserAccount(
-					user.userAccountPublicKey,
-					user.getUserAccount()
+					subaccountUser.userAccountPublicKey,
+					subaccountUser.getUserAccount()
 				),
 			});
 
 			logger.info(
-				`executeTriggerablePerpNodesForMarket (${nodeSignature}) estimated CUs: ${simResult.cuEstimate}, finalIxCount: ${ixs.length}). revertTx: ${this.revertOnFailure}}, buildForBundle: ${buildForBundle}`
+				`Simulation complete - CUs: ${simResult.cuEstimate}, ixCount: ${ixs.length}, revertTx: ${this.revertOnFailure}, buildForBundle: ${buildForBundle}`
 			);
 
 			if (simResult.simError) {
 				logger.error(
-					`executeTriggerablePerpNodesForMarket simError: (simError: ${JSON.stringify(
-						simResult.simError
-					)})`
+					`Simulation error: ${JSON.stringify(simResult.simError)}, ${
+						simResult.simTxLogs
+					}`
 				);
 			} else {
 				if (this.hasEnoughSolToFill) {
@@ -1500,7 +1551,7 @@ export class FillerMultithreaded {
 							.sendTransaction(simResult.tx)
 							.then((txSig) => {
 								logger.info(
-									`${logPrefix} Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} Tx: ${
+									`Triggered successfully - user: ${nodeToTrigger.node.userAccount.toString()}, order: ${nodeToTrigger.node.order.orderId.toString()}, tx: ${
 										txSig.txSig
 									}`
 								);
@@ -1516,9 +1567,6 @@ export class FillerMultithreaded {
 										'Transaction was not confirmed'
 									)
 								) {
-									logger.error(
-										`Error (${errorCode}) triggering order for user (account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()}`
-									);
 									logger.error(error);
 								}
 							})
@@ -1527,17 +1575,15 @@ export class FillerMultithreaded {
 							});
 					}
 				} else {
-					logger.info(
-						`Not enough SOL to fill, skipping executeTriggerablePerpNodes`
-					);
+					logger.info(`Insufficient SOL balance to fill`);
 				}
 			}
 		}
 		this.attemptedTriggersCounter?.add(
 			nodesToTrigger.length,
 			metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
+				subaccountUser.userAccountPublicKey,
+				subaccountUser.getUserAccount()
 			)
 		);
 	}
@@ -2576,7 +2622,20 @@ export class FillerMultithreaded {
 					this.driftClient.program.programId,
 					takerUserAccount!.authority
 			  ).toString();
-		const referrerInfo = await this.referrerMap.mustGet(authority);
+
+		// Add try-catch around referrer lookup
+		let referrerInfo: ReferrerInfo | undefined;
+		try {
+			// Existing referrer lookup code
+			if (nodeToFill.node.userAccount) {
+				referrerInfo = await this.referrerMap?.mustGet(
+					nodeToFill.node.userAccount
+				);
+			}
+		} catch (e) {
+			logger.warn(`Failed to get referrer info: ${e}`);
+			referrerInfo = undefined;
+		}
 
 		return Promise.resolve({
 			makerInfos,

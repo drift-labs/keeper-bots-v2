@@ -10,7 +10,6 @@ import {
 	UserAccount,
 	isVariant,
 	decodeUser,
-	NodeToTrigger,
 	Wallet,
 	PhoenixSubscriber,
 	BN,
@@ -27,6 +26,8 @@ import {
 	PositionDirection,
 	UserStatus,
 	isUserProtectedMaker,
+	OraclePriceData,
+	StateAccount,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -37,6 +38,7 @@ import {
 	SerializedNodeToFill,
 	SerializedNodeToTrigger,
 	NodeToFillWithContext,
+	NodeToTriggerWithMakers,
 } from './types';
 import {
 	getDriftClientFromArgs,
@@ -47,6 +49,7 @@ import { initializeSpotFulfillmentAccounts, sleepMs } from '../../utils';
 import { LRUCache } from 'lru-cache';
 
 const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
+const NUM_MAKERS = 3; // number of makers to consider for triggerable nodes
 
 const logPrefix = '[DLOBBuilder]';
 class DLOBBuilder {
@@ -190,8 +193,7 @@ class DLOBBuilder {
 			swiftOrderParams,
 			subAccountId: takerSubaccountId,
 			slot,
-		}: SwiftOrderParamsMessage = this.driftClient.program.coder.types.decode(
-			'SwiftOrderParamsMessage',
+		}: SwiftOrderParamsMessage = this.driftClient.decodeSwiftOrderParamsMessage(
 			Buffer.from(orderData['order_message'], 'hex')
 		);
 
@@ -260,14 +262,14 @@ class DLOBBuilder {
 
 	public getNodesToTriggerAndNodesToFill(): [
 		NodeToFillWithContext[],
-		NodeToTrigger[],
+		NodeToTriggerWithMakers[],
 	] {
 		const dlob = this.build();
 		const nodesToFill: NodeToFillWithContext[] = [];
-		const nodesToTrigger: NodeToTrigger[] = [];
+		const nodesToTrigger: NodeToTriggerWithMakers[] = [];
 		for (const marketIndex of this.marketIndexes) {
 			let market;
-			let oraclePriceData;
+			let oraclePriceData: OraclePriceData;
 			let fallbackAsk: BN | undefined = undefined;
 			let fallbackBid: BN | undefined = undefined;
 			let fallbackAskSource: FallbackLiquiditySource | undefined = undefined;
@@ -343,13 +345,16 @@ class DLOBBuilder {
 				stateAccount,
 				market
 			);
-			const nodesToTriggerForMarket = dlob.findNodesToTrigger(
-				marketIndex,
-				slot,
-				oraclePriceData.price,
-				this.marketType,
-				stateAccount
-			);
+			const nodesToTriggerForMarket: NodeToTriggerWithMakers[] =
+				this.findTriggerableNodesWithMakers(
+					dlob,
+					marketIndex,
+					slot,
+					oraclePriceData,
+					this.marketType,
+					stateAccount
+				);
+
 			nodesToFill.push(
 				...nodesToFillForMarket.map((node) => {
 					return { ...node, fallbackAskSource, fallbackBidSource };
@@ -358,6 +363,46 @@ class DLOBBuilder {
 			nodesToTrigger.push(...nodesToTriggerForMarket);
 		}
 		return [nodesToFill, nodesToTrigger];
+	}
+
+	public findTriggerableNodesWithMakers(
+		dlob: DLOB,
+		marketIndex: number,
+		slot: number,
+		oraclePriceData: OraclePriceData,
+		marketType: MarketType,
+		stateAccount: StateAccount
+	): NodeToTriggerWithMakers[] {
+		const baseTriggerable = dlob.findNodesToTrigger(
+			marketIndex,
+			slot,
+			oraclePriceData.price,
+			marketType,
+			stateAccount
+		);
+
+		const triggerWithMaker: NodeToTriggerWithMakers[] = [];
+
+		for (const nodeObj of baseTriggerable) {
+			const order = nodeObj.node.order;
+
+			const makers = dlob.getBestMakers({
+				marketIndex,
+				marketType,
+				direction: isVariant(order.direction, 'long')
+					? PositionDirection.SHORT
+					: PositionDirection.LONG,
+				slot,
+				oraclePriceData,
+				numMakers: NUM_MAKERS,
+			});
+			triggerWithMaker.push({
+				...nodeObj,
+				makers,
+			});
+		}
+
+		return triggerWithMaker;
 	}
 
 	public serializeNodesToFill(
@@ -393,7 +438,7 @@ class DLOBBuilder {
 	}
 
 	public serializeNodesToTrigger(
-		nodesToTrigger: NodeToTrigger[]
+		nodesToTrigger: NodeToTriggerWithMakers[]
 	): SerializedNodeToTrigger[] {
 		return nodesToTrigger
 			.map((node) => {
@@ -401,7 +446,7 @@ class DLOBBuilder {
 				if (!buffer) {
 					return undefined;
 				}
-				return serializeNodeToTrigger(node, buffer);
+				return serializeNodeToTrigger(node, buffer, node.makers);
 			})
 			.filter((node): node is SerializedNodeToTrigger => node !== undefined);
 	}
