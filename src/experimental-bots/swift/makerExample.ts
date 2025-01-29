@@ -24,7 +24,8 @@ export class SwiftMaker {
 	constructor(
 		private driftClient: DriftClient,
 		private userMap: UserMap,
-		runtimeSpec: RuntimeSpec
+		runtimeSpec: RuntimeSpec,
+		private dryRun?: boolean
 	) {
 		if (runtimeSpec.driftEnv != 'devnet') {
 			throw new Error('SwiftMaker only works on devnet');
@@ -187,8 +188,13 @@ export class SwiftMaker {
 					);
 					if (resp.value.err) {
 						console.log(resp.value.logs);
+						return;
 					}
 
+					if (this.dryRun) {
+						console.log('Dry run, not sending transaction');
+						return;
+					}
 					this.driftClient.txSender
 						.sendVersionedTransaction(tx)
 						.then((response) => {

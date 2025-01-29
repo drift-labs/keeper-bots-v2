@@ -414,7 +414,7 @@ export class FillerMultithreaded {
 				)
 				.filter((market) => market.pythLazerId !== undefined);
 			const pythLazerIds = markets.map((m) => m.pythLazerId!);
-			const pythLazerIdsChunks = chunks(pythLazerIds, 6);
+			const pythLazerIdsChunks = chunks(pythLazerIds, 3);
 			this.pythLazerSubscriber = new PythLazerSubscriber(
 				this.globalConfig.lazerEndpoint,
 				this.globalConfig.lazerToken,

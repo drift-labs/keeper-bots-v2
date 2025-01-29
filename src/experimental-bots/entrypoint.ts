@@ -390,13 +390,18 @@ const runBot = async () => {
 		});
 		await userMap.subscribe();
 
-		const swiftMaker = new SwiftMaker(driftClient, userMap, {
-			rpcEndpoint: endpoint,
-			commit: '',
-			driftEnv: config.global.driftEnv!,
-			driftPid: driftPublicKey.toBase58(),
-			walletAuthority: wallet.publicKey.toBase58(),
-		});
+		const swiftMaker = new SwiftMaker(
+			driftClient,
+			userMap,
+			{
+				rpcEndpoint: endpoint,
+				commit: '',
+				driftEnv: config.global.driftEnv!,
+				driftPid: driftPublicKey.toBase58(),
+				walletAuthority: wallet.publicKey.toBase58(),
+			},
+			config.global.testLiveness
+		);
 		bots.push(swiftMaker);
 	}
 
