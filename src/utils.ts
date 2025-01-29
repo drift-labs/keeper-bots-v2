@@ -43,6 +43,7 @@ import {
 	OpenbookV2FulfillmentConfigAccount,
 	OpenbookV2Subscriber,
 	OracleInfo,
+	PYTH_LAZER_STORAGE_ACCOUNT_KEY,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -1383,9 +1384,14 @@ export function removePythIxs(
 ): TransactionInstruction[] {
 	return ixs.filter(
 		(ix) =>
-			!ix.keys
-				.map((meta) => meta.pubkey.toString())
-				.includes(receiverPublicKeyStr)
+			!(
+				ix.keys
+					.map((meta) => meta.pubkey.toString())
+					.includes(receiverPublicKeyStr) ||
+				ix.keys
+					.map((meta) => meta.pubkey.toString())
+					.includes(PYTH_LAZER_STORAGE_ACCOUNT_KEY.toString())
+			)
 	);
 }
 
