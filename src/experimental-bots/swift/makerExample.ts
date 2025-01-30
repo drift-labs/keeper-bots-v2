@@ -15,6 +15,7 @@ import { RuntimeSpec } from 'src/metrics';
 import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
+import { simulateAndGetTxWithCUs } from 'src/utils';
 
 export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
@@ -172,19 +173,15 @@ export class SwiftMaker {
 						})
 					);
 
-					const tx = await this.driftClient.txSender.getVersionedTransaction(
+					const resp = await simulateAndGetTxWithCUs({
+						connection: this.driftClient.connection,
+						payerPublicKey: this.driftClient.wallet.payer!.publicKey,
 						ixs,
-						[this.driftClient.lookupTableAccount],
-						undefined,
-						undefined,
-						await this.driftClient.connection.getLatestBlockhash()
-					);
-
-					const resp = await this.driftClient.connection.simulateTransaction(
-						tx
-					);
-					if (resp.value.err) {
-						console.log(resp.value.logs);
+						cuLimitMultiplier: 1.25,
+						lookupTableAccounts: [this.driftClient.lookupTableAccount],
+					});
+					if (resp.simError) {
+						console.log(resp.simTxLogs);
 						return;
 					}
 
@@ -193,7 +190,7 @@ export class SwiftMaker {
 						return;
 					}
 					this.driftClient.txSender
-						.sendVersionedTransaction(tx)
+						.sendVersionedTransaction(resp.tx)
 						.then((response) => {
 							console.log(response);
 						})
