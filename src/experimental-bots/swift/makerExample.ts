@@ -100,7 +100,7 @@ export class SwiftMaker {
 						JSON.stringify({
 							action: 'subscribe',
 							market_type: 'perp',
-							market_name: 'MATIC-PERP',
+							market_name: 'POL-PERP',
 						})
 					);
 					ws.send(
@@ -175,6 +175,8 @@ export class SwiftMaker {
 							immediateOrCancel: true,
 						})
 					);
+					
+					console.log(Uint8Array.from(ixs[1].data).length);
 					const tx = await this.driftClient.txSender.getVersionedTransaction(
 						ixs,
 						[this.driftClient.lookupTableAccount],
