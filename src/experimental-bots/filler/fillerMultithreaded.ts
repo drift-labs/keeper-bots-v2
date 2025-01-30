@@ -1468,12 +1468,26 @@ export class FillerMultithreaded {
 					})
 				);
 
+				let referrerInfo: ReferrerInfo | undefined;
+				try {
+					if (nodeToTrigger.node.userAccount) {
+						referrerInfo = await this.referrerMap?.mustGet(
+							nodeToTrigger.node.userAccount
+						);
+					}
+				} catch (e) {
+					logger.warn(
+						`executeTriggerablePerpNodes: Failed to get referrer info: ${e}`
+					);
+					referrerInfo = undefined;
+				}
+
 				const fillIx = await this.driftClient.getFillPerpOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
 					user.data,
 					nodeToTrigger.node.order,
 					makerInfos,
-					undefined,
+					referrerInfo,
 					this.subaccount
 				);
 				ixs.push(fillIx);
@@ -2633,7 +2647,7 @@ export class FillerMultithreaded {
 				);
 			}
 		} catch (e) {
-			logger.warn(`Failed to get referrer info: ${e}`);
+			logger.warn(`getNodeFillInfo: Failed to get referrer info: ${e}`);
 			referrerInfo = undefined;
 		}
 
