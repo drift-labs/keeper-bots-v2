@@ -63,7 +63,7 @@ export class SwiftTaker {
 						? lowPrice
 						: highPrice,
 					auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
-					auctionDuration: 200,
+					auctionDuration: 50,
 				}),
 				subAccountId: 0,
 				slot: new BN(slot),
