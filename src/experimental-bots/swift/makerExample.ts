@@ -15,7 +15,7 @@ import { RuntimeSpec } from 'src/metrics';
 import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
-import { simulateAndGetTxWithCUs } from 'src/utils';
+import { simulateAndGetTxWithCUs } from '../../utils';
 
 export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
