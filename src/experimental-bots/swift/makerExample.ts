@@ -15,6 +15,7 @@ import { RuntimeSpec } from 'src/metrics';
 import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
+import { simulateAndGetTxWithCUs } from '../../utils';
 
 export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
@@ -48,8 +49,6 @@ export class SwiftMaker {
 
 			ws.on('message', async (data: WebSocket.Data) => {
 				const message = JSON.parse(data.toString());
-				console.log(message);
-
 				this.startHeartbeatTimer();
 
 				if (message['channel'] === 'auth' && message['nonce'] != null) {
@@ -100,7 +99,7 @@ export class SwiftMaker {
 						JSON.stringify({
 							action: 'subscribe',
 							market_type: 'perp',
-							market_name: 'MATIC-PERP',
+							market_name: 'POL-PERP',
 						})
 					);
 					ws.send(
@@ -136,8 +135,6 @@ export class SwiftMaker {
 					const takerUserAccount = (
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();
-
-					console.log(takerUserAccount.authority.toString());
 
 					const isOrderLong = isVariant(swiftOrderParams.direction, 'long');
 					if (!swiftOrderParams.price) {
@@ -175,19 +172,16 @@ export class SwiftMaker {
 							immediateOrCancel: true,
 						})
 					);
-					const tx = await this.driftClient.txSender.getVersionedTransaction(
-						ixs,
-						[this.driftClient.lookupTableAccount],
-						undefined,
-						undefined,
-						await this.driftClient.connection.getLatestBlockhash()
-					);
 
-					const resp = await this.driftClient.connection.simulateTransaction(
-						tx
-					);
-					if (resp.value.err) {
-						console.log(resp.value.logs);
+					const resp = await simulateAndGetTxWithCUs({
+						connection: this.driftClient.connection,
+						payerPublicKey: this.driftClient.wallet.payer!.publicKey,
+						ixs,
+						cuLimitMultiplier: 1.25,
+						lookupTableAccounts: [this.driftClient.lookupTableAccount],
+					});
+					if (resp.simError) {
+						console.log(resp.simTxLogs);
 						return;
 					}
 
@@ -196,7 +190,7 @@ export class SwiftMaker {
 						return;
 					}
 					this.driftClient.txSender
-						.sendVersionedTransaction(tx)
+						.sendVersionedTransaction(resp.tx)
 						.then((response) => {
 							console.log(response);
 						})
