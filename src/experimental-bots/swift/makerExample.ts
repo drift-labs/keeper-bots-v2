@@ -48,8 +48,6 @@ export class SwiftMaker {
 
 			ws.on('message', async (data: WebSocket.Data) => {
 				const message = JSON.parse(data.toString());
-				console.log(message);
-
 				this.startHeartbeatTimer();
 
 				if (message['channel'] === 'auth' && message['nonce'] != null) {
@@ -137,8 +135,6 @@ export class SwiftMaker {
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();
 
-					console.log(takerUserAccount.authority.toString());
-
 					const isOrderLong = isVariant(swiftOrderParams.direction, 'long');
 					if (!swiftOrderParams.price) {
 						console.error(
@@ -175,8 +171,7 @@ export class SwiftMaker {
 							immediateOrCancel: true,
 						})
 					);
-					
-					console.log(Uint8Array.from(ixs[1].data).length);
+
 					const tx = await this.driftClient.txSender.getVersionedTransaction(
 						ixs,
 						[this.driftClient.lookupTableAccount],
