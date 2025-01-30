@@ -2001,12 +2001,32 @@ export class FillerBot extends TxThreaded implements Bot {
 					};
 				})
 			);
+			let referrerInfo: ReferrerInfo | undefined;
+			try {
+				const takerUserPubKey = nodeToTrigger.node.userAccount.toString();
+				const takerUserAcct = await this.getUserAccountAndSlotFromMap(
+					takerUserPubKey
+				);
+				const userStats = await this.userStatsMap!.mustGet(
+					takerUserAcct.data.authority.toString()
+				);
+				referrerInfo = userStats.getReferrerInfo();
+				logger.info(
+					`[Filler - executeTriggerablePerpNodes] Got referrerInfo: ${referrerInfo}`
+				);
+			} catch (e) {
+				logger.warn(
+					`[Filler - executeTriggerablePerpNodes] Failed to get referrer info: ${e}`
+				);
+				referrerInfo = undefined;
+			}
 
 			const fillIx = await this.driftClient.getFillPerpOrderIx(
 				new PublicKey(nodeToTrigger.node.userAccount),
 				user.data,
 				nodeToTrigger.node.order,
-				makerInfos
+				makerInfos,
+				referrerInfo
 			);
 			ixs.push(fillIx);
 
