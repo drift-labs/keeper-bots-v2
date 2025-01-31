@@ -741,10 +741,13 @@ const runBot = async () => {
 	if (configHasBot(config, 'trigger')) {
 		needUserMapSubscribe = true;
 		needDriftStateWatcher = true;
+		needBlockhashSubscriber = true;
+
 		bots.push(
 			new TriggerBot(
 				driftClient,
 				slotSubscriber,
+				blockhashSubscriber,
 				userMap,
 				{
 					rpcEndpoint: endpoint,
