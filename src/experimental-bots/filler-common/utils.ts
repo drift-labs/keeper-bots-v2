@@ -235,7 +235,7 @@ const serializeTriggerOrderNode = (
 		haveFilled: node.haveFilled,
 		haveTrigger: node.haveTrigger,
 		isSwift: node.isSwift,
-		isUserProtectedMaker: node.isUserProtectedMaker,
+		isProtectedMaker: node.isProtectedMaker,
 	};
 };
 
@@ -258,8 +258,9 @@ const deserializeTriggerOrderNode = (
 		sortValue: new BN(serializedNode.sortValue, 'hex'),
 		haveFilled: serializedNode.haveFilled,
 		haveTrigger: serializedNode.haveTrigger,
-		isUserProtectedMaker: serializedNode.isUserProtectedMaker,
+		isProtectedMaker: serializedNode.isProtectedMaker,
 		isSwift: serializedNode.isSwift,
+		applyProtectedMakerOffset: false,
 		isVammNode: () => false,
 		isBaseFilled: () => false,
 		getSortValue: () => new BN(0),
@@ -362,25 +363,29 @@ export const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
 			return new TakingLimitOrderNode(
 				order,
 				node.userAccount,
-				node.isUserProtectedMaker
+				node.isUserProtectedMaker,
+				false
 			);
 		case 'RestingLimitOrderNode':
 			return new RestingLimitOrderNode(
 				order,
 				node.userAccount,
-				node.isUserProtectedMaker
+				node.isUserProtectedMaker,
+				false
 			);
 		case 'FloatingLimitOrderNode':
 			return new FloatingLimitOrderNode(
 				order,
 				node.userAccount,
-				node.isUserProtectedMaker
+				node.isUserProtectedMaker,
+				false
 			);
 		case 'MarketOrderNode':
 			return new MarketOrderNode(
 				order,
 				node.userAccount,
-				node.isUserProtectedMaker
+				node.isUserProtectedMaker,
+				false
 			);
 		case 'SwiftOrderNode':
 			return new SwiftOrderNode(order, node.userAccount);

@@ -108,7 +108,7 @@ export type SerializedTriggerOrderNode = {
 	haveFilled: boolean;
 	haveTrigger: boolean;
 	isSwift: boolean;
-	isUserProtectedMaker: boolean;
+	isProtectedMaker: boolean;
 };
 
 export type SerializedNodeToFill = {
