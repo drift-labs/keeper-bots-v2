@@ -2061,7 +2061,7 @@ export class FillerBot extends TxThreaded implements Bot {
 			};
 
 			let simResult;
-			for (let i = NUM_MAKERS; i > 0; i--) {
+			for (let i = NUM_MAKERS; i >= 0; i--) {
 				simResult = await getSimResult(makerInfos.slice(0, i));
 				if (simResult.simError) {
 					logger.info(
