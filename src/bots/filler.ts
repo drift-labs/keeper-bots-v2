@@ -123,7 +123,7 @@ export const CACHED_BLOCKHASH_OFFSET = 5;
 const DUMP_TXS_IN_SIM = false;
 
 const EXPIRE_ORDER_BUFFER_SEC = 60; // add extra time before trying to expire orders (want to avoid 6252 error due to clock drift)
-const NUM_MAKERS = 4; // number of makers to pull for triggerable orders
+const NUM_MAKERS = 3; // number of makers to pull for triggerable orders
 
 const errorCodesToSuppress = [
 	6004, // 0x1774 Error Number: 6004. Error Message: SufficientCollateral.
@@ -2021,41 +2021,66 @@ export class FillerBot extends TxThreaded implements Bot {
 				referrerInfo = undefined;
 			}
 
-			const fillIx = await this.driftClient.getFillPerpOrderIx(
-				new PublicKey(nodeToTrigger.node.userAccount),
-				user.data,
-				nodeToTrigger.node.order,
-				makerInfos,
-				referrerInfo
-			);
-			ixs.push(fillIx);
-
-			if (this.revertOnFailure) {
-				ixs.push(await this.driftClient.getRevertFillIx());
-			}
-
-			const txSize = getSizeOfTransaction(ixs, true, this.lutAccounts);
-			if (txSize > PACKET_DATA_SIZE) {
-				logger.info(
-					`tx too large, removing pyth ixs. keys: ${ixs.map((ix) =>
-						ix.keys.map((key) => key.pubkey.toString())
-					)}`
-				);
-				ixs = removePythIxs(ixs);
-			}
-
 			const driftUser = this.driftClient.getUser();
-			const simResult = await simulateAndGetTxWithCUs({
-				ixs,
-				connection: this.driftClient.connection,
-				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: this.lutAccounts,
-				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-				doSimulation: this.simulateTxForCUEstimate,
-				recentBlockhash: await this.getBlockhashForTx(),
-				dumpTx: DUMP_TXS_IN_SIM,
-				removeLastIxPostSim,
-			});
+
+			const getSimResult = async (makerInfos: MakerInfo[]) => {
+				const fillIx = await this.driftClient.getFillPerpOrderIx(
+					new PublicKey(nodeToTrigger.node.userAccount),
+					user.data,
+					nodeToTrigger.node.order,
+					makerInfos,
+					referrerInfo
+				);
+				ixs.push(fillIx);
+
+				if (this.revertOnFailure) {
+					ixs.push(await this.driftClient.getRevertFillIx());
+				}
+
+				const txSize = getSizeOfTransaction(ixs, true, this.lutAccounts);
+				if (txSize > PACKET_DATA_SIZE) {
+					logger.info(
+						`tx too large, removing pyth ixs. keys: ${ixs.map((ix) =>
+							ix.keys.map((key) => key.pubkey.toString())
+						)}`
+					);
+					ixs = removePythIxs(ixs);
+				}
+				const simResult = await simulateAndGetTxWithCUs({
+					ixs,
+					connection: this.driftClient.connection,
+					payerPublicKey: this.driftClient.wallet.publicKey,
+					lookupTableAccounts: this.lutAccounts,
+					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+					doSimulation: this.simulateTxForCUEstimate,
+					recentBlockhash: await this.getBlockhashForTx(),
+					dumpTx: DUMP_TXS_IN_SIM,
+					removeLastIxPostSim,
+				});
+				return simResult;
+			};
+
+			let simResult;
+			for (let i = NUM_MAKERS; i >= 0; i--) {
+				simResult = await getSimResult(makerInfos.slice(0, i));
+				if (simResult.simError) {
+					logger.info(
+						`[Filler - executeTriggerablePerpNodesForMarket] Sim error, trying ${
+							i - 1
+						} makers`
+					);
+				} else {
+					break;
+				}
+			}
+
+			if (!simResult) {
+				logger.error(
+					`[Filler - executeTriggerablePerpNodesForMarket] No valid sim result`
+				);
+				continue;
+			}
+
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',
 				simError: simResult.simError !== null,
