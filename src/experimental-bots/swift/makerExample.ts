@@ -27,11 +27,7 @@ export class SwiftMaker {
 		private userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
 		private dryRun?: boolean
-	) {
-		if (runtimeSpec.driftEnv != 'devnet') {
-			throw new Error('SwiftMaker only works on devnet');
-		}
-	}
+	) {}
 
 	async init() {
 		await this.subscribeWs();
