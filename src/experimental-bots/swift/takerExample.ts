@@ -16,12 +16,18 @@ const CONFIRM_TIMEOUT = 30_000;
 
 export class SwiftTaker {
 	interval: NodeJS.Timeout | null = null;
+	swiftUrl: string;
 
 	constructor(
 		private driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
 		private intervalMs: number
-	) {}
+	) {
+		this.swiftUrl =
+			runtimeSpec.driftEnv === 'mainnet-beta'
+				? 'https://swift.drift.trade/orders'
+				: 'https://master.swift.drift.trade/orders';
+	}
 
 	async init() {
 		await this.startInterval();
@@ -76,8 +82,7 @@ export class SwiftTaker {
 			);
 
 			const response = await axios.default.post(
-				// 'http://0.0.0.0:3000/orders',
-				'https://master.swift.drift.trade/orders',
+				this.swiftUrl,
 				{
 					market_index: marketIndex,
 					market_type: 'perp',
