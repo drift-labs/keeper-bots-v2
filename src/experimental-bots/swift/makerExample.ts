@@ -20,6 +20,7 @@ import { simulateAndGetTxWithCUs } from '../../utils';
 export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
 	private ws: WebSocket | null = null;
+	private swiftUrl: string;
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
 	private readonly heartbeatIntervalMs = 80_000;
 	constructor(
@@ -27,7 +28,12 @@ export class SwiftMaker {
 		private userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
 		private dryRun?: boolean
-	) {}
+	) {
+		this.swiftUrl =
+			runtimeSpec.driftEnv === 'mainnet-beta'
+				? 'wss://swift.drift.trade/ws'
+				: 'wss://master.swift.drift.trade/ws';
+	}
 
 	async init() {
 		await this.subscribeWs();
@@ -36,7 +42,7 @@ export class SwiftMaker {
 	async subscribeWs() {
 		const keypair = this.driftClient.wallet.payer!;
 		const ws = new WebSocket(
-			`wss://master.swift.drift.trade/ws?pubkey=` + keypair.publicKey.toBase58()
+			this.swiftUrl + '?pubkey=' + keypair.publicKey.toBase58()
 		);
 
 		ws.on('open', async () => {
