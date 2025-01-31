@@ -21,11 +21,7 @@ export class SwiftTaker {
 		private driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
 		private intervalMs: number
-	) {
-		if (runtimeSpec.driftEnv != 'devnet') {
-			throw new Error('SwiftTaker only works on devnet');
-		}
-	}
+	) {}
 
 	async init() {
 		await this.startInterval();
