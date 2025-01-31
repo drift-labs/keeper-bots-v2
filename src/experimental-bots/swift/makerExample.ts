@@ -173,6 +173,11 @@ export class SwiftMaker {
 						})
 					);
 
+					if (this.dryRun) {
+						// console.log('Dry run, not sending transaction');
+						return;
+					}
+
 					const resp = await simulateAndGetTxWithCUs({
 						connection: this.driftClient.connection,
 						payerPublicKey: this.driftClient.wallet.payer!.publicKey,
@@ -185,10 +190,6 @@ export class SwiftMaker {
 						return;
 					}
 
-					if (this.dryRun) {
-						console.log('Dry run, not sending transaction');
-						return;
-					}
 					this.driftClient.txSender
 						.sendVersionedTransaction(resp.tx)
 						.then((response) => {

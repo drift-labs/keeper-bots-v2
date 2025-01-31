@@ -84,7 +84,8 @@ export class PythLazerCrankerBot implements Bot {
 		this.pythLazerClient = new PythLazerSubscriber(
 			this.globalConfig.lazerEndpoint,
 			this.globalConfig.lazerToken,
-			feedIdChunks
+			feedIdChunks,
+			this.globalConfig.driftEnv
 		);
 		this.decodeFunc =
 			this.driftClient.program.account.pythLazerOracle.coder.accounts.decodeUnchecked.bind(

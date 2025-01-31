@@ -10,6 +10,7 @@ import {
 	PriorityFeeCalculator,
 	TxParams,
 	PublicKey,
+	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -27,7 +28,8 @@ import {
 	View,
 } from '@opentelemetry/sdk-metrics-base';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
-import { getNodeToTriggerSignature } from '../utils';
+import { getNodeToTriggerSignature, getVersionedTransaction } from '../utils';
+import { AddressLookupTableAccount } from '@solana/web3.js';
 
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
@@ -52,6 +54,8 @@ export class TriggerBot implements Bot {
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 	private dlobSubscriber?: DLOBSubscriber;
+	private blockhashSubscriber: BlockhashSubscriber;
+	private lookupTableAccount?: AddressLookupTableAccount;
 	private triggeringNodes = new Map<string, number>();
 	private periodicTaskMutex = new Mutex();
 	private intervalIds: Array<NodeJS.Timer> = [];
@@ -77,6 +81,7 @@ export class TriggerBot implements Bot {
 	constructor(
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
+		blockhashSubscriber: BlockhashSubscriber,
 		userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
 		config: BaseBotConfig
@@ -87,6 +92,7 @@ export class TriggerBot implements Bot {
 		this.userMap = userMap;
 		this.runtimeSpec = runtimeSpec;
 		this.slotSubscriber = slotSubscriber;
+		this.blockhashSubscriber = blockhashSubscriber;
 
 		this.metricsPort = config.metricsPort;
 		if (this.metricsPort) {
@@ -168,6 +174,9 @@ export class TriggerBot implements Bot {
 			driftClient: this.driftClient,
 		});
 		await this.dlobSubscriber.subscribe();
+
+		this.lookupTableAccount =
+			await this.driftClient.fetchMarketLookupTableAccount();
 	}
 
 	public async reset() {
@@ -196,6 +205,20 @@ export class TriggerBot implements Bot {
 		});
 
 		return healthy;
+	}
+
+	private async getBlockhashForTx(): Promise<string> {
+		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(10);
+		if (cachedBlockhash) {
+			return cachedBlockhash.blockhash as string;
+		}
+
+		const recentBlockhash =
+			await this.driftClient.connection.getLatestBlockhash({
+				commitment: 'confirmed',
+			});
+
+		return recentBlockhash.blockhash;
 	}
 
 	private async tryTriggerForPerpMarket(market: PerpMarketAccount) {
@@ -258,11 +281,11 @@ export class TriggerBot implements Bot {
 
 				ixs.push(await this.driftClient.getRevertFillIx());
 
-				const tx = await this.driftClient.txSender.getVersionedTransaction(
+				const tx = getVersionedTransaction(
+					this.driftClient.wallet.publicKey,
 					ixs,
-					[],
-					undefined,
-					this.driftClient.opts
+					[this.lookupTableAccount!],
+					await this.getBlockhashForTx()
 				);
 
 				this.driftClient
