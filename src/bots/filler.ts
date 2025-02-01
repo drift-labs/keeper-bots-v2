@@ -5,7 +5,6 @@ import {
 	calculateAskPrice,
 	calculateBidPrice,
 	MakerInfo,
-	isFillableByVAMM,
 	calculateBaseAssetAmountForAmmToFulfill,
 	isVariant,
 	DLOB,
@@ -93,6 +92,7 @@ import {
 	swapFillerHardEarnedUSDCForSOL,
 	validMinimumGasAmount,
 	validRebalanceSettledPnlThreshold,
+	isFillableByVAMMDetails,
 } from '../utils';
 import { selectMakers } from '../makerSelection';
 import { BundleSender, JITO_METRIC_TYPES } from '../bundleSender';
@@ -938,19 +938,19 @@ export class FillerBot extends TxThreaded implements Bot {
 			return true;
 		}
 
+		const isVammFillable = isFillableByVAMMDetails(
+			nodeToFill.node.order,
+			this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex)!,
+			oraclePriceData,
+			this.getMaxSlot(),
+			Date.now() / 1000,
+			this.driftClient.getStateAccount().minPerpAuctionDuration
+		);
+
 		if (
 			nodeToFill.makerNodes.length === 0 &&
 			isVariant(nodeToFill.node.order.marketType, 'perp') &&
-			!isFillableByVAMM(
-				nodeToFill.node.order,
-				this.driftClient.getPerpMarketAccount(
-					nodeToFill.node.order.marketIndex
-				)!,
-				oraclePriceData,
-				this.getMaxSlot(),
-				Date.now() / 1000,
-				this.driftClient.getStateAccount().minPerpAuctionDuration
-			)
+			!isVammFillable.fillable
 		) {
 			logger.warn(
 				`filtered out unfillable node on market ${nodeToFill.node.order.marketIndex} for user ${nodeToFill.node.userAccount}-${nodeToFill.node.order.orderId}`
@@ -960,16 +960,7 @@ export class FillerBot extends TxThreaded implements Bot {
 				` . is perp: ${isVariant(nodeToFill.node.order.marketType, 'perp')}`
 			);
 			logger.warn(
-				` . is not fillable by vamm: ${!isFillableByVAMM(
-					nodeToFill.node.order,
-					this.driftClient.getPerpMarketAccount(
-						nodeToFill.node.order.marketIndex
-					)!,
-					oraclePriceData,
-					this.getMaxSlot(),
-					Date.now() / 1000,
-					this.driftClient.getStateAccount().minPerpAuctionDuration
-				)}`
+				` . is not fillable by vamm: ${JSON.stringify(isVammFillable)}`
 			);
 			logger.warn(
 				` .     calculateBaseAssetAmountForAmmToFulfill: ${calculateBaseAssetAmountForAmmToFulfill(
@@ -2065,9 +2056,9 @@ export class FillerBot extends TxThreaded implements Bot {
 				simResult = await getSimResult(makerInfos.slice(0, i));
 				if (simResult.simError) {
 					logger.info(
-						`[Filler - executeTriggerablePerpNodesForMarket] Sim error, trying ${
-							i - 1
-						} makers`
+						`[Filler - executeTriggerablePerpNodesForMarket] Sim error, attempted ${i} makers, error: ${JSON.stringify(
+							simResult.simError
+						)}, logs: ${JSON.stringify(simResult.simTxLogs)}`
 					);
 				} else {
 					break;
@@ -2102,7 +2093,7 @@ export class FillerBot extends TxThreaded implements Bot {
 				logger.error(
 					`executeTriggerablePerpNodesForMarket simError: (simError: ${JSON.stringify(
 						simResult.simError
-					)})`
+					)}, logs: ${JSON.stringify(simResult.simTxLogs)})`
 				);
 				handleSimResultError(
 					simResult,

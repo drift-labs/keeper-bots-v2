@@ -96,7 +96,7 @@ export class TxThreaded {
 		logger.info(
 			`[TxThreaded] isTsNode or tsx: ${isTs}, txThreadFileName: ${txThreadFileName}, argv: ${JSON.stringify(
 				process.argv
-			)}`
+			)}, __dirname: ${__dirname}, __filename: ${__filename}`
 		);
 
 		const rpcEndpoint =
@@ -110,7 +110,11 @@ export class TxThreaded {
 
 		// {@link ./threads/txThread.ts}
 		this.txThreadProcess = spawnChildWithRetry(
-			path.join(__dirname, './bots/common/threads', txThreadFileName),
+			path.join(
+				__dirname,
+				isTs ? 'threads' : './bots/common/threads',
+				txThreadFileName
+			),
 			[`--rpc=${rpcEndpoint}`, `--send-tx=false`], // initially disable transactions
 			'txThread',
 			(_msg: Serializable, _sendHandle: SendHandle) => {
