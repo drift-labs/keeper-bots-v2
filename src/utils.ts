@@ -44,6 +44,10 @@ import {
 	OpenbookV2Subscriber,
 	OracleInfo,
 	PYTH_LAZER_STORAGE_ACCOUNT_KEY,
+	Order,
+	isFallbackAvailableLiquiditySource,
+	calculateBaseAssetAmountForAmmToFulfill,
+	isOrderExpired,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -1568,4 +1572,47 @@ export function isSolLstToken(spotMarketIndex: number): boolean {
 		17, // dSOL
 		25, // BNSOL
 	].includes(spotMarketIndex);
+}
+
+export function isFillableByVAMMDetails(
+	order: Order,
+	market: PerpMarketAccount,
+	oraclePriceData: OraclePriceData,
+	slot: number,
+	ts: number,
+	minAuctionDuration: number
+): {
+	fillable: boolean;
+	fallbackAvailableLiquiditySource: boolean;
+	baseAssetAmountForAmmToFulfill: number;
+	minOrderSize: number;
+	orderExpired: boolean;
+} {
+	const fallbackAvailableLiquiditySource = isFallbackAvailableLiquiditySource(
+		order,
+		minAuctionDuration,
+		slot
+	);
+	const baseAssetAmountForAmmToFulfill =
+		calculateBaseAssetAmountForAmmToFulfill(
+			order,
+			market,
+			oraclePriceData,
+			slot
+		);
+	const minOrderSize = market.amm.minOrderSize;
+	const orderExpired = isOrderExpired(order, ts);
+	return {
+		fillable:
+			(fallbackAvailableLiquiditySource &&
+				baseAssetAmountForAmmToFulfill.gte(minOrderSize)) ||
+			orderExpired,
+		fallbackAvailableLiquiditySource,
+		baseAssetAmountForAmmToFulfill: convertToNumber(
+			baseAssetAmountForAmmToFulfill,
+			BASE_PRECISION
+		),
+		minOrderSize: convertToNumber(minOrderSize, BASE_PRECISION),
+		orderExpired,
+	};
 }
