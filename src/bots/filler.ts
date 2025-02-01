@@ -2056,9 +2056,9 @@ export class FillerBot extends TxThreaded implements Bot {
 				simResult = await getSimResult(makerInfos.slice(0, i));
 				if (simResult.simError) {
 					logger.info(
-						`[Filler - executeTriggerablePerpNodesForMarket] Sim error, trying ${
-							i - 1
-						} makers`
+						`[Filler - executeTriggerablePerpNodesForMarket] Sim error, attempted ${i} makers, error: ${JSON.stringify(
+							simResult.simError
+						)}, logs: ${JSON.stringify(simResult.simTxLogs)}`
 					);
 				} else {
 					break;
@@ -2093,7 +2093,7 @@ export class FillerBot extends TxThreaded implements Bot {
 				logger.error(
 					`executeTriggerablePerpNodesForMarket simError: (simError: ${JSON.stringify(
 						simResult.simError
-					)})`
+					)}, logs: ${JSON.stringify(simResult.simTxLogs)})`
 				);
 				handleSimResultError(
 					simResult,
