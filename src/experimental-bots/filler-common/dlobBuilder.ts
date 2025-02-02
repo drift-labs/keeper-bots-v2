@@ -485,6 +485,10 @@ class DLOBBuilder {
 		}
 	}
 
+	public removeConfirmedSwiftOrder(uuid: number) {
+		console.log(this.swiftOrders.delete(uuid));
+	}
+
 	sendLivenessCheck(health: boolean) {
 		if (typeof process.send === 'function') {
 			process.send({
@@ -572,6 +576,10 @@ const main = async () => {
 		switch (msg.data.type) {
 			case 'swiftOrderParamsMessage':
 				dlobBuilder.insertSwiftOrder(msg.data.swiftOrder, msg.data.uuid);
+				break;
+			case 'confirmed':
+				console.log('received confirmed message', msg.data);
+				dlobBuilder.removeConfirmedSwiftOrder(Number(msg.data.uuid));
 				break;
 			case 'update':
 				dlobBuilder.deserializeAndUpdateUserAccountData(

@@ -551,24 +551,6 @@ export class FillerMultithreaded {
 			);
 		}
 
-		const routeMessageToDlobBuilder = (msg: any) => {
-			const dlobBuilder = this.dlobBuilders.get(Number(msg.data.marketIndex));
-			if (dlobBuilder === undefined) {
-				logger.error(
-					`Received message for unknown marketIndex: ${msg.data.marketIndex}`
-				);
-				return;
-			}
-			if (dlobBuilder.marketIndexes.includes(Number(msg.data.marketIndex))) {
-				if (typeof dlobBuilder.process.send == 'function') {
-					if (dlobBuilder.ready) {
-						dlobBuilder.process.send(msg);
-						return;
-					}
-				}
-			}
-		};
-
 		const orderSubscriberFileName =
 			'orderSubscriberFiltered' + (isTsRuntime() ? '.ts' : '.js');
 		const orderSubscriberProcess = spawnChild(
@@ -583,7 +565,7 @@ export class FillerMultithreaded {
 			(msg: any) => {
 				switch (msg.type) {
 					case 'userAccountUpdate':
-						routeMessageToDlobBuilder(msg);
+						this.routeMessageToDlobBuilder(msg);
 						break;
 					case 'health':
 						this.orderSubscriberHealthy = msg.data.healthy;
@@ -620,7 +602,7 @@ export class FillerMultithreaded {
 						case 'swiftOrderParamsMessage':
 							if (msg.data.type === 'swiftOrderParamsMessage') {
 								this.swiftOrderMessages.set(msg.data.uuid, msg.data.swiftOrder);
-								routeMessageToDlobBuilder(msg);
+								this.routeMessageToDlobBuilder(msg);
 							} else if (msg.data.type === 'delete') {
 								console.log(`received delete message for ${msg.data.uuid}`);
 								this.swiftOrderMessages.delete(msg.data.uuid);
@@ -670,6 +652,24 @@ export class FillerMultithreaded {
 			);
 		}
 	}
+
+	routeMessageToDlobBuilder = (msg: any) => {
+		const dlobBuilder = this.dlobBuilders.get(Number(msg.data.marketIndex));
+		if (dlobBuilder === undefined) {
+			logger.error(
+				`Received message for unknown marketIndex: ${msg.data.marketIndex}`
+			);
+			return;
+		}
+		if (dlobBuilder.marketIndexes.includes(Number(msg.data.marketIndex))) {
+			if (typeof dlobBuilder.process.send == 'function') {
+				if (dlobBuilder.ready) {
+					dlobBuilder.process.send(msg);
+					return;
+				}
+			}
+		}
+	};
 
 	protected recordEvictedTxSig(
 		_tsTxSigAdded: { ts: number; nodeFilled: Array<NodeToFillWithBuffer> },
@@ -1038,6 +1038,21 @@ export class FillerMultithreaded {
 								txAge / 1000
 							} s`
 						);
+						for (const node of nodeFilled) {
+							if (node.node.isSwift) {
+								console.log(
+									'routing confirm message to dlob builder with uuid',
+									node.node.order?.orderId
+								);
+								this.routeMessageToDlobBuilder({
+									data: {
+										marketIndex: node.node.order?.marketIndex,
+										type: 'confirmed',
+										uuid: node.node.order?.orderId,
+									},
+								});
+							}
+						}
 						this.pendingTxSigsToconfirm.delete(txSig);
 						if (txType === 'fill') {
 							const result = await this.handleTransactionLogs(
@@ -1614,7 +1629,6 @@ export class FillerMultithreaded {
 		const deserializedNodesToFill = serializedNodesToFill.map(
 			deserializeNodeToFill
 		);
-		// console.log(deserializedNodesToFill);
 
 		const seenFillableNodes = new Set<string>();
 		const filteredFillableNodes = deserializedNodesToFill.filter((node) => {
