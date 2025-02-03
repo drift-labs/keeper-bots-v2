@@ -604,7 +604,6 @@ export class FillerMultithreaded {
 								this.swiftOrderMessages.set(msg.data.uuid, msg.data.swiftOrder);
 								this.routeMessageToDlobBuilder(msg);
 							} else if (msg.data.type === 'delete') {
-								console.log(`received delete message for ${msg.data.uuid}`);
 								this.swiftOrderMessages.delete(msg.data.uuid);
 							}
 							break;
@@ -1040,10 +1039,6 @@ export class FillerMultithreaded {
 						);
 						for (const node of nodeFilled) {
 							if (node.node.isSwift) {
-								console.log(
-									'routing confirm message to dlob builder with uuid',
-									node.node.order?.orderId
-								);
 								this.routeMessageToDlobBuilder({
 									data: {
 										marketIndex: node.node.order?.marketIndex,
@@ -1929,7 +1924,6 @@ export class FillerMultithreaded {
 				const user = this.driftClient.getUser(this.subaccount);
 
 				if (this.revertOnFailure) {
-					console.log(user.userAccountPublicKey.toString());
 					ixs.push(
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
@@ -2285,7 +2279,8 @@ export class FillerMultithreaded {
 			txResp = this.driftClient.txSender.sendVersionedTransaction(
 				tx,
 				[],
-				this.driftClient.opts
+				this.driftClient.opts,
+				true
 			);
 		}
 

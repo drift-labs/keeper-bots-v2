@@ -74,7 +74,6 @@ class DLOBBuilder {
 	private swiftOrders = new LRUCache<number, SwiftOrderNode>({
 		max: 5000,
 		dispose: (_, key) => {
-			console.log('disposing', key);
 			if (typeof process.send === 'function') {
 				process.send({
 					type: 'swiftOrderParamsMessage',
@@ -486,7 +485,7 @@ class DLOBBuilder {
 	}
 
 	public removeConfirmedSwiftOrder(uuid: number) {
-		console.log(this.swiftOrders.delete(uuid));
+		this.swiftOrders.delete(uuid);
 	}
 
 	sendLivenessCheck(health: boolean) {
@@ -578,7 +577,6 @@ const main = async () => {
 				dlobBuilder.insertSwiftOrder(msg.data.swiftOrder, msg.data.uuid);
 				break;
 			case 'confirmed':
-				console.log('received confirmed message', msg.data);
 				dlobBuilder.removeConfirmedSwiftOrder(Number(msg.data.uuid));
 				break;
 			case 'update':
