@@ -581,6 +581,9 @@ export class MakerBidAskTwapCrank implements Bot {
 							'pyth1MPull',
 							'pythStableCoinPull',
 							'pythLazer',
+							'pythLazer1K',
+							'pythLazer1M',
+							'pythLazerStableCoin',
 						]
 					)
 				) {
