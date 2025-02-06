@@ -181,7 +181,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private pythPriceSubscriber?: PythPriceFeedSubscriber;
 	private pythLazerSubscriber?: PythLazerSubscriber;
 	private pythPullOracleClient: PythPullClient;
-	private pythHealthy: boolean = true;
+	private pythHealthy = true;
 	private lookupTableAccounts: AddressLookupTableAccount[];
 
 	private bundleSender?: BundleSender;
