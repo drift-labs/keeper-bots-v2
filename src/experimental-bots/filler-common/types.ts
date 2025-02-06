@@ -65,6 +65,7 @@ export type SerializedOrder = {
 	auctionStartPrice: string;
 	auctionEndPrice: string;
 	maxTs: string;
+	postedSlotTail: number;
 };
 
 export type SerializedSpotPosition = {
