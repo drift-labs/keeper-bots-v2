@@ -427,17 +427,8 @@ const runBot = async () => {
 	logger.info(`starting bots`);
 
 	// start http server listening to /health endpoint using http package
-	const startupTime = Date.now();
 	const createServerCallback = async (req: any, res: any) => {
 		if (req.url === '/health') {
-			if (config.global.testLiveness) {
-				if (Date.now() > startupTime + 60 * 1000) {
-					res.writeHead(500);
-					res.end('Testing liveness test fail');
-					return;
-				}
-			}
-
 			/* @ts-ignore */
 			if (!driftClient.connection._rpcWebSocketConnected) {
 				logger.error(`Connection rpc websocket disconnected`);
