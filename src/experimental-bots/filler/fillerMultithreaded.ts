@@ -403,25 +403,23 @@ export class FillerMultithreaded {
 		});
 
 		// Pyth lazer: remember to remove devnet guard
-		if (this.globalConfig.driftEnv == 'devnet') {
-			if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
-				throw new Error('Missing lazerEndpoint or lazerToken in global config');
-			}
-
-			const markets = PerpMarkets[this.globalConfig.driftEnv!]
-				.filter((market) =>
-					this.marketIndexesFlattened.includes(market.marketIndex)
-				)
-				.filter((market) => market.pythLazerId !== undefined);
-			const pythLazerIds = markets.map((m) => m.pythLazerId!);
-			const pythLazerIdsChunks = chunks(pythLazerIds, 3);
-			this.pythLazerSubscriber = new PythLazerSubscriber(
-				this.globalConfig.lazerEndpoint,
-				this.globalConfig.lazerToken,
-				pythLazerIdsChunks,
-				this.globalConfig.driftEnv
-			);
+		if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
+			throw new Error('Missing lazerEndpoint or lazerToken in global config');
 		}
+
+		const markets = PerpMarkets[this.globalConfig.driftEnv!]
+			.filter((market) =>
+				this.marketIndexesFlattened.includes(market.marketIndex)
+			)
+			.filter((market) => market.pythLazerId !== undefined);
+		const pythLazerIds = markets.map((m) => m.pythLazerId!);
+		const pythLazerIdsChunks = chunks(pythLazerIds, 3);
+		this.pythLazerSubscriber = new PythLazerSubscriber(
+			this.globalConfig.lazerEndpoint,
+			this.globalConfig.lazerToken,
+			pythLazerIdsChunks,
+			this.globalConfig.driftEnv
+		);
 	}
 
 	async init() {
