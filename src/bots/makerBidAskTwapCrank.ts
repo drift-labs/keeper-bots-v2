@@ -218,7 +218,7 @@ export class MakerBidAskTwapCrank implements Bot {
 			(market) => market.pythLazerId !== undefined
 		);
 		const pythLazerIds = markets.map((m) => m.pythLazerId!);
-		const pythLazerIdsChunks = chunks(pythLazerIds, 10);
+		const pythLazerIdsChunks = chunks(pythLazerIds, 4);
 		this.pythLazerSubscriber = new PythLazerSubscriber(
 			this.globalConfig.lazerEndpoint,
 			this.globalConfig.lazerToken,
