@@ -175,20 +175,20 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.12.96":
-  version "0.12.96"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.12.96.tgz#bb4d99b16100e66d6f35e75582a833e6ce848f33"
-  integrity sha512-jfr8ejSWEMd8zO81Hn1uzi5Lu/Ld97+UupqttBothnSdEcXyaZNPW6xF25MyXYaEDR5fuFdTbsEzgDM28fOfUw==
+"@drift-labs/jit-proxy@0.12.97":
+  version "0.12.97"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.12.97.tgz#c2b62a1184e89484e21422834dbf0b3997ac5876"
+  integrity sha512-SV2f7e+jIKB9Ao/NDRPHOmKPXv+PhW/RBTnqj/Cfm7G3bb7b+7n1pAEoJYu+MJk6PbfG226tJcPGUJpVmnp3+w==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.110.0-beta.1"
+    "@drift-labs/sdk" "2.110.0-beta.2"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.110.0-beta.1":
-  version "2.110.0-beta.1"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.110.0-beta.1.tgz#9719947b0cc9cce28eaa2afce1ab05661b00aea7"
-  integrity sha512-J/5e7uwOaVkfqpmPWvyHHd1VEpASh1evyJzkG5NZzTxTPUFFeya9kGp1Z8wD5wo2fAHS7LDmpTTDoQaDxVeiig==
+"@drift-labs/sdk@2.110.0-beta.2":
+  version "2.110.0-beta.2"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.110.0-beta.2.tgz#b9cf878119fe1104cde27a6797fa19c7c17c6ed3"
+  integrity sha512-fWUwNijc+Qa0v+WlgwvUVebDv8aEXlyNQVKjbXEN4ziUTo0nQub8G+Q7BeCMsJXPa+8GDtUtUs0I7gAC2OLI9g==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
