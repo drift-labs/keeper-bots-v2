@@ -403,8 +403,8 @@ export class FillerMultithreaded {
 		});
 
 		// Pyth lazer: remember to remove devnet guard
-		if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
-			throw new Error('Missing lazerEndpoint or lazerToken in global config');
+		if (!this.globalConfig.lazerEndpoints || !this.globalConfig.lazerToken) {
+			throw new Error('Missing lazerEndpoints or lazerToken in global config');
 		}
 
 		const markets = PerpMarkets[this.globalConfig.driftEnv!]
@@ -415,7 +415,7 @@ export class FillerMultithreaded {
 		const pythLazerIds = markets.map((m) => m.pythLazerId!);
 		const pythLazerIdsChunks = chunks(pythLazerIds, 3);
 		this.pythLazerSubscriber = new PythLazerSubscriber(
-			this.globalConfig.lazerEndpoint,
+			this.globalConfig.lazerEndpoints,
 			this.globalConfig.lazerToken,
 			pythLazerIdsChunks,
 			this.globalConfig.driftEnv
