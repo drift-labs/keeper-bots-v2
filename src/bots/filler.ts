@@ -375,7 +375,7 @@ export class FillerBot extends TxThreaded implements Bot {
 
 		// Pyth lazer: remember to remove devnet guard
 		if (this.globalConfig.driftEnv == 'devnet') {
-			if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
+			if (!this.globalConfig.lazerEndpoints || !this.globalConfig.lazerToken) {
 				throw new Error('Missing lazerEndpoint or lazerToken in global config');
 			}
 
@@ -385,7 +385,7 @@ export class FillerBot extends TxThreaded implements Bot {
 			const pythLazerIds = markets.map((m) => m.pythLazerId!);
 			const pythLazerIdsChunks = chunks(pythLazerIds, 5);
 			this.pythLazerSubscriber = new PythLazerSubscriber(
-				this.globalConfig.lazerEndpoint,
+				this.globalConfig.lazerEndpoints,
 				this.globalConfig.lazerToken,
 				pythLazerIdsChunks,
 				this.globalConfig.driftEnv

@@ -15,7 +15,7 @@ export class PythLazerSubscriber {
 	marketIndextoPriceFeedIdChunk: Map<number, number[]> = new Map();
 
 	constructor(
-		private endpoint: string,
+		private endpoints: string[],
 		private token: string,
 		private priceFeedIdsArrays: number[][],
 		env: DriftEnv = 'devnet',
@@ -39,7 +39,7 @@ export class PythLazerSubscriber {
 
 	async subscribe() {
 		this.pythLazerClient = await PythLazerClient.create(
-			[this.endpoint],
+			this.endpoints,
 			this.token
 		);
 		let subscriptionId = 1;
