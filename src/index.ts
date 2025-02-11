@@ -384,9 +384,9 @@ const runBot = async () => {
 
 	// keeping these arrays undefined will prompt DriftClient to call `findAllMarketAndOracles`
 	// and load all markets and oracle accounts from on-chain
-	const marketLookupTable = config.global?.lutPubkey
-		? new PublicKey(config.global.lutPubkey)
-		: new PublicKey(configs[config.global.driftEnv!].MARKET_LOOKUP_TABLE);
+	const marketLookupTables = configs[
+		config.global.driftEnv!
+	].MARKET_LOOKUP_TABLES.map((key) => new PublicKey(key));
 	const marketsAndOracleInfos = getMarketsAndOracleInfosToLoad(
 		sdkConfig,
 		config.global.perpMarketsToLoad,
@@ -408,7 +408,7 @@ const runBot = async () => {
 		subAccountIds: config.global.subaccounts ?? [0],
 		txVersion: 0 as TransactionVersion,
 		txSender,
-		marketLookupTable,
+		marketLookupTables,
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	driftClient.eventEmitter.on('error', (e) => {

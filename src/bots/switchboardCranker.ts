@@ -62,7 +62,7 @@ export class SwitchboardCrankerBot implements Bot {
 		logger.info(`Initializing ${this.name} bot`);
 		await this.blockhashSubscriber.subscribe();
 		this.lookupTableAccounts.push(
-			await this.driftClient.fetchMarketLookupTableAccount()
+			...(await this.driftClient.fetchAllLookupTableAccounts())
 		);
 		await this.slothashSubscriber.subscribe();
 

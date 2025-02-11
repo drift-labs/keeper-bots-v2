@@ -544,7 +544,7 @@ export class FillerBot extends TxThreaded implements Bot {
 		await this.pythLazerSubscriber?.subscribe();
 
 		this.lutAccounts.push(
-			await this.driftClient.fetchMarketLookupTableAccount()
+			...(await this.driftClient.fetchAllLookupTableAccounts())
 		);
 
 		// initialize tx thread

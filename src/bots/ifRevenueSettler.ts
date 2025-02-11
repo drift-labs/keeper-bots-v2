@@ -42,7 +42,7 @@ export class IFRevenueSettlerBot implements Bot {
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
-	private lookupTableAccount?: AddressLookupTableAccount;
+	private lookupTableAccounts?: AddressLookupTableAccount[];
 
 	constructor(driftClient: DriftClient, config: BaseBotConfig) {
 		this.name = config.botId;
@@ -77,8 +77,8 @@ export class IFRevenueSettlerBot implements Bot {
 			);
 		}
 
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts =
+			await this.driftClient.fetchAllLookupTableAccounts();
 	}
 
 	public async reset() {
@@ -142,7 +142,7 @@ export class IFRevenueSettlerBot implements Bot {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.lookupTableAccount!],
+				lookupTableAccounts: this.lookupTableAccounts!,
 				cuLimitMultiplier: 1.1,
 				doSimulation: true,
 				recentBlockhash: recentBlockhash.blockhash,

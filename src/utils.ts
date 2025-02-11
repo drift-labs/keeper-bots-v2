@@ -903,7 +903,7 @@ export async function swapFillerHardEarnedUSDCForSOL(
 			`Quoted ${quoteInNum} USDC for ${quoteOutNum} SOL, swapPrice: ${swapPrice}, oraclePrice: ${oraclePrice}`
 		);
 
-		const driftLut = await driftClient.fetchMarketLookupTableAccount();
+		const driftLuts = await driftClient.fetchAllLookupTableAccounts();
 
 		const transaction = await jupiterClient.getSwap({
 			quote,
@@ -1003,7 +1003,7 @@ export async function swapFillerHardEarnedUSDCForSOL(
 					}),
 					...ixs,
 				],
-				[...lookupTables, driftLut],
+				[...lookupTables, ...driftLuts],
 				blockhash
 			);
 		};

@@ -154,7 +154,7 @@ export class JitMaker implements Bot {
 	 */
 	public async init(): Promise<void> {
 		logger.info(`${this.name} initing`);
-		await this.driftClient.fetchMarketLookupTableAccount();
+		await this.driftClient.fetchAllLookupTableAccounts();
 
 		for (const subAccountId of this.subAccountIds) {
 			if (!this.driftClient.hasUser(subAccountId)) {

@@ -444,7 +444,7 @@ export class FillerMultithreaded {
 		await this.referrerMap.subscribe();
 
 		this.lookupTableAccounts.push(
-			await this.driftClient.fetchMarketLookupTableAccount()
+			...(await this.driftClient.fetchAllLookupTableAccounts())
 		);
 		assert(this.lookupTableAccounts, 'Lookup table account not found');
 		this.startProcesses();

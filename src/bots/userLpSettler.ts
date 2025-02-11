@@ -48,7 +48,7 @@ export class UserLpSettlerBot implements Bot {
 	public readonly defaultIntervalMs: number = 30 * 60 * 1000;
 
 	private driftClient: DriftClient;
-	private lookupTableAccount?: AddressLookupTableAccount;
+	private lookupTableAccounts?: AddressLookupTableAccount[];
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
@@ -85,8 +85,8 @@ export class UserLpSettlerBot implements Bot {
 				`User for ${this.driftClient.wallet.publicKey.toString()} does not exist`
 			);
 		}
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts =
+			await this.driftClient.fetchAllLookupTableAccounts();
 
 		const perpMarkets: PublicKey[] = [];
 		const driftMarkets: DriftMarketInfo[] = [];
@@ -377,7 +377,7 @@ export class UserLpSettlerBot implements Bot {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.lookupTableAccount!],
+				lookupTableAccounts: this.lookupTableAccounts!,
 				cuLimitMultiplier: CU_EST_MULTIPLIER,
 				doSimulation: true,
 				recentBlockhash: recentBlockhash.blockhash,

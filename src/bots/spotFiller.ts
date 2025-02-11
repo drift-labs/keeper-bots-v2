@@ -690,7 +690,7 @@ export class SpotFillerBot implements Bot {
 		}
 
 		this.lookupTableAccounts.push(
-			await this.driftClient.fetchMarketLookupTableAccount()
+			...(await this.driftClient.fetchAllLookupTableAccounts())
 		);
 
 		await this.clockSubscriber.subscribe();
