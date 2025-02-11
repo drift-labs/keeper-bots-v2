@@ -78,11 +78,11 @@ export class PythLazerCrankerBot implements Bot {
 		const feedIdChunks = chunks(Array.from(allFeedIdsSet), 11);
 		console.log(feedIdChunks);
 
-		if (!this.globalConfig.lazerEndpoint || !this.globalConfig.lazerToken) {
+		if (!this.globalConfig.lazerEndpoints || !this.globalConfig.lazerToken) {
 			throw new Error('Missing lazerEndpoint or lazerToken in global config');
 		}
 		this.pythLazerClient = new PythLazerSubscriber(
-			this.globalConfig.lazerEndpoint,
+			this.globalConfig.lazerEndpoints,
 			this.globalConfig.lazerToken,
 			feedIdChunks,
 			this.globalConfig.driftEnv
