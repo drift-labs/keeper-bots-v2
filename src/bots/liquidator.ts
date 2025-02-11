@@ -193,7 +193,7 @@ export class LiquidatorBot implements Bot {
 
 	private driftClient: DriftClient;
 	private serumLookupTableAddress?: PublicKey;
-	private driftLookupTables?: AddressLookupTableAccount;
+	private driftLookupTables?: AddressLookupTableAccount[];
 	private driftSpotLookupTables?: AddressLookupTableAccount;
 
 	private perpMarketIndicies: number[] = [];
@@ -552,7 +552,7 @@ export class LiquidatorBot implements Bot {
 		logger.info(`${this.name} initing`);
 
 		this.driftLookupTables =
-			await this.driftClient.fetchMarketLookupTableAccount();
+			await this.driftClient.fetchAllLookupTableAccounts();
 
 		let serumLut: AddressLookupTableAccount | null = null;
 		if (this.serumLookupTableAddress !== undefined) {
@@ -783,7 +783,7 @@ export class LiquidatorBot implements Bot {
 
 		const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 			[cancelOrdersIx, placeOrderIx],
-			[this.driftLookupTables!],
+			this.driftLookupTables!,
 			Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 		);
 		if (simResult.simError !== null) {
@@ -816,7 +816,7 @@ export class LiquidatorBot implements Bot {
 		);
 		const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 			[cancelOrdersIx],
-			[this.driftLookupTables!],
+			this.driftLookupTables!,
 			Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 		);
 		if (simResult.simError !== null) {
@@ -856,7 +856,7 @@ export class LiquidatorBot implements Bot {
 				subAccountId
 			),
 		});
-		const lookupTables = [...swapIx.lookupTables, this.driftLookupTables!];
+		const lookupTables = [...swapIx.lookupTables, ...this.driftLookupTables!];
 		if (this.driftSpotLookupTables) {
 			lookupTables.push(this.driftSpotLookupTables);
 		}
@@ -1040,7 +1040,7 @@ export class LiquidatorBot implements Bot {
 
 				const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 					[cancelOrdersIx, placeOrderIx],
-					[this.driftLookupTables!],
+					this.driftLookupTables!,
 					Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 				);
 
@@ -1098,7 +1098,7 @@ export class LiquidatorBot implements Bot {
 
 				const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 					ix,
-					[this.driftLookupTables!],
+					this.driftLookupTables!,
 					Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 				);
 				if (simResult.simError !== null) {
@@ -1161,7 +1161,7 @@ export class LiquidatorBot implements Bot {
 					const simResult =
 						await this.buildVersionedTransactionWithSimulatedCus(
 							ix,
-							[this.driftLookupTables!],
+							this.driftLookupTables!,
 							Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 						);
 					if (simResult.simError !== null) {
@@ -1525,7 +1525,7 @@ export class LiquidatorBot implements Bot {
 
 			const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 				ixs,
-				[this.driftLookupTables!],
+				this.driftLookupTables!,
 				Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 			);
 			if (simResult.simError !== null) {
@@ -1767,7 +1767,7 @@ export class LiquidatorBot implements Bot {
 			);
 			const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 				[ix],
-				[this.driftLookupTables!],
+				this.driftLookupTables!,
 				Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 			);
 			if (simResult.simError !== null) {
@@ -1824,7 +1824,7 @@ export class LiquidatorBot implements Bot {
 			);
 			const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 				[ix],
-				[this.driftLookupTables!],
+				this.driftLookupTables!,
 				Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 			);
 			if (simResult.simError !== null) {
@@ -1998,7 +1998,7 @@ export class LiquidatorBot implements Bot {
 		);
 		const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 			[ix],
-			[this.driftLookupTables!],
+			this.driftLookupTables!,
 			Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 		);
 		if (simResult.simError !== null) {
@@ -2147,7 +2147,7 @@ export class LiquidatorBot implements Bot {
 				);
 				const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 					ix,
-					[this.driftLookupTables!],
+					this.driftLookupTables!,
 					Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 				);
 				if (simResult.simError !== null) {
@@ -2214,7 +2214,7 @@ export class LiquidatorBot implements Bot {
 				);
 				const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 					[ix],
-					[this.driftLookupTables!],
+					this.driftLookupTables!,
 					Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 				);
 				if (simResult.simError !== null) {
@@ -2305,7 +2305,7 @@ export class LiquidatorBot implements Bot {
 				);
 				const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 					[ix],
-					[this.driftLookupTables!],
+					this.driftLookupTables!,
 					Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 				);
 
@@ -2393,7 +2393,7 @@ export class LiquidatorBot implements Bot {
 		);
 		const simResult = await this.buildVersionedTransactionWithSimulatedCus(
 			[ix],
-			[this.driftLookupTables!],
+			this.driftLookupTables!,
 			Math.floor(this.priorityFeeSubscriber.getCustomStrategyResult())
 		);
 		if (simResult.simError !== null) {

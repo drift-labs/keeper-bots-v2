@@ -68,7 +68,7 @@ export class UserPnlSettlerBot implements Bot {
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
 	private globalConfig: GlobalConfig;
-	private lookupTableAccount?: AddressLookupTableAccount;
+	private lookupTableAccounts?: AddressLookupTableAccount[];
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
@@ -134,8 +134,8 @@ export class UserPnlSettlerBot implements Bot {
 		await this.driftClient.subscribe();
 
 		await this.userMap.subscribe();
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts =
+			await this.driftClient.fetchAllLookupTableAccounts();
 
 		logger.info(`${this.name} init'd!`);
 	}
@@ -625,7 +625,7 @@ export class UserPnlSettlerBot implements Bot {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.lookupTableAccount!],
+				lookupTableAccounts: this.lookupTableAccounts!,
 				cuLimitMultiplier: CU_EST_MULTIPLIER,
 				doSimulation: true,
 				recentBlockhash: recentBlockhash.blockhash,

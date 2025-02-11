@@ -29,7 +29,7 @@ export class UserIdleFlipperBot implements Bot {
 	public readonly defaultIntervalMs: number = 600000;
 
 	private driftClient: DriftClient;
-	private lookupTableAccount?: AddressLookupTableAccount;
+	private lookupTableAccounts?: AddressLookupTableAccount[];
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 	private blockhashSubscriber: BlockhashSubscriber;
@@ -69,8 +69,8 @@ export class UserIdleFlipperBot implements Bot {
 			);
 		}
 		await this.userMap.subscribe();
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts =
+			await this.driftClient.fetchAllLookupTableAccounts();
 	}
 
 	public async reset() {
@@ -208,7 +208,7 @@ export class UserIdleFlipperBot implements Bot {
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: [this.lookupTableAccount!],
+				lookupTableAccounts: this.lookupTableAccounts!,
 				cuLimitMultiplier: 1.1,
 				doSimulation: true,
 				recentBlockhash,

@@ -84,7 +84,7 @@ export class FundingRateUpdaterBot implements Bot {
 	private driftClient: DriftClient;
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
-	private lookupTableAccount?: AddressLookupTableAccount;
+	private lookupTableAccounts?: AddressLookupTableAccount[];
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -112,8 +112,8 @@ export class FundingRateUpdaterBot implements Bot {
 		});
 		await this.priorityFeeSubscriberMap!.subscribe();
 
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts =
+			await this.driftClient.fetchAllLookupTableAccounts();
 		logger.info(`[${this.name}] inited`);
 	}
 
@@ -279,7 +279,7 @@ export class FundingRateUpdaterBot implements Bot {
 			ixs,
 			connection: this.driftClient.connection,
 			payerPublicKey: this.driftClient.wallet.publicKey,
-			lookupTableAccounts: [this.lookupTableAccount!],
+			lookupTableAccounts: this.lookupTableAccounts!,
 			cuLimitMultiplier: CU_EST_MULTIPLIER,
 			doSimulation: true,
 			recentBlockhash: recentBlockhash.blockhash,

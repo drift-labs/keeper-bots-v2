@@ -55,7 +55,7 @@ export class TriggerBot implements Bot {
 	private slotSubscriber: SlotSubscriber;
 	private dlobSubscriber?: DLOBSubscriber;
 	private blockhashSubscriber: BlockhashSubscriber;
-	private lookupTableAccount?: AddressLookupTableAccount;
+	private lookupTableAccounts?: AddressLookupTableAccount[];
 	private triggeringNodes = new Map<string, number>();
 	private periodicTaskMutex = new Mutex();
 	private intervalIds: Array<NodeJS.Timer> = [];
@@ -175,8 +175,8 @@ export class TriggerBot implements Bot {
 		});
 		await this.dlobSubscriber.subscribe();
 
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts =
+			await this.driftClient.fetchAllLookupTableAccounts();
 	}
 
 	public async reset() {
@@ -284,7 +284,7 @@ export class TriggerBot implements Bot {
 				const tx = getVersionedTransaction(
 					this.driftClient.wallet.publicKey,
 					ixs,
-					[this.lookupTableAccount!],
+					this.lookupTableAccounts!,
 					await this.getBlockhashForTx()
 				);
 

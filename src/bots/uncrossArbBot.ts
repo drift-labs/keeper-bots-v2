@@ -71,7 +71,7 @@ export class UncrossArbBot implements Bot {
 
 	private jitProxyClient: JitProxyClient;
 	private driftClient: DriftClient;
-	private lookupTableAccount?: AddressLookupTableAccount;
+	private lookupTableAccounts?: AddressLookupTableAccount[];
 	private intervalIds: Array<NodeJS.Timer> = [];
 
 	private watchdogTimerMutex = new Mutex();
@@ -159,8 +159,8 @@ export class UncrossArbBot implements Bot {
 
 		await this.orderSubscriber.subscribe();
 		await this.dlobSubscriber.subscribe();
-		this.lookupTableAccount =
-			await this.driftClient.fetchMarketLookupTableAccount();
+		this.lookupTableAccounts =
+			await this.driftClient.fetchAllLookupTableAccounts();
 
 		for (const marketIndex of this.driftClient
 			.getPerpMarketAccounts()
@@ -521,7 +521,7 @@ export class UncrossArbBot implements Bot {
 													.getReferrerInfo(),
 											}),
 										],
-										[this.lookupTableAccount!],
+										this.lookupTableAccounts!,
 										[],
 										this.driftClient.opts
 									),
@@ -643,7 +643,7 @@ export class UncrossArbBot implements Bot {
 						this.driftClient.txSender.sendVersionedTransaction(
 							await this.driftClient.txSender.getVersionedTransaction(
 								ixs,
-								[this.lookupTableAccount!],
+								this.lookupTableAccounts!,
 								[],
 								this.driftClient.opts
 							),

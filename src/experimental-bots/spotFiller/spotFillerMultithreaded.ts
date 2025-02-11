@@ -409,7 +409,7 @@ export class SpotFillerMultithreaded {
 		await this.pythPriceSubscriber?.subscribe(feedIds);
 
 		this.lookupTableAccounts.push(
-			await this.driftClient.fetchMarketLookupTableAccount()
+			...(await this.driftClient.fetchAllLookupTableAccounts())
 		);
 
 		const fillerSolBalance = await this.driftClient.connection.getBalance(

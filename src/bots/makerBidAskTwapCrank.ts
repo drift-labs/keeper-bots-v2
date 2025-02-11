@@ -232,7 +232,7 @@ export class MakerBidAskTwapCrank implements Bot {
 
 		logger.info(`[${this.name}] initing, runOnce: ${this.runOnce}`);
 		this.lookupTableAccounts.push(
-			await this.driftClient.fetchMarketLookupTableAccount()
+			...(await this.driftClient.fetchAllLookupTableAccounts())
 		);
 
 		let driftMarkets: DriftMarketInfo[] = [];
