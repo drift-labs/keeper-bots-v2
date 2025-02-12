@@ -230,9 +230,9 @@ class DLOBBuilder {
 			direction: swiftOrderParams.direction,
 			postOnly: false,
 			oraclePriceOffset: swiftOrderParams.oraclePriceOffset ?? 0,
+			maxTs: swiftOrderParams.maxTs ?? ZERO,
 			// Rest are not required for DLOB
 			price: ZERO,
-			maxTs: ZERO,
 			triggerPrice: ZERO,
 			triggerCondition: OrderTriggerCondition.ABOVE,
 			existingPositionDirection: PositionDirection.LONG,

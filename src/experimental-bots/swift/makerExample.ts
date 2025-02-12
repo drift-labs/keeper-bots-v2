@@ -159,6 +159,7 @@ export class SwiftMaker {
 								this.driftClient.program.programId,
 								takerUserAccount.authority
 							),
+							signingAuthority: takerAuthority,
 						},
 						getLimitOrderParams({
 							marketType: MarketType.PERP,
