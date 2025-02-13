@@ -204,7 +204,7 @@ class DLOBBuilder {
 		);
 		this.swiftUserAuthorities.set(
 			takerUserPubkey.toString(),
-			orderData['taker_authority']
+			orderData['signing_authority']
 		);
 
 		const maxSlot = slot.addn(swiftOrderParams.auctionDuration ?? 0);

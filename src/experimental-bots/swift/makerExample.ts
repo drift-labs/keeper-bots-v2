@@ -128,6 +128,7 @@ export class SwiftMaker {
 					}: SwiftOrderParamsMessage =
 						this.driftClient.decodeSwiftOrderParamsMessage(swiftOrderParamsBuf);
 
+					const signingAuthority = new PublicKey(order['signing_authority']);
 					const takerAuthority = new PublicKey(order['taker_authority']);
 					const takerUserPubkey = await getUserAccountPublicKey(
 						this.driftClient.program.programId,
@@ -159,7 +160,7 @@ export class SwiftMaker {
 								this.driftClient.program.programId,
 								takerUserAccount.authority
 							),
-							signingAuthority: takerAuthority,
+							signingAuthority,
 						},
 						getLimitOrderParams({
 							marketType: MarketType.PERP,
