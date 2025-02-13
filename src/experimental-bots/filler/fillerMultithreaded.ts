@@ -1841,8 +1841,8 @@ export class FillerMultithreaded {
 							taker: new PublicKey(takerUserPubKey),
 							takerStats: takerStatsPubKey,
 							takerUserAccount: takerUser,
+							signingAuthority: authority!,
 						},
-						authority,
 						ixs
 					))
 				);
@@ -2141,8 +2141,8 @@ export class FillerMultithreaded {
 						taker: new PublicKey(takerUserPubKey),
 						takerStats: takerStatsPubKey,
 						takerUserAccount: takerUser,
+						signingAuthority: authority!,
 					},
-					authority,
 					ixs
 				))
 			);
@@ -2575,7 +2575,7 @@ export class FillerMultithreaded {
 		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
 		isSwift: boolean | undefined;
-		authority?: PublicKey;
+		authority: PublicKey;
 	}> {
 		const makerInfos: Array<DataAndSlot<MakerInfo>> = [];
 
@@ -2670,9 +2670,7 @@ export class FillerMultithreaded {
 			referrerInfo,
 			marketType: nodeToFill.node.order!.marketType,
 			isSwift: nodeToFill.node.isSwift,
-			authority: nodeToFill.authority
-				? new PublicKey(nodeToFill.authority)
-				: undefined,
+			authority: new PublicKey(authority),
 		});
 	}
 

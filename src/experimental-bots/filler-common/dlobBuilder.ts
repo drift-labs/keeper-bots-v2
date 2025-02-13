@@ -204,7 +204,7 @@ class DLOBBuilder {
 		);
 		this.swiftUserAuthorities.set(
 			takerUserPubkey.toString(),
-			orderData['taker_authority']
+			orderData['signing_authority']
 		);
 
 		const maxSlot = slot.addn(swiftOrderParams.auctionDuration ?? 0);
@@ -230,9 +230,9 @@ class DLOBBuilder {
 			direction: swiftOrderParams.direction,
 			postOnly: false,
 			oraclePriceOffset: swiftOrderParams.oraclePriceOffset ?? 0,
+			maxTs: swiftOrderParams.maxTs ?? ZERO,
 			// Rest are not required for DLOB
 			price: ZERO,
-			maxTs: ZERO,
 			triggerPrice: ZERO,
 			triggerCondition: OrderTriggerCondition.ABOVE,
 			existingPositionDirection: PositionDirection.LONG,
