@@ -252,7 +252,6 @@ const runBot = async () => {
 		txSender,
 		marketLookupTables,
 		activeSubAccountId: config.global.subaccounts?.[0] || 0,
-		subAccountIds: config.global.subaccounts || [0],
 	};
 	const driftClient = new DriftClient(driftClientConfig);
 	await driftClient.subscribe();
