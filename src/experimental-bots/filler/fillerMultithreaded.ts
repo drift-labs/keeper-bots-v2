@@ -9,7 +9,6 @@ import {
 	DriftEnv,
 	FeeTier,
 	getOrderSignature,
-	getUserAccountPublicKey,
 	getUserStatsAccountPublicKey,
 	getUserWithoutOrderFilter,
 	isFillableByVAMM,
@@ -1763,26 +1762,8 @@ export class FillerMultithreaded {
 		fillTxId: number,
 		nodeToFill: NodeToFillWithBuffer
 	): Promise<boolean> {
-		const ixs = [
-			ComputeBudgetProgram.setComputeUnitLimit({
-				units: 1_400_000, // will be overridden by simulateTx
-			}),
-		];
-
 		try {
-			const priorityFeePrice = Math.floor(
-				this.priorityFeeSubscriber.getPriorityFees(
-					'perp',
-					nodeToFill.node.order!.marketIndex!
-				)!.high * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-			);
 			const buildForBundle = this.shouldBuildForBundle();
-
-			if (buildForBundle) {
-				ixs.push(this.bundleSender!.getTipIx());
-			} else {
-				ixs.push(getPriorityFeeInstruction(priorityFeePrice));
-			}
 
 			const {
 				makerInfos,
@@ -1796,57 +1777,39 @@ export class FillerMultithreaded {
 				authority,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			let removeLastIxPostSim = this.revertOnFailure;
-			if (
-				this.pythPriceSubscriber &&
-				((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)
-			) {
-				const pythIxs = await this.getPythIxsFromNode(nodeToFill, ixs, isSwift);
-				ixs.push(...pythIxs);
-				removeLastIxPostSim = false;
-			}
-
-			logMessageForNodeToFill(
-				nodeToFill,
-				takerUserPubKey,
-				takerUserSlot,
-				makerInfos,
-				this.slotSubscriber.getSlot(),
-				fillTxId,
-				'multiMakerFill',
-				this.revertOnFailure ?? false,
-				removeLastIxPostSim ?? false
-			);
-
-			if (!isVariant(marketType, 'perp')) {
-				throw new Error('expected perp market type');
-			}
-
-			if (isSwift) {
-				const swiftOrderMessageParams = this.swiftOrderMessages.get(
+			const getSwiftIxsFromNodeToFillInfo = async (
+				swiftOrderMessages: Map<number, any>,
+				driftClient: DriftClient,
+				precedingIxs: TransactionInstruction[]
+			): Promise<TransactionInstruction[]> => {
+				const swiftOrderMessageParams = swiftOrderMessages.get(
 					nodeToFill.node.order!.orderId
 				);
-				const signedSwiftOrderParams: SignedSwiftOrderParams = {
+				const signedSwiftOrderMessageParams: SignedSwiftOrderParams = {
 					orderParams: Buffer.from(swiftOrderMessageParams['order_message']),
 					signature: Buffer.from(
 						swiftOrderMessageParams['order_signature'],
 						'base64'
 					),
 				};
-				ixs.push(
-					...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
-						signedSwiftOrderParams,
-						nodeToFill.node.order!.marketIndex,
-						{
-							taker: new PublicKey(takerUserPubKey),
-							takerStats: takerStatsPubKey,
-							takerUserAccount: takerUser,
-							signingAuthority: authority!,
-						},
-						ixs
-					))
+				const ixs = await driftClient.getPlaceSwiftTakerPerpOrderIxs(
+					signedSwiftOrderMessageParams,
+					nodeToFill.node.order!.marketIndex,
+					{
+						taker: new PublicKey(takerUserPubKey),
+						takerStats: takerStatsPubKey,
+						takerUserAccount: takerUser,
+						signingAuthority: authority!,
+					},
+					precedingIxs
 				);
+				return ixs;
+			};
+
+			if (!isVariant(marketType, 'perp')) {
+				throw new Error('expected perp market type');
 			}
+
 			let makerInfosToUse = makerInfos;
 
 			const buildTxWithMakerInfos = async (
@@ -1856,21 +1819,11 @@ export class FillerMultithreaded {
 					return undefined;
 				}
 
-				let ixs: Array<TransactionInstruction> = [
+				const computeBudgetIxs: Array<TransactionInstruction> = [
 					ComputeBudgetProgram.setComputeUnitLimit({
 						units: 1_400_000,
 					}),
 				];
-
-				let removeLastIxPostSim = this.revertOnFailure;
-				if (
-					this.pythPriceSubscriber &&
-					((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)
-				) {
-					const pythIxs = await this.getPythIxsFromNode(nodeToFill);
-					ixs.push(...pythIxs);
-					removeLastIxPostSim = false;
-				}
 
 				const priorityFeePrice = Math.floor(
 					this.priorityFeeSubscriber.getPriorityFees(
@@ -1881,9 +1834,20 @@ export class FillerMultithreaded {
 				);
 
 				if (buildForBundle) {
-					ixs.push(this.bundleSender!.getTipIx());
+					computeBudgetIxs.push(this.bundleSender!.getTipIx());
 				} else {
-					ixs.push(getPriorityFeeInstruction(priorityFeePrice));
+					computeBudgetIxs.push(getPriorityFeeInstruction(priorityFeePrice));
+				}
+
+				let removeLastIxPostSim = this.revertOnFailure;
+				const pythIxs: TransactionInstruction[] = [];
+				if (
+					this.pythPriceSubscriber &&
+					((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)
+				) {
+					const ixs = await this.getPythIxsFromNode(nodeToFill);
+					pythIxs.push(...ixs);
+					removeLastIxPostSim = false;
 				}
 
 				logMessageForNodeToFill(
@@ -1902,65 +1866,68 @@ export class FillerMultithreaded {
 					throw new Error('expected perp market type');
 				}
 
-				ixs.push(
-					await this.driftClient.getFillPerpOrderIx(
-						await getUserAccountPublicKey(
-							this.driftClient.program.programId,
-							takerUser!.authority,
-							takerUser!.subAccountId
-						),
-						takerUser!,
-						nodeToFill.node.order!,
-						makers.map((m) => m.data),
-						referrerInfo,
-						this.subaccount,
-						isSwift
-					)
+				let swiftIxs: TransactionInstruction[] = [];
+				if (isSwift) {
+					swiftIxs = await getSwiftIxsFromNodeToFillInfo(
+						this.swiftOrderMessages,
+						this.driftClient,
+						[...computeBudgetIxs, ...pythIxs]
+					);
+				}
+				const fillIxs: TransactionInstruction[] = [];
+				const fillIx = await this.driftClient.getFillPerpOrderIx(
+					new PublicKey(nodeToFill.node.userAccount!),
+					takerUser!,
+					nodeToFill.node.order!,
+					makers.map((m) => m.data),
+					referrerInfo,
+					this.subaccount,
+					isSwift
 				);
+				fillIxs.push(fillIx);
 
 				this.fillingNodes.set(getNodeToFillSignature(nodeToFill), Date.now());
 				const user = this.driftClient.getUser(this.subaccount);
 
 				if (this.revertOnFailure) {
-					ixs.push(
+					fillIxs.push(
 						await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 					);
 				}
 
+				let ixsToUse = [
+					...computeBudgetIxs,
+					...pythIxs,
+					...swiftIxs,
+					...fillIxs,
+				];
 				const txSize = getSizeOfTransaction(
-					ixs,
+					ixsToUse,
 					true,
 					this.lookupTableAccounts
 				);
 				if (txSize > PACKET_DATA_SIZE && this.pythPriceSubscriber) {
 					logger.info(`tx too large, removing pyth ixs.
-							keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
+							keys: ${ixsToUse.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
 							total number of maker positions: ${makerInfos.reduce(
 								(acc, maker) =>
 									acc +
 									(maker.data.makerUserAccount.perpPositions.length +
 										maker.data.makerUserAccount.spotPositions.length),
 								0
-							)}
-							total taker positions: ${
-								takerUser.perpPositions.length + takerUser.spotPositions.length
-							}
-							marketIndex: ${nodeToFill.node.order!.marketIndex}
-							taker has position in market: ${takerUser!.perpPositions.some(
-								(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
-							)}
-							makers have position in market: ${makerInfos.some((maker) =>
-								maker.data.makerUserAccount.perpPositions.some(
-									(pos) =>
-										pos.marketIndex === nodeToFill.node.order!.marketIndex
-								)
-							)}
-							`);
-					ixs = removePythIxs(ixs);
+							)}`);
+					if (isSwift) {
+						swiftIxs = await getSwiftIxsFromNodeToFillInfo(
+							this.swiftOrderMessages,
+							this.driftClient,
+							[...computeBudgetIxs]
+						);
+					}
+					ixsToUse = [...computeBudgetIxs, ...swiftIxs, ...fillIxs];
 				}
 
 				const simResult = await simulateAndGetTxWithCUs({
-					ixs,
+					ixs: ixsToUse,
 					connection: this.driftClient.connection,
 					payerPublicKey: this.driftClient.wallet.publicKey,
 					lookupTableAccounts: this.lookupTableAccounts!,
@@ -2073,16 +2040,16 @@ export class FillerMultithreaded {
 		);
 		const buildForBundle = this.shouldBuildForBundle();
 
-		let ixs = [
+		const computeBudgetIxs: TransactionInstruction[] = [
 			ComputeBudgetProgram.setComputeUnitLimit({
 				units: 1_400_000,
 			}),
 		];
 
 		if (buildForBundle) {
-			ixs.push(this.bundleSender!.getTipIx());
+			computeBudgetIxs.push(this.bundleSender!.getTipIx());
 		} else {
-			ixs.push(getPriorityFeeInstruction(priorityFeePrice));
+			computeBudgetIxs.push(getPriorityFeeInstruction(priorityFeePrice));
 		}
 
 		const fillTxId = this.fillTxId++;
@@ -2100,9 +2067,15 @@ export class FillerMultithreaded {
 		} = await this.getNodeFillInfo(nodeToFill);
 
 		let removeLastIxPostSim = this.revertOnFailure;
+		const pythIxs: TransactionInstruction[] = [];
 		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
-			const pythIxs = await this.getPythIxsFromNode(nodeToFill, ixs, isSwift);
-			ixs.push(...pythIxs);
+			pythIxs.push(
+				...(await this.getPythIxsFromNode(
+					nodeToFill,
+					computeBudgetIxs,
+					isSwift
+				))
+			);
 			removeLastIxPostSim = false;
 		}
 
@@ -2122,8 +2095,12 @@ export class FillerMultithreaded {
 			throw new Error('expected perp market type');
 		}
 
-		if (isSwift) {
-			const swiftOrderMessageParams = this.swiftOrderMessages.get(
+		async function getSwiftIxsFromNodeToFillInfo(
+			swiftOrderMessages: Map<number, any>,
+			driftClient: DriftClient,
+			precedingIxs: TransactionInstruction[]
+		): Promise<TransactionInstruction[]> {
+			const swiftOrderMessageParams = swiftOrderMessages.get(
 				nodeToFill.node.order!.orderId
 			);
 			const signedSwiftOrderMessageParams: SignedSwiftOrderParams = {
@@ -2133,20 +2110,30 @@ export class FillerMultithreaded {
 					'base64'
 				),
 			};
-			ixs.push(
-				...(await this.driftClient.getPlaceSwiftTakerPerpOrderIxs(
-					signedSwiftOrderMessageParams,
-					nodeToFill.node.order!.marketIndex,
-					{
-						taker: new PublicKey(takerUserPubKey),
-						takerStats: takerStatsPubKey,
-						takerUserAccount: takerUser,
-						signingAuthority: authority!,
-					},
-					ixs
-				))
+			const ixs = await driftClient.getPlaceSwiftTakerPerpOrderIxs(
+				signedSwiftOrderMessageParams,
+				nodeToFill.node.order!.marketIndex,
+				{
+					taker: new PublicKey(takerUserPubKey),
+					takerStats: takerStatsPubKey,
+					takerUserAccount: takerUser,
+					signingAuthority: authority!,
+				},
+				precedingIxs
+			);
+			return ixs;
+		}
+
+		let swiftIxs: TransactionInstruction[] = [];
+		if (isSwift) {
+			swiftIxs = await getSwiftIxsFromNodeToFillInfo(
+				this.swiftOrderMessages,
+				this.driftClient,
+				[...computeBudgetIxs, ...pythIxs]
 			);
 		}
+
+		const fillIxs: TransactionInstruction[] = [];
 		const fillIx = await this.driftClient.getFillPerpOrderIx(
 			new PublicKey(nodeToFill.node.userAccount!),
 			takerUser!,
@@ -2156,52 +2143,44 @@ export class FillerMultithreaded {
 			this.subaccount,
 			isSwift
 		);
-		ixs.push(fillIx);
+		fillIxs.push(fillIx);
 
 		const user = this.driftClient.getUser(this.subaccount);
 		if (this.revertOnFailure) {
-			ixs.push(
+			fillIxs.push(
 				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 			);
 		}
 
-		const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
+		let ixsToUse = [...computeBudgetIxs, ...pythIxs, ...swiftIxs, ...fillIxs];
+		const txSize = getSizeOfTransaction(
+			ixsToUse,
+			true,
+			this.lookupTableAccounts
+		);
 		if (txSize > PACKET_DATA_SIZE) {
-			const lutAccounts = this.lookupTableAccounts[0].state.addresses.map((a) =>
-				a.toBase58()
-			);
+			const lutAccounts = this.lookupTableAccounts
+				.map((lut) => lut.state.addresses.map((a) => a.toBase58()))
+				.flat();
 			logger.info(`tx too large: ${txSize} bytes, removing pyth ixs.
-				keys: ${ixs.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
-				keys not in LUT: ${ixs
+				keys not in LUT: ${ixsToUse
 					.map((ix) => ix.keys.map((key) => key.pubkey.toString()))
 					.flat()
 					.filter((key) => !lutAccounts.includes(key))}
-				total number of maker positions: ${makerInfos.reduce(
-					(acc, maker) =>
-						acc +
-						(maker.data.makerUserAccount.perpPositions.length +
-							maker.data.makerUserAccount.spotPositions.length),
-					0
-				)}
-				total taker positions: ${
-					takerUser.perpPositions.length + takerUser.spotPositions.length
-				}
-				marketIndex: ${nodeToFill.node.order!.marketIndex}
-				taker has position in market: ${takerUser.perpPositions.some(
-					(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
-				)}
-				makers have position in market: ${makerInfos.some((maker) =>
-					maker.data.makerUserAccount.perpPositions.some(
-						(pos) => pos.marketIndex === nodeToFill.node.order!.marketIndex
-					)
-				)}
 				`);
 
-			ixs = removePythIxs(ixs);
+			if (isSwift) {
+				swiftIxs = await getSwiftIxsFromNodeToFillInfo(
+					this.swiftOrderMessages,
+					this.driftClient,
+					[...computeBudgetIxs]
+				);
+			}
+			ixsToUse = [...computeBudgetIxs, ...swiftIxs, ...fillIxs];
 		}
 
 		const simResult = await simulateAndGetTxWithCUs({
-			ixs,
+			ixs: ixsToUse,
 			connection: this.driftClient.connection,
 			payerPublicKey: this.driftClient.wallet.publicKey,
 			lookupTableAccounts: this.lookupTableAccounts!,
