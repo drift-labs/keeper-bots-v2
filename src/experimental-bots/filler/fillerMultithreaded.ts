@@ -1475,13 +1475,15 @@ export class FillerMultithreaded {
 					})
 				);
 
+				const takerUserAccount = await this.userMap.mustGet(
+					nodeToTrigger.node.userAccount.toString()
+				);
+
 				let referrerInfo: ReferrerInfo | undefined;
 				try {
-					if (nodeToTrigger.node.userAccount) {
-						referrerInfo = await this.referrerMap?.mustGet(
-							nodeToTrigger.node.userAccount
-						);
-					}
+					referrerInfo = await this.referrerMap?.mustGet(
+						takerUserAccount.getUserAccount().authority.toString()
+					);
 				} catch (e) {
 					logger.warn(
 						`executeTriggerablePerpNodes: Failed to get referrer info: ${e}`
@@ -2618,20 +2620,11 @@ export class FillerMultithreaded {
 
 		const authority = nodeToFill.authority
 			? nodeToFill.authority
-			: getUserStatsAccountPublicKey(
-					this.driftClient.program.programId,
-					takerUserAccount!.authority
-			  ).toString();
+			: takerUserAccount.authority.toString();
 
-		// Add try-catch around referrer lookup
 		let referrerInfo: ReferrerInfo | undefined;
 		try {
-			// Existing referrer lookup code
-			if (nodeToFill.node.userAccount) {
-				referrerInfo = await this.referrerMap?.mustGet(
-					nodeToFill.node.userAccount
-				);
-			}
+			referrerInfo = await this.referrerMap?.mustGet(authority);
 		} catch (e) {
 			logger.warn(`getNodeFillInfo: Failed to get referrer info: ${e}`);
 			referrerInfo = undefined;
