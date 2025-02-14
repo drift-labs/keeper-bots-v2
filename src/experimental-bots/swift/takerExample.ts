@@ -67,7 +67,7 @@ export class SwiftTaker {
 					auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
 					auctionDuration: 50,
 				}),
-				subAccountId: 0,
+				subAccountId: this.driftClient.activeSubAccountId,
 				slot: new BN(slot),
 				uuid: generateSwiftUuid(),
 				stopLossOrderParams: null,
