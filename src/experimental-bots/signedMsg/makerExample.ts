@@ -192,7 +192,8 @@ export class SignedMsgMaker {
 						payerPublicKey: this.driftClient.wallet.payer!.publicKey,
 						ixs,
 						cuLimitMultiplier: 1.25,
-						lookupTableAccounts: [this.driftClient.lookupTableAccount],
+						lookupTableAccounts:
+							await this.driftClient.fetchAllLookupTableAccounts(),
 					});
 					if (resp.simError) {
 						console.log(resp.simTxLogs);
