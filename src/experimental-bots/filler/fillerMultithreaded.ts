@@ -25,6 +25,7 @@ import {
 	QUOTE_PRECISION,
 	ReferrerInfo,
 	ReferrerMap,
+	SignedMsgOrderParams,
 	SlotSubscriber,
 	TxSigAndSlot,
 	UserAccount,
@@ -112,7 +113,6 @@ import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 import { PythLazerSubscriber } from '../../pythLazerSubscriber';
 import path from 'path';
-import { SignedSwiftOrderParams } from '@drift-labs/sdk/lib/node/swift/types';
 
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -197,11 +197,11 @@ export class FillerMultithreaded {
 
 	private dlobHealthy = true;
 	private orderSubscriberHealthy = true;
-	private swiftOrderSubscriberHealth = true;
+	private signedMsgOrderSubscriberHealth = true;
 	private simulateTxForCUEstimate?: boolean;
 
-	// Swift orders
-	private swiftOrderMessages: Map<number, any> = new Map();
+	// SignedMsg orders
+	private signedMsgOrderMessages: Map<number, any> = new Map();
 
 	private intervalIds: NodeJS.Timeout[] = [];
 
@@ -581,38 +581,41 @@ export class FillerMultithreaded {
 			`orderSubscriber spawned with pid: ${orderSubscriberProcess.pid}`
 		);
 
-		// Swift Subscriber process
+		// SignedMsg Subscriber process
 		if (this.globalConfig.driftEnv === 'devnet') {
-			const swiftOrderSubscriberFileName =
-				'swiftOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
-			const swiftOrderSubscriberProcess = spawnChild(
+			const signedMsgOrderSubscriberFileName =
+				'signedMsgOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
+			const signedMsgOrderSubscriberProcess = spawnChild(
 				path.join(
 					__dirname,
 					isTsRuntime() ? '..' : '.',
 					'filler-common',
-					swiftOrderSubscriberFileName
+					signedMsgOrderSubscriberFileName
 				),
 				orderSubscriberArgs,
-				'swiftOrderSubscriber',
+				'signedMsgOrderSubscriber',
 				(msg: any) => {
 					switch (msg.type) {
-						case 'swiftOrderParamsMessage':
-							if (msg.data.type === 'swiftOrderParamsMessage') {
-								this.swiftOrderMessages.set(msg.data.uuid, msg.data.swiftOrder);
+						case 'signedMsgOrderParamsMessage':
+							if (msg.data.type === 'signedMsgOrderParamsMessage') {
+								this.signedMsgOrderMessages.set(
+									msg.data.uuid,
+									msg.data.signedMsgOrder
+								);
 								this.routeMessageToDlobBuilder(msg);
 							} else if (msg.data.type === 'delete') {
-								this.swiftOrderMessages.delete(msg.data.uuid);
+								this.signedMsgOrderMessages.delete(msg.data.uuid);
 							}
 							break;
 						case 'health':
-							this.swiftOrderSubscriberHealth = msg.data.healthy;
+							this.signedMsgOrderSubscriberHealth = msg.data.healthy;
 							break;
 					}
 				}
 			);
 
-			swiftOrderSubscriberProcess.on('exit', (code) => {
-				logger.error(`swiftOrderSubscriber exited with code ${code}`);
+			signedMsgOrderSubscriberProcess.on('exit', (code) => {
+				logger.error(`signedMsgOrderSubscriber exited with code ${code}`);
 				process.exit(code || 1);
 			});
 
@@ -624,12 +627,12 @@ export class FillerMultithreaded {
 					}
 				);
 				orderSubscriberProcess.kill();
-				swiftOrderSubscriberProcess.kill();
+				signedMsgOrderSubscriberProcess.kill();
 				process.exit(0);
 			});
 
 			logger.info(
-				`swiftOrderSubscriber process spawned with pid: ${swiftOrderSubscriberProcess.pid}`
+				`signedMsgOrderSubscriber process spawned with pid: ${signedMsgOrderSubscriberProcess.pid}`
 			);
 		}
 
@@ -822,13 +825,13 @@ export class FillerMultithreaded {
 		if (!this.orderSubscriberHealthy) {
 			logger.error(`${logPrefix} Order subscriber not healthy`);
 		}
-		if (!this.swiftOrderSubscriberHealth) {
-			logger.error(`${logPrefix} Swift order subscriber not healthy`);
+		if (!this.signedMsgOrderSubscriberHealth) {
+			logger.error(`${logPrefix} SignedMsg order subscriber not healthy`);
 		}
 		return (
 			this.dlobHealthy &&
 			this.orderSubscriberHealthy &&
-			this.swiftOrderSubscriberHealth
+			this.signedMsgOrderSubscriberHealth
 		);
 	}
 
@@ -1035,7 +1038,7 @@ export class FillerMultithreaded {
 							} s`
 						);
 						for (const node of nodeFilled) {
-							if (node.node.isSwift) {
+							if (node.node.isSignedMsg) {
 								this.routeMessageToDlobBuilder({
 									data: {
 										marketIndex: node.node.order?.marketIndex,
@@ -1096,7 +1099,7 @@ export class FillerMultithreaded {
 	private async getPythIxsFromNode(
 		node: NodeToFillWithBuffer | NodeToTrigger | SerializedNodeToTrigger,
 		precedingIxs: TransactionInstruction[] = [],
-		isSwift = false
+		isSignedMsg = false
 	): Promise<TransactionInstruction[]> {
 		const marketIndex = node.node.order?.marketIndex;
 		if (marketIndex === undefined) {
@@ -1148,7 +1151,7 @@ export class FillerMultithreaded {
 				latestLazerUpdate,
 				precedingIxs
 			);
-		} else if (!isSwift) {
+		} else if (!isSignedMsg) {
 			pythIxs = await getAllPythOracleUpdateIxs(
 				this.runtimeSpec.driftEnv as DriftEnv,
 				marketIndex,
@@ -1775,27 +1778,29 @@ export class FillerMultithreaded {
 				referrerInfo,
 				marketType,
 				takerStatsPubKey,
-				isSwift,
+				isSignedMsg,
 				authority,
 			} = await this.getNodeFillInfo(nodeToFill);
 
-			const getSwiftIxsFromNodeToFillInfo = async (
-				swiftOrderMessages: Map<number, any>,
+			const getSignedMsgIxsFromNodeToFillInfo = async (
+				signedMsgOrderMessages: Map<number, any>,
 				driftClient: DriftClient,
 				precedingIxs: TransactionInstruction[]
 			): Promise<TransactionInstruction[]> => {
-				const swiftOrderMessageParams = swiftOrderMessages.get(
+				const signedMsgOrderMessageParams = signedMsgOrderMessages.get(
 					nodeToFill.node.order!.orderId
 				);
-				const signedSwiftOrderMessageParams: SignedSwiftOrderParams = {
-					orderParams: Buffer.from(swiftOrderMessageParams['order_message']),
+				const signedSignedMsgOrderMessageParams: SignedMsgOrderParams = {
+					orderParams: Buffer.from(
+						signedMsgOrderMessageParams['order_message']
+					),
 					signature: Buffer.from(
-						swiftOrderMessageParams['order_signature'],
+						signedMsgOrderMessageParams['order_signature'],
 						'base64'
 					),
 				};
-				const ixs = await driftClient.getPlaceSwiftTakerPerpOrderIxs(
-					signedSwiftOrderMessageParams,
+				const ixs = await driftClient.getPlaceSignedMsgTakerPerpOrderIxs(
+					signedSignedMsgOrderMessageParams,
 					nodeToFill.node.order!.marketIndex,
 					{
 						taker: new PublicKey(takerUserPubKey),
@@ -1868,10 +1873,10 @@ export class FillerMultithreaded {
 					throw new Error('expected perp market type');
 				}
 
-				let swiftIxs: TransactionInstruction[] = [];
-				if (isSwift) {
-					swiftIxs = await getSwiftIxsFromNodeToFillInfo(
-						this.swiftOrderMessages,
+				let signedMsgIxs: TransactionInstruction[] = [];
+				if (isSignedMsg) {
+					signedMsgIxs = await getSignedMsgIxsFromNodeToFillInfo(
+						this.signedMsgOrderMessages,
 						this.driftClient,
 						[...computeBudgetIxs, ...pythIxs]
 					);
@@ -1884,7 +1889,7 @@ export class FillerMultithreaded {
 					makers.map((m) => m.data),
 					referrerInfo,
 					this.subaccount,
-					isSwift
+					isSignedMsg
 				);
 				fillIxs.push(fillIx);
 
@@ -1900,7 +1905,7 @@ export class FillerMultithreaded {
 				let ixsToUse = [
 					...computeBudgetIxs,
 					...pythIxs,
-					...swiftIxs,
+					...signedMsgIxs,
 					...fillIxs,
 				];
 				const txSize = getSizeOfTransaction(
@@ -1918,14 +1923,14 @@ export class FillerMultithreaded {
 										maker.data.makerUserAccount.spotPositions.length),
 								0
 							)}`);
-					if (isSwift) {
-						swiftIxs = await getSwiftIxsFromNodeToFillInfo(
-							this.swiftOrderMessages,
+					if (isSignedMsg) {
+						signedMsgIxs = await getSignedMsgIxsFromNodeToFillInfo(
+							this.signedMsgOrderMessages,
 							this.driftClient,
 							[...computeBudgetIxs]
 						);
 					}
-					ixsToUse = [...computeBudgetIxs, ...swiftIxs, ...fillIxs];
+					ixsToUse = [...computeBudgetIxs, ...signedMsgIxs, ...fillIxs];
 				}
 
 				const simResult = await simulateAndGetTxWithCUs({
@@ -2064,7 +2069,7 @@ export class FillerMultithreaded {
 			referrerInfo,
 			marketType,
 			takerStatsPubKey,
-			isSwift,
+			isSignedMsg,
 			authority,
 		} = await this.getNodeFillInfo(nodeToFill);
 
@@ -2075,7 +2080,7 @@ export class FillerMultithreaded {
 				...(await this.getPythIxsFromNode(
 					nodeToFill,
 					computeBudgetIxs,
-					isSwift
+					isSignedMsg
 				))
 			);
 			removeLastIxPostSim = false;
@@ -2097,23 +2102,23 @@ export class FillerMultithreaded {
 			throw new Error('expected perp market type');
 		}
 
-		async function getSwiftIxsFromNodeToFillInfo(
-			swiftOrderMessages: Map<number, any>,
+		async function getSignedMsgIxsFromNodeToFillInfo(
+			signedMsgOrderMessages: Map<number, any>,
 			driftClient: DriftClient,
 			precedingIxs: TransactionInstruction[]
 		): Promise<TransactionInstruction[]> {
-			const swiftOrderMessageParams = swiftOrderMessages.get(
+			const signedMsgOrderMessageParams = signedMsgOrderMessages.get(
 				nodeToFill.node.order!.orderId
 			);
-			const signedSwiftOrderMessageParams: SignedSwiftOrderParams = {
-				orderParams: Buffer.from(swiftOrderMessageParams['order_message']),
+			const signedSignedMsgOrderMessageParams: SignedMsgOrderParams = {
+				orderParams: Buffer.from(signedMsgOrderMessageParams['order_message']),
 				signature: Buffer.from(
-					swiftOrderMessageParams['order_signature'],
+					signedMsgOrderMessageParams['order_signature'],
 					'base64'
 				),
 			};
-			const ixs = await driftClient.getPlaceSwiftTakerPerpOrderIxs(
-				signedSwiftOrderMessageParams,
+			const ixs = await driftClient.getPlaceSignedMsgTakerPerpOrderIxs(
+				signedSignedMsgOrderMessageParams,
 				nodeToFill.node.order!.marketIndex,
 				{
 					taker: new PublicKey(takerUserPubKey),
@@ -2126,10 +2131,10 @@ export class FillerMultithreaded {
 			return ixs;
 		}
 
-		let swiftIxs: TransactionInstruction[] = [];
-		if (isSwift) {
-			swiftIxs = await getSwiftIxsFromNodeToFillInfo(
-				this.swiftOrderMessages,
+		let signedMsgIxs: TransactionInstruction[] = [];
+		if (isSignedMsg) {
+			signedMsgIxs = await getSignedMsgIxsFromNodeToFillInfo(
+				this.signedMsgOrderMessages,
 				this.driftClient,
 				[...computeBudgetIxs, ...pythIxs]
 			);
@@ -2143,7 +2148,7 @@ export class FillerMultithreaded {
 			makerInfos.map((m) => m.data),
 			referrerInfo,
 			this.subaccount,
-			isSwift
+			isSignedMsg
 		);
 		fillIxs.push(fillIx);
 
@@ -2154,7 +2159,12 @@ export class FillerMultithreaded {
 			);
 		}
 
-		let ixsToUse = [...computeBudgetIxs, ...pythIxs, ...swiftIxs, ...fillIxs];
+		let ixsToUse = [
+			...computeBudgetIxs,
+			...pythIxs,
+			...signedMsgIxs,
+			...fillIxs,
+		];
 		const txSize = getSizeOfTransaction(
 			ixsToUse,
 			true,
@@ -2171,14 +2181,14 @@ export class FillerMultithreaded {
 					.filter((key) => !lutAccounts.includes(key))}
 				`);
 
-			if (isSwift) {
-				swiftIxs = await getSwiftIxsFromNodeToFillInfo(
-					this.swiftOrderMessages,
+			if (isSignedMsg) {
+				signedMsgIxs = await getSignedMsgIxsFromNodeToFillInfo(
+					this.signedMsgOrderMessages,
 					this.driftClient,
 					[...computeBudgetIxs]
 				);
 			}
-			ixsToUse = [...computeBudgetIxs, ...swiftIxs, ...fillIxs];
+			ixsToUse = [...computeBudgetIxs, ...signedMsgIxs, ...fillIxs];
 		}
 
 		const simResult = await simulateAndGetTxWithCUs({
@@ -2555,7 +2565,7 @@ export class FillerMultithreaded {
 		takerUserSlot: number;
 		referrerInfo: ReferrerInfo | undefined;
 		marketType: MarketType;
-		isSwift: boolean | undefined;
+		isSignedMsg: boolean | undefined;
 		authority: PublicKey;
 	}> {
 		const makerInfos: Array<DataAndSlot<MakerInfo>> = [];
@@ -2641,7 +2651,7 @@ export class FillerMultithreaded {
 			takerUserSlot: this.slotSubscriber.getSlot(),
 			referrerInfo,
 			marketType: nodeToFill.node.order!.marketType,
-			isSwift: nodeToFill.node.isSwift,
+			isSignedMsg: nodeToFill.node.isSignedMsg,
 			authority: new PublicKey(authority),
 		});
 	}

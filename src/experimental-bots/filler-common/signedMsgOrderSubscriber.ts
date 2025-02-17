@@ -12,20 +12,20 @@ import { sleepMs } from '../../utils';
 import dotenv from 'dotenv';
 import parseArgs from 'minimist';
 
-export type SwiftOrderSubscriberConfig = {
+export type SignedMsgOrderSubscriberConfig = {
 	driftEnv: DriftEnv;
 	endpoint: string;
 	marketIndexes: number[];
 	keypair: Keypair;
 };
 
-export class SwiftOrderSubscriber {
+export class SignedMsgOrderSubscriber {
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
 	private readonly heartbeatIntervalMs = 60000;
 	private ws: WebSocket | null = null;
 	subscribed: boolean = false;
 
-	constructor(private config: SwiftOrderSubscriberConfig) {}
+	constructor(private config: SignedMsgOrderSubscriberConfig) {}
 
 	getSymbolForMarketIndex(marketIndex: number) {
 		const markets =
@@ -93,13 +93,13 @@ export class SwiftOrderSubscriber {
 				}
 
 				if (message['order']) {
-					const order = JSON.parse(message['order']);
+					const order = message['order'];
 					if (typeof process.send === 'function') {
 						process.send({
-							type: 'swiftOrderParamsMessage',
+							type: 'signedMsgOrderParamsMessage',
 							data: {
-								type: 'swiftOrderParamsMessage',
-								swiftOrder: order,
+								type: 'signedMsgOrderParamsMessage',
+								signedMsgOrder: order,
 								marketIndex: order.market_index,
 								uuid: this.convertUuidToNumber(order.uuid),
 							},
@@ -178,7 +178,7 @@ async function main() {
 	}
 
 	const keypair = loadKeypair(privateKey);
-	const swiftOrderSubscriberConfig: SwiftOrderSubscriberConfig = {
+	const signedMsgOrderSubscriberConfig: SignedMsgOrderSubscriberConfig = {
 		driftEnv,
 		endpoint:
 			driftEnv === 'devnet'
@@ -188,10 +188,10 @@ async function main() {
 		keypair,
 	};
 
-	const swiftOrderSubscriber = new SwiftOrderSubscriber(
-		swiftOrderSubscriberConfig
+	const signedMsgOrderSubscriber = new SignedMsgOrderSubscriber(
+		signedMsgOrderSubscriberConfig
 	);
-	await swiftOrderSubscriber.subscribe();
+	await signedMsgOrderSubscriber.subscribe();
 }
 
 main();

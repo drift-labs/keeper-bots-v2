@@ -5,7 +5,7 @@ import {
 	MarketType,
 	PositionDirection,
 	digestSignature,
-	generateSwiftUuid,
+	generateSignedMsgUuid,
 	BN,
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
@@ -14,7 +14,7 @@ import { sleepMs } from '../../utils';
 
 const CONFIRM_TIMEOUT = 30_000;
 
-export class SwiftTaker {
+export class SignedMsgTaker {
 	interval: NodeJS.Timeout | null = null;
 	swiftUrl: string;
 
@@ -54,7 +54,7 @@ export class SwiftTaker {
 			const lowPrice = oracleInfo.price;
 
 			const orderMessage = {
-				swiftOrderParams: getMarketOrderParams({
+				signedMsgOrderParams: getMarketOrderParams({
 					marketIndex,
 					marketType: MarketType.PERP,
 					direction,
@@ -69,12 +69,12 @@ export class SwiftTaker {
 				}),
 				subAccountId: this.driftClient.activeSubAccountId,
 				slot: new BN(slot),
-				uuid: generateSwiftUuid(),
+				uuid: generateSignedMsgUuid(),
 				stopLossOrderParams: null,
 				takeProfitOrderParams: null,
 			};
 			const { orderParams: message, signature } =
-				this.driftClient.signSwiftOrderParamsMessage(orderMessage);
+				this.driftClient.signSignedMsgOrderParamsMessage(orderMessage);
 
 			const hash = digestSignature(Uint8Array.from(signature));
 			console.log(

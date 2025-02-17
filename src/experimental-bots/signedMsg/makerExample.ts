@@ -8,7 +8,7 @@ import {
 	PositionDirection,
 	PostOnlyParams,
 	PublicKey,
-	SwiftOrderParamsMessage,
+	SignedMsgOrderParamsMessage,
 	UserMap,
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
@@ -17,10 +17,10 @@ import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
 import { simulateAndGetTxWithCUs } from '../../utils';
 
-export class SwiftMaker {
+export class SignedMsgMaker {
 	interval: NodeJS.Timeout | null = null;
 	private ws: WebSocket | null = null;
-	private swiftUrl: string;
+	private signedMsgUrl: string;
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
 	private readonly heartbeatIntervalMs = 80_000;
 	constructor(
@@ -29,7 +29,7 @@ export class SwiftMaker {
 		runtimeSpec: RuntimeSpec,
 		private dryRun?: boolean
 	) {
-		this.swiftUrl =
+		this.signedMsgUrl =
 			runtimeSpec.driftEnv === 'mainnet-beta'
 				? 'wss://swift.drift.trade/ws'
 				: 'wss://master.swift.drift.trade/ws';
@@ -42,7 +42,7 @@ export class SwiftMaker {
 	async subscribeWs() {
 		const keypair = this.driftClient.wallet.payer!;
 		const ws = new WebSocket(
-			this.swiftUrl + '?pubkey=' + keypair.publicKey.toBase58()
+			this.signedMsgUrl + '?pubkey=' + keypair.publicKey.toBase58()
 		);
 
 		ws.on('open', async () => {
@@ -114,19 +114,23 @@ export class SwiftMaker {
 				}
 
 				if (message['order'] && this.driftClient.isSubscribed) {
-					const order = JSON.parse(message['order']);
+					const order = message['order'];
 					console.info(`uuid: ${order['uuid']} at ${Date.now()}`);
 
-					const swiftOrderParamsBufHex = Buffer.from(order['order_message']);
-					const swiftOrderParamsBuf = Buffer.from(
+					const signedMsgOrderParamsBufHex = Buffer.from(
+						order['order_message']
+					);
+					const signedMsgOrderParamsBuf = Buffer.from(
 						order['order_message'],
 						'hex'
 					);
 					const {
-						swiftOrderParams,
+						signedMsgOrderParams,
 						subAccountId: takerSubaccountId,
-					}: SwiftOrderParamsMessage =
-						this.driftClient.decodeSwiftOrderParamsMessage(swiftOrderParamsBuf);
+					}: SignedMsgOrderParamsMessage =
+						this.driftClient.decodeSignedMsgOrderParamsMessage(
+							signedMsgOrderParamsBuf
+						);
 
 					const signingAuthority = new PublicKey(order['signing_authority']);
 					const takerAuthority = new PublicKey(order['taker_authority']);
@@ -139,43 +143,44 @@ export class SwiftMaker {
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();
 
-					const isOrderLong = isVariant(swiftOrderParams.direction, 'long');
-					if (!swiftOrderParams.price) {
+					const isOrderLong = isVariant(signedMsgOrderParams.direction, 'long');
+					if (!signedMsgOrderParams.price) {
 						console.error(
-							`order has no price: ${JSON.stringify(swiftOrderParams)}`
+							`order has no price: ${JSON.stringify(signedMsgOrderParams)}`
 						);
 						return;
 					}
 
-					const ixs = await this.driftClient.getPlaceAndMakeSwiftPerpOrderIxs(
-						{
-							orderParams: swiftOrderParamsBufHex,
-							signature: Buffer.from(order['order_signature'], 'base64'),
-						},
-						decodeUTF8(order['uuid']),
-						{
-							taker: takerUserPubkey,
-							takerUserAccount,
-							takerStats: getUserStatsAccountPublicKey(
-								this.driftClient.program.programId,
-								takerUserAccount.authority
-							),
-							signingAuthority,
-						},
-						getLimitOrderParams({
-							marketType: MarketType.PERP,
-							marketIndex: swiftOrderParams.marketIndex,
-							direction: isOrderLong
-								? PositionDirection.SHORT
-								: PositionDirection.LONG,
-							baseAssetAmount: swiftOrderParams.baseAssetAmount.divn(2),
-							price: isOrderLong
-								? swiftOrderParams.auctionStartPrice!.muln(99).divn(100)
-								: swiftOrderParams.auctionEndPrice!.muln(101).divn(100),
-							postOnly: PostOnlyParams.MUST_POST_ONLY,
-							immediateOrCancel: true,
-						})
-					);
+					const ixs =
+						await this.driftClient.getPlaceAndMakeSignedMsgPerpOrderIxs(
+							{
+								orderParams: signedMsgOrderParamsBufHex,
+								signature: Buffer.from(order['order_signature'], 'base64'),
+							},
+							decodeUTF8(order['uuid']),
+							{
+								taker: takerUserPubkey,
+								takerUserAccount,
+								takerStats: getUserStatsAccountPublicKey(
+									this.driftClient.program.programId,
+									takerUserAccount.authority
+								),
+								signingAuthority,
+							},
+							getLimitOrderParams({
+								marketType: MarketType.PERP,
+								marketIndex: signedMsgOrderParams.marketIndex,
+								direction: isOrderLong
+									? PositionDirection.SHORT
+									: PositionDirection.LONG,
+								baseAssetAmount: signedMsgOrderParams.baseAssetAmount.divn(2),
+								price: isOrderLong
+									? signedMsgOrderParams.auctionStartPrice!.muln(99).divn(100)
+									: signedMsgOrderParams.auctionEndPrice!.muln(101).divn(100),
+								postOnly: PostOnlyParams.MUST_POST_ONLY,
+								immediateOrCancel: true,
+							})
+						);
 
 					if (this.dryRun) {
 						// console.log('Dry run, not sending transaction');

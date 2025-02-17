@@ -24,7 +24,7 @@ import {
 	isVariant,
 	StateAccount,
 	DriftEnv,
-	SwiftOrderNode,
+	SignedMsgOrderNode,
 } from '@drift-labs/sdk';
 import { ComputeBudgetProgram, Connection, PublicKey } from '@solana/web3.js';
 import {
@@ -234,7 +234,7 @@ const serializeTriggerOrderNode = (
 		sortValue: node.sortValue.toString('hex'),
 		haveFilled: node.haveFilled,
 		haveTrigger: node.haveTrigger,
-		isSwift: node.isSwift,
+		isSignedMsg: node.isSignedMsg,
 		isProtectedMaker: node.isProtectedMaker,
 	};
 };
@@ -259,7 +259,7 @@ const deserializeTriggerOrderNode = (
 		haveFilled: serializedNode.haveFilled,
 		haveTrigger: serializedNode.haveTrigger,
 		isProtectedMaker: serializedNode.isProtectedMaker,
-		isSwift: serializedNode.isSwift,
+		isSignedMsg: serializedNode.isSignedMsg,
 		applyProtectedMakerOffset: false,
 		isVammNode: () => false,
 		isBaseFilled: () => false,
@@ -306,7 +306,7 @@ const serializeDLOBNode = (
 			sortValue: node.sortValue.toString('hex'),
 			haveFilled: node.haveFilled,
 			haveTrigger: 'haveTrigger' in node ? node.haveTrigger : undefined,
-			isSwift: 'isSwift' in node ? node.isSwift : undefined,
+			isSignedMsg: 'isSignedMsg' in node ? node.isSignedMsg : undefined,
 			isUserProtectedMaker,
 		};
 	} else {
@@ -325,8 +325,8 @@ const getOrderNodeType = (node: OrderNode): string => {
 		return 'FloatingLimitOrderNode';
 	} else if (node instanceof MarketOrderNode) {
 		return 'MarketOrderNode';
-	} else if (node instanceof SwiftOrderNode) {
-		return 'SwiftOrderNode';
+	} else if (node instanceof SignedMsgOrderNode) {
+		return 'SignedMsgOrderNode';
 	} else {
 		throw new Error('Invalid node type');
 	}
@@ -387,8 +387,8 @@ export const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
 				node.isUserProtectedMaker,
 				false
 			);
-		case 'SwiftOrderNode':
-			return new SwiftOrderNode(order, node.userAccount);
+		case 'SignedMsgOrderNode':
+			return new SignedMsgOrderNode(order, node.userAccount);
 		default:
 			throw new Error(`Invalid node type: ${node.type}`);
 	}
