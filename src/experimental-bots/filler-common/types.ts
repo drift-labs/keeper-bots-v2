@@ -108,7 +108,7 @@ export type SerializedTriggerOrderNode = {
 	sortValue: string;
 	haveFilled: boolean;
 	haveTrigger: boolean;
-	isSwift: boolean;
+	isSignedMsg: boolean;
 	isProtectedMaker: boolean;
 };
 
@@ -130,7 +130,7 @@ export type SerializedDLOBNode = {
 	haveTrigger?: boolean;
 	fallbackAskSource?: FallbackLiquiditySource;
 	fallbackBidSource?: FallbackLiquiditySource;
-	isSwift?: boolean;
+	isSignedMsg?: boolean;
 	isUserProtectedMaker: boolean;
 };
 

@@ -146,8 +146,8 @@ export type BotConfigMap = {
 	pythCranker?: PythCrankerBotConfig;
 	pythLazerCranker?: PythLazerCrankerBotConfig;
 	switchboardCranker?: SwitchboardCrankerBotConfig;
-	swiftTaker?: BaseBotConfig;
-	swiftMaker?: BaseBotConfig;
+	fastlaneTaker?: BaseBotConfig;
+	fastlaneMaker?: BaseBotConfig;
 	jitMaker?: JitMakerConfig;
 };
 

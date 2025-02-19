@@ -757,7 +757,7 @@ export function logMessageForNodeToFill(
 				fillId,
 				revertOnFailure,
 				removeLastIxPreSim,
-				isSwift: node.node.isSwift,
+				isSignedMsg: node.node.isSignedMsg,
 				fallbackSource,
 			})
 	);
