@@ -136,7 +136,7 @@ export class PythCrankerBot implements Bot {
 			(market) => {
 				const oracleVariant = getVariant(market.oracleSource).toLowerCase();
 				const useMarket = this.crankConfigs.onlyCrankUsedOracles
-					? oracleVariant.includes('pyth') && !oracleVariant.includes('pull')
+					? oracleVariant.includes('pyth') && oracleVariant.includes('pull')
 					: true;
 				return perpMarketIndexes.includes(market.marketIndex) && useMarket;
 			}
@@ -148,7 +148,7 @@ export class PythCrankerBot implements Bot {
 			(market) => {
 				const oracleVariant = getVariant(market.oracleSource).toLowerCase();
 				const useMarket = this.crankConfigs.onlyCrankUsedOracles
-					? oracleVariant.includes('pyth') && !oracleVariant.includes('pull')
+					? oracleVariant.includes('pyth') && oracleVariant.includes('pull')
 					: true;
 				return spotMarketIndexes.includes(market.marketIndex) && useMarket;
 			}
