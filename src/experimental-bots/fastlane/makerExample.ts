@@ -17,7 +17,7 @@ import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
 import { simulateAndGetTxWithCUs } from '../../utils';
 
-export class SignedMsgMaker {
+export class FastlaneMaker {
 	interval: NodeJS.Timeout | null = null;
 	private ws: WebSocket | null = null;
 	private signedMsgUrl: string;
@@ -31,8 +31,8 @@ export class SignedMsgMaker {
 	) {
 		this.signedMsgUrl =
 			runtimeSpec.driftEnv === 'mainnet-beta'
-				? 'wss://swift.drift.trade/ws'
-				: 'wss://master.swift.drift.trade/ws';
+				? 'wss://fastlane.drift.trade/ws'
+				: 'wss://master.fastlane.drift.trade/ws';
 	}
 
 	async init() {

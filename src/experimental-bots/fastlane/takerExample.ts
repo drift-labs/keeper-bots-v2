@@ -14,7 +14,7 @@ import { sleepMs } from '../../utils';
 
 const CONFIRM_TIMEOUT = 30_000;
 
-export class SignedMsgTaker {
+export class FastlaneTaker {
 	interval: NodeJS.Timeout | null = null;
 	swiftUrl: string;
 
@@ -25,8 +25,8 @@ export class SignedMsgTaker {
 	) {
 		this.swiftUrl =
 			runtimeSpec.driftEnv === 'mainnet-beta'
-				? 'https://swift.drift.trade/orders'
-				: 'https://master.swift.drift.trade/orders';
+				? 'https://fastlane.drift.trade/orders'
+				: 'https://master.fastlane.drift.trade/orders';
 	}
 
 	async init() {

@@ -12,20 +12,20 @@ import { sleepMs } from '../../utils';
 import dotenv from 'dotenv';
 import parseArgs from 'minimist';
 
-export type SignedMsgOrderSubscriberConfig = {
+export type FastlaneOrderSubscriberConfig = {
 	driftEnv: DriftEnv;
 	endpoint: string;
 	marketIndexes: number[];
 	keypair: Keypair;
 };
 
-export class SignedMsgOrderSubscriber {
+export class FastlaneOrderSubscriber {
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
 	private readonly heartbeatIntervalMs = 60000;
 	private ws: WebSocket | null = null;
 	subscribed: boolean = false;
 
-	constructor(private config: SignedMsgOrderSubscriberConfig) {}
+	constructor(private config: FastlaneOrderSubscriberConfig) {}
 
 	getSymbolForMarketIndex(marketIndex: number) {
 		const markets =
@@ -178,17 +178,17 @@ async function main() {
 	}
 
 	const keypair = loadKeypair(privateKey);
-	const signedMsgOrderSubscriberConfig: SignedMsgOrderSubscriberConfig = {
+	const signedMsgOrderSubscriberConfig: FastlaneOrderSubscriberConfig = {
 		driftEnv,
 		endpoint:
 			driftEnv === 'devnet'
-				? 'wss://master.swift.drift.trade/ws'
-				: 'wss://swift.drift.trade/ws',
+				? 'wss://master.fastlane.drift.trade/ws'
+				: 'wss://fastlane.drift.trade/ws',
 		marketIndexes,
 		keypair,
 	};
 
-	const signedMsgOrderSubscriber = new SignedMsgOrderSubscriber(
+	const signedMsgOrderSubscriber = new FastlaneOrderSubscriber(
 		signedMsgOrderSubscriberConfig
 	);
 	await signedMsgOrderSubscriber.subscribe();

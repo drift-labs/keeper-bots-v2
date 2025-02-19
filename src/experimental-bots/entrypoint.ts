@@ -37,8 +37,8 @@ import { promiseTimeout } from '@drift-labs/sdk';
 import { SpotFillerMultithreaded } from './spotFiller/spotFillerMultithreaded';
 import { setGlobalDispatcher, Agent } from 'undici';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
-import { SignedMsgMaker } from './signedMsg/makerExample';
-import { SignedMsgTaker } from './signedMsg/takerExample';
+import { FastlaneMaker } from './fastlane/makerExample';
+import { FastlaneTaker } from './fastlane/takerExample';
 import * as net from 'net';
 
 setGlobalDispatcher(
@@ -376,7 +376,7 @@ const runBot = async () => {
 		bots.push(spotFillerMultithreaded);
 	}
 
-	if (configHasBot(config, 'signedMsgMaker')) {
+	if (configHasBot(config, 'fastlaneMaker')) {
 		const userMap = new UserMap({
 			connection,
 			driftClient,
@@ -388,7 +388,7 @@ const runBot = async () => {
 		});
 		await userMap.subscribe();
 
-		const signedMsgMaker = new SignedMsgMaker(
+		const signedMsgMaker = new FastlaneMaker(
 			driftClient,
 			userMap,
 			{
@@ -403,8 +403,8 @@ const runBot = async () => {
 		bots.push(signedMsgMaker);
 	}
 
-	if (configHasBot(config, 'signedMsgTaker')) {
-		const signedMsgMaker = new SignedMsgTaker(
+	if (configHasBot(config, 'fastlaneTaker')) {
+		const signedMsgMaker = new FastlaneTaker(
 			driftClient,
 			{
 				rpcEndpoint: endpoint,
