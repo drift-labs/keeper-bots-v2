@@ -104,7 +104,8 @@ export class FastlaneTaker {
 			const expireTime = Date.now() + CONFIRM_TIMEOUT;
 			while (Date.now() < expireTime) {
 				const response = await axios.default.get(
-					this.fastlaneUrl + '/confirmation/hash-status?hash=' +
+					this.fastlaneUrl +
+						'/confirmation/hash-status?hash=' +
 						encodeURIComponent(hash),
 					{
 						validateStatus: (_status) => true,
