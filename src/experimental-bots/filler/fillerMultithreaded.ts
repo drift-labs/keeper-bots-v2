@@ -197,7 +197,7 @@ export class FillerMultithreaded {
 
 	private dlobHealthy = true;
 	private orderSubscriberHealthy = true;
-	private signedMsgOrderSubscriberHealth = true;
+	private fastlaneOrderSubscriberHealth = true;
 	private simulateTxForCUEstimate?: boolean;
 
 	// SignedMsg orders
@@ -583,17 +583,17 @@ export class FillerMultithreaded {
 
 		// SignedMsg Subscriber process
 		if (this.globalConfig.driftEnv === 'devnet') {
-			const signedMsgOrderSubscriberFileName =
-				'signedMsgOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
-			const signedMsgOrderSubscriberProcess = spawnChild(
+			const fastlaneOrderSubscriberFileName =
+				'fastlaneOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
+			const fastlaneOrderSubscriberProcess = spawnChild(
 				path.join(
 					__dirname,
 					isTsRuntime() ? '..' : '.',
 					'filler-common',
-					signedMsgOrderSubscriberFileName
+					fastlaneOrderSubscriberFileName
 				),
 				orderSubscriberArgs,
-				'signedMsgOrderSubscriber',
+				'fastlaneOrderSubscriber',
 				(msg: any) => {
 					switch (msg.type) {
 						case 'signedMsgOrderParamsMessage':
@@ -608,14 +608,14 @@ export class FillerMultithreaded {
 							}
 							break;
 						case 'health':
-							this.signedMsgOrderSubscriberHealth = msg.data.healthy;
+							this.fastlaneOrderSubscriberHealth = msg.data.healthy;
 							break;
 					}
 				}
 			);
 
-			signedMsgOrderSubscriberProcess.on('exit', (code) => {
-				logger.error(`signedMsgOrderSubscriber exited with code ${code}`);
+			fastlaneOrderSubscriberProcess.on('exit', (code) => {
+				logger.error(`fastlaneOrderSubscriber exited with code ${code}`);
 				process.exit(code || 1);
 			});
 
@@ -627,12 +627,12 @@ export class FillerMultithreaded {
 					}
 				);
 				orderSubscriberProcess.kill();
-				signedMsgOrderSubscriberProcess.kill();
+				fastlaneOrderSubscriberProcess.kill();
 				process.exit(0);
 			});
 
 			logger.info(
-				`signedMsgOrderSubscriber process spawned with pid: ${signedMsgOrderSubscriberProcess.pid}`
+				`fastlaneOrderSubscriber process spawned with pid: ${fastlaneOrderSubscriberProcess.pid}`
 			);
 		}
 
@@ -825,13 +825,13 @@ export class FillerMultithreaded {
 		if (!this.orderSubscriberHealthy) {
 			logger.error(`${logPrefix} Order subscriber not healthy`);
 		}
-		if (!this.signedMsgOrderSubscriberHealth) {
+		if (!this.fastlaneOrderSubscriberHealth) {
 			logger.error(`${logPrefix} SignedMsg order subscriber not healthy`);
 		}
 		return (
 			this.dlobHealthy &&
 			this.orderSubscriberHealthy &&
-			this.signedMsgOrderSubscriberHealth
+			this.fastlaneOrderSubscriberHealth
 		);
 	}
 

@@ -178,7 +178,7 @@ async function main() {
 	}
 
 	const keypair = loadKeypair(privateKey);
-	const signedMsgOrderSubscriberConfig: FastlaneOrderSubscriberConfig = {
+	const fastlaneOrderSubscriberConfig: FastlaneOrderSubscriberConfig = {
 		driftEnv,
 		endpoint:
 			driftEnv === 'devnet'
@@ -188,10 +188,10 @@ async function main() {
 		keypair,
 	};
 
-	const signedMsgOrderSubscriber = new FastlaneOrderSubscriber(
-		signedMsgOrderSubscriberConfig
+	const fastlaneOrderSubscriber = new FastlaneOrderSubscriber(
+		fastlaneOrderSubscriberConfig
 	);
-	await signedMsgOrderSubscriber.subscribe();
+	await fastlaneOrderSubscriber.subscribe();
 }
 
 main();
