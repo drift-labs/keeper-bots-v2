@@ -16,17 +16,17 @@ const CONFIRM_TIMEOUT = 30_000;
 
 export class FastlaneTaker {
 	interval: NodeJS.Timeout | null = null;
-	swiftUrl: string;
+	fastlaneUrl: string;
 
 	constructor(
 		private driftClient: DriftClient,
 		runtimeSpec: RuntimeSpec,
 		private intervalMs: number
 	) {
-		this.swiftUrl =
+		this.fastlaneUrl =
 			runtimeSpec.driftEnv === 'mainnet-beta'
-				? 'https://fastlane.drift.trade/orders'
-				: 'https://master.fastlane.drift.trade/orders';
+				? 'https://fastlane.drift.trade'
+				: 'https://master.fastlane.drift.trade';
 	}
 
 	async init() {
@@ -82,7 +82,7 @@ export class FastlaneTaker {
 			);
 
 			const response = await axios.default.post(
-				this.swiftUrl,
+				this.fastlaneUrl + '/orders',
 				{
 					market_index: marketIndex,
 					market_type: 'perp',
@@ -104,7 +104,8 @@ export class FastlaneTaker {
 			const expireTime = Date.now() + CONFIRM_TIMEOUT;
 			while (Date.now() < expireTime) {
 				const response = await axios.default.get(
-					'https://master.swift.drift.trade/confirmation/hash-status?hash=' +
+					this.fastlaneUrl +
+						'/confirmation/hash-status?hash=' +
 						encodeURIComponent(hash),
 					{
 						validateStatus: (_status) => true,
