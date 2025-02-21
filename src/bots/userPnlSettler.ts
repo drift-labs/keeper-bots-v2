@@ -604,7 +604,7 @@ export class UserPnlSettlerBot implements Bot {
 				marketIndex
 			);
 			let microLamports = 10_000;
-			if (pfs) {
+			if (pfs && pfs.medium) {
 				microLamports = Math.floor(pfs.medium);
 			}
 			const ixs = [
