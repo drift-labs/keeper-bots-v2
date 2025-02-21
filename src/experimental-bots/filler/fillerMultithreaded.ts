@@ -138,7 +138,7 @@ const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
 	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	// 6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
-	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
+	// 6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6003, // 0x1773 Error Number: 6003. Error Message: Insufficient collateral.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
 
@@ -582,59 +582,55 @@ export class FillerMultithreaded {
 		);
 
 		// SignedMsg Subscriber process
-		if (this.globalConfig.driftEnv === 'devnet') {
-			const fastlaneOrderSubscriberFileName =
-				'fastlaneOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
-			const fastlaneOrderSubscriberProcess = spawnChild(
-				path.join(
-					__dirname,
-					isTsRuntime() ? '..' : '.',
-					'filler-common',
-					fastlaneOrderSubscriberFileName
-				),
-				orderSubscriberArgs,
-				'fastlaneOrderSubscriber',
-				(msg: any) => {
-					switch (msg.type) {
-						case 'signedMsgOrderParamsMessage':
-							if (msg.data.type === 'signedMsgOrderParamsMessage') {
-								this.signedMsgOrderMessages.set(
-									msg.data.uuid,
-									msg.data.signedMsgOrder
-								);
-								this.routeMessageToDlobBuilder(msg);
-							} else if (msg.data.type === 'delete') {
-								this.signedMsgOrderMessages.delete(msg.data.uuid);
-							}
-							break;
-						case 'health':
-							this.fastlaneOrderSubscriberHealth = msg.data.healthy;
-							break;
-					}
+		const fastlaneOrderSubscriberFileName =
+			'fastlaneOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
+		const fastlaneOrderSubscriberProcess = spawnChild(
+			path.join(
+				__dirname,
+				isTsRuntime() ? '..' : '.',
+				'filler-common',
+				fastlaneOrderSubscriberFileName
+			),
+			orderSubscriberArgs,
+			'fastlaneOrderSubscriber',
+			(msg: any) => {
+				switch (msg.type) {
+					case 'signedMsgOrderParamsMessage':
+						if (msg.data.type === 'signedMsgOrderParamsMessage') {
+							this.signedMsgOrderMessages.set(
+								msg.data.uuid,
+								msg.data.signedMsgOrder
+							);
+							this.routeMessageToDlobBuilder(msg);
+						} else if (msg.data.type === 'delete') {
+							this.signedMsgOrderMessages.delete(msg.data.uuid);
+						}
+						break;
+					case 'health':
+						this.fastlaneOrderSubscriberHealth = msg.data.healthy;
+						break;
 				}
-			);
+			}
+		);
 
-			fastlaneOrderSubscriberProcess.on('exit', (code) => {
-				logger.error(`fastlaneOrderSubscriber exited with code ${code}`);
-				process.exit(code || 1);
+		fastlaneOrderSubscriberProcess.on('exit', (code) => {
+			logger.error(`fastlaneOrderSubscriber exited with code ${code}`);
+			process.exit(code || 1);
+		});
+
+		process.on('SIGINT', () => {
+			logger.info(`${logPrefix} Received SIGINT, killing children`);
+			this.dlobBuilders.forEach((value: DLOBBuilderWithProcess, _: number) => {
+				value.process.kill();
 			});
+			orderSubscriberProcess.kill();
+			fastlaneOrderSubscriberProcess.kill();
+			process.exit(0);
+		});
 
-			process.on('SIGINT', () => {
-				logger.info(`${logPrefix} Received SIGINT, killing children`);
-				this.dlobBuilders.forEach(
-					(value: DLOBBuilderWithProcess, _: number) => {
-						value.process.kill();
-					}
-				);
-				orderSubscriberProcess.kill();
-				fastlaneOrderSubscriberProcess.kill();
-				process.exit(0);
-			});
-
-			logger.info(
-				`fastlaneOrderSubscriber process spawned with pid: ${fastlaneOrderSubscriberProcess.pid}`
-			);
-		}
+		logger.info(
+			`fastlaneOrderSubscriber process spawned with pid: ${fastlaneOrderSubscriberProcess.pid}`
+		);
 
 		this.intervalIds.push(
 			setInterval(

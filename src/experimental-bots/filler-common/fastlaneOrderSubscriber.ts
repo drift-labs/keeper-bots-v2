@@ -173,10 +173,6 @@ async function main() {
 		throw new Error('ENDPOINT and KEEPER_PRIVATE_KEY must be provided');
 	}
 
-	if (driftEnv !== 'devnet') {
-		throw new Error('Only devnet is supported');
-	}
-
 	const keypair = loadKeypair(privateKey);
 	const fastlaneOrderSubscriberConfig: FastlaneOrderSubscriberConfig = {
 		driftEnv,
