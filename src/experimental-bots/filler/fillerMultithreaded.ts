@@ -428,11 +428,16 @@ export class FillerMultithreaded {
 		await this.pythLazerSubscriber?.subscribe();
 
 		const feedIds: string[] = PerpMarkets[this.globalConfig.driftEnv!]
-			.filter((market) =>
-				this.marketIndexesFlattened.includes(market.marketIndex)
+			.filter(
+				(market) =>
+					this.marketIndexesFlattened.includes(market.marketIndex) &&
+					isOneOfVariant(market.oracleSource, [
+						'pyth1MPull',
+						'pyth1KPull',
+						'pythPull',
+					])
 			)
-			.map((m) => m.pythFeedId)
-			.filter((id) => id !== undefined) as string[];
+			.map((m) => m.pythFeedId) as string[];
 		if (feedIds.length > 0) {
 			await this.pythPriceSubscriber?.subscribe(feedIds);
 		}
