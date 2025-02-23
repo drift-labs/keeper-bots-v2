@@ -412,7 +412,8 @@ export class FillerMultithreaded {
 			)
 			.filter((market) => market.pythLazerId !== undefined);
 		const pythLazerIds = markets.map((m) => m.pythLazerId!);
-		const pythLazerIdsChunks = chunks(pythLazerIds, 3);
+		const chunkSize = config.pythLazerChunkSize || 2;
+		const pythLazerIdsChunks = chunks(pythLazerIds, chunkSize);
 		this.pythLazerSubscriber = new PythLazerSubscriber(
 			this.globalConfig.lazerEndpoints,
 			this.globalConfig.lazerToken,
@@ -427,9 +428,19 @@ export class FillerMultithreaded {
 		await this.pythLazerSubscriber?.subscribe();
 
 		const feedIds: string[] = PerpMarkets[this.globalConfig.driftEnv!]
-			.map((m) => m.pythFeedId)
-			.filter((id) => id !== undefined) as string[];
-		await this.pythPriceSubscriber?.subscribe(feedIds);
+			.filter(
+				(market) =>
+					this.marketIndexesFlattened.includes(market.marketIndex) &&
+					isOneOfVariant(market.oracleSource, [
+						'pyth1MPull',
+						'pyth1KPull',
+						'pythPull',
+					])
+			)
+			.map((m) => m.pythFeedId) as string[];
+		if (feedIds.length > 0) {
+			await this.pythPriceSubscriber?.subscribe(feedIds);
+		}
 
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
