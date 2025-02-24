@@ -219,11 +219,12 @@ class DLOBBuilder {
 			return;
 		}
 
+		const orderSlot = Math.min(slot.toNumber(), this.slotSubscriber.getSlot());
 		const signedMsgOrder: Order = {
 			status: 'open',
 			orderType: OrderType.MARKET,
 			orderId: uuid,
-			slot,
+			slot: new BN(orderSlot),
 			marketIndex: signedMsgOrderParams.marketIndex,
 			marketType: MarketType.PERP,
 			baseAssetAmount: signedMsgOrderParams.baseAssetAmount,
