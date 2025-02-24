@@ -199,6 +199,9 @@ class DLOBBuilder {
 		}: SignedMsgOrderParamsMessage = this.driftClient.decodeSignedMsgOrderParamsMessage(
 			Buffer.from(orderData['order_message'], 'hex')
 		);
+		logger.info(
+			`Received signedMsgOrder: ${JSON.stringify(signedMsgOrderParams)}`
+		);
 
 		const takerAuthority = new PublicKey(orderData['taker_authority']);
 		const takerUserPubkey = await getUserAccountPublicKey(
@@ -219,11 +222,12 @@ class DLOBBuilder {
 			return;
 		}
 
+		const orderSlot = Math.min(slot.toNumber(), this.slotSubscriber.getSlot());
 		const signedMsgOrder: Order = {
 			status: 'open',
 			orderType: OrderType.MARKET,
 			orderId: uuid,
-			slot,
+			slot: new BN(orderSlot),
 			marketIndex: signedMsgOrderParams.marketIndex,
 			marketType: MarketType.PERP,
 			baseAssetAmount: signedMsgOrderParams.baseAssetAmount,
