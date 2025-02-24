@@ -393,8 +393,10 @@ export class MakerBidAskTwapCrank implements Bot {
 	): Promise<VersionedTransaction | undefined> {
 		const recentBlockhash =
 			await this.driftClient.connection.getLatestBlockhash('confirmed');
-		const simResult: SimulateAndGetTxWithCUsResponse | undefined =
-			await simulateAndGetTxWithCUs({
+
+		let simResult: SimulateAndGetTxWithCUsResponse | undefined;
+		try {
+			simResult = await simulateAndGetTxWithCUs({
 				ixs,
 				connection: this.driftClient.connection,
 				payerPublicKey: this.driftClient.wallet.publicKey,
@@ -404,6 +406,11 @@ export class MakerBidAskTwapCrank implements Bot {
 				doSimulation,
 				recentBlockhash: recentBlockhash.blockhash,
 			});
+		} catch (error) {
+			logger.error(`[${this.name}] simulating tx: ${error}`);
+			return;
+		}
+
 		logger.info(
 			`[${this.name}] estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
 		);

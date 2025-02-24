@@ -183,7 +183,7 @@ export class FastlaneMaker {
 						);
 
 					if (this.dryRun) {
-						// console.log('Dry run, not sending transaction');
+						console.log(Date.now() - order['ts']);
 						return;
 					}
 

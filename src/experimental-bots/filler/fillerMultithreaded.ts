@@ -1536,16 +1536,23 @@ export class FillerMultithreaded {
 				ixs = removePythIxs(ixs);
 			}
 
-			const simResult = await simulateAndGetTxWithCUs({
-				ixs,
-				connection: this.driftClient.connection,
-				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: this.lookupTableAccounts,
-				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-				doSimulation: this.simulateTxForCUEstimate,
-				recentBlockhash: await this.getBlockhashForTx(),
-				removeLastIxPostSim,
-			});
+			let simResult;
+			try {
+				simResult = await simulateAndGetTxWithCUs({
+					ixs,
+					connection: this.driftClient.connection,
+					payerPublicKey: this.driftClient.wallet.publicKey,
+					lookupTableAccounts: this.lookupTableAccounts,
+					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+					doSimulation: this.simulateTxForCUEstimate,
+					recentBlockhash: await this.getBlockhashForTx(),
+					removeLastIxPostSim,
+				});
+			} catch (error) {
+				logger.error(`Error simulating tx: ${error}`);
+				return;
+			}
+
 			this.simulateTxHistogram?.record(simResult.simTxDuration, {
 				type: 'trigger',
 				simError: simResult.simError !== null,
@@ -1940,16 +1947,23 @@ export class FillerMultithreaded {
 					ixsToUse = [...computeBudgetIxs, ...signedMsgIxs, ...fillIxs];
 				}
 
-				const simResult = await simulateAndGetTxWithCUs({
-					ixs: ixsToUse,
-					connection: this.driftClient.connection,
-					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: this.lookupTableAccounts!,
-					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-					doSimulation: this.simulateTxForCUEstimate,
-					recentBlockhash: await this.getBlockhashForTx(),
-					removeLastIxPostSim,
-				});
+				let simResult;
+				try {
+					simResult = await simulateAndGetTxWithCUs({
+						ixs: ixsToUse,
+						connection: this.driftClient.connection,
+						payerPublicKey: this.driftClient.wallet.publicKey,
+						lookupTableAccounts: this.lookupTableAccounts!,
+						cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+						doSimulation: this.simulateTxForCUEstimate,
+						recentBlockhash: await this.getBlockhashForTx(),
+						removeLastIxPostSim,
+					});
+				} catch (error) {
+					logger.error(`Error simulating tx: ${error}`);
+					return;
+				}
+
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
 					simError: simResult.simError !== null,
@@ -2198,16 +2212,23 @@ export class FillerMultithreaded {
 			ixsToUse = [...computeBudgetIxs, ...signedMsgIxs, ...fillIxs];
 		}
 
-		const simResult = await simulateAndGetTxWithCUs({
-			ixs: ixsToUse,
-			connection: this.driftClient.connection,
-			payerPublicKey: this.driftClient.wallet.publicKey,
-			lookupTableAccounts: this.lookupTableAccounts!,
-			cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-			doSimulation: this.simulateTxForCUEstimate,
-			recentBlockhash: await this.getBlockhashForTx(),
-			removeLastIxPostSim,
-		});
+		let simResult;
+		try {
+			simResult = await simulateAndGetTxWithCUs({
+				ixs: ixsToUse,
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: this.lookupTableAccounts!,
+				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+				doSimulation: this.simulateTxForCUEstimate,
+				recentBlockhash: await this.getBlockhashForTx(),
+				removeLastIxPostSim,
+			});
+		} catch (error) {
+			logger.error(`Error simulating tx: ${error}`);
+			return;
+		}
+
 		logger.info(
 			`tryFillPerpNode estimated CUs: ${simResult.cuEstimate} (fillTxId: ${fillTxId})`
 		);
