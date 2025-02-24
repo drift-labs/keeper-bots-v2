@@ -44,6 +44,7 @@ export type FillerMultiThreadedConfig = BaseBotConfig & {
 	rebalanceSettledPnlThreshold?: number;
 	minGasBalanceToFill?: number;
 	bidToFillerReward?: boolean;
+	pythLazerChunkSize?: number;
 };
 
 export type FillerConfig = BaseBotConfig & {
