@@ -410,14 +410,20 @@ export class FillerMultithreaded {
 			)
 			.filter((market) => market.pythLazerId !== undefined);
 		const pythLazerIds = markets.map((m) => m.pythLazerId!);
-		const chunkSize = config.pythLazerChunkSize || 2;
-		const pythLazerIdsChunks = chunks(pythLazerIds, chunkSize);
-		this.pythLazerSubscriber = new PythLazerSubscriber(
-			this.globalConfig.lazerEndpoints,
-			this.globalConfig.lazerToken,
-			pythLazerIdsChunks,
-			this.globalConfig.driftEnv
-		);
+		if (pythLazerIds.length > 0) {
+			const chunkSize = config.pythLazerChunkSize || 2;
+			const pythLazerIdsChunks = chunks(pythLazerIds, chunkSize);
+			this.pythLazerSubscriber = new PythLazerSubscriber(
+				this.globalConfig.lazerEndpoints,
+				this.globalConfig.lazerToken,
+				pythLazerIdsChunks,
+				this.globalConfig.driftEnv
+			);
+		} else {
+			logger.info(
+				'No pyth lazer ids found, skipping initting PythLazerSubscriber'
+			);
+		}
 	}
 
 	async init() {
