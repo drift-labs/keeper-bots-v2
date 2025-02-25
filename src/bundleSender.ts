@@ -430,7 +430,7 @@ export class BundleSender {
 			const jitoSlot = this.nextJitoLeader.nextLeaderSlot;
 			if (slot >= jitoSlot) {
 				if (slot >= jitoSlot - 2) {
-					logger.info(
+					logger.debug(
 						`${logPrefix}: currSlot: ${slot}, next jito leader slot: ${jitoSlot} (in ${
 							jitoSlot - slot
 						} slots)`
