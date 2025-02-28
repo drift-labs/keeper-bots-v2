@@ -17,7 +17,7 @@ import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
 import { simulateAndGetTxWithCUs } from '../../utils';
-import { ComputeBudgetProgram, TransactionInstruction } from '@solana/web3.js';
+import { ComputeBudgetProgram, Keypair, TransactionInstruction } from '@solana/web3.js';
 import { getPriorityFeeInstruction } from '../filler-common/utils';
 
 export class FastlaneMaker {
@@ -54,7 +54,12 @@ export class FastlaneMaker {
 	}
 
 	async subscribeWs() {
-		const keypair = this.driftClient.wallet.payer!;
+		/**
+			In the future, this will be used for verifying $DRIFT stake as we add
+			authentication for delegate signers
+			For now, pass a new keypair or a keypair to an empty wallet
+		*/
+		const keypair = new Keypair();
 		const ws = new WebSocket(
 			this.signedMsgUrl + '?pubkey=' + keypair.publicKey.toBase58()
 		);
