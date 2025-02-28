@@ -634,6 +634,7 @@ const runBot = async () => {
 			jitProxyClient,
 			fastlaneOrderSubscriber,
 			slotSubscriber,
+			auctionSubscriberIgnoresFastlaneOrders: true,
 		});
 		await jitter.subscribe();
 
