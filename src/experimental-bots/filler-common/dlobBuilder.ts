@@ -239,8 +239,9 @@ class DLOBBuilder {
 			postOnly: false,
 			oraclePriceOffset: signedMsgOrderParams.oraclePriceOffset ?? 0,
 			maxTs: signedMsgOrderParams.maxTs ?? ZERO,
+			price: signedMsgOrderParams.price ?? ZERO,
+			userOrderId: signedMsgOrderParams.userOrderId ?? 0,
 			// Rest are not required for DLOB
-			price: ZERO,
 			triggerPrice: ZERO,
 			triggerCondition: OrderTriggerCondition.ABOVE,
 			existingPositionDirection: PositionDirection.LONG,
@@ -248,7 +249,7 @@ class DLOBBuilder {
 			baseAssetAmountFilled: ZERO,
 			quoteAssetAmountFilled: ZERO,
 			quoteAssetAmount: ZERO,
-			userOrderId: 0,
+			bitFlags: 0,
 			postedSlotTail: 0,
 		};
 		signedMsgOrder.price = getAuctionPrice(

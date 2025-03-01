@@ -7,6 +7,7 @@ import {
 	MarketType,
 	PositionDirection,
 	PostOnlyParams,
+	PriorityFeeSubscriberMap,
 	PublicKey,
 	SignedMsgOrderParamsMessage,
 	UserMap,
@@ -16,12 +17,15 @@ import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
 import { simulateAndGetTxWithCUs } from '../../utils';
+import { ComputeBudgetProgram, Keypair, TransactionInstruction } from '@solana/web3.js';
+import { getPriorityFeeInstruction } from '../filler-common/utils';
 
 export class FastlaneMaker {
 	interval: NodeJS.Timeout | null = null;
 	private ws: WebSocket | null = null;
 	private signedMsgUrl: string;
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
+	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
 	private readonly heartbeatIntervalMs = 80_000;
 	constructor(
 		private driftClient: DriftClient,
@@ -33,14 +37,29 @@ export class FastlaneMaker {
 			runtimeSpec.driftEnv === 'mainnet-beta'
 				? 'wss://fastlane.drift.trade/ws'
 				: 'wss://master.fastlane.drift.trade/ws';
+
+		const perpMarketsToWatchForFees = [0, 1, 2, 3, 4, 5].map((x) => {
+			return { marketType: 'perp', marketIndex: x };
+		});
+
+		this.priorityFeeSubscriber = new PriorityFeeSubscriberMap({
+			driftMarkets: perpMarketsToWatchForFees,
+			driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
+		});
 	}
 
 	async init() {
 		await this.subscribeWs();
+		await this.priorityFeeSubscriber.subscribe();
 	}
 
 	async subscribeWs() {
-		const keypair = this.driftClient.wallet.payer!;
+		/**
+			In the future, this will be used for verifying $DRIFT stake as we add
+			authentication for delegate signers
+			For now, pass a new keypair or a keypair to an empty wallet
+		*/
+		const keypair = new Keypair();
 		const ws = new WebSocket(
 			this.signedMsgUrl + '?pubkey=' + keypair.publicKey.toBase58()
 		);
@@ -150,6 +169,19 @@ export class FastlaneMaker {
 						);
 						return;
 					}
+					const computeBudgetIxs: Array<TransactionInstruction> = [
+						ComputeBudgetProgram.setComputeUnitLimit({
+							units: 1_400_000,
+						}),
+					];
+					computeBudgetIxs.push(
+						getPriorityFeeInstruction(
+							this.priorityFeeSubscriber.getPriorityFees(
+								'perp',
+								signedMsgOrderParams.marketIndex
+							)?.medium ?? 0
+						)
+					);
 
 					const ixs =
 						await this.driftClient.getPlaceAndMakeSignedMsgPerpOrderIxs(
@@ -179,7 +211,10 @@ export class FastlaneMaker {
 									: signedMsgOrderParams.auctionEndPrice!.muln(101).divn(100),
 								postOnly: PostOnlyParams.MUST_POST_ONLY,
 								immediateOrCancel: true,
-							})
+							}),
+							undefined,
+							undefined,
+							computeBudgetIxs
 						);
 
 					if (this.dryRun) {
@@ -190,10 +225,11 @@ export class FastlaneMaker {
 					const resp = await simulateAndGetTxWithCUs({
 						connection: this.driftClient.connection,
 						payerPublicKey: this.driftClient.wallet.payer!.publicKey,
-						ixs,
-						cuLimitMultiplier: 1.25,
+						ixs: [...computeBudgetIxs, ...ixs],
+						cuLimitMultiplier: 1.5,
 						lookupTableAccounts:
 							await this.driftClient.fetchAllLookupTableAccounts(),
+						doSimulation: true,
 					});
 					if (resp.simError) {
 						console.log(resp.simTxLogs);

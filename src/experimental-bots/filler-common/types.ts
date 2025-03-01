@@ -65,6 +65,7 @@ export type SerializedOrder = {
 	auctionStartPrice: string;
 	auctionEndPrice: string;
 	maxTs: string;
+	bitFlags: number;
 	postedSlotTail: number;
 };
 
