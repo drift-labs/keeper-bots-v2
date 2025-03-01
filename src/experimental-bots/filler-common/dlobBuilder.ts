@@ -19,8 +19,6 @@ import {
 	getUserAccountPublicKey,
 	SignedMsgOrderNode,
 	Order,
-	OrderType,
-	getAuctionPrice,
 	ZERO,
 	OrderTriggerCondition,
 	PositionDirection,
@@ -28,6 +26,7 @@ import {
 	isUserProtectedMaker,
 	OraclePriceData,
 	StateAccount,
+	OrderStatus,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -199,6 +198,21 @@ class DLOBBuilder {
 		}: SignedMsgOrderParamsMessage = this.driftClient.decodeSignedMsgOrderParamsMessage(
 			Buffer.from(orderData['order_message'], 'hex')
 		);
+
+		if (
+			!signedMsgOrderParams.auctionDuration ||
+			!signedMsgOrderParams.auctionStartPrice ||
+			!signedMsgOrderParams.auctionEndPrice ||
+			signedMsgOrderParams.auctionStartPrice.eq(ZERO) ||
+			signedMsgOrderParams.auctionEndPrice.eq(ZERO)
+		) {
+			return;
+		}
+
+		if (signedMsgOrderParams.baseAssetAmount.eq(ZERO)) {
+			return;
+		}
+
 		logger.info(
 			`Received signedMsgOrder: ${JSON.stringify(signedMsgOrderParams)}`
 		);
@@ -223,41 +237,37 @@ class DLOBBuilder {
 		}
 
 		const orderSlot = Math.min(slot.toNumber(), this.slotSubscriber.getSlot());
+
 		const signedMsgOrder: Order = {
-			status: 'open',
-			orderType: OrderType.MARKET,
+			status: OrderStatus.OPEN,
+			orderType: signedMsgOrderParams.orderType,
 			orderId: uuid,
 			slot: new BN(orderSlot),
 			marketIndex: signedMsgOrderParams.marketIndex,
 			marketType: MarketType.PERP,
 			baseAssetAmount: signedMsgOrderParams.baseAssetAmount,
-			auctionDuration: signedMsgOrderParams.auctionDuration!,
-			auctionStartPrice: signedMsgOrderParams.auctionStartPrice!,
-			auctionEndPrice: signedMsgOrderParams.auctionEndPrice!,
-			immediateOrCancel: true,
+			auctionDuration: signedMsgOrderParams.auctionDuration,
+			auctionStartPrice: signedMsgOrderParams.auctionStartPrice,
+			auctionEndPrice: signedMsgOrderParams.auctionEndPrice,
+			immediateOrCancel: signedMsgOrderParams.immediateOrCancel ?? false,
 			direction: signedMsgOrderParams.direction,
 			postOnly: false,
 			oraclePriceOffset: signedMsgOrderParams.oraclePriceOffset ?? 0,
 			maxTs: signedMsgOrderParams.maxTs ?? ZERO,
+			reduceOnly: signedMsgOrderParams.reduceOnly ?? false,
+			triggerCondition:
+				signedMsgOrderParams.triggerCondition ?? OrderTriggerCondition.ABOVE,
 			price: signedMsgOrderParams.price ?? ZERO,
 			userOrderId: signedMsgOrderParams.userOrderId ?? 0,
-			// Rest are not required for DLOB
-			triggerPrice: ZERO,
-			triggerCondition: OrderTriggerCondition.ABOVE,
+			// Rest are not necessary and set for type conforming
 			existingPositionDirection: PositionDirection.LONG,
-			reduceOnly: false,
+			triggerPrice: ZERO,
 			baseAssetAmountFilled: ZERO,
 			quoteAssetAmountFilled: ZERO,
 			quoteAssetAmount: ZERO,
 			bitFlags: 0,
 			postedSlotTail: 0,
 		};
-		signedMsgOrder.price = getAuctionPrice(
-			signedMsgOrder,
-			this.slotSubscriber.getSlot(),
-			this.driftClient.getOracleDataForPerpMarket(signedMsgOrder.marketIndex)
-				.price
-		);
 
 		const signedMsgOrderNode = new SignedMsgOrderNode(
 			signedMsgOrder,
