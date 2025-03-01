@@ -17,7 +17,11 @@ import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
 import { simulateAndGetTxWithCUs } from '../../utils';
-import { ComputeBudgetProgram, Keypair, TransactionInstruction } from '@solana/web3.js';
+import {
+	ComputeBudgetProgram,
+	Keypair,
+	TransactionInstruction,
+} from '@solana/web3.js';
 import { getPriorityFeeInstruction } from '../filler-common/utils';
 
 export class FastlaneMaker {

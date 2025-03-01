@@ -175,25 +175,25 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.13.51":
-  version "0.13.51"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.13.51.tgz#3053974101169594dbd8abf1a8f080d13830e85b"
-  integrity sha512-MHgE/DAN3vbpxfZ7HmjWlEa2L1Iqmz+lF/GGw5WaKiVDovSBZFIeVKo55stnhZHLAKMwe3XrX3RenT8BPpVDHQ==
+"@drift-labs/jit-proxy@0.13.54":
+  version "0.13.54"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.13.54.tgz#49c4285a7dbd07e571c7d7fee1afdc586f864ce5"
+  integrity sha512-eTo0uLodVXyY7sMQZXnUNcfi0nVdioKUN7XBuBL8Q5yCm/yCM9OR2Ix+F1an/ULYjcaYH6zCsf+nC3I1A9AgeA==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.112.0-beta.7"
+    "@drift-labs/sdk" "2.112.0-beta.10"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.112.0-beta.7":
-  version "2.112.0-beta.7"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.112.0-beta.7.tgz#dcc3f05f11e22683ee07c87e0d40e6057f7998fd"
-  integrity sha512-soj6ugDQ3D4DXP+E9eThIjhhBiSCRxCafXnZBZp5nA1T8wQjomtdxFceMWxIHH2dytLguZ4SWU9Ms+4BnKMd3w==
+"@drift-labs/sdk@2.112.0-beta.10":
+  version "2.112.0-beta.10"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.112.0-beta.10.tgz#ed5b5db322377a86a81fce40132bd0a6bb87e165"
+  integrity sha512-fHqIlL4mZMsGTBEK81L7NlTMgu4WHGU+65NgMp1gxgCOr5iZaBir4n5Zig6Vhojilcj0Hk2AJy30xjdVqVJevg==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
     "@ellipsis-labs/phoenix-sdk" "1.4.5"
-    "@grpc/grpc-js" "^1.8.0"
+    "@grpc/grpc-js" "1.12.2"
     "@openbook-dex/openbook-v2" "0.2.10"
     "@project-serum/serum" "0.13.65"
     "@pythnetwork/client" "2.5.3"
@@ -388,7 +388,7 @@
   resolved "https://registry.yarnpkg.com/@fastify/error/-/error-2.0.0.tgz#a9f94af56eb934f0ab1ce4ef9f0ced6ebf2319dc"
   integrity sha512-wI3fpfDT0t7p8E6dA2eTECzzOd+bZsZCJ2Hcv+Onn2b7ZwK3RwD27uW2QDaMtQhAfWQQP+WNK7nKf0twLsBf9w==
 
-"@grpc/grpc-js@^1.8.0":
+"@grpc/grpc-js@1.12.2", "@grpc/grpc-js@^1.8.0":
   version "1.12.2"
   resolved "https://registry.yarnpkg.com/@grpc/grpc-js/-/grpc-js-1.12.2.tgz#97eda82dd49bb9c24eaf6434ea8d7de446e95aac"
   integrity sha512-bgxdZmgTrJZX50OjyVwz3+mNEnCTNkh3cIqGPWVNeW9jX6bn1ZkU80uPd+67/ZpIJIjRQ9qaHCjhavyoWYxumg==
