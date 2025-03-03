@@ -1410,6 +1410,25 @@ export class FillerMultithreaded {
 
 		for (const nodeToTrigger of triggerableNodes) {
 			nodeToTrigger.node.haveTrigger = true;
+			const nodeSignature = getOrderSignature(
+				nodeToTrigger.node.order.orderId,
+				nodeToTrigger.node.userAccount
+			);
+
+			const now = Date.now();
+			const timeStartedToTriggerNode = this.triggeringNodes.get(nodeSignature);
+
+			if (
+				timeStartedToTriggerNode &&
+				timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now
+			) {
+				logger.debug(
+					`Skipping order ${nodeSignature} - still in cooldown period`
+				);
+				continue;
+			}
+
+			this.triggeringNodes.set(nodeSignature, now);
 			const user = await this.getUserAccountAndSlotFromMap(
 				nodeToTrigger.node.userAccount.toString()
 			);
@@ -1455,10 +1474,6 @@ export class FillerMultithreaded {
 				removeLastIxPostSim = false;
 			}
 
-			const nodeSignature = getOrderSignature(
-				nodeToTrigger.node.order.orderId,
-				nodeToTrigger.node.userAccount
-			);
 			if (!this.seenTriggerableOrders.has(nodeSignature)) {
 				this.seenTriggerableOrders.add(nodeSignature);
 				this.triggeringNodes.set(nodeSignature, Date.now());
