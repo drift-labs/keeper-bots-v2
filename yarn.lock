@@ -175,25 +175,25 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.13.57":
-  version "0.13.57"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.13.57.tgz#2ef315e328f6cb24953615a1854198259faa8b06"
-  integrity sha512-mYzIOjE31N5TqYO7IjHGBLvCWN4EEe/au6I2jbBupT0AQ8o4KYy8grWv+boMXsvD43CArqAZgrFuDnzl0Oqdsg==
+"@drift-labs/jit-proxy@0.13.58":
+  version "0.13.58"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.13.58.tgz#ab8390e654848c1c6afc90fd31cb5e35e477f530"
+  integrity sha512-BLGSweGPw/w7ps3dKY78CGutZm6QtRM0c2VQ3mYpJRPJ7bmawLXzOgzBGwcM3hkVhH6PXzz5uv+8tUka/Zl+Kw==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.112.0-beta.13"
+    "@drift-labs/sdk" "2.112.0-beta.14"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.112.0-beta.13":
-  version "2.112.0-beta.13"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.112.0-beta.13.tgz#368509fe26c0b047e831065aacd29a6ccafa3655"
-  integrity sha512-Ub5YSWt8ZzFEJ5JszUNvv+MrneJxO8ez07hKRFIKNrILooIaplZe+Ae4fhI3ELOXJ1X7ZUeLC7IP5NeNf57piA==
+"@drift-labs/sdk@2.112.0-beta.14":
+  version "2.112.0-beta.14"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.112.0-beta.14.tgz#31f0a3f8ea5970c9ccec2c9ec88ae0511072d8b1"
+  integrity sha512-0m38qacpznXe4SQyMkwxHkyoe4V7UbigpCMszHg4Ql7lgmHkZfXzt9EhJywCBBBMJ9+IDvDPjY+Vwm/oT+8ksA==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
     "@ellipsis-labs/phoenix-sdk" "1.4.5"
-    "@grpc/grpc-js" "^1.8.0"
+    "@grpc/grpc-js" "1.12.6"
     "@openbook-dex/openbook-v2" "0.2.10"
     "@project-serum/serum" "0.13.65"
     "@pythnetwork/client" "2.5.3"
@@ -387,6 +387,14 @@
   version "2.0.0"
   resolved "https://registry.yarnpkg.com/@fastify/error/-/error-2.0.0.tgz#a9f94af56eb934f0ab1ce4ef9f0ced6ebf2319dc"
   integrity sha512-wI3fpfDT0t7p8E6dA2eTECzzOd+bZsZCJ2Hcv+Onn2b7ZwK3RwD27uW2QDaMtQhAfWQQP+WNK7nKf0twLsBf9w==
+
+"@grpc/grpc-js@1.12.6":
+  version "1.12.6"
+  resolved "https://registry.yarnpkg.com/@grpc/grpc-js/-/grpc-js-1.12.6.tgz#a3586ffdfb6a1f5cd5b4866dec9074c4a1e65472"
+  integrity sha512-JXUj6PI0oqqzTGvKtzOkxtpsyPRNsrmhh41TtIz/zEB6J+AUiZZ0dxWzcMwO9Ns5rmSPuMdghlTbUuqIM48d3Q==
+  dependencies:
+    "@grpc/proto-loader" "^0.7.13"
+    "@js-sdsl/ordered-map" "^4.4.2"
 
 "@grpc/grpc-js@^1.8.0":
   version "1.12.2"
