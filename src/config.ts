@@ -159,6 +159,7 @@ export interface GlobalConfig {
 	/// ws endpoint to use (inferred from endpoint using web3.js rules, only provide if you want to use a different one)
 	wsEndpoint?: string;
 	hermesEndpoint?: string;
+	lazerHttpEndpoints?: string[];
 	lazerEndpoints?: string[];
 	lazerToken?: string;
 

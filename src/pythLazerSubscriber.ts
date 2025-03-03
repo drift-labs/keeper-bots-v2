@@ -1,5 +1,6 @@
 import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
 import { DriftEnv, PerpMarkets } from '@drift-labs/sdk';
+import * as axios from 'axios';
 
 export class PythLazerSubscriber {
 	private pythLazerClient?: PythLazerClient;
@@ -13,17 +14,29 @@ export class PythLazerSubscriber {
 	isUnsubscribing = false;
 
 	marketIndextoPriceFeedIdChunk: Map<number, number[]> = new Map();
+	useHttpRequests: boolean = false;
 
 	constructor(
 		private endpoints: string[],
 		private token: string,
 		private priceFeedIdsArrays: number[][],
 		env: DriftEnv = 'devnet',
+		private httpEndpoints: string[] = [],
 		private resubTimeoutMs: number = 2000
 	) {
 		const markets = PerpMarkets[env].filter(
 			(market) => market.pythLazerId !== undefined
 		);
+
+		this.allSubscribedIds = this.priceFeedIdsArrays.flat();
+		if (
+			priceFeedIdsArrays[0].length === 1 &&
+			this.allSubscribedIds.length > 3 &&
+			this.httpEndpoints.length > 0
+		) {
+			this.useHttpRequests = true;
+		}
+
 		for (const priceFeedIds of priceFeedIdsArrays) {
 			const filteredMarkets = markets.filter((market) =>
 				priceFeedIds.includes(market.pythLazerId!)
@@ -38,6 +51,11 @@ export class PythLazerSubscriber {
 	}
 
 	async subscribe() {
+		// Will use http requests if chunk size is 1 and there are more than 3 ids
+		if (this.useHttpRequests) {
+			return;
+		}
+
 		this.pythLazerClient = await PythLazerClient.create(
 			this.endpoints,
 			this.token
@@ -45,7 +63,6 @@ export class PythLazerSubscriber {
 		let subscriptionId = 1;
 		for (const priceFeedIds of this.priceFeedIdsArrays) {
 			const feedIdsHash = this.hash(priceFeedIds);
-			this.allSubscribedIds.push(...priceFeedIds);
 			this.feedIdHashToFeedIds.set(feedIdsHash, priceFeedIds);
 			this.subscriptionIdsToFeedIdsHash.set(subscriptionId, feedIdsHash);
 			this.pythLazerClient.addMessageListener((message) => {
@@ -117,16 +134,56 @@ export class PythLazerSubscriber {
 		return 'h:' + arr.join('|');
 	}
 
-	getLatestPriceMessage(feedIds: number[]): string | undefined {
+	async getLatestPriceMessage(feedIds: number[]): Promise<string | undefined> {
+		if (this.useHttpRequests) {
+			for (const url of this.httpEndpoints) {
+				const priceMessage = await this.fetchLatestPriceMessage(url, feedIds);
+				if (priceMessage) {
+					return priceMessage;
+				}
+			}
+			return undefined;
+		}
 		return this.feedIdChunkToPriceMessage.get(this.hash(feedIds));
 	}
 
-	getLatestPriceMessageForMarketIndex(marketIndex: number): string | undefined {
+	async fetchLatestPriceMessage(
+		url: string,
+		feedIds: number[]
+	): Promise<string | undefined> {
+		try {
+			const result = await axios.default.post(
+				url,
+				{
+					priceFeedIds: feedIds,
+					properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
+					chains: ['solana'],
+					channel: 'real_time',
+					jsonBinaryEncoding: 'hex',
+				},
+				{
+					headers: {
+						Authorization: `Bearer ${this.token}`,
+					},
+				}
+			);
+			if (result.data && result.status == 200) {
+				return result.data['solana']['data'];
+			}
+		} catch (e) {
+			console.error(e);
+			return undefined;
+		}
+	}
+
+	async getLatestPriceMessageForMarketIndex(
+		marketIndex: number
+	): Promise<string | undefined> {
 		const feedIds = this.marketIndextoPriceFeedIdChunk.get(marketIndex);
 		if (!feedIds) {
 			return undefined;
 		}
-		return this.feedIdChunkToPriceMessage.get(this.hash(feedIds));
+		return await this.getLatestPriceMessage(feedIds);
 	}
 
 	getPriceFeedIdsFromMarketIndex(marketIndex: number): number[] {

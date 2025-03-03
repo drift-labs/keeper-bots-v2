@@ -138,7 +138,7 @@ const errorCodesToSuppress = [
 	6081, // 0x17c1 Error Number: 6081. Error Message: MarketWrongMutability.
 	// 6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	// 6087, // 0x17c7 Error Number: 6087. Error Message: SpotMarketNotFound.
-	// 6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
+	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6003, // 0x1773 Error Number: 6003. Error Message: Insufficient collateral.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
 
@@ -417,7 +417,8 @@ export class FillerMultithreaded {
 				this.globalConfig.lazerEndpoints,
 				this.globalConfig.lazerToken,
 				pythLazerIdsChunks,
-				this.globalConfig.driftEnv
+				this.globalConfig.driftEnv,
+				this.globalConfig.lazerHttpEndpoints
 			);
 		} else {
 			logger.info(
@@ -1147,7 +1148,7 @@ export class FillerMultithreaded {
 			}
 
 			const latestLazerUpdate =
-				this.pythLazerSubscriber?.getLatestPriceMessageForMarketIndex(
+				await this.pythLazerSubscriber?.getLatestPriceMessageForMarketIndex(
 					marketIndex
 				);
 			if (!latestLazerUpdate) {
