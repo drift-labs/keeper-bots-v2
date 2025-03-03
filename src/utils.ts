@@ -1160,7 +1160,9 @@ export const getAllPythOracleUpdateIxs = async (
 		);
 	} else {
 		const updateMessage =
-			pythLazerSubscriber?.getLatestPriceMessageForMarketIndex(marketIndex);
+			await pythLazerSubscriber?.getLatestPriceMessageForMarketIndex(
+				marketIndex
+			);
 		const feedIds =
 			pythLazerSubscriber?.getPriceFeedIdsFromMarketIndex(marketIndex);
 		if (!updateMessage || !feedIds) {
