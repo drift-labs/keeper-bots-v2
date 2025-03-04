@@ -2097,7 +2097,7 @@ export class FillerMultithreaded {
 			authority,
 		} = await this.getNodeFillInfo(nodeToFill);
 
-		let removeLastIxPostSim = this.revertOnFailure;
+		let removeLastIxPostSim = this.revertOnFailure && !isSignedMsg;
 		const pythIxs: TransactionInstruction[] = [];
 		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
 			pythIxs.push(
@@ -2177,7 +2177,7 @@ export class FillerMultithreaded {
 		fillIxs.push(fillIx);
 
 		const user = this.driftClient.getUser(this.subaccount);
-		if (this.revertOnFailure) {
+		if (this.revertOnFailure && !isSignedMsg) {
 			fillIxs.push(
 				await this.driftClient.getRevertFillIx(user.userAccountPublicKey)
 			);

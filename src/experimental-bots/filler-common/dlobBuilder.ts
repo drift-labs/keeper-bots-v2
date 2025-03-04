@@ -27,6 +27,7 @@ import {
 	OraclePriceData,
 	StateAccount,
 	OrderStatus,
+	getVariant,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -213,16 +214,24 @@ class DLOBBuilder {
 			return;
 		}
 
-		logger.info(
-			`Received signedMsgOrder: ${JSON.stringify(signedMsgOrderParams)}`
-		);
-
 		const takerAuthority = new PublicKey(orderData['taker_authority']);
 		const takerUserPubkey = await getUserAccountPublicKey(
 			this.driftClient.program.programId,
 			takerAuthority,
 			takerSubaccountId
 		);
+		logger.info(
+			`Received signedMsgOrder: pubkey: ${takerUserPubkey.toString()}, direction: ${getVariant(
+				signedMsgOrderParams.direction
+			)}, marketIndex: ${
+				signedMsgOrderParams.marketIndex
+			}, baseAssetAmount: ${signedMsgOrderParams.baseAssetAmount.toNumber()}, auctionDuration: ${
+				signedMsgOrderParams.auctionDuration
+			}, auctionStartPrice: ${signedMsgOrderParams.auctionStartPrice.toNumber()}, auctionEndPrice: ${signedMsgOrderParams.auctionEndPrice.toNumber()}, price: ${signedMsgOrderParams.price?.toNumber()}, maxTs: ${
+				signedMsgOrderParams.maxTs
+			}`
+		);
+
 		this.signedMsgUserAuthorities.set(
 			takerUserPubkey.toString(),
 			orderData['signing_authority']
