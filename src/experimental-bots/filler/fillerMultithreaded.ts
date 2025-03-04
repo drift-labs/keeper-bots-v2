@@ -1410,6 +1410,16 @@ export class FillerMultithreaded {
 
 		for (const nodeToTrigger of triggerableNodes) {
 			nodeToTrigger.node.haveTrigger = true;
+
+			const nodeSignature = getOrderSignature(
+				nodeToTrigger.node.order.orderId,
+				nodeToTrigger.node.userAccount
+			);
+			if (this.seenTriggerableOrders.has(nodeSignature)) {
+				logger.info(`Skipping order ${nodeSignature} - already seen`);
+				continue;
+			}
+
 			const user = await this.getUserAccountAndSlotFromMap(
 				nodeToTrigger.node.userAccount.toString()
 			);
@@ -1455,81 +1465,67 @@ export class FillerMultithreaded {
 				removeLastIxPostSim = false;
 			}
 
-			const nodeSignature = getOrderSignature(
-				nodeToTrigger.node.order.orderId,
-				nodeToTrigger.node.userAccount
-			);
-			if (!this.seenTriggerableOrders.has(nodeSignature)) {
-				this.seenTriggerableOrders.add(nodeSignature);
-				this.triggeringNodes.set(nodeSignature, Date.now());
+			this.seenTriggerableOrders.add(nodeSignature);
+			this.triggeringNodes.set(nodeSignature, Date.now());
 
-				ixs.push(
-					await this.driftClient.getTriggerOrderIx(
-						new PublicKey(nodeToTrigger.node.userAccount),
-						user.data,
-						nodeToTrigger.node.order
-					)
-				);
-
-				const makerInfos = await Promise.all(
-					nodeToTrigger.makers.map(async (maker) => {
-						const { data } = await this.getUserAccountAndSlotFromMap(
-							maker.toString()
-						);
-						const makerUserAccount = data;
-						const makerAuthority = makerUserAccount.authority;
-						const makerStats = getUserStatsAccountPublicKey(
-							this.driftClient.program.programId,
-							makerAuthority
-						);
-						return {
-							maker,
-							makerStats,
-							makerUserAccount,
-						};
-					})
-				);
-
-				const takerUserAccount = await this.userMap.mustGet(
-					nodeToTrigger.node.userAccount.toString()
-				);
-
-				let referrerInfo: ReferrerInfo | undefined;
-				try {
-					referrerInfo = await this.referrerMap?.mustGet(
-						takerUserAccount.getUserAccount().authority.toString()
-					);
-				} catch (e) {
-					logger.warn(
-						`executeTriggerablePerpNodes: Failed to get referrer info: ${e}`
-					);
-					referrerInfo = undefined;
-				}
-
-				const fillIx = await this.driftClient.getFillPerpOrderIx(
+			ixs.push(
+				await this.driftClient.getTriggerOrderIx(
 					new PublicKey(nodeToTrigger.node.userAccount),
 					user.data,
-					nodeToTrigger.node.order,
-					makerInfos,
-					referrerInfo,
-					this.subaccount
-				);
-				ixs.push(fillIx);
+					nodeToTrigger.node.order
+				)
+			);
 
-				if (this.revertOnFailure) {
-					ixs.push(
-						await this.driftClient.getRevertFillIx(
-							subaccountUser.userAccountPublicKey
-						)
+			const makerInfos = await Promise.all(
+				nodeToTrigger.makers.map(async (maker) => {
+					const { data } = await this.getUserAccountAndSlotFromMap(
+						maker.toString()
 					);
-				}
-			} else {
-				if (!this.pythPriceSubscriber) {
-					logger.info(`No pyth price subscriber, skipping`);
-					return;
-				}
-				logger.info(
-					`Already triggered order ${nodeSignature}, only pulling oracles`
+					const makerUserAccount = data;
+					const makerAuthority = makerUserAccount.authority;
+					const makerStats = getUserStatsAccountPublicKey(
+						this.driftClient.program.programId,
+						makerAuthority
+					);
+					return {
+						maker,
+						makerStats,
+						makerUserAccount,
+					};
+				})
+			);
+
+			const takerUserAccount = await this.userMap.mustGet(
+				nodeToTrigger.node.userAccount.toString()
+			);
+
+			let referrerInfo: ReferrerInfo | undefined;
+			try {
+				referrerInfo = await this.referrerMap?.mustGet(
+					takerUserAccount.getUserAccount().authority.toString()
+				);
+			} catch (e) {
+				logger.warn(
+					`executeTriggerablePerpNodes: Failed to get referrer info: ${e}`
+				);
+				referrerInfo = undefined;
+			}
+
+			const fillIx = await this.driftClient.getFillPerpOrderIx(
+				new PublicKey(nodeToTrigger.node.userAccount),
+				user.data,
+				nodeToTrigger.node.order,
+				makerInfos,
+				referrerInfo,
+				this.subaccount
+			);
+			ixs.push(fillIx);
+
+			if (this.revertOnFailure) {
+				ixs.push(
+					await this.driftClient.getRevertFillIx(
+						subaccountUser.userAccountPublicKey
+					)
 				);
 			}
 
