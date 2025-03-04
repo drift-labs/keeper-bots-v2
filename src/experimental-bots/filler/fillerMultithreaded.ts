@@ -1347,7 +1347,11 @@ export class FillerMultithreaded {
 				return false;
 			}
 			seenTriggerableNodes.add(sig);
-			return this.filterTriggerableNodes(node);
+			if (this.filterTriggerableNodes(node, sig)) {
+				this.triggeringNodes.set(sig, Date.now());
+				return true;
+			}
+			return false;
 		});
 		logger.debug(
 			`${logPrefix} Filtered down to ${filteredTriggerableNodes.length} triggerable nodes...`
@@ -1367,22 +1371,20 @@ export class FillerMultithreaded {
 	}
 
 	protected filterTriggerableNodes(
-		nodeToTrigger: SerializedNodeToTrigger
+		nodeToTrigger: SerializedNodeToTrigger,
+		signature: string
 	): boolean {
 		if (nodeToTrigger.node.haveTrigger) {
 			return false;
 		}
 
 		const now = Date.now();
-		const nodeToFillSignature = getNodeToTriggerSignature(nodeToTrigger);
-		const timeStartedToTriggerNode =
-			this.triggeringNodes.get(nodeToFillSignature);
+		const timeStartedToTriggerNode = this.triggeringNodes.get(signature);
 		if (timeStartedToTriggerNode) {
 			if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
 				return false;
 			}
 		}
-
 		return true;
 	}
 
