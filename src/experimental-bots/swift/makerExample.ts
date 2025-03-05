@@ -24,7 +24,7 @@ import {
 } from '@solana/web3.js';
 import { getPriorityFeeInstruction } from '../filler-common/utils';
 
-export class FastlaneMaker {
+export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
 	private ws: WebSocket | null = null;
 	private signedMsgUrl: string;
@@ -39,8 +39,8 @@ export class FastlaneMaker {
 	) {
 		this.signedMsgUrl =
 			runtimeSpec.driftEnv === 'mainnet-beta'
-				? 'wss://fastlane.drift.trade/ws'
-				: 'wss://master.fastlane.drift.trade/ws';
+				? 'wss://swift.drift.trade/ws'
+				: 'wss://master.swift.drift.trade/ws';
 
 		const perpMarketsToWatchForFees = [0, 1, 2, 3, 4, 5].map((x) => {
 			return { marketType: 'perp', marketIndex: x };
