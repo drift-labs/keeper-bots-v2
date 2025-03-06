@@ -197,7 +197,7 @@ export class FillerMultithreaded {
 
 	private dlobHealthy = true;
 	private orderSubscriberHealthy = true;
-	private fastlaneOrderSubscriberHealth = true;
+	private swiftOrderSubscriberHealth = true;
 	private simulateTxForCUEstimate?: boolean;
 
 	// SignedMsg orders
@@ -598,17 +598,17 @@ export class FillerMultithreaded {
 		);
 
 		// SignedMsg Subscriber process
-		const fastlaneOrderSubscriberFileName =
-			'fastlaneOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
-		const fastlaneOrderSubscriberProcess = spawnChild(
+		const swiftOrderSubscriberFileName =
+			'swiftOrderSubscriber' + (isTsRuntime() ? '.ts' : '.js');
+		const swiftOrderSubscriberProcess = spawnChild(
 			path.join(
 				__dirname,
 				isTsRuntime() ? '..' : '.',
 				'filler-common',
-				fastlaneOrderSubscriberFileName
+				swiftOrderSubscriberFileName
 			),
 			orderSubscriberArgs,
-			'fastlaneOrderSubscriber',
+			'swiftOrderSubscriber',
 			(msg: any) => {
 				switch (msg.type) {
 					case 'signedMsgOrderParamsMessage':
@@ -623,14 +623,14 @@ export class FillerMultithreaded {
 						}
 						break;
 					case 'health':
-						this.fastlaneOrderSubscriberHealth = msg.data.healthy;
+						this.swiftOrderSubscriberHealth = msg.data.healthy;
 						break;
 				}
 			}
 		);
 
-		fastlaneOrderSubscriberProcess.on('exit', (code) => {
-			logger.error(`fastlaneOrderSubscriber exited with code ${code}`);
+		swiftOrderSubscriberProcess.on('exit', (code) => {
+			logger.error(`swiftOrderSubscriber exited with code ${code}`);
 			process.exit(code || 1);
 		});
 
@@ -640,12 +640,12 @@ export class FillerMultithreaded {
 				value.process.kill();
 			});
 			orderSubscriberProcess.kill();
-			fastlaneOrderSubscriberProcess.kill();
+			swiftOrderSubscriberProcess.kill();
 			process.exit(0);
 		});
 
 		logger.info(
-			`fastlaneOrderSubscriber process spawned with pid: ${fastlaneOrderSubscriberProcess.pid}`
+			`swiftOrderSubscriber process spawned with pid: ${swiftOrderSubscriberProcess.pid}`
 		);
 
 		this.intervalIds.push(
@@ -837,13 +837,13 @@ export class FillerMultithreaded {
 		if (!this.orderSubscriberHealthy) {
 			logger.error(`${logPrefix} Order subscriber not healthy`);
 		}
-		if (!this.fastlaneOrderSubscriberHealth) {
+		if (!this.swiftOrderSubscriberHealth) {
 			logger.error(`${logPrefix} SignedMsg order subscriber not healthy`);
 		}
 		return (
 			this.dlobHealthy &&
 			this.orderSubscriberHealthy &&
-			this.fastlaneOrderSubscriberHealth
+			this.swiftOrderSubscriberHealth
 		);
 	}
 
