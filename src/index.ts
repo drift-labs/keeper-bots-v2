@@ -38,7 +38,7 @@ import {
 	PerpMarkets,
 	configs,
 	AuctionSubscriber,
-	FastlaneOrderSubscriber,
+	SwiftOrderSubscriber,
 } from '@drift-labs/sdk';
 import { promiseTimeout } from '@drift-labs/sdk';
 
@@ -607,13 +607,12 @@ const runBot = async () => {
 			driftClient,
 			resubTimeoutMs: 30_000,
 		});
-		let fastlaneOrderSubscriber: FastlaneOrderSubscriber | undefined =
-			undefined;
+		let swiftOrderSubscriber: SwiftOrderSubscriber | undefined = undefined;
 		if (config.global.driftEnv === 'devnet') {
 			if (!config.botConfigs?.jitMaker?.marketIndexes) {
 				throw new Error('Market indexes must be specified for JIT Maker bot');
 			}
-			fastlaneOrderSubscriber = new FastlaneOrderSubscriber({
+			swiftOrderSubscriber = new SwiftOrderSubscriber({
 				driftEnv: 'devnet',
 				marketIndexes: config.botConfigs?.jitMaker?.marketIndexes,
 				keypair: new Keypair(),
@@ -632,9 +631,9 @@ const runBot = async () => {
 			auctionSubscriber,
 			driftClient,
 			jitProxyClient,
-			fastlaneOrderSubscriber,
+			swiftOrderSubscriber,
 			slotSubscriber,
-			auctionSubscriberIgnoresFastlaneOrders: !!fastlaneOrderSubscriber,
+			auctionSubscriberIgnoresSwiftOrders: !!swiftOrderSubscriber,
 		});
 		await jitter.subscribe();
 
