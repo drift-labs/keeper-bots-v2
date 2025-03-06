@@ -67,5 +67,5 @@ jobs:
           kubectl rollout restart -n $BRANCH_NAME deployment/pyth-cranker-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/pyth-lazer-cranker-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/switchboard-cranker-bot
-          kubectl rollout restart -n $BRANCH_NAME deployment/fastlane-taker-example-bot
-          kubectl rollout restart -n $BRANCH_NAME deployment/fastlane-maker-example-bot
+          kubectl rollout restart -n $BRANCH_NAME deployment/swift-taker-example-bot
+          kubectl rollout restart -n $BRANCH_NAME deployment/swift-maker-example-bot
