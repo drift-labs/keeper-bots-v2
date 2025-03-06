@@ -3,7 +3,6 @@ import {
 	UserAccount,
 	SpotPosition,
 	PerpPosition,
-	TriggerOrderNode,
 	DLOBNode,
 	OrderNode,
 	TakingLimitOrderNode,
@@ -32,13 +31,10 @@ import {
 	SerializedOrder,
 	SerializedSpotPosition,
 	SerializedPerpPosition,
-	SerializedNodeToTrigger,
-	SerializedTriggerOrderNode,
 	SerializedNodeToFill,
 	SerializedDLOBNode,
 	NodeToFillWithBuffer,
 	NodeToFillWithContext,
-	NodeToTriggerWithMakers,
 } from './types';
 import { ChildProcess, fork } from 'child_process';
 import { logger } from '../../logger';
@@ -209,63 +205,6 @@ const deserializePerpPosition = (
 			serializedPosition.lastQuoteAssetAmountPerLp,
 			'hex'
 		),
-	};
-};
-
-export const serializeNodeToTrigger = (
-	node: NodeToTriggerWithMakers,
-	userAccountData: Buffer,
-	makers: PublicKey[]
-): SerializedNodeToTrigger => {
-	return {
-		node: serializeTriggerOrderNode(node.node, userAccountData),
-		makers: makers.map((maker) => maker.toString()),
-	};
-};
-
-const serializeTriggerOrderNode = (
-	node: TriggerOrderNode,
-	userAccountData: Buffer
-): SerializedTriggerOrderNode => {
-	return {
-		userAccountData: userAccountData,
-		order: serializeOrder(node.order),
-		userAccount: node.userAccount.toString(),
-		sortValue: node.sortValue.toString('hex'),
-		haveFilled: node.haveFilled,
-		haveTrigger: node.haveTrigger,
-		isSignedMsg: node.isSignedMsg,
-		isProtectedMaker: node.isProtectedMaker,
-	};
-};
-
-export const deserializeNodeToTriggerWithMakers = (
-	serializedNode: SerializedNodeToTrigger
-): NodeToTriggerWithMakers => {
-	return {
-		node: deserializeTriggerOrderNode(serializedNode.node),
-		makers: serializedNode.makers.map((m) => new PublicKey(m)),
-	};
-};
-
-const deserializeTriggerOrderNode = (
-	serializedNode: SerializedTriggerOrderNode
-): TriggerOrderNode => {
-	const order = deserializeOrder(serializedNode.order);
-	return {
-		order,
-		userAccount: serializedNode.userAccount,
-		sortValue: new BN(serializedNode.sortValue, 'hex'),
-		haveFilled: serializedNode.haveFilled,
-		haveTrigger: serializedNode.haveTrigger,
-		isProtectedMaker: serializedNode.isProtectedMaker,
-		isSignedMsg: serializedNode.isSignedMsg,
-		applyProtectedMakerOffset: false,
-		isVammNode: () => false,
-		isBaseFilled: () => false,
-		getSortValue: () => new BN(0),
-		getLabel: () => '',
-		getPrice: () => new BN(0),
 	};
 };
 
