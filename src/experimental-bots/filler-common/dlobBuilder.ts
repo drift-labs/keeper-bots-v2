@@ -25,7 +25,6 @@ import {
 	UserStatus,
 	isUserProtectedMaker,
 	OraclePriceData,
-	StateAccount,
 	OrderStatus,
 	getVariant,
 } from '@drift-labs/sdk';
@@ -36,20 +35,13 @@ import { logger } from '../../logger';
 import {
 	FallbackLiquiditySource,
 	SerializedNodeToFill,
-	SerializedNodeToTrigger,
 	NodeToFillWithContext,
-	NodeToTriggerWithMakers,
 } from './types';
-import {
-	getDriftClientFromArgs,
-	serializeNodeToFill,
-	serializeNodeToTrigger,
-} from './utils';
+import { getDriftClientFromArgs, serializeNodeToFill } from './utils';
 import { initializeSpotFulfillmentAccounts, sleepMs } from '../../utils';
 import { LRUCache } from 'lru-cache';
 
 const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
-const NUM_MAKERS = 3; // number of makers to consider for triggerable nodes
 
 const logPrefix = '[DLOBBuilder]';
 class DLOBBuilder {
@@ -289,13 +281,9 @@ class DLOBBuilder {
 		});
 	}
 
-	public getNodesToTriggerAndNodesToFill(): [
-		NodeToFillWithContext[],
-		NodeToTriggerWithMakers[],
-	] {
+	public getdNodesToFill(): NodeToFillWithContext[] {
 		const dlob = this.build();
 		const nodesToFill: NodeToFillWithContext[] = [];
-		const nodesToTrigger: NodeToTriggerWithMakers[] = [];
 		for (const marketIndex of this.marketIndexes) {
 			let market;
 			let oraclePriceData: OraclePriceData;
@@ -374,64 +362,14 @@ class DLOBBuilder {
 				stateAccount,
 				market
 			);
-			const nodesToTriggerForMarket: NodeToTriggerWithMakers[] =
-				this.findTriggerableNodesWithMakers(
-					dlob,
-					marketIndex,
-					slot,
-					oraclePriceData,
-					this.marketType,
-					stateAccount
-				);
 
 			nodesToFill.push(
 				...nodesToFillForMarket.map((node) => {
 					return { ...node, fallbackAskSource, fallbackBidSource };
 				})
 			);
-			nodesToTrigger.push(...nodesToTriggerForMarket);
 		}
-		return [nodesToFill, nodesToTrigger];
-	}
-
-	public findTriggerableNodesWithMakers(
-		dlob: DLOB,
-		marketIndex: number,
-		slot: number,
-		oraclePriceData: OraclePriceData,
-		marketType: MarketType,
-		stateAccount: StateAccount
-	): NodeToTriggerWithMakers[] {
-		const baseTriggerable = dlob.findNodesToTrigger(
-			marketIndex,
-			slot,
-			oraclePriceData.price,
-			marketType,
-			stateAccount
-		);
-
-		const triggerWithMaker: NodeToTriggerWithMakers[] = [];
-
-		for (const nodeObj of baseTriggerable) {
-			const order = nodeObj.node.order;
-
-			const makers = dlob.getBestMakers({
-				marketIndex,
-				marketType,
-				direction: isVariant(order.direction, 'long')
-					? PositionDirection.SHORT
-					: PositionDirection.LONG,
-				slot,
-				oraclePriceData,
-				numMakers: NUM_MAKERS,
-			});
-			triggerWithMaker.push({
-				...nodeObj,
-				makers,
-			});
-		}
-
-		return triggerWithMaker;
+		return nodesToFill;
 	}
 
 	public serializeNodesToFill(
@@ -466,38 +404,8 @@ class DLOBBuilder {
 			.filter((node): node is SerializedNodeToFill => node !== undefined);
 	}
 
-	public serializeNodesToTrigger(
-		nodesToTrigger: NodeToTriggerWithMakers[]
-	): SerializedNodeToTrigger[] {
-		return nodesToTrigger
-			.map((node) => {
-				const buffer = this.getUserBuffer(node.node.userAccount);
-				if (!buffer) {
-					return undefined;
-				}
-				return serializeNodeToTrigger(node, buffer, node.makers);
-			})
-			.filter((node): node is SerializedNodeToTrigger => node !== undefined);
-	}
-
-	public trySendNodes(
-		serializedNodesToTrigger: SerializedNodeToTrigger[],
-		serializedNodesToFill: SerializedNodeToFill[]
-	) {
+	public trySendNodes(serializedNodesToFill: SerializedNodeToFill[]) {
 		if (typeof process.send === 'function') {
-			if (serializedNodesToTrigger.length > 0) {
-				try {
-					logger.debug('Sending triggerable nodes');
-					process.send({
-						type: 'triggerableNodes',
-						data: serializedNodesToTrigger,
-						// }, { swallowErrors: true });
-					});
-				} catch (e) {
-					logger.error(`${logPrefix} Failed to send triggerable nodes: ${e}`);
-					// logger.error(JSON.stringify(serializedNodesToTrigger, null, 2));
-				}
-			}
 			if (serializedNodesToFill.length > 0) {
 				try {
 					logger.debug('Sending fillable nodes');
@@ -629,18 +537,12 @@ const main = async () => {
 	});
 
 	setInterval(() => {
-		const [nodesToFill, nodesToTrigger] =
-			dlobBuilder.getNodesToTriggerAndNodesToFill();
+		const nodesToFill = dlobBuilder.getdNodesToFill();
 		const serializedNodesToFill = dlobBuilder.serializeNodesToFill(nodesToFill);
 		logger.debug(
 			`${logPrefix} Serialized ${serializedNodesToFill.length} fillable nodes`
 		);
-		const serializedNodesToTrigger =
-			dlobBuilder.serializeNodesToTrigger(nodesToTrigger);
-		logger.debug(
-			`${logPrefix} Serialized ${serializedNodesToTrigger.length} triggerable nodes`
-		);
-		dlobBuilder.trySendNodes(serializedNodesToTrigger, serializedNodesToFill);
+		dlobBuilder.trySendNodes(serializedNodesToFill);
 	}, 200);
 
 	dlobBuilder.sendLivenessCheck(true);

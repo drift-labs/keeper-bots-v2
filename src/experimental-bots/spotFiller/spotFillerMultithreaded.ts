@@ -8,7 +8,6 @@ import {
 	BulkAccountLoader,
 	isVariant,
 	DLOBNode,
-	getOrderSignature,
 	BN,
 	PhoenixV1FulfillmentConfigAccount,
 	TEN,
@@ -68,7 +67,6 @@ import {
 import { ChildProcess } from 'child_process';
 import {
 	deserializeNodeToFill,
-	deserializeOrder,
 	serializeNodeToFill,
 	spawnChild,
 	isTsRuntime,
@@ -82,7 +80,6 @@ import {
 import {
 	NodeToFillWithBuffer,
 	SerializedNodeToFill,
-	SerializedNodeToTrigger,
 } from '../filler-common/types';
 import {
 	isEndIxLog,
@@ -126,9 +123,6 @@ const errorCodesToSuppress = [
 	6078, // 0x17BE Error Number: 6078. Error Message: PerpMarketNotFound
 	// 6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
-
-	6111, // Error Message: OrderNotTriggerable.
-	6112, // Error Message: OrderDidNotSatisfyTriggerCondition.
 ];
 
 function getMakerNodeFromNodeToFill(
@@ -150,24 +144,19 @@ function getMakerNodeFromNodeToFill(
 	return nodeToFill.makerNodes[0];
 }
 
-const getNodeToTriggerSignature = (node: SerializedNodeToTrigger): string => {
-	return getOrderSignature(node.node.order.orderId, node.node.userAccount);
-};
-
 type DLOBBuilderWithProcess = {
 	process: ChildProcess;
 	ready: boolean;
 	marketIndexes: number[];
 };
 
-export type TxType = 'fill' | 'trigger' | 'settlePnl';
+export type TxType = 'fill' | 'settlePnl';
 export const TX_TIMEOUT_THRESHOLD_MS = 60_000; // tx considered stale after this time and give up confirming
 export const CONFIRM_TX_RATE_LIMIT_BACKOFF_MS = 5_000; // wait this long until trying to confirm tx again if rate limited
 export const CONFIRM_TX_INTERVAL_MS = 5_000;
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
 const CONFIRM_TX_ATTEMPTS = 2;
 const SLOTS_UNTIL_JITO_LEADER_TO_SEND = 4;
-const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.15;
 const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana-labs/solana/issues/27241
 
@@ -202,7 +191,6 @@ export class SpotFillerMultithreaded {
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private throttledNodes = new Map<string, number>();
-	private triggeringNodes = new Map<string, number>();
 
 	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
 	private revertOnFailure: boolean;
@@ -237,7 +225,6 @@ export class SpotFillerMultithreaded {
 	protected lastTryFillTimeGauge?: GaugeValue;
 	protected mutexBusyCounter?: CounterValue;
 	protected sentTxsCounter?: CounterValue;
-	protected attemptedTriggersCounter?: CounterValue;
 	protected landedTxsCounter?: CounterValue;
 	protected txSimErrorCounter?: CounterValue;
 	protected pendingTxSigsToConfirmGauge?: GaugeValue;
@@ -485,20 +472,6 @@ export class SpotFillerMultithreaded {
 								}
 							}
 							break;
-						case 'triggerableNodes':
-							if (this.dryRun) {
-								logger.info(`Triggerable node received`);
-							} else {
-								this.triggerNodes(msg.data);
-							}
-							this.lastTryFillTimeGauge?.setLatestValue(
-								Date.now(),
-								metricAttrFromUserAccount(
-									user.getUserAccountPublicKey(),
-									user.getUserAccount()
-								)
-							);
-							break;
 						case 'fillableNodes':
 							if (this.dryRun) {
 								logger.info(`Fillable node received`);
@@ -611,238 +584,6 @@ export class SpotFillerMultithreaded {
 				setInterval(this.recordJitoBundleStats.bind(this), 10_000)
 			);
 		}
-	}
-
-	public async triggerNodes(
-		serializedNodesToTrigger: SerializedNodeToTrigger[]
-	) {
-		if (!this.hasEnoughSolToFill) {
-			logger.info(
-				`Not enough SOL to fill, skipping executeTriggerablePerpNodes`
-			);
-			return;
-		}
-
-		logger.info(
-			`${logPrefix} Triggering ${serializedNodesToTrigger.length} nodes...`
-		);
-		const seenTriggerableNodes = new Set<string>();
-		const filteredTriggerableNodes = serializedNodesToTrigger.filter((node) => {
-			const sig = getNodeToTriggerSignature(node);
-			if (seenTriggerableNodes.has(sig)) {
-				return false;
-			}
-			seenTriggerableNodes.add(sig);
-			return this.filterTriggerableNodes(node);
-		});
-		logger.info(
-			`${logPrefix} Filtered down to ${filteredTriggerableNodes.length} triggerable nodes...`
-		);
-
-		const buildForBundle = this.shouldBuildForBundle();
-
-		try {
-			await this.executeTriggerableSpotNodes(
-				filteredTriggerableNodes,
-				!!buildForBundle
-			);
-		} catch (e) {
-			if (e instanceof Error) {
-				logger.error(
-					`${logPrefix} Error triggering nodes: ${
-						e.stack ? e.stack : e.message
-					}`
-				);
-			}
-		}
-	}
-
-	private filterTriggerableNodes(
-		nodeToTrigger: SerializedNodeToTrigger
-	): boolean {
-		if (nodeToTrigger.node.haveTrigger) {
-			return false;
-		}
-
-		const now = Date.now();
-		const nodeToFillSignature = getNodeToTriggerSignature(nodeToTrigger);
-		const timeStartedToTriggerNode =
-			this.triggeringNodes.get(nodeToFillSignature);
-		if (timeStartedToTriggerNode) {
-			if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	private async executeTriggerableSpotNodes(
-		serializedNodesToTrigger: SerializedNodeToTrigger[],
-		buildForBundle: boolean
-	) {
-		const driftUser = this.driftClient.getUser(this.subaccount);
-		for (const nodeToTrigger of serializedNodesToTrigger) {
-			nodeToTrigger.node.haveTrigger = true;
-			// @ts-ignore
-			const buffer = Buffer.from(nodeToTrigger.node.userAccountData.data);
-			// @ts-ignore
-			const userAccount = decodeUser(buffer);
-
-			const nodeSignature = getNodeToTriggerSignature(nodeToTrigger);
-			this.triggeringNodes.set(nodeSignature, Date.now());
-
-			const ixs = [
-				ComputeBudgetProgram.setComputeUnitLimit({
-					units: 1_400_000,
-				}),
-			];
-
-			if (buildForBundle) {
-				ixs.push(this.bundleSender!.getTipIx());
-			} else {
-				ixs.push(
-					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: Math.floor(
-							Math.max(
-								...serializedNodesToTrigger.map(
-									(node: SerializedNodeToTrigger) => {
-										return this.priorityFeeSubscriber.getPriorityFees(
-											'spot',
-											node.node.order.marketIndex
-										)!.medium;
-									}
-								)
-							) * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-						),
-					})
-				);
-			}
-
-			ixs.push(
-				await this.driftClient.getTriggerOrderIx(
-					new PublicKey(nodeToTrigger.node.userAccount),
-					userAccount,
-					deserializeOrder(nodeToTrigger.node.order),
-					driftUser.userAccountPublicKey
-				)
-			);
-
-			if (this.revertOnFailure) {
-				ixs.push(
-					await this.driftClient.getRevertFillIx(driftUser.userAccountPublicKey)
-				);
-			}
-
-			const simResult = await simulateAndGetTxWithCUs({
-				ixs,
-				connection: this.driftClient.connection,
-				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: this.lookupTableAccounts,
-				cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-				doSimulation: this.simulateTxForCUEstimate,
-				recentBlockhash: await this.getBlockhashForTx(),
-			});
-			this.simulateTxHistogram?.record(simResult.simTxDuration, {
-				type: 'trigger',
-				simError: simResult.simError !== null,
-				...metricAttrFromUserAccount(
-					driftUser.userAccountPublicKey,
-					driftUser.getUserAccount()
-				),
-			});
-			this.estTxCuHistogram?.record(simResult.cuEstimate, {
-				type: 'trigger',
-				simError: simResult.simError !== null,
-				...metricAttrFromUserAccount(
-					driftUser.userAccountPublicKey,
-					driftUser.getUserAccount()
-				),
-			});
-
-			if (this.simulateTxForCUEstimate && simResult.simError) {
-				handleSimResultError(
-					simResult,
-					errorCodesToSuppress,
-					`${this.name}: (executeTriggerableSpotNodesForMarket)`
-				);
-				logger.error(
-					`executeTriggerableSpotNodesForMarket simError: (simError: ${JSON.stringify(
-						simResult.simError
-					)})`
-				);
-			} else {
-				if (!this.dryRun) {
-					if (this.hasEnoughSolToFill) {
-						// @ts-ignore;
-						simResult.tx.sign([this.driftClient.wallet.payer]);
-						const txSig = bs58.encode(simResult.tx.signatures[0]);
-
-						if (buildForBundle) {
-							await this.sendTxThroughJito(simResult.tx, 'triggerOrder', txSig);
-							this.removeTriggeringNodes(nodeToTrigger);
-						} else if (this.canSendOutsideJito()) {
-							this.driftClient
-								.sendTransaction(simResult.tx)
-								.then((txSig) => {
-									logger.info(
-										`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}, order: ${nodeToTrigger.node.order.orderId.toString()}`
-									);
-									logger.info(`Tx: ${txSig}`);
-								})
-								.catch((error) => {
-									nodeToTrigger.node.haveTrigger = false;
-
-									const errorCode = getErrorCode(error);
-									if (
-										errorCode &&
-										!errorCodesToSuppress.includes(errorCode) &&
-										!(error as Error).message.includes(
-											'Transaction was not confirmed'
-										)
-									) {
-										const user = this.driftClient.getUser(this.subaccount);
-										this.txSimErrorCounter?.add(1, {
-											errorCode: errorCode.toString(),
-											...metricAttrFromUserAccount(
-												user.userAccountPublicKey,
-												user.getUserAccount()
-											),
-										});
-										logger.error(
-											`Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} `
-										);
-										logger.error(error);
-										webhookMessage(
-											`[${
-												this.name
-											}]: Error(${errorCode}) triggering order for user(account: ${nodeToTrigger.node.userAccount.toString()}) order: ${nodeToTrigger.node.order.orderId.toString()} \n${
-												error.stack ? error.stack : error.message
-											} `
-										);
-									}
-								})
-								.finally(() => {
-									this.removeTriggeringNodes(nodeToTrigger);
-								});
-						}
-					} else {
-						logger.info(`Not enough SOL to fill, not triggering node`);
-					}
-				} else {
-					logger.info(`dry run, not triggering node`);
-				}
-			}
-		}
-
-		const user = this.driftClient.getUser(this.subaccount);
-		this.attemptedTriggersCounter?.add(
-			serializedNodesToTrigger.length,
-			metricAttrFromUserAccount(
-				user.userAccountPublicKey,
-				user.getUserAccount()
-			)
-		);
 	}
 
 	public async fillNodes(serializedNodesToFill: SerializedNodeToFill[]) {
@@ -1432,10 +1173,6 @@ export class SpotFillerMultithreaded {
 
 	private clearThrottledNode(nodeSignature: string) {
 		this.throttledNodes.delete(nodeSignature);
-	}
-
-	private removeTriggeringNodes(node: SerializedNodeToTrigger) {
-		this.triggeringNodes.delete(getNodeToTriggerSignature(node));
 	}
 
 	protected initializeMetrics(metricsPort?: number) {
