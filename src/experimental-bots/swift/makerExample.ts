@@ -16,7 +16,7 @@ import { RuntimeSpec } from 'src/metrics';
 import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
-import { simulateAndGetTxWithCUs } from '../../utils';
+import { getWallet, simulateAndGetTxWithCUs } from '../../utils';
 import {
 	ComputeBudgetProgram,
 	Keypair,
@@ -40,7 +40,8 @@ export class SwiftMaker {
 		this.signedMsgUrl =
 			runtimeSpec.driftEnv === 'mainnet-beta'
 				? 'wss://swift.drift.trade/ws'
-				: 'wss://master.swift.drift.trade/ws';
+				: 'http://0.0.0.0:3000/ws';
+		// : 'wss://master.swift.drift.trade/ws';
 
 		const perpMarketsToWatchForFees = [0, 1, 2, 3, 4, 5].map((x) => {
 			return { marketType: 'perp', marketIndex: x };
@@ -59,11 +60,19 @@ export class SwiftMaker {
 
 	async subscribeWs() {
 		/**
-			In the future, this will be used for verifying $DRIFT stake as we add
-			authentication for delegate signers
-			For now, pass a new keypair or a keypair to an empty wallet
+			Make sure that WS_DELEGATE_KEY referrs to a keypair for an empty wallet, and that it has been added to 
+			ws_delegates for an authority. see here:
+			https://github.com/drift-labs/protocol-v2/blob/master/sdk/src/driftClient.ts#L1160-L1194
 		*/
-		const keypair = new Keypair();
+		const keypair = process.env.WS_DELEGATE_KEY
+			? getWallet(process.env.WS_DELEGATE_KEY)[0]
+			: new Keypair();
+		const stakePrivateKey = process.env.STAKE_PRIVATE_KEY;
+		let stakeKeypair: Keypair | undefined;
+		if (stakePrivateKey) {
+			stakeKeypair = getWallet(stakePrivateKey)[0];
+		}
+
 		const ws = new WebSocket(
 			this.signedMsgUrl + '?pubkey=' + keypair.publicKey.toBase58()
 		);
@@ -80,10 +89,12 @@ export class SwiftMaker {
 					const messageBytes = decodeUTF8(message['nonce']);
 					const signature = nacl.sign.detached(messageBytes, keypair.secretKey);
 					const signatureBase64 = Buffer.from(signature).toString('base64');
+					console.log(stakeKeypair?.publicKey.toBase58());
 					ws.send(
 						JSON.stringify({
 							pubkey: keypair.publicKey.toBase58(),
 							signature: signatureBase64,
+							stake_pubkey: stakeKeypair?.publicKey.toBase58(),
 						})
 					);
 				}

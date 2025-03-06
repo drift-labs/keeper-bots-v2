@@ -8,7 +8,6 @@ import {
 	DriftClient,
 	DriftEnv,
 	FeeTier,
-	getOrderSignature,
 	getUserStatsAccountPublicKey,
 	getUserWithoutOrderFilter,
 	isFillableByVAMM,
@@ -19,7 +18,6 @@ import {
 	MakerInfo,
 	MarketType,
 	NodeToFill,
-	NodeToTrigger,
 	PerpMarkets,
 	PriorityFeeSubscriberMap,
 	QUOTE_PRECISION,
@@ -50,9 +48,7 @@ import { getErrorCode } from '../../error';
 import { selectMakers } from '../../makerSelection';
 import {
 	NodeToFillWithBuffer,
-	SerializedNodeToTrigger,
 	SerializedNodeToFill,
-	NodeToTriggerWithMakers,
 } from '../filler-common/types';
 import { assert } from 'console';
 import {
@@ -64,7 +60,6 @@ import {
 	// getStaleOracleMarketIndexes,
 	handleSimResultError,
 	logMessageForNodeToFill,
-	removePythIxs,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
 	sleepMs,
@@ -77,7 +72,6 @@ import {
 	deserializeNodeToFill,
 	getPriorityFeeInstruction,
 	isTsRuntime,
-	deserializeNodeToTriggerWithMakers,
 } from '../filler-common/utils';
 import {
 	CounterValue,
@@ -119,7 +113,6 @@ export type MakerNodeMap = Map<string, DLOBNode[]>;
 
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again
 const THROTTLED_NODE_SIZE_TO_PRUNE = 10; // Size of throttled nodes to get to before pruning the map
-const TRIGGER_ORDER_COOLDOWN_MS = 1000; // the time to wait before trying to a node in the triggering map again
 export const MAX_MAKERS_PER_FILL = 6; // max number of unique makers to include per fill
 const MAX_ACCOUNTS_PER_TX = 64; // solana limit, track https://github.com/solana-labs/solana/issues/27241
 
@@ -141,9 +134,6 @@ const errorCodesToSuppress = [
 	6239, // 0x185F Error Number: 6239. Error Message: RevertFill.
 	6003, // 0x1773 Error Number: 6003. Error Message: Insufficient collateral.
 	6023, // 0x1787 Error Number: 6023. Error Message: PriceBandsBreached.
-
-	6111, // Error Message: OrderNotTriggerable.
-	6112, // Error Message: OrderDidNotSatisfyTriggerCondition.
 ];
 
 enum METRIC_TYPES {
@@ -160,10 +150,6 @@ enum METRIC_TYPES {
 	simulate_tx_duration_histogram = 'simulate_tx_duration_histogram',
 	expired_nodes_set_size = 'expired_nodes_set_size',
 }
-
-const getNodeToTriggerSignature = (node: SerializedNodeToTrigger): string => {
-	return getOrderSignature(node.node.order.orderId, node.node.userAccount);
-};
 
 type DLOBBuilderWithProcess = {
 	process: ChildProcess;
@@ -186,12 +172,10 @@ export class FillerMultithreaded {
 	private referrerMap: ReferrerMap;
 	private throttledNodes = new Map<string, number>();
 	private fillingNodes = new Map<string, number>();
-	private triggeringNodes = new Map<string, number>();
 	private revertOnFailure?: boolean;
 	private lookupTableAccounts: AddressLookupTableAccount[];
 	private lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 	private seenFillableOrders = new Set<string>();
-	private seenTriggerableOrders = new Set<string>();
 	private blockhashSubscriber: BlockhashSubscriber;
 	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
 
@@ -234,7 +218,6 @@ export class FillerMultithreaded {
 	protected simulateTxHistogram?: HistogramValue;
 	protected lastTryFillTimeGauge?: GaugeValue;
 	protected sentTxsCounter?: CounterValue;
-	protected attemptedTriggersCounter?: CounterValue;
 	protected landedTxsCounter?: CounterValue;
 	protected txSimErrorCounter?: CounterValue;
 	protected pendingTxSigsToConfirmGauge?: GaugeValue;
@@ -509,20 +492,6 @@ export class FillerMultithreaded {
 									);
 								}
 							}
-							break;
-						case 'triggerableNodes':
-							if (this.dryRun) {
-								logger.info(`Triggerable node received`);
-							} else {
-								this.triggerNodes(msg.data);
-							}
-							this.lastTryFillTimeGauge?.setLatestValue(
-								Date.now(),
-								metricAttrFromUserAccount(
-									user.getUserAccountPublicKey(),
-									user.getUserAccount()
-								)
-							);
 							break;
 						case 'fillableNodes':
 							if (this.dryRun) {
@@ -1109,7 +1078,7 @@ export class FillerMultithreaded {
 	}
 
 	private async getPythIxsFromNode(
-		node: NodeToFillWithBuffer | NodeToTrigger | SerializedNodeToTrigger,
+		node: NodeToFillWithBuffer,
 		precedingIxs: TransactionInstruction[] = [],
 		isSignedMsg = false
 	): Promise<TransactionInstruction[]> {
@@ -1247,14 +1216,6 @@ export class FillerMultithreaded {
 		this.throttledNodes.set(signature, Date.now());
 	}
 
-	protected removeTriggeringNodes(node: NodeToTriggerWithMakers) {
-		const nodeSignature = getOrderSignature(
-			node.node.order.orderId,
-			node.node.userAccount
-		);
-		this.triggeringNodes.delete(nodeSignature);
-	}
-
 	protected pruneThrottledNode() {
 		if (this.throttledNodes.size > THROTTLED_NODE_SIZE_TO_PRUNE) {
 			for (const [key, value] of this.throttledNodes.entries()) {
@@ -1327,67 +1288,6 @@ export class FillerMultithreaded {
 		return true;
 	}
 
-	public async triggerNodes(
-		serializedNodesToTrigger: SerializedNodeToTrigger[]
-	) {
-		if (!this.hasEnoughSolToFill) {
-			logger.info(
-				`Not enough SOL to fill, skipping executeTriggerablePerpNodes`
-			);
-			return;
-		}
-
-		logger.debug(
-			`${logPrefix} Triggering ${serializedNodesToTrigger.length} nodes...`
-		);
-		const seenTriggerableNodes = new Set<string>();
-		const filteredTriggerableNodes = serializedNodesToTrigger.filter((node) => {
-			const sig = getNodeToTriggerSignature(node);
-			if (seenTriggerableNodes.has(sig)) {
-				return false;
-			}
-			seenTriggerableNodes.add(sig);
-			if (this.filterTriggerableNodes(node, sig)) {
-				this.triggeringNodes.set(sig, Date.now());
-				return true;
-			}
-			return false;
-		});
-		logger.debug(
-			`${logPrefix} Filtered down to ${filteredTriggerableNodes.length} triggerable nodes...`
-		);
-
-		try {
-			await this.executeTriggerablePerpNodes(filteredTriggerableNodes);
-		} catch (e) {
-			if (e instanceof Error) {
-				logger.error(
-					`${logPrefix} Error triggering nodes: ${
-						e.stack ? e.stack : e.message
-					}`
-				);
-			}
-		}
-	}
-
-	protected filterTriggerableNodes(
-		nodeToTrigger: SerializedNodeToTrigger,
-		signature: string
-	): boolean {
-		if (nodeToTrigger.node.haveTrigger) {
-			return false;
-		}
-
-		const now = Date.now();
-		const timeStartedToTriggerNode = this.triggeringNodes.get(signature);
-		if (timeStartedToTriggerNode) {
-			if (timeStartedToTriggerNode + TRIGGER_ORDER_COOLDOWN_MS > now) {
-				return false;
-			}
-		}
-		return true;
-	}
-
 	protected async getUserAccountAndSlotFromMap(
 		key: string
 	): Promise<DataAndSlot<UserAccount>> {
@@ -1399,236 +1299,6 @@ export class FillerMultithreaded {
 			data: user.data.getUserAccount(),
 			slot: user.slot,
 		};
-	}
-
-	protected async executeTriggerablePerpNodes(
-		nodesToTrigger: SerializedNodeToTrigger[]
-	) {
-		const triggerableNodes = nodesToTrigger.map((node) =>
-			deserializeNodeToTriggerWithMakers(node)
-		);
-		const buildForBundle = this.shouldBuildForBundle();
-		const subaccountUser = this.driftClient.getUser(this.subaccount);
-
-		for (const nodeToTrigger of triggerableNodes) {
-			nodeToTrigger.node.haveTrigger = true;
-
-			const nodeSignature = getOrderSignature(
-				nodeToTrigger.node.order.orderId,
-				nodeToTrigger.node.userAccount
-			);
-			if (this.seenTriggerableOrders.has(nodeSignature)) {
-				logger.info(`Skipping order ${nodeSignature} - already seen`);
-				continue;
-			}
-
-			const user = await this.getUserAccountAndSlotFromMap(
-				nodeToTrigger.node.userAccount.toString()
-			);
-			logger.info(
-				`multithreaded: Processing node: account=${nodeToTrigger.node.userAccount.toString()}, slot=${
-					user.slot
-				}, orderId=${nodeToTrigger.node.order.orderId.toString()}, numMakers=${
-					nodeToTrigger.makers?.length ?? 0
-				}`
-			);
-
-			let ixs = [
-				ComputeBudgetProgram.setComputeUnitLimit({
-					units: 1_400_000,
-				}),
-			];
-
-			const priorityFeePrice = Math.floor(
-				Math.max(
-					...nodesToTrigger.map((node: SerializedNodeToTrigger) => {
-						return this.priorityFeeSubscriber.getPriorityFees(
-							'perp',
-							node.node.order.marketIndex
-						)!.medium;
-					})
-				) * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-			);
-
-			if (buildForBundle) {
-				ixs.push(this.bundleSender!.getTipIx());
-			} else {
-				ixs.push(
-					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: priorityFeePrice,
-					})
-				);
-			}
-
-			let removeLastIxPostSim = this.revertOnFailure;
-			if (this.pythPriceSubscriber) {
-				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger, ixs);
-				ixs.push(...pythIxs);
-				removeLastIxPostSim = false;
-			}
-
-			this.seenTriggerableOrders.add(nodeSignature);
-			this.triggeringNodes.set(nodeSignature, Date.now());
-
-			ixs.push(
-				await this.driftClient.getTriggerOrderIx(
-					new PublicKey(nodeToTrigger.node.userAccount),
-					user.data,
-					nodeToTrigger.node.order
-				)
-			);
-
-			const makerInfos = await Promise.all(
-				nodeToTrigger.makers.map(async (maker) => {
-					const { data } = await this.getUserAccountAndSlotFromMap(
-						maker.toString()
-					);
-					const makerUserAccount = data;
-					const makerAuthority = makerUserAccount.authority;
-					const makerStats = getUserStatsAccountPublicKey(
-						this.driftClient.program.programId,
-						makerAuthority
-					);
-					return {
-						maker,
-						makerStats,
-						makerUserAccount,
-					};
-				})
-			);
-
-			const takerUserAccount = await this.userMap.mustGet(
-				nodeToTrigger.node.userAccount.toString()
-			);
-
-			let referrerInfo: ReferrerInfo | undefined;
-			try {
-				referrerInfo = await this.referrerMap?.mustGet(
-					takerUserAccount.getUserAccount().authority.toString()
-				);
-			} catch (e) {
-				logger.warn(
-					`executeTriggerablePerpNodes: Failed to get referrer info: ${e}`
-				);
-				referrerInfo = undefined;
-			}
-
-			const fillIx = await this.driftClient.getFillPerpOrderIx(
-				new PublicKey(nodeToTrigger.node.userAccount),
-				user.data,
-				nodeToTrigger.node.order,
-				makerInfos,
-				referrerInfo,
-				this.subaccount
-			);
-			ixs.push(fillIx);
-
-			if (this.revertOnFailure) {
-				ixs.push(
-					await this.driftClient.getRevertFillIx(
-						subaccountUser.userAccountPublicKey
-					)
-				);
-			}
-
-			const txSize = getSizeOfTransaction(ixs, true, this.lookupTableAccounts);
-			if (txSize > PACKET_DATA_SIZE) {
-				logger.warn(
-					`Transaction too large (${txSize}), removing pyth instructions`
-				);
-				ixs = removePythIxs(ixs);
-			}
-
-			let simResult;
-			try {
-				simResult = await simulateAndGetTxWithCUs({
-					ixs,
-					connection: this.driftClient.connection,
-					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: this.lookupTableAccounts,
-					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-					doSimulation: this.simulateTxForCUEstimate,
-					recentBlockhash: await this.getBlockhashForTx(),
-					removeLastIxPostSim,
-				});
-			} catch (error) {
-				logger.error(`Error simulating tx: ${error}`);
-				return;
-			}
-
-			this.simulateTxHistogram?.record(simResult.simTxDuration, {
-				type: 'trigger',
-				simError: simResult.simError !== null,
-				...metricAttrFromUserAccount(
-					subaccountUser.userAccountPublicKey,
-					subaccountUser.getUserAccount()
-				),
-			});
-			this.estTxCuHistogram?.record(simResult.cuEstimate, {
-				type: 'trigger',
-				simError: simResult.simError !== null,
-				...metricAttrFromUserAccount(
-					subaccountUser.userAccountPublicKey,
-					subaccountUser.getUserAccount()
-				),
-			});
-
-			logger.info(
-				`Simulation complete - CUs: ${simResult.cuEstimate}, ixCount: ${ixs.length}, revertTx: ${this.revertOnFailure}, buildForBundle: ${buildForBundle}`
-			);
-
-			if (simResult.simError) {
-				logger.error(
-					`Simulation error: ${JSON.stringify(simResult.simError)}, ${
-						simResult.simTxLogs
-					}`
-				);
-			} else {
-				if (this.hasEnoughSolToFill) {
-					if (buildForBundle) {
-						this.sendTxThroughJito(simResult.tx, 'triggerOrder');
-					} else {
-						const blockhash = await this.getBlockhashForTx();
-						simResult.tx.message.recentBlockhash = blockhash;
-						this.driftClient
-							.sendTransaction(simResult.tx)
-							.then((txSig) => {
-								logger.info(
-									`Triggered successfully - user: ${nodeToTrigger.node.userAccount.toString()}, order: ${nodeToTrigger.node.order.orderId.toString()}, tx: ${
-										txSig.txSig
-									}`
-								);
-							})
-							.catch((error) => {
-								nodeToTrigger.node.haveTrigger = false;
-
-								const errorCode = getErrorCode(error);
-								if (
-									errorCode &&
-									!errorCodesToSuppress.includes(errorCode) &&
-									!(error as Error).message.includes(
-										'Transaction was not confirmed'
-									)
-								) {
-									logger.error(error);
-								}
-							})
-							.finally(() => {
-								this.removeTriggeringNodes(nodeToTrigger);
-							});
-					}
-				} else {
-					logger.info(`Insufficient SOL balance to fill`);
-				}
-			}
-		}
-		this.attemptedTriggersCounter?.add(
-			nodesToTrigger.length,
-			metricAttrFromUserAccount(
-				subaccountUser.userAccountPublicKey,
-				subaccountUser.getUserAccount()
-			)
-		);
 	}
 
 	public async fillNodes(serializedNodesToFill: SerializedNodeToFill[]) {
