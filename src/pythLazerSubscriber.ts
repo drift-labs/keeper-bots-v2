@@ -1,5 +1,6 @@
 import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
 import { DriftEnv, PerpMarkets } from '@drift-labs/sdk';
+import { RedisClient } from '@drift/common/clients';
 import * as axios from 'axios';
 
 export class PythLazerSubscriber {
@@ -21,6 +22,7 @@ export class PythLazerSubscriber {
 		private token: string,
 		private priceFeedIdsArrays: number[][],
 		env: DriftEnv = 'devnet',
+		private redisClient?: RedisClient,
 		private httpEndpoints: string[] = [],
 		private resubTimeoutMs: number = 2000
 	) {
@@ -136,6 +138,14 @@ export class PythLazerSubscriber {
 
 	async getLatestPriceMessage(feedIds: number[]): Promise<string | undefined> {
 		if (this.useHttpRequests) {
+			if (feedIds.length === 1 && this.redisClient) {
+				const priceMessage = (await this.redisClient.get(
+					`pythLazerData:${feedIds[0]}`
+				)) as { data: string; ts: number } | undefined;
+				if (priceMessage?.data && Date.now() - priceMessage.ts < 5000) {
+					return priceMessage.data;
+				}
+			}
 			for (const url of this.httpEndpoints) {
 				const priceMessage = await this.fetchLatestPriceMessage(url, feedIds);
 				if (priceMessage) {

@@ -617,7 +617,7 @@ const runBot = async () => {
 				marketIndexes: config.botConfigs?.jitMaker?.marketIndexes,
 				keypair: new Keypair(),
 				driftClient,
-				userMap,
+				userAccountGetter: userMap,
 			});
 		}
 
