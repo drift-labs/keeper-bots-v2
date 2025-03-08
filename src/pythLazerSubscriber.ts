@@ -138,6 +138,14 @@ export class PythLazerSubscriber {
 
 	async getLatestPriceMessage(feedIds: number[]): Promise<string | undefined> {
 		if (this.useHttpRequests) {
+			if (feedIds.length === 1 && this.redisClient) {
+				const priceMessage = (await this.redisClient.get(
+					`pythLazerData:${feedIds[0]}`
+				)) as { data: string; ts: number } | undefined;
+				if (priceMessage?.data && Date.now() - priceMessage.ts < 5000) {
+					return priceMessage.data;
+				}
+			}
 			for (const url of this.httpEndpoints) {
 				const priceMessage = await this.fetchLatestPriceMessage(url, feedIds);
 				if (priceMessage) {
@@ -154,15 +162,6 @@ export class PythLazerSubscriber {
 		feedIds: number[]
 	): Promise<string | undefined> {
 		try {
-			if (feedIds.length === 1 && this.redisClient) {
-				const priceMessage = (await this.redisClient.get(
-					`pythLazerData:${feedIds[0]}`
-				)) as { data: string; ts: number } | undefined;
-				if (priceMessage && Date.now() - priceMessage.ts < 5000) {
-					return priceMessage.data;
-				}
-			}
-
 			const result = await axios.default.post(
 				url,
 				{
