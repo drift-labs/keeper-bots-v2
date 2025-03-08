@@ -6,8 +6,8 @@
 	"license": "Apache-2.0",
 	"dependencies": {
 		"@drift/common": "file:./drift-common/common-ts",
-		"@drift-labs/jit-proxy": "0.13.70",
-		"@drift-labs/sdk": "2.114.0-beta.2",
+		"@drift-labs/jit-proxy": "0.13.71",
+		"@drift-labs/sdk": "2.114.0-beta.3",
 		"@opentelemetry/api": "1.7.0",
 		"@opentelemetry/auto-instrumentations-node": "0.31.2",
 		"@opentelemetry/exporter-prometheus": "0.31.0",
