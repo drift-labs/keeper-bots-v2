@@ -2,6 +2,7 @@
 	"compilerOptions": {
 		"types": [
 			"mocha",
+			"node",
 		],
 		"module": "commonjs",
 		"target": "es2019",
@@ -17,7 +18,10 @@
 			"src"
 		],
 		"outDir": "./lib",
-		"strict": true
+		"strict": true,
+		"paths": {
+			"@drift/common/clients": ["./drift-common/common-ts/lib/clients"],
+		}
 	},
 	"include": [
 		"src/**/*"

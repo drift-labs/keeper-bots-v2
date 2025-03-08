@@ -107,6 +107,7 @@ import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 import { PythLazerSubscriber } from '../../pythLazerSubscriber';
 import path from 'path';
+import { RedisClient, RedisClientPrefix } from '@drift/common/clients';
 
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -401,6 +402,9 @@ export class FillerMultithreaded {
 				this.globalConfig.lazerToken,
 				pythLazerIdsChunks,
 				this.globalConfig.driftEnv,
+				new RedisClient({
+					prefix: RedisClientPrefix.DLOB,
+				}),
 				this.globalConfig.lazerHttpEndpoints
 			);
 		} else {

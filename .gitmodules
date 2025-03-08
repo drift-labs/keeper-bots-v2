@@ -1,0 +1,3 @@
+[submodule "drift-common"]
+	path = drift-common
+	url = https://github.com/drift-labs/drift-common.git
