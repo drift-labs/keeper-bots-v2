@@ -6,7 +6,18 @@ COPY package.json yarn.lock ./
 WORKDIR /app
 
 COPY . .
+
+WORKDIR /app/drift-common/protocol/sdk
 RUN yarn install
+RUN yarn run build
+
+WORKDIR /app/drift-common/common-ts
+RUN yarn install
+RUN yarn run build
+
+WORKDIR /app
+RUN yarn install
+
 RUN node esbuild.config.js
 
 FROM public.ecr.aws/docker/library/node:20.18.1-alpine
