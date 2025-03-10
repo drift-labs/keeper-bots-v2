@@ -27,6 +27,9 @@ import {
 	OraclePriceData,
 	OrderStatus,
 	getVariant,
+	PRICE_PRECISION,
+	convertToNumber,
+	BASE_PRECISION,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -217,11 +220,18 @@ class DLOBBuilder {
 				signedMsgOrderParams.direction
 			)}, marketIndex: ${
 				signedMsgOrderParams.marketIndex
-			}, baseAssetAmount: ${signedMsgOrderParams.baseAssetAmount.toNumber()}, auctionDuration: ${
+			}, baseAssetAmount: ${convertToNumber(
+				signedMsgOrderParams.baseAssetAmount,
+				BASE_PRECISION
+			)}, auctionDuration: ${
 				signedMsgOrderParams.auctionDuration
-			}, auctionStartPrice: ${signedMsgOrderParams.auctionStartPrice.toNumber()}, auctionEndPrice: ${signedMsgOrderParams.auctionEndPrice.toNumber()}, price: ${signedMsgOrderParams.price?.toNumber()}, maxTs: ${
-				signedMsgOrderParams.maxTs
-			}`
+			}, auctionStartPrice: ${convertToNumber(
+				signedMsgOrderParams.auctionStartPrice,
+				PRICE_PRECISION
+			)}, auctionEndPrice: ${convertToNumber(
+				signedMsgOrderParams.auctionEndPrice,
+				PRICE_PRECISION
+			)}, maxTs: ${signedMsgOrderParams.maxTs}`
 		);
 
 		this.signedMsgUserAuthorities.set(
