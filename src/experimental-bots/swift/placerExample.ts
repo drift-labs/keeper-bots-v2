@@ -1,0 +1,247 @@
+import {
+	DriftClient,
+	DriftEnv,
+	getUserAccountPublicKey,
+	getUserStatsAccountPublicKey,
+	PerpMarkets,
+	PriorityFeeSubscriberMap,
+	PublicKey,
+	SignedMsgOrderParamsMessage,
+	UserMap,
+} from '@drift-labs/sdk';
+import { RuntimeSpec } from 'src/metrics';
+import WebSocket from 'ws';
+import nacl from 'tweetnacl';
+import { decodeUTF8 } from 'tweetnacl-util';
+import { getWallet, simulateAndGetTxWithCUs, sleepMs } from '../../utils';
+import {
+	ComputeBudgetProgram,
+	Keypair,
+	TransactionInstruction,
+} from '@solana/web3.js';
+import { getPriorityFeeInstruction } from '../filler-common/utils';
+
+export class SwiftPlacer {
+	interval: NodeJS.Timeout | null = null;
+	private ws: WebSocket | null = null;
+	private signedMsgUrl: string;
+	private heartbeatTimeout: NodeJS.Timeout | null = null;
+	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
+	private readonly heartbeatIntervalMs = 80_000;
+	constructor(
+		private driftClient: DriftClient,
+		private userMap: UserMap,
+		private runtimeSpec: RuntimeSpec
+	) {
+		this.signedMsgUrl =
+			runtimeSpec.driftEnv === 'mainnet-beta'
+				? 'wss://swift.drift.trade/ws'
+				: 'http://0.0.0.0:3000/ws';
+		// : 'wss://master.swift.drift.trade/ws';
+
+		const perpMarketsToWatchForFees = [0, 1, 2, 3, 4, 5].map((x) => {
+			return { marketType: 'perp', marketIndex: x };
+		});
+
+		this.priorityFeeSubscriber = new PriorityFeeSubscriberMap({
+			driftMarkets: perpMarketsToWatchForFees,
+			driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
+		});
+	}
+
+	async init() {
+		await this.subscribeWs();
+		await this.priorityFeeSubscriber.subscribe();
+	}
+
+	async subscribeWs() {
+		/**
+      Make sure that WS_DELEGATE_KEY referrs to a keypair for an empty wallet, and that it has been added to 
+      ws_delegates for an authority. see here:
+      https://github.com/drift-labs/protocol-v2/blob/master/sdk/src/driftClient.ts#L1160-L1194
+    */
+		const keypair = process.env.WS_DELEGATE_KEY
+			? getWallet(process.env.WS_DELEGATE_KEY)[0]
+			: new Keypair();
+		const stakePrivateKey = process.env.STAKE_PRIVATE_KEY;
+		let stakeKeypair: Keypair | undefined;
+		if (stakePrivateKey) {
+			stakeKeypair = getWallet(stakePrivateKey)[0];
+		}
+
+		const ws = new WebSocket(
+			this.signedMsgUrl + '?pubkey=' + keypair.publicKey.toBase58()
+		);
+
+		ws.on('open', async () => {
+			console.log('Connected to the server');
+			this.startHeartbeatTimer();
+
+			ws.on('message', async (data: WebSocket.Data) => {
+				const message = JSON.parse(data.toString());
+				this.startHeartbeatTimer();
+
+				if (message['channel'] === 'auth' && message['nonce'] != null) {
+					const messageBytes = decodeUTF8(message['nonce']);
+					const signature = nacl.sign.detached(messageBytes, keypair.secretKey);
+					const signatureBase64 = Buffer.from(signature).toString('base64');
+					console.log(stakeKeypair?.publicKey.toBase58());
+					ws.send(
+						JSON.stringify({
+							pubkey: keypair.publicKey.toBase58(),
+							signature: signatureBase64,
+							stake_pubkey: stakeKeypair?.publicKey.toBase58(),
+						})
+					);
+				}
+
+				if (
+					message['channel'] === 'auth' &&
+					message['message'] === 'Authenticated'
+				) {
+					for (const perpMarket of PerpMarkets[
+						this.runtimeSpec.driftEnv as DriftEnv
+					])
+						ws.send(
+							JSON.stringify({
+								action: 'subscribe',
+								market_type: 'perp',
+								market_name: perpMarket.symbol,
+							})
+						);
+					await sleepMs(50);
+				}
+
+				if (message['order'] && this.driftClient.isSubscribed) {
+					const order = message['order'];
+					console.info(`uuid: ${order['uuid']} at ${Date.now()}`);
+
+					const signedMsgOrderParamsBufHex = Buffer.from(
+						order['order_message']
+					);
+					const signedMsgOrderParamsBuf = Buffer.from(
+						order['order_message'],
+						'hex'
+					);
+					const {
+						signedMsgOrderParams,
+						subAccountId: takerSubaccountId,
+					}: SignedMsgOrderParamsMessage =
+						this.driftClient.decodeSignedMsgOrderParamsMessage(
+							signedMsgOrderParamsBuf
+						);
+
+					const signingAuthority = new PublicKey(order['signing_authority']);
+					const takerAuthority = new PublicKey(order['taker_authority']);
+					const takerUserPubkey = await getUserAccountPublicKey(
+						this.driftClient.program.programId,
+						takerAuthority,
+						takerSubaccountId
+					);
+					const takerUserAccount = (
+						await this.userMap.mustGet(takerUserPubkey.toString())
+					).getUserAccount();
+
+					if (!signedMsgOrderParams.price) {
+						console.error(
+							`order has no price: ${JSON.stringify(signedMsgOrderParams)}`
+						);
+						return;
+					}
+					const computeBudgetIxs: Array<TransactionInstruction> = [
+						ComputeBudgetProgram.setComputeUnitLimit({
+							units: 1_400_000,
+						}),
+					];
+					computeBudgetIxs.push(
+						getPriorityFeeInstruction(
+							this.priorityFeeSubscriber.getPriorityFees(
+								'perp',
+								signedMsgOrderParams.marketIndex
+							)?.medium ?? 0
+						)
+					);
+
+					const ixs = await this.driftClient.getPlaceSignedMsgTakerPerpOrderIxs(
+						{
+							orderParams: signedMsgOrderParamsBufHex,
+							signature: Buffer.from(order['order_signature'], 'base64'),
+						},
+						signedMsgOrderParams.marketIndex,
+						{
+							taker: takerUserPubkey,
+							takerUserAccount,
+							takerStats: getUserStatsAccountPublicKey(
+								this.driftClient.program.programId,
+								takerUserAccount.authority
+							),
+							signingAuthority,
+						},
+						computeBudgetIxs
+					);
+
+					const resp = await simulateAndGetTxWithCUs({
+						connection: this.driftClient.connection,
+						payerPublicKey: this.driftClient.wallet.payer!.publicKey,
+						ixs: [...computeBudgetIxs, ...ixs],
+						cuLimitMultiplier: 1.5,
+						lookupTableAccounts:
+							await this.driftClient.fetchAllLookupTableAccounts(),
+						doSimulation: true,
+					});
+					if (resp.simError) {
+						console.log(resp.simTxLogs);
+						return;
+					}
+
+					this.driftClient.txSender
+						.sendVersionedTransaction(resp.tx)
+						.then((response) => {
+							console.log(response);
+						})
+						.catch((error) => {
+							console.log(error);
+						});
+				}
+			});
+
+			ws.on('close', () => {
+				console.log('Disconnected from the server');
+				this.reconnect();
+			});
+
+			ws.on('error', (error: Error) => {
+				console.error('WebSocket error:', error);
+				this.reconnect();
+			});
+		});
+
+		this.ws = ws;
+	}
+
+	public async healthCheck() {
+		return true;
+	}
+
+	private startHeartbeatTimer() {
+		if (this.heartbeatTimeout) {
+			clearTimeout(this.heartbeatTimeout);
+		}
+		this.heartbeatTimeout = setTimeout(() => {
+			console.warn('No heartbeat received within 60 seconds, reconnecting...');
+			this.reconnect();
+		}, this.heartbeatIntervalMs);
+	}
+
+	private reconnect() {
+		if (this.ws) {
+			this.ws.removeAllListeners();
+			this.ws.terminate();
+		}
+
+		console.log('Reconnecting to WebSocket...');
+		setTimeout(() => {
+			this.subscribeWs();
+		}, 1000);
+	}
+}
