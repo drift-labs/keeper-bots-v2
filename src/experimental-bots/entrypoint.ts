@@ -40,6 +40,7 @@ import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { SwiftMaker } from './swift/makerExample';
 import { SwiftTaker } from './swift/takerExample';
 import * as net from 'net';
+import { SwiftPlacer } from './swift/placerExample';
 
 setGlobalDispatcher(
 	new Agent({
@@ -400,6 +401,28 @@ const runBot = async () => {
 			},
 			config.global.testLiveness
 		);
+		bots.push(signedMsgMaker);
+	}
+
+	if (configHasBot(config, 'swiftPlacer')) {
+		const userMap = new UserMap({
+			connection,
+			driftClient,
+			subscriptionConfig: {
+				type: 'websocket',
+				resubTimeoutMs: 30_000,
+			},
+			fastDecode: true,
+		});
+		await userMap.subscribe();
+
+		const signedMsgMaker = new SwiftPlacer(driftClient, userMap, {
+			rpcEndpoint: endpoint,
+			commit: '',
+			driftEnv: config.global.driftEnv!,
+			driftPid: driftPublicKey.toBase58(),
+			walletAuthority: wallet.publicKey.toBase58(),
+		});
 		bots.push(signedMsgMaker);
 	}
 

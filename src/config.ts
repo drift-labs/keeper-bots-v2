@@ -149,6 +149,7 @@ export type BotConfigMap = {
 	switchboardCranker?: SwitchboardCrankerBotConfig;
 	swiftTaker?: BaseBotConfig;
 	swiftMaker?: BaseBotConfig;
+	swiftPlacer?: BaseBotConfig;
 	jitMaker?: JitMakerConfig;
 };
 
