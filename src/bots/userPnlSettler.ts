@@ -392,6 +392,7 @@ export class UserPnlSettlerBot implements Bot {
 						perpMarketAndOracleData[perpMarketIdx].marketAccount.pnlPool;
 					let pnlToSettleWithUser = ZERO;
 					let pnlPoolTookenAmount = ZERO;
+					let settleUser = false;
 					if (userUnsettledPnl.gt(ZERO)) {
 						pnlPoolTookenAmount = getTokenAmount(
 							pnlPool.scaledBalance,
@@ -399,58 +400,77 @@ export class UserPnlSettlerBot implements Bot {
 							SpotBalanceType.DEPOSIT
 						);
 						pnlToSettleWithUser = BN.min(userUnsettledPnl, pnlPoolTookenAmount);
-					}
-
-					if (pnlToSettleWithUser.gt(ZERO)) {
-						const netUserPnl = calculateNetUserPnl(
-							perpMarketAndOracleData[perpMarketIdx].marketAccount,
-							perpMarketAndOracleData[perpMarketIdx].oraclePriceData
-						);
-						let maxPnlPoolExcess = ZERO;
-						if (netUserPnl.lt(pnlPoolTookenAmount)) {
-							maxPnlPoolExcess = pnlPoolTookenAmount.sub(
-								BN.max(netUserPnl, ZERO)
+						if (pnlToSettleWithUser.gt(ZERO)) {
+							const netUserPnl = calculateNetUserPnl(
+								perpMarketAndOracleData[perpMarketIdx].marketAccount,
+								perpMarketAndOracleData[perpMarketIdx].oraclePriceData
 							);
+							let maxPnlPoolExcess = ZERO;
+							if (netUserPnl.lt(pnlPoolTookenAmount)) {
+								maxPnlPoolExcess = pnlPoolTookenAmount.sub(
+									BN.max(netUserPnl, ZERO)
+								);
+							}
+
+							// we're only allowed to settle positive pnl if pnl pool is in excess
+							if (maxPnlPoolExcess.lte(ZERO)) {
+								logger.warn(
+									`Want to settle positive PnL for user ${user
+										.getUserAccountPublicKey()
+										.toBase58()} in market ${perpMarketIdx}, but maxPnlPoolExcess is: (${convertToNumber(
+										maxPnlPoolExcess,
+										QUOTE_PRECISION
+									)})`
+								);
+								continue;
+							}
+
+							const netUserPnlImbalance = calculateNetUserPnlImbalance(
+								perpMarketAndOracleData[perpMarketIdx].marketAccount,
+								spotMarketAndOracleData[spotMarketIdx].marketAccount,
+								perpMarketAndOracleData[perpMarketIdx].oraclePriceData
+							);
+							if (netUserPnlImbalance.gt(ZERO)) {
+								logger.warn(
+									`Want to settle positive PnL for user ${user
+										.getUserAccountPublicKey()
+										.toBase58()} in market ${perpMarketIdx}, protocol's AMM lacks excess PnL (${convertToNumber(
+										netUserPnlImbalance,
+										QUOTE_PRECISION
+									)})`
+								);
+								continue;
+							}
 						}
 
-						// we're only allowed to settle positive pnl if pnl pool is in excess
-						if (maxPnlPoolExcess.lte(ZERO)) {
+						// only settle user pnl if they have enough collateral
+						if (user.canBeLiquidated().canBeLiquidated) {
 							logger.warn(
-								`Want to settle positive PnL for user ${user
+								`Want to settle negative PnL for user ${user
 									.getUserAccountPublicKey()
-									.toBase58()} in market ${perpMarketIdx}, but maxPnlPoolExcess is: (${convertToNumber(
-									maxPnlPoolExcess,
-									QUOTE_PRECISION
-								)})`
+									.toBase58()}, but they have insufficient collateral`
 							);
 							continue;
 						}
-
-						const netUserPnlImbalance = calculateNetUserPnlImbalance(
-							perpMarketAndOracleData[perpMarketIdx].marketAccount,
-							spotMarketAndOracleData[spotMarketIdx].marketAccount,
-							perpMarketAndOracleData[perpMarketIdx].oraclePriceData
-						);
-						if (netUserPnlImbalance.gt(ZERO)) {
-							logger.warn(
-								`Want to settle positive PnL for user ${user
+						settleUser = true;
+					} else {
+						// only settle negative pnl if unsettled pnl is material
+						if (userUnsettledPnl.abs().gte(this.minPnlToSettle.abs())) {
+							logger.info(
+								`Settling negative pnl for user ${user
 									.getUserAccountPublicKey()
-									.toBase58()} in market ${perpMarketIdx}, protocol's AMM lacks excess PnL (${convertToNumber(
-									netUserPnlImbalance,
+									.toBase58()} in market ${
+									settleePosition.marketIndex
+								} with unsettled pnl: ${convertToNumber(
+									userUnsettledPnl,
 									QUOTE_PRECISION
-								)})`
+								)}`
 							);
-							continue;
+							settleUser = true;
 						}
 					}
 
-					// only settle user pnl if they have enough collateral
-					if (user.canBeLiquidated().canBeLiquidated) {
-						logger.warn(
-							`Want to settle negative PnL for user ${user
-								.getUserAccountPublicKey()
-								.toBase58()}, but they have insufficient collateral`
-						);
+					if (!settleUser) {
 						continue;
 					}
 
@@ -648,11 +668,7 @@ export class UserPnlSettlerBot implements Bot {
 					[],
 					this.driftClient.opts
 				);
-				logger.info(
-					`Settle PNL tx sent in ${Date.now() - sendTxStart}ms, response: ${
-						txSig.txSig
-					}`
-				);
+				const sendTxDuration = Date.now() - sendTxStart;
 				success = true;
 
 				this.logTxAndSlotForUsers(
@@ -660,7 +676,8 @@ export class UserPnlSettlerBot implements Bot {
 					marketIndex,
 					users.map(
 						({ settleeUserAccountPublicKey }) => settleeUserAccountPublicKey
-					)
+					),
+					sendTxDuration
 				);
 			}
 		} catch (err) {
@@ -698,13 +715,18 @@ export class UserPnlSettlerBot implements Bot {
 	private logTxAndSlotForUsers(
 		txSigAndSlot: TxSigAndSlot,
 		marketIndex: number,
-		userAccountPublicKeys: Array<PublicKey>
+		userAccountPublicKeys: Array<PublicKey>,
+		sendTxDuration: number
 	) {
 		const txSig = txSigAndSlot.txSig;
+		let userStr = '';
+		let countUsers = 0;
 		for (const userAccountPublicKey of userAccountPublicKeys) {
-			logger.info(
-				`Settled pnl user ${userAccountPublicKey.toBase58()} in market ${marketIndex} https://solana.fm/tx/${txSig}`
-			);
+			userStr += `${userAccountPublicKey.toBase58()}, `;
+			countUsers++;
 		}
+		logger.info(
+			`Settled pnl in market ${marketIndex}. For ${countUsers} users: ${userStr}. Took: ${sendTxDuration}ms. https://solana.fm/tx/${txSig}`
+		);
 	}
 }
