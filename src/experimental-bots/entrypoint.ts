@@ -416,13 +416,18 @@ const runBot = async () => {
 		});
 		await userMap.subscribe();
 
-		const signedMsgMaker = new SwiftPlacer(driftClient, userMap, {
-			rpcEndpoint: endpoint,
-			commit: '',
-			driftEnv: config.global.driftEnv!,
-			driftPid: driftPublicKey.toBase58(),
-			walletAuthority: wallet.publicKey.toBase58(),
-		});
+		const signedMsgMaker = new SwiftPlacer(
+			driftClient,
+			slotSubscriber,
+			userMap,
+			{
+				rpcEndpoint: endpoint,
+				commit: '',
+				driftEnv: config.global.driftEnv!,
+				driftPid: driftPublicKey.toBase58(),
+				walletAuthority: wallet.publicKey.toBase58(),
+			}
+		);
 		bots.push(signedMsgMaker);
 	}
 

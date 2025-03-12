@@ -1,13 +1,25 @@
 import {
+	BN,
 	DriftClient,
 	DriftEnv,
 	getUserAccountPublicKey,
 	getUserStatsAccountPublicKey,
+	isVariant,
+	MakerInfo,
+	MarketType,
+	Order,
+	OrderStatus,
+	OrderTriggerCondition,
 	PerpMarkets,
+	PositionDirection,
 	PriorityFeeSubscriberMap,
 	PublicKey,
+	ReferrerInfo,
+	ReferrerMap,
 	SignedMsgOrderParamsMessage,
+	SlotSubscriber,
 	UserMap,
+	ZERO,
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
 import WebSocket from 'ws';
@@ -20,6 +32,8 @@ import {
 	TransactionInstruction,
 } from '@solana/web3.js';
 import { getPriorityFeeInstruction } from '../filler-common/utils';
+import axios from 'axios';
+import { logger } from '../../logger';
 
 export class SwiftPlacer {
 	interval: NodeJS.Timeout | null = null;
@@ -27,17 +41,18 @@ export class SwiftPlacer {
 	private signedMsgUrl: string;
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
 	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
+	private referrerMap: ReferrerMap;
 	private readonly heartbeatIntervalMs = 80_000;
 	constructor(
 		private driftClient: DriftClient,
+		private slotSubscriber: SlotSubscriber,
 		private userMap: UserMap,
 		private runtimeSpec: RuntimeSpec
 	) {
 		this.signedMsgUrl =
 			runtimeSpec.driftEnv === 'mainnet-beta'
 				? 'wss://swift.drift.trade/ws'
-				: 'http://0.0.0.0:3000/ws';
-		// : 'wss://master.swift.drift.trade/ws';
+				: 'wss://master.swift.drift.trade/ws';
 
 		const perpMarketsToWatchForFees = [0, 1, 2, 3, 4, 5].map((x) => {
 			return { marketType: 'perp', marketIndex: x };
@@ -47,10 +62,14 @@ export class SwiftPlacer {
 			driftMarkets: perpMarketsToWatchForFees,
 			driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
 		});
+
+		this.referrerMap = new ReferrerMap(driftClient, true);
 	}
 
 	async init() {
 		await this.subscribeWs();
+		await this.slotSubscriber.subscribe();
+		await this.referrerMap.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
 	}
 
@@ -115,6 +134,7 @@ export class SwiftPlacer {
 				if (message['order'] && this.driftClient.isSubscribed) {
 					const order = message['order'];
 					console.info(`uuid: ${order['uuid']} at ${Date.now()}`);
+					console.time(`placing order-${order['uuid']}`);
 
 					const signedMsgOrderParamsBufHex = Buffer.from(
 						order['order_message']
@@ -125,11 +145,11 @@ export class SwiftPlacer {
 					);
 					const {
 						signedMsgOrderParams,
+						slot,
 						subAccountId: takerSubaccountId,
-					}: SignedMsgOrderParamsMessage =
-						this.driftClient.decodeSignedMsgOrderParamsMessage(
-							signedMsgOrderParamsBuf
-						);
+					}: SignedMsgOrderParamsMessage = this.driftClient.decodeSignedMsgOrderParamsMessage(
+						signedMsgOrderParamsBuf
+					);
 
 					const signingAuthority = new PublicKey(order['signing_authority']);
 					const takerAuthority = new PublicKey(order['taker_authority']);
@@ -138,9 +158,10 @@ export class SwiftPlacer {
 						takerAuthority,
 						takerSubaccountId
 					);
-					const takerUserAccount = (
-						await this.userMap.mustGet(takerUserPubkey.toString())
-					).getUserAccount();
+					const takerUser = await this.userMap.mustGet(
+						takerUserPubkey.toString()
+					);
+					const takerUserAccount = takerUser.getUserAccount();
 
 					if (!signedMsgOrderParams.price) {
 						console.error(
@@ -180,10 +201,91 @@ export class SwiftPlacer {
 						computeBudgetIxs
 					);
 
+					const isOrderLong = isVariant(signedMsgOrderParams.direction, 'long');
+					const result = await axios.get(
+						`https://dlob.drift.trade/topMakers?marketType=perp&marketIndex=${
+							signedMsgOrderParams.marketIndex
+						}&side=${isOrderLong ? 'ask' : 'bid'}&limit=2`
+					);
+					if (result.status !== 200) {
+						console.error('Failed to get top makers');
+						return;
+					}
+
+					const topMakers = result.data as string[];
+
+					const orderSlot = Math.min(
+						slot.toNumber(),
+						this.slotSubscriber.getSlot()
+					);
+					const signedMsgOrder: Order = {
+						status: OrderStatus.OPEN,
+						orderType: signedMsgOrderParams.orderType,
+						orderId: 0,
+						slot: new BN(orderSlot),
+						marketIndex: signedMsgOrderParams.marketIndex,
+						marketType: MarketType.PERP,
+						baseAssetAmount: signedMsgOrderParams.baseAssetAmount,
+						auctionDuration: signedMsgOrderParams.auctionDuration!,
+						auctionStartPrice: signedMsgOrderParams.auctionStartPrice!,
+						auctionEndPrice: signedMsgOrderParams.auctionEndPrice!,
+						immediateOrCancel: signedMsgOrderParams.immediateOrCancel ?? false,
+						direction: signedMsgOrderParams.direction,
+						postOnly: false,
+						oraclePriceOffset: signedMsgOrderParams.oraclePriceOffset ?? 0,
+						maxTs: signedMsgOrderParams.maxTs ?? ZERO,
+						reduceOnly: signedMsgOrderParams.reduceOnly ?? false,
+						triggerCondition:
+							signedMsgOrderParams.triggerCondition ??
+							OrderTriggerCondition.ABOVE,
+						price: signedMsgOrderParams.price ?? ZERO,
+						userOrderId: signedMsgOrderParams.userOrderId ?? 0,
+						// Rest are not necessary and set for type conforming
+						existingPositionDirection: PositionDirection.LONG,
+						triggerPrice: ZERO,
+						baseAssetAmountFilled: ZERO,
+						quoteAssetAmountFilled: ZERO,
+						quoteAssetAmount: ZERO,
+						bitFlags: 0,
+						postedSlotTail: 0,
+					};
+
+					const makerInfos: MakerInfo[] = [];
+					for (const makerKey of topMakers) {
+						const makerUser = await this.userMap.mustGet(makerKey);
+						makerInfos.push({
+							maker: new PublicKey(makerKey),
+							makerStats: getUserStatsAccountPublicKey(
+								this.driftClient.program.programId,
+								makerUser.getUserAccount().authority
+							),
+							makerUserAccount: makerUser.getUserAccount(),
+						});
+					}
+
+					let referrerInfo: ReferrerInfo | undefined;
+					try {
+						referrerInfo = await this.referrerMap?.mustGet(
+							takerUserAccount.authority.toString()
+						);
+					} catch (e) {
+						logger.warn(`getNodeFillInfo: Failed to get referrer info: ${e}`);
+					}
+
+					const fillIx = await this.driftClient.getFillPerpOrderIx(
+						takerUserPubkey,
+						takerUserAccount,
+						signedMsgOrder,
+						makerInfos,
+						referrerInfo,
+						undefined,
+						true
+					);
+
 					const resp = await simulateAndGetTxWithCUs({
 						connection: this.driftClient.connection,
 						payerPublicKey: this.driftClient.wallet.payer!.publicKey,
-						ixs: [...computeBudgetIxs, ...ixs],
+						ixs: [...computeBudgetIxs, ...ixs, fillIx],
 						cuLimitMultiplier: 1.5,
 						lookupTableAccounts:
 							await this.driftClient.fetchAllLookupTableAccounts(),
@@ -193,6 +295,7 @@ export class SwiftPlacer {
 						console.log(resp.simTxLogs);
 						return;
 					}
+					console.timeEnd(`placing order-${order['uuid']}`);
 
 					this.driftClient.txSender
 						.sendVersionedTransaction(resp.tx)
