@@ -10,6 +10,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
         with:
+          submodules: 'recursive'
           persist-credentials: false
 
       - name: Setup node
@@ -19,7 +20,16 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
-        run: yarn install
+        run: |
+          cd drift-common/protocol/sdk
+          yarn install
+          yarn build
+          cd ../../common-ts
+          yarn install
+          yarn build
+          cd ../../
+          yarn install
+          yarn build
 
       - name: Add specific version of sdk
         run: yarn add @drift-labs/sdk@${{ github.event.client_payload.sdk-version }}
