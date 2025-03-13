@@ -441,20 +441,20 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.13.71":
-  version "0.13.71"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.13.71.tgz#4a207f1ad3ead05d667f78ecc023ba624620a07a"
-  integrity sha512-I3zPc2UlYjdt2baCCNMiNCHGYOvyFVm84We1c/CR5auw+QUUua1hRv3nf9rp5VU3/aD+dtaLSi1nL1+hsMzZ7Q==
+"@drift-labs/jit-proxy@0.14.5":
+  version "0.14.5"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.14.5.tgz#91e7b8b9b59fb7f6c2854f2d64227b599277bea4"
+  integrity sha512-xeYmAlo0f3GylbiJFO9b49SIPtnxXZFwNwZ9JY0Ig/3e+4CN5doTs3ZYRMGXX4f3kym82mZu9ZXzfQriKwihng==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.114.0-beta.3"
+    "@drift-labs/sdk" "2.114.0-beta.7"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.114.0-beta.3":
-  version "2.114.0-beta.3"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.114.0-beta.3.tgz#67eff0434a65f9cb2a4a8bccbda5b87bcdf8ca83"
-  integrity sha512-5q3ix7VVYZx3WcfpMm5uvN54yPg1ahAVQBQMJzRbIrTHz10KQRQgJKDbxeBl20ZoiqsuGGKmkIZOLXqn92dYpg==
+"@drift-labs/sdk@2.114.0-beta.6":
+  version "2.114.0-beta.6"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.114.0-beta.6.tgz#ed66a37135dc5ef3c369c24254054aaad2a8fe99"
+  integrity sha512-/otw+0cmhvuvNG33vOU5aMoaBYF2n0Q7RByriaHX1sAGp0YGtielrUBKDy+mBx1GIwMZNWER3anAgcLRo/amLw==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -481,8 +481,38 @@
     yargs "17.7.2"
     zstddec "0.1.0"
 
+"@drift-labs/sdk@2.114.0-beta.7":
+  version "2.114.0-beta.7"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.114.0-beta.7.tgz#a2b51e02c0dff49562998069e1759a0d7717cdd8"
+  integrity sha512-RBXF9XoiqRqtnKr/k0ranO2R61ziHeRS7LDF0aeICe6grM4L2mCLv2ozbStoJnW56Oy34oPToakWpoq5xkpUxQ==
+  dependencies:
+    "@coral-xyz/anchor" "0.29.0"
+    "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
+    "@ellipsis-labs/phoenix-sdk" "1.4.5"
+    "@grpc/grpc-js" "1.12.6"
+    "@openbook-dex/openbook-v2" "0.2.10"
+    "@project-serum/serum" "0.13.65"
+    "@pythnetwork/client" "2.5.3"
+    "@pythnetwork/price-service-sdk" "1.7.1"
+    "@pythnetwork/pyth-solana-receiver" "0.7.0"
+    "@solana/spl-token" "0.3.7"
+    "@solana/web3.js" "1.92.3"
+    "@switchboard-xyz/on-demand" "2.2.0"
+    "@triton-one/yellowstone-grpc" "1.3.0"
+    anchor-bankrun "0.3.0"
+    nanoid "3.3.4"
+    node-cache "5.1.2"
+    rpc-websockets "7.5.1"
+    solana-bankrun "0.3.1"
+    strict-event-emitter-types "2.0.0"
+    tweetnacl "1.0.3"
+    tweetnacl-util "0.15.1"
+    uuid "8.3.2"
+    yargs "17.7.2"
+    zstddec "0.1.0"
+
 "@drift-labs/sdk@file:drift-common/protocol/sdk":
-  version "2.114.0-beta.2"
+  version "2.114.0-beta.3"
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -512,7 +542,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-067b258b-5118-43c0-b6ee-663238cfce50-1741881936741/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-840dba73-5c5c-42fc-9fd9-d5b0c83fee2e-1741901541342/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
@@ -2251,7 +2281,7 @@
     rpc-websockets "^9.0.0"
     superstruct "^1.0.4"
 
-"@solana/web3.js@^1.98.0":
+"@solana/web3.js@^1.95.8", "@solana/web3.js@^1.98.0":
   version "1.98.0"
   resolved "https://registry.yarnpkg.com/@solana/web3.js/-/web3.js-1.98.0.tgz#21ecfe8198c10831df6f0cfde7f68370d0405917"
   integrity sha512-nz3Q5OeyGFpFCR+erX2f6JPt3sKhzhYcSycBCSPkWjzSVDh/Rr1FqTVMRe58FKO16/ivTUcuJjeS5MyBvpkbzA==
@@ -2337,6 +2367,24 @@
     protobufjs "^7.2.6"
     yaml "^2.5.0"
 
+"@switchboard-xyz/common@^3":
+  version "3.0.6"
+  resolved "https://registry.yarnpkg.com/@switchboard-xyz/common/-/common-3.0.6.tgz#9702471002b5faccb1f4f2a50d193624ff6191c1"
+  integrity sha512-HbG1kVBVbJ8KFxdAMVSOeeL7hxL7eCrS4jXFoKDNoPzdDVQrNGbr7yuQe9SqW+jvUt43P5D0Xnv0i4YOBHaZLQ==
+  dependencies:
+    "@solana/web3.js" "^1.95.8"
+    axios "^1.7.8"
+    big.js "^6.2.2"
+    bn.js "^5.2.1"
+    bs58 "^6.0.0"
+    buffer "^6.0.3"
+    cron-validator "^1.3.1"
+    decimal.js "^10.4.3"
+    js-sha256 "^0.11.0"
+    lodash "^4.17.21"
+    protobufjs "^7.4.0"
+    yaml "^2.6.1"
+
 "@switchboard-xyz/on-demand@1.2.42":
   version "1.2.42"
   resolved "https://registry.yarnpkg.com/@switchboard-xyz/on-demand/-/on-demand-1.2.42.tgz#1ec8ae18381baa66e20341648a1cdbd3c30efc8f"
@@ -2352,6 +2400,19 @@
     bs58 "^5.0.0"
     js-yaml "^4.1.0"
     protobufjs "^7.2.6"
+
+"@switchboard-xyz/on-demand@2.2.0":
+  version "2.2.0"
+  resolved "https://registry.yarnpkg.com/@switchboard-xyz/on-demand/-/on-demand-2.2.0.tgz#543dd8cba68cdf02838da6c427f0c0709875154b"
+  integrity sha512-3WOyvJW9kSnu2qC3sFczcx0XhC170A3E1LaEQVdRcLjmeWkLtTbhnxP7hKSJA+Y83MNdAfyGH0F8Eix/NmaagA==
+  dependencies:
+    "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
+    "@isaacs/ttlcache" "^1.4.1"
+    "@switchboard-xyz/common" "^3"
+    axios "^1.8.1"
+    bs58 "^6.0.0"
+    buffer "^6.0.3"
+    js-yaml "^4.1.0"
 
 "@triton-one/yellowstone-grpc@1.3.0":
   version "1.3.0"
@@ -3259,6 +3320,15 @@ axios@^1.7.4:
     form-data "^4.0.0"
     proxy-from-env "^1.1.0"
 
+axios@^1.7.8, axios@^1.8.1:
+  version "1.8.3"
+  resolved "https://registry.yarnpkg.com/axios/-/axios-1.8.3.tgz#9ebccd71c98651d547162a018a1a95a4b4ed4de8"
+  integrity sha512-iP4DebzoNlP/YN2dpwCgb8zoCmhtkajzS48JvwmkSkXvPI3DHc7m+XYL5tGnSlJtR6nImXZmdCuN5aP8dh1d8A==
+  dependencies:
+    follow-redirects "^1.15.6"
+    form-data "^4.0.0"
+    proxy-from-env "^1.1.0"
+
 babel-plugin-istanbul@^6.1.1:
   version "6.1.1"
   resolved "https://registry.yarnpkg.com/babel-plugin-istanbul/-/babel-plugin-istanbul-6.1.1.tgz#fa88ec59232fd9b4e36dbbc540a8ec9a9b47da73"
@@ -3334,6 +3404,11 @@ big.js@^6.2.1:
   version "6.2.1"
   resolved "https://registry.yarnpkg.com/big.js/-/big.js-6.2.1.tgz#7205ce763efb17c2e41f26f121c420c6a7c2744f"
   integrity sha512-bCtHMwL9LeDIozFn+oNhhFoq+yQ3BNdnsLSASUxLciOb1vgvpHsIO1dsENiGMgbb4SkP5TrzWzRiLddn8ahVOQ==
+
+big.js@^6.2.2:
+  version "6.2.2"
+  resolved "https://registry.yarnpkg.com/big.js/-/big.js-6.2.2.tgz#be3bb9ac834558b53b099deef2a1d06ac6368e1a"
+  integrity sha512-y/ie+Faknx7sZA5MfGA2xKlu0GDv8RWrXGsmlteyJQ2lvoKv9GBK/fpRMc2qlSoBAgNxrixICFCBefIq8WCQpQ==
 
 bigint-buffer@^1.1.5:
   version "1.1.5"
@@ -5851,7 +5926,7 @@ protobufjs@^7.2.4:
     "@types/node" ">=13.7.0"
     long "^5.0.0"
 
-protobufjs@^7.2.5:
+protobufjs@^7.2.5, protobufjs@^7.4.0:
   version "7.4.0"
   resolved "https://registry.yarnpkg.com/protobufjs/-/protobufjs-7.4.0.tgz#7efe324ce9b3b61c82aae5de810d287bc08a248a"
   integrity sha512-mRUWCc3KUU4w1jU8sGxICXH/gNS94DvI1gxqDvBzhj1JpcsimQkYiOJfwsPUykUI5ZaspFbSgmBLER8IrQ3tqw==
@@ -6906,6 +6981,11 @@ yaml@^2.5.0:
   version "2.5.1"
   resolved "https://registry.yarnpkg.com/yaml/-/yaml-2.5.1.tgz#c9772aacf62cb7494a95b0c4f1fb065b563db130"
   integrity sha512-bLQOjaX/ADgQ20isPJRvF0iRUHIxVhYvr53Of7wGcWlO2jvtUlH5m87DsmulFVxRpNLOnI4tB6p/oh8D7kpn9Q==
+
+yaml@^2.6.1:
+  version "2.7.0"
+  resolved "https://registry.yarnpkg.com/yaml/-/yaml-2.7.0.tgz#aef9bb617a64c937a9a748803786ad8d3ffe1e98"
+  integrity sha512-+hSoy/QHluxmC9kCIJyL/uyFmLmc+e5CFR5Wa+bpIhIj85LVb9ZH2nVnqrHoSvKogwODv0ClqZkmiSSaIH5LTA==
 
 yargs-parser@20.2.4:
   version "20.2.4"
