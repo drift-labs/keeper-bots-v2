@@ -119,11 +119,24 @@ export class SwitchboardCrankerBot implements Bot {
 	async runCrankLoop() {
 		const pullFeedAliases = chunks(
 			shuffle(Object.keys(this.crankConfigs.pullFeedConfigs)),
-			2
+			3
 		);
 		for (const aliasChunk of pullFeedAliases) {
 			try {
+				console.log(aliasChunk);
+				const switchboardIxs =
+					await this.driftClient.getPostManySwitchboardOnDemandUpdatesAtomicIxs(
+						aliasChunk.map(
+							(alias) =>
+								new PublicKey(this.crankConfigs.pullFeedConfigs[alias].pubkey)
+						)
+					);
+				if (!switchboardIxs) {
+					logger.error(`No switchboardIxs for ${aliasChunk}`);
+					continue;
+				}
 				const ixs = [
+					...switchboardIxs,
 					ComputeBudgetProgram.setComputeUnitLimit({
 						units: MIN_CU_LIMIT,
 					}),
@@ -142,10 +155,10 @@ export class SwitchboardCrankerBot implements Bot {
 					);
 				}
 
-				const pullIxs = (
-					await Promise.all(aliasChunk.map((alias) => this.getPullIx(alias)))
-				).filter((ix) => ix !== undefined) as TransactionInstruction[];
-				ixs.push(...pullIxs);
+				// const pullIxs = (
+				// 	await Promise.all(aliasChunk.map((alias) => this.getPullIx(alias)))
+				// ).filter((ix) => ix !== undefined) as TransactionInstruction[];
+				// ixs.push(...pullIxs);
 
 				const tx = getVersionedTransaction(
 					this.driftClient.wallet.publicKey,
