@@ -126,7 +126,7 @@ export type SwitchboardCrankerBotConfig = BaseBotConfig & {
 			pubkey: string;
 		};
 	};
-	writableAccounts: string[];
+	writableAccounts?: string[];
 };
 
 export type BotConfigMap = {
