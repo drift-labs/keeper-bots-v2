@@ -4,6 +4,7 @@ import {
 	DriftEnv,
 	getUserAccountPublicKey,
 	getUserStatsAccountPublicKey,
+	getVariant,
 	isVariant,
 	MakerInfo,
 	MarketType,
@@ -75,10 +76,10 @@ export class SwiftPlacer {
 
 	async subscribeWs() {
 		/**
-      Make sure that WS_DELEGATE_KEY referrs to a keypair for an empty wallet, and that it has been added to 
-      ws_delegates for an authority. see here:
-      https://github.com/drift-labs/protocol-v2/blob/master/sdk/src/driftClient.ts#L1160-L1194
-    */
+	  Make sure that WS_DELEGATE_KEY referrs to a keypair for an empty wallet, and that it has been added to
+	  ws_delegates for an authority. see here:
+	  https://github.com/drift-labs/protocol-v2/blob/master/sdk/src/driftClient.ts#L1160-L1194
+	*/
 		const keypair = process.env.WS_DELEGATE_KEY
 			? getWallet(process.env.WS_DELEGATE_KEY)[0]
 			: new Keypair();
@@ -203,8 +204,7 @@ export class SwiftPlacer {
 
 					const isOrderLong = isVariant(signedMsgOrderParams.direction, 'long');
 					const result = await axios.get(
-						`https://dlob.drift.trade/topMakers?marketType=perp&marketIndex=${
-							signedMsgOrderParams.marketIndex
+						`https://dlob.drift.trade/topMakers?marketType=perp&marketIndex=${signedMsgOrderParams.marketIndex
 						}&side=${isOrderLong ? 'ask' : 'bid'}&limit=2`
 					);
 					if (result.status !== 200) {
@@ -299,8 +299,8 @@ export class SwiftPlacer {
 
 					this.driftClient.txSender
 						.sendVersionedTransaction(resp.tx)
-						.then((response) => {
-							console.log(response);
+						.then((r) => {
+							console.log(`Placed order. uuid: ${order['uuid']}, taker: ${takerUserPubkey.toBase58()}, marketType: ${getVariant(signedMsgOrder.marketType)}, marketIndex: ${signedMsgOrder.marketIndex}, tx: ${r.txSig}, slot: ${r.slot}`);
 						})
 						.catch((error) => {
 							console.log(error);
