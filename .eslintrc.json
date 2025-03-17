@@ -4,7 +4,7 @@
 	"env": {
 		"browser": true
 	},
-	"ignorePatterns": ["**/lib", "**/node_modules", "migrations", "**/scratch"],
+	"ignorePatterns": ["**/lib", "**/node_modules", "migrations", "**/scratch, **/drift-common"],
 	"plugins": [],
 	"extends": [
 		"eslint:recommended",
