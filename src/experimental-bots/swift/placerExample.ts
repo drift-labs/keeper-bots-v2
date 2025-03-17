@@ -204,7 +204,8 @@ export class SwiftPlacer {
 
 					const isOrderLong = isVariant(signedMsgOrderParams.direction, 'long');
 					const result = await axios.get(
-						`https://dlob.drift.trade/topMakers?marketType=perp&marketIndex=${signedMsgOrderParams.marketIndex
+						`https://dlob.drift.trade/topMakers?marketType=perp&marketIndex=${
+							signedMsgOrderParams.marketIndex
 						}&side=${isOrderLong ? 'ask' : 'bid'}&limit=2`
 					);
 					if (result.status !== 200) {
@@ -300,7 +301,15 @@ export class SwiftPlacer {
 					this.driftClient.txSender
 						.sendVersionedTransaction(resp.tx)
 						.then((r) => {
-							console.log(`Placed order. uuid: ${order['uuid']}, taker: ${takerUserPubkey.toBase58()}, marketType: ${getVariant(signedMsgOrder.marketType)}, marketIndex: ${signedMsgOrder.marketIndex}, tx: ${r.txSig}, slot: ${r.slot}`);
+							console.log(
+								`Placed order. uuid: ${
+									order['uuid']
+								}, taker: ${takerUserPubkey.toBase58()}, marketType: ${getVariant(
+									signedMsgOrder.marketType
+								)}, marketIndex: ${signedMsgOrder.marketIndex}, tx: ${
+									r.txSig
+								}, slot: ${r.slot}`
+							);
 						})
 						.catch((error) => {
 							console.log(error);
