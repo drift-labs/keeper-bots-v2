@@ -66,13 +66,18 @@ export class SwitchboardCrankerBot implements Bot {
 		);
 		await this.slothashSubscriber.subscribe();
 
+		const writableAccounts =
+			this.crankConfigs.writableAccounts &&
+			this.crankConfigs.writableAccounts.length > 0
+				? this.crankConfigs.writableAccounts.map((acc) => new PublicKey(acc))
+				: [];
 		this.priorityFeeSubscriber?.updateAddresses([
 			...Object.entries(this.crankConfigs.pullFeedConfigs).map(
 				([_alias, config]) => {
 					return new PublicKey(config.pubkey);
 				}
 			),
-			...this.crankConfigs.writableAccounts.map((acc) => new PublicKey(acc)),
+			...writableAccounts,
 		]);
 	}
 
