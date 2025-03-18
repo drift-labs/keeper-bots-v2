@@ -7,6 +7,7 @@ import {
 	digestSignature,
 	generateSignedMsgUuid,
 	BN,
+	OrderParams,
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
 import * as axios from 'axios';
@@ -53,20 +54,23 @@ export class SwiftTaker {
 			const highPrice = oracleInfo.price.muln(101).divn(100);
 			const lowPrice = oracleInfo.price;
 
+
+			const marketOrderParams = getMarketOrderParams({
+				marketIndex,
+				marketType: MarketType.PERP,
+				direction,
+				baseAssetAmount: this.driftClient
+					.getPerpMarketAccount(marketIndex)!
+					.amm.minOrderSize.muln(2),
+				auctionStartPrice: isVariant(direction, 'long')
+					? lowPrice
+					: highPrice,
+				auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
+				auctionDuration: 50,
+			});
+
 			const orderMessage = {
-				signedMsgOrderParams: getMarketOrderParams({
-					marketIndex,
-					marketType: MarketType.PERP,
-					direction,
-					baseAssetAmount: this.driftClient
-						.getPerpMarketAccount(marketIndex)!
-						.amm.minOrderSize.muln(2),
-					auctionStartPrice: isVariant(direction, 'long')
-						? lowPrice
-						: highPrice,
-					auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
-					auctionDuration: 50,
-				}),
+				signedMsgOrderParams: marketOrderParams as OrderParams,
 				subAccountId: this.driftClient.activeSubAccountId,
 				slot: new BN(slot),
 				uuid: generateSignedMsgUuid(),
@@ -74,7 +78,6 @@ export class SwiftTaker {
 				takeProfitOrderParams: null,
 			};
 			const { orderParams: message, signature } =
-				//@ts-ignore
 				this.driftClient.signSignedMsgOrderParamsMessage(orderMessage);
 
 			const hash = digestSignature(Uint8Array.from(signature));
