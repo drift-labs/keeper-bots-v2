@@ -74,6 +74,7 @@ export class SwiftTaker {
 				takeProfitOrderParams: null,
 			};
 			const { orderParams: message, signature } =
+				//@ts-ignore
 				this.driftClient.signSignedMsgOrderParamsMessage(orderMessage);
 
 			const hash = digestSignature(Uint8Array.from(signature));
