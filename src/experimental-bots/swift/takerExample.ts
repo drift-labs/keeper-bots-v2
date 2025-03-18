@@ -54,7 +54,6 @@ export class SwiftTaker {
 			const highPrice = oracleInfo.price.muln(101).divn(100);
 			const lowPrice = oracleInfo.price;
 
-
 			const marketOrderParams = getMarketOrderParams({
 				marketIndex,
 				marketType: MarketType.PERP,
@@ -62,9 +61,7 @@ export class SwiftTaker {
 				baseAssetAmount: this.driftClient
 					.getPerpMarketAccount(marketIndex)!
 					.amm.minOrderSize.muln(2),
-				auctionStartPrice: isVariant(direction, 'long')
-					? lowPrice
-					: highPrice,
+				auctionStartPrice: isVariant(direction, 'long') ? lowPrice : highPrice,
 				auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
 				auctionDuration: 50,
 			});
