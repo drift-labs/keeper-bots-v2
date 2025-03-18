@@ -26,7 +26,12 @@ import { RuntimeSpec } from 'src/metrics';
 import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
-import { getWallet, simulateAndGetTxWithCUs, sleepMs } from '../../utils';
+import {
+	getWallet,
+	simulateAndGetTxWithCUs,
+	SimulateAndGetTxWithCUsResponse,
+	sleepMs,
+} from '../../utils';
 import {
 	ComputeBudgetProgram,
 	Keypair,
@@ -283,15 +288,22 @@ export class SwiftPlacer {
 						true
 					);
 
-					const resp = await simulateAndGetTxWithCUs({
-						connection: this.driftClient.connection,
-						payerPublicKey: this.driftClient.wallet.payer!.publicKey,
-						ixs: [...computeBudgetIxs, ...ixs, fillIx],
-						cuLimitMultiplier: 1.5,
-						lookupTableAccounts:
-							await this.driftClient.fetchAllLookupTableAccounts(),
-						doSimulation: true,
-					});
+					let resp: SimulateAndGetTxWithCUsResponse | undefined;
+					try {
+						resp = await simulateAndGetTxWithCUs({
+							connection: this.driftClient.connection,
+							payerPublicKey: this.driftClient.wallet.payer!.publicKey,
+							ixs: [...computeBudgetIxs, ...ixs, fillIx],
+							cuLimitMultiplier: 1.5,
+							lookupTableAccounts:
+								await this.driftClient.fetchAllLookupTableAccounts(),
+							doSimulation: true,
+						});
+					} catch (e) {
+						console.error(e);
+						return;
+					}
+
 					if (resp.simError) {
 						console.log(resp.simTxLogs);
 						return;
