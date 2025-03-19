@@ -52,6 +52,9 @@ const SETTLE_USER_CHUNKS = 4;
 const SLEEP_MS = 500;
 const CU_EST_MULTIPLIER = 1.25;
 
+const FILTER_FOR_MARKET = undefined; // undefined;
+const EMPTY_USER_SETTLE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
 	6035, // Error Code: InvalidOracle. Error Number: 6035. Error Message: InvalidOracle.
@@ -154,10 +157,19 @@ export class UserPnlSettlerBot implements Bot {
 		logger.info(`${this.name} Bot started!`);
 		if (this.runOnce) {
 			await this.trySettlePnl();
+			await this.trySettleUsersWithNoPositions();
 		} else {
 			await this.trySettlePnl();
-			const intervalId = setInterval(this.trySettlePnl.bind(this), intervalMs);
-			this.intervalIds.push(intervalId);
+			await this.trySettleUsersWithNoPositions();
+			this.intervalIds.push(
+				setInterval(this.trySettlePnl.bind(this), intervalMs)
+			);
+			this.intervalIds.push(
+				setInterval(
+					this.trySettleUsersWithNoPositions.bind(this),
+					EMPTY_USER_SETTLE_INTERVAL_MS
+				)
+			);
 		}
 	}
 
@@ -495,6 +507,15 @@ export class UserPnlSettlerBot implements Bot {
 				const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex)!;
 				const marketStr = decodeName(perpMarket.name);
 
+				if (FILTER_FOR_MARKET !== undefined) {
+					if (marketIndex !== FILTER_FOR_MARKET) {
+						logger.info(
+							`Skipping market ${marketStr} because FILTER_FOR_MARKET is set to ${FILTER_FOR_MARKET}`
+						);
+						continue;
+					}
+				}
+
 				const settlePnlPaused = isOperationPaused(
 					perpMarket.pausedOperations,
 					PerpOperation.SETTLE_PNL
@@ -536,7 +557,7 @@ export class UserPnlSettlerBot implements Bot {
 				);
 			}
 		} catch (err) {
-			console.error(err);
+			console.error('Error in trySettlePnl', err);
 			if (!(err instanceof Error)) {
 				return;
 			}
@@ -571,6 +592,152 @@ export class UserPnlSettlerBot implements Bot {
 		}
 	}
 
+	private async trySettleUsersWithNoPositions() {
+		const start = Date.now();
+		try {
+			const usersToSettleMap: Map<
+				number,
+				{
+					settleeUserAccountPublicKey: PublicKey;
+					settleeUserAccount: UserAccount;
+					pnl: number;
+				}[]
+			> = new Map();
+			const nowTs = Date.now() / 1000;
+
+			for (const user of this.userMap!.values()) {
+				const perpPositions = user.getActivePerpPositions();
+				for (const perpPosition of perpPositions) {
+					// this loop only processes empty positions
+					if (!perpPosition.baseAssetAmount.eq(ZERO)) {
+						continue;
+					}
+
+					const perpMarket = this.driftClient.getPerpMarketAccount(
+						perpPosition.marketIndex
+					)!;
+					const settlePnlPaused = isOperationPaused(
+						perpMarket.pausedOperations,
+						PerpOperation.SETTLE_PNL
+					);
+					if (settlePnlPaused) {
+						logger.warn(
+							`Settle PNL paused for market ${perpPosition.marketIndex}, skipping settle PNL`
+						);
+						continue;
+					}
+
+					const pnl = convertToNumber(
+						perpPosition.quoteAssetAmount,
+						QUOTE_PRECISION
+					);
+					logger.info(
+						`[trySettleUsersWithNoPositions] User ${user
+							.getUserAccountPublicKey()
+							.toBase58()} has empty perp position in market ${
+							perpPosition.marketIndex
+						} with unsettled pnl: ${pnl}`
+					);
+
+					const userData = {
+						settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
+						settleeUserAccount: user.getUserAccount(),
+						pnl,
+					};
+
+					if (usersToSettleMap.has(perpPosition.marketIndex)) {
+						const existingData = usersToSettleMap.get(
+							perpPosition.marketIndex
+						)!;
+						existingData.push(userData);
+					} else {
+						usersToSettleMap.set(perpPosition.marketIndex, [userData]);
+					}
+				}
+			}
+
+			if (usersToSettleMap.size === 0) {
+				logger.info('[trySettleUsersWithNoPositions] No users to settle');
+				return;
+			}
+
+			for (const [marketIndex, params] of usersToSettleMap) {
+				const perpMarket = this.driftClient.getPerpMarketAccount(marketIndex)!;
+				const marketStr = decodeName(perpMarket.name);
+
+				if (
+					FILTER_FOR_MARKET !== undefined &&
+					marketIndex !== FILTER_FOR_MARKET
+				) {
+					logger.info(
+						`[trySettleUsersWithNoPositions] Skipping market ${marketStr} because FILTER_FOR_MARKET is set to ${FILTER_FOR_MARKET}`
+					);
+					continue;
+				}
+
+				logger.info(
+					`[trySettleUsersWithNoPositions] Trying to settle PNL for ${params.length} users with no positions on market ${marketStr}`
+				);
+
+				const sortedParams = params
+					.sort((a, b) => a.pnl - b.pnl)
+					.slice(0, this.maxUsersToConsider);
+
+				logger.info(
+					`[trySettleUsersWithNoPositions] Settling ${
+						sortedParams.length
+					} users in ${
+						sortedParams.length / SETTLE_USER_CHUNKS
+					} chunks for market ${marketIndex}`
+				);
+
+				const allTxPromises = [];
+				for (let i = 0; i < sortedParams.length; i += SETTLE_USER_CHUNKS) {
+					const usersChunk = sortedParams.slice(i, i + SETTLE_USER_CHUNKS);
+					allTxPromises.push(this.trySendTxForChunk(marketIndex, usersChunk));
+				}
+
+				logger.info(
+					`[trySettleUsersWithNoPositions] Waiting for ${allTxPromises.length} txs to settle...`
+				);
+				const settleStart = Date.now();
+				await Promise.all(allTxPromises);
+				logger.info(
+					`[trySettleUsersWithNoPositions] Settled ${
+						sortedParams.length
+					} users in market ${marketIndex} in ${Date.now() - settleStart}ms`
+				);
+			}
+		} catch (err) {
+			console.error('Error in trySettleUsersWithNoPositions', err);
+			if (!(err instanceof Error)) {
+				return;
+			}
+			if (
+				!err.message.includes('Transaction was not confirmed') &&
+				!err.message.includes('Blockhash not found')
+			) {
+				const errorCode = getErrorCode(err);
+				if (errorCodesToSuppress.includes(errorCode!)) {
+					console.log(`Suppressing error code: ${errorCode}`);
+				} else {
+					const simError = err as SendTransactionError;
+					if (simError) {
+						await webhookMessage(
+							`[${
+								this.name
+							}]: :x: Uncaught error: Error code: ${errorCode} while settling pnls:\n${
+								simError.logs!
+									? (simError.logs as Array<string>).join('\n')
+									: ''
+							}\n${err.stack ? err.stack : err.message}`
+						);
+					}
+				}
+			}
+		}
+	}
+
 	async trySendTxForChunk(
 		marketIndex: number,
 		users: {
@@ -588,7 +755,7 @@ export class UserPnlSettlerBot implements Bot {
 			const slice0 = users.slice(0, slice);
 			const slice1 = users.slice(slice);
 			logger.info(
-				`Chunk failed: ${users
+				`[trySendTxForChunk] Chunk failed: ${users
 					.map((u) => u.settleeUserAccountPublicKey.toBase58())
 					.join(' ')}, retrying with:\nslice0: ${slice0
 					.map((u) => u.settleeUserAccountPublicKey.toBase58())
@@ -651,7 +818,7 @@ export class UserPnlSettlerBot implements Bot {
 				recentBlockhash: recentBlockhash.blockhash,
 			});
 			logger.info(
-				`Settle Pnl estimated ${simResult.cuEstimate} CUs for ${ixs.length} ixs, ${users.length} users.`
+				`[sendTxForChunk] Settle Pnl estimated ${simResult.cuEstimate} CUs for ${ixs.length} ixs, ${users.length} users.`
 			);
 			if (simResult.simError !== null) {
 				logger.error(
