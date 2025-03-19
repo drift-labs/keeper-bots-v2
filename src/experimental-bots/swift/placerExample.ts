@@ -27,6 +27,7 @@ import WebSocket from 'ws';
 import nacl from 'tweetnacl';
 import { decodeUTF8 } from 'tweetnacl-util';
 import {
+	getSizeOfTransaction,
 	getWallet,
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
@@ -35,6 +36,7 @@ import {
 import {
 	ComputeBudgetProgram,
 	Keypair,
+	PACKET_DATA_SIZE,
 	TransactionInstruction,
 } from '@solana/web3.js';
 import { getPriorityFeeInstruction } from '../filler-common/utils';
@@ -278,7 +280,7 @@ export class SwiftPlacer {
 						logger.warn(`getNodeFillInfo: Failed to get referrer info: ${e}`);
 					}
 
-					const fillIx = await this.driftClient.getFillPerpOrderIx(
+					let fillIx = await this.driftClient.getFillPerpOrderIx(
 						takerUserPubkey,
 						takerUserAccount,
 						signedMsgOrder,
@@ -287,6 +289,33 @@ export class SwiftPlacer {
 						undefined,
 						true
 					);
+
+					let txSize = getSizeOfTransaction(
+						[...computeBudgetIxs, ...ixs, fillIx],
+						true,
+						await this.driftClient.fetchAllLookupTableAccounts()
+					);
+					while (txSize > PACKET_DATA_SIZE) {
+						if (makerInfos.length === 0) {
+							console.log('No more makers to try');
+							break;
+						}
+						makerInfos.pop();
+						fillIx = await this.driftClient.getFillPerpOrderIx(
+							takerUserPubkey,
+							takerUserAccount,
+							signedMsgOrder,
+							makerInfos,
+							referrerInfo,
+							undefined,
+							true
+						);
+						txSize = getSizeOfTransaction(
+							[...computeBudgetIxs, ...ixs, fillIx],
+							true,
+							await this.driftClient.fetchAllLookupTableAccounts()
+						);
+					}
 
 					let resp: SimulateAndGetTxWithCUsResponse | undefined;
 					try {
