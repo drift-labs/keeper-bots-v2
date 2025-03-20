@@ -9,6 +9,7 @@ import {
 	PostOnlyParams,
 	PriorityFeeSubscriberMap,
 	PublicKey,
+	SignedMsgOrderParamsDelegateMessage,
 	SignedMsgOrderParamsMessage,
 	UserMap,
 } from '@drift-labs/sdk';
@@ -157,21 +158,28 @@ export class SwiftMaker {
 						order['order_message'],
 						'hex'
 					);
-					const {
-						signedMsgOrderParams,
-						subAccountId: takerSubaccountId,
-					}: SignedMsgOrderParamsMessage =
+
+					const isDelegateSigner =
+						order['signing_authority'] != order['taker_authority'];
+					const signedMessage:
+						| SignedMsgOrderParamsMessage
+						| SignedMsgOrderParamsDelegateMessage =
 						this.driftClient.decodeSignedMsgOrderParamsMessage(
-							signedMsgOrderParamsBuf
+							signedMsgOrderParamsBuf,
+							isDelegateSigner
 						);
+
+					const signedMsgOrderParams = signedMessage.signedMsgOrderParams;
 
 					const signingAuthority = new PublicKey(order['signing_authority']);
 					const takerAuthority = new PublicKey(order['taker_authority']);
-					const takerUserPubkey = await getUserAccountPublicKey(
-						this.driftClient.program.programId,
-						takerAuthority,
-						takerSubaccountId
-					);
+					const takerUserPubkey = isDelegateSigner
+						? (signedMessage as SignedMsgOrderParamsDelegateMessage).takerPubkey
+						: await getUserAccountPublicKey(
+								this.driftClient.program.programId,
+								takerAuthority,
+								(signedMessage as SignedMsgOrderParamsMessage).subAccountId
+						  );
 					const takerUserAccount = (
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();

@@ -17,6 +17,7 @@ import {
 	PublicKey,
 	ReferrerInfo,
 	ReferrerMap,
+	SignedMsgOrderParamsDelegateMessage,
 	SignedMsgOrderParamsMessage,
 	SlotSubscriber,
 	UserMap,
@@ -151,21 +152,27 @@ export class SwiftPlacer {
 						order['order_message'],
 						'hex'
 					);
-					const {
-						signedMsgOrderParams,
-						slot,
-						subAccountId: takerSubaccountId,
-					}: SignedMsgOrderParamsMessage = this.driftClient.decodeSignedMsgOrderParamsMessage(
-						signedMsgOrderParamsBuf
-					);
+					const isDelegateSigner =
+						order['signing_authority'] != order['taker_authority'];
+					const signedMessage:
+						| SignedMsgOrderParamsMessage
+						| SignedMsgOrderParamsDelegateMessage =
+						this.driftClient.decodeSignedMsgOrderParamsMessage(
+							signedMsgOrderParamsBuf,
+							isDelegateSigner
+						);
+
+					const signedMsgOrderParams = signedMessage.signedMsgOrderParams;
 
 					const signingAuthority = new PublicKey(order['signing_authority']);
 					const takerAuthority = new PublicKey(order['taker_authority']);
-					const takerUserPubkey = await getUserAccountPublicKey(
-						this.driftClient.program.programId,
-						takerAuthority,
-						takerSubaccountId
-					);
+					const takerUserPubkey = isDelegateSigner
+						? (signedMessage as SignedMsgOrderParamsDelegateMessage).takerPubkey
+						: await getUserAccountPublicKey(
+								this.driftClient.program.programId,
+								takerAuthority,
+								(signedMessage as SignedMsgOrderParamsMessage).subAccountId
+						  );
 					const takerUser = await this.userMap.mustGet(
 						takerUserPubkey.toString()
 					);
@@ -223,7 +230,7 @@ export class SwiftPlacer {
 					const topMakers = result.data as string[];
 
 					const orderSlot = Math.min(
-						slot.toNumber(),
+						signedMessage.slot.toNumber(),
 						this.slotSubscriber.getSlot()
 					);
 					const signedMsgOrder: Order = {
