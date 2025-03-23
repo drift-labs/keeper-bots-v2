@@ -40,8 +40,7 @@ export class SwiftMaker {
 		this.signedMsgUrl =
 			runtimeSpec.driftEnv === 'mainnet-beta'
 				? 'wss://swift.drift.trade/ws'
-				: 'http://0.0.0.0:3000/ws';
-		// : 'wss://master.swift.drift.trade/ws';
+				: 'wss://master.swift.drift.trade/ws';
 
 		const perpMarketsToWatchForFees = [0, 1, 2, 3, 4, 5].map((x) => {
 			return { marketType: 'perp', marketIndex: x };
