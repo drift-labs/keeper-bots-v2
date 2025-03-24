@@ -594,7 +594,6 @@ export class UserPnlSettlerBot implements Bot {
 	}
 
 	private async trySettleUsersWithNoPositions() {
-		const start = Date.now();
 		try {
 			const usersToSettleMap: Map<
 				number,
@@ -604,8 +603,6 @@ export class UserPnlSettlerBot implements Bot {
 					pnl: number;
 				}[]
 			> = new Map();
-			const nowTs = Date.now() / 1000;
-
 			for (const user of this.userMap!.values()) {
 				const perpPositions = user.getActivePerpPositions();
 				for (const perpPosition of perpPositions) {
