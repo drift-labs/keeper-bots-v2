@@ -441,20 +441,20 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.14.19":
-  version "0.14.19"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.14.19.tgz#c1d36ac2529366a0ad0c43ab770c808d518ea5e1"
-  integrity sha512-xCPdPZarkYupJ7wFhVOca43oHmSXijk9Ssn0f+khvsjJ/qBdXUYdjGxkPnzlgz4qYQ7lSWR3Ea8kD327OUGIFg==
+"@drift-labs/jit-proxy@0.15.4":
+  version "0.15.4"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.15.4.tgz#7c3481d866fc8345bd1b71c0b564544843c30396"
+  integrity sha512-sUFHzS67+XEFgRuXazdFIeQya5sc8p6lYNA7eEn67GuUzqWVUkwVjHwehqhCydhsRJf3cuUqyaojjcxcVxMLcg==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.115.0-beta.13"
+    "@drift-labs/sdk" "2.117.0-beta.1"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.115.0-beta.13":
-  version "2.115.0-beta.13"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.115.0-beta.13.tgz#d5d0341d933bd69321c258de50334ed41a40aff1"
-  integrity sha512-lzQbQhA7SuYqU8AXGpc7/eL3s2xcvhRlHLTCtzMe/0/FYUI3zFkPxBpmXurJ60AaCBixpUeNn3BhrcTeI+8o8Q==
+"@drift-labs/sdk@2.117.0-beta.1":
+  version "2.117.0-beta.1"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.117.0-beta.1.tgz#5ee846ec6bb39224af457ef6c17bc6821256a82b"
+  integrity sha512-DwNp+hMdfFsZQP4wIoxIVpVJmwmBJGXs3Hp9vB/hNU3N/V+0m8yepNcKWUCqNKCn3Hj62CoSbeLGfmlwymxqAg==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -467,7 +467,7 @@
     "@pythnetwork/pyth-solana-receiver" "0.7.0"
     "@solana/spl-token" "0.3.7"
     "@solana/web3.js" "1.92.3"
-    "@switchboard-xyz/on-demand" "2.3.2"
+    "@switchboard-xyz/on-demand" "2.4.0"
     "@triton-one/yellowstone-grpc" "1.3.0"
     anchor-bankrun "0.3.0"
     nanoid "3.3.4"
@@ -512,7 +512,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-e8183409-72c9-486c-a7ce-4dae25ffb453-1742400550578/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-b3c0a68b-9100-4bf1-a331-a2c0c094c3c9-1742842900938/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
@@ -2251,7 +2251,7 @@
     rpc-websockets "^9.0.0"
     superstruct "^1.0.4"
 
-"@solana/web3.js@^1.95.8", "@solana/web3.js@^1.98.0":
+"@solana/web3.js@^1.98.0":
   version "1.98.0"
   resolved "https://registry.yarnpkg.com/@solana/web3.js/-/web3.js-1.98.0.tgz#21ecfe8198c10831df6f0cfde7f68370d0405917"
   integrity sha512-nz3Q5OeyGFpFCR+erX2f6JPt3sKhzhYcSycBCSPkWjzSVDh/Rr1FqTVMRe58FKO16/ivTUcuJjeS5MyBvpkbzA==
@@ -2320,6 +2320,22 @@
   dependencies:
     tslib "^2.8.0"
 
+"@switchboard-xyz/common@>=3.0.0":
+  version "3.0.11"
+  resolved "https://registry.yarnpkg.com/@switchboard-xyz/common/-/common-3.0.11.tgz#4b2b0397033f240233234f604282219f80a5ad73"
+  integrity sha512-rRaBjJAvkR1gTGbkoykHLySSr7kjS7UgDpJBOni+0DkFqyh+SwkcxT1RmjhReAMqxZ5qvO88WNGMdF6IKsGXcA==
+  dependencies:
+    "@solana/web3.js" "^1.98.0"
+    axios "^1.8.3"
+    big.js "^6.2.2"
+    bn.js "^5.2.1"
+    bs58 "^6.0.0"
+    buffer "^6.0.3"
+    decimal.js "^10.4.3"
+    js-sha256 "^0.11.0"
+    protobufjs "^7.4.0"
+    yaml "^2.6.1"
+
 "@switchboard-xyz/common@^2.5.0":
   version "2.5.0"
   resolved "https://registry.yarnpkg.com/@switchboard-xyz/common/-/common-2.5.0.tgz#15f60abd0c2503d855caf6f120ed98f8f0dd9d25"
@@ -2337,24 +2353,6 @@
     protobufjs "^7.2.6"
     yaml "^2.5.0"
 
-"@switchboard-xyz/common@^3":
-  version "3.0.6"
-  resolved "https://registry.yarnpkg.com/@switchboard-xyz/common/-/common-3.0.6.tgz#9702471002b5faccb1f4f2a50d193624ff6191c1"
-  integrity sha512-HbG1kVBVbJ8KFxdAMVSOeeL7hxL7eCrS4jXFoKDNoPzdDVQrNGbr7yuQe9SqW+jvUt43P5D0Xnv0i4YOBHaZLQ==
-  dependencies:
-    "@solana/web3.js" "^1.95.8"
-    axios "^1.7.8"
-    big.js "^6.2.2"
-    bn.js "^5.2.1"
-    bs58 "^6.0.0"
-    buffer "^6.0.3"
-    cron-validator "^1.3.1"
-    decimal.js "^10.4.3"
-    js-sha256 "^0.11.0"
-    lodash "^4.17.21"
-    protobufjs "^7.4.0"
-    yaml "^2.6.1"
-
 "@switchboard-xyz/on-demand@1.2.42":
   version "1.2.42"
   resolved "https://registry.yarnpkg.com/@switchboard-xyz/on-demand/-/on-demand-1.2.42.tgz#1ec8ae18381baa66e20341648a1cdbd3c30efc8f"
@@ -2371,15 +2369,15 @@
     js-yaml "^4.1.0"
     protobufjs "^7.2.6"
 
-"@switchboard-xyz/on-demand@2.3.2":
-  version "2.3.2"
-  resolved "https://registry.yarnpkg.com/@switchboard-xyz/on-demand/-/on-demand-2.3.2.tgz#78dca1eced8b8cda0863c605447700d96f927ca6"
-  integrity sha512-oFkkjIsJGfY64rEFtJpk4oqEK/ELlVRRy/WrpdgDW3HWXLMZSP13rjuG/0BkJMqI5xXDDEwI/AMgpXhH0XEJTQ==
+"@switchboard-xyz/on-demand@2.4.0":
+  version "2.4.0"
+  resolved "https://registry.yarnpkg.com/@switchboard-xyz/on-demand/-/on-demand-2.4.0.tgz#adb5beaa113fcf3729ffa40bc30f7369900817c2"
+  integrity sha512-TtBw4CceI44NIWLJzHKTRdSqgIHr34UxUxRhp0r0P7Y1peIXgeJpmzx2Na18dH2XjcsTRcN/5U9Kdfm5bdf0+A==
   dependencies:
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
     "@isaacs/ttlcache" "^1.4.1"
-    "@switchboard-xyz/common" "^3"
-    axios "^1.8.1"
+    "@switchboard-xyz/common" ">=3.0.0"
+    axios "^1.8.3"
     bs58 "^6.0.0"
     buffer "^6.0.3"
     js-yaml "^4.1.0"
@@ -3290,10 +3288,10 @@ axios@^1.7.4:
     form-data "^4.0.0"
     proxy-from-env "^1.1.0"
 
-axios@^1.7.8, axios@^1.8.1:
-  version "1.8.3"
-  resolved "https://registry.yarnpkg.com/axios/-/axios-1.8.3.tgz#9ebccd71c98651d547162a018a1a95a4b4ed4de8"
-  integrity sha512-iP4DebzoNlP/YN2dpwCgb8zoCmhtkajzS48JvwmkSkXvPI3DHc7m+XYL5tGnSlJtR6nImXZmdCuN5aP8dh1d8A==
+axios@^1.8.3:
+  version "1.8.4"
+  resolved "https://registry.yarnpkg.com/axios/-/axios-1.8.4.tgz#78990bb4bc63d2cae072952d374835950a82f447"
+  integrity sha512-eBSYY4Y68NNlHbHBMdeDmKNtDgXWhQsJcGqzO3iLUM0GraQFSS9cVgPX5I9b3lbdFKyYoAEGAZF1DwhTaljNAw==
   dependencies:
     follow-redirects "^1.15.6"
     form-data "^4.0.0"
