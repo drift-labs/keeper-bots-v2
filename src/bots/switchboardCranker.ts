@@ -25,7 +25,7 @@ setGlobalDispatcher(
 );
 
 // ref: https://solscan.io/tx/Z5X334CFBmzbzxXHgfa49UVbMdLZf7nJdDCekjaZYinpykVqgTm47VZphazocMjYe1XJtEyeiL6QgrmvLeMesMA
-const MIN_CU_LIMIT = 700_000;
+const MIN_CU_LIMIT = 50_000;
 
 export class SwitchboardCrankerBot implements Bot {
 	public name: string;
