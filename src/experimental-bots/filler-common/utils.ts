@@ -303,28 +303,24 @@ export const deserializeDLOBNode = (node: SerializedDLOBNode): DLOBNode => {
 				order,
 				node.userAccount,
 				node.isUserProtectedMaker,
-				false
 			);
 		case 'RestingLimitOrderNode':
 			return new RestingLimitOrderNode(
 				order,
 				node.userAccount,
 				node.isUserProtectedMaker,
-				false
 			);
 		case 'FloatingLimitOrderNode':
 			return new FloatingLimitOrderNode(
 				order,
 				node.userAccount,
 				node.isUserProtectedMaker,
-				false
 			);
 		case 'MarketOrderNode':
 			return new MarketOrderNode(
 				order,
 				node.userAccount,
 				node.isUserProtectedMaker,
-				false
 			);
 		case 'SignedMsgOrderNode':
 			return new SignedMsgOrderNode(order, node.userAccount);
