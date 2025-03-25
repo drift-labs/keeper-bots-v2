@@ -60,6 +60,7 @@ const errorCodesToSuppress = [
 	6035, // Error Code: InvalidOracle. Error Number: 6035. Error Message: InvalidOracle.
 	6078, // Error Code: PerpMarketNotFound. Error Number: 6078. Error Message: PerpMarketNotFound.
 	6095, // Error Code: InsufficientCollateralForSettlingPNL. Error Number: 6095. Error Message: InsufficientCollateralForSettlingPNL.
+	6259, // Error Code: NoUnsettledPnl. Error Number: 6259. Error Message: NoUnsettledPnl.
 ];
 
 export class UserPnlSettlerBot implements Bot {
@@ -593,7 +594,6 @@ export class UserPnlSettlerBot implements Bot {
 	}
 
 	private async trySettleUsersWithNoPositions() {
-		const start = Date.now();
 		try {
 			const usersToSettleMap: Map<
 				number,
@@ -603,8 +603,6 @@ export class UserPnlSettlerBot implements Bot {
 					pnl: number;
 				}[]
 			> = new Map();
-			const nowTs = Date.now() / 1000;
-
 			for (const user of this.userMap!.values()) {
 				const perpPositions = user.getActivePerpPositions();
 				for (const perpPosition of perpPositions) {
