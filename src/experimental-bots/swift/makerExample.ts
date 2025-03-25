@@ -24,6 +24,7 @@ import {
 	TransactionInstruction,
 } from '@solana/web3.js';
 import { getPriorityFeeInstruction } from '../filler-common/utils';
+import { sha256 } from '@noble/hashes/sha256';
 
 export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
@@ -159,8 +160,16 @@ export class SwiftMaker {
 						'hex'
 					);
 
-					const isDelegateSigner =
-						order['signing_authority'] != order['taker_authority'];
+					const isDelegateSigner = signedMsgOrderParamsBuf
+						.slice(0, 8)
+						.equals(
+							Uint8Array.from(
+								Buffer.from(
+									sha256('global' + ':' + 'SignedMsgOrderParamDelegateMessage')
+								).slice(0, 8)
+							)
+						);
+
 					const signedMessage:
 						| SignedMsgOrderParamsMessage
 						| SignedMsgOrderParamsDelegateMessage =
