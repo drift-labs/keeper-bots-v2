@@ -180,6 +180,7 @@ export class SwiftMaker {
 								takerAuthority,
 								(signedMessage as SignedMsgOrderParamsMessage).subAccountId
 						  );
+					console.log(takerUserPubkey.toString());
 					const takerUserAccount = (
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();
