@@ -7,10 +7,9 @@ import {
 	UserMap,
 	MarketType,
 	DLOBSubscriber,
-	PriorityFeeCalculator,
-	TxParams,
 	PublicKey,
 	BlockhashSubscriber,
+	PriorityFeeSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -18,7 +17,7 @@ import { logger } from '../logger';
 import { Bot } from '../types';
 import { getErrorCode } from '../error';
 import { webhookMessage } from '../webhook';
-import { BaseBotConfig } from '../config';
+import { TriggerConfig } from '../config';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { Counter, Histogram, Meter, ObservableGauge } from '@opentelemetry/api';
 import {
@@ -29,7 +28,10 @@ import {
 } from '@opentelemetry/sdk-metrics-base';
 import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import { getNodeToTriggerSignature, getVersionedTransaction } from '../utils';
-import { AddressLookupTableAccount } from '@solana/web3.js';
+import {
+	AddressLookupTableAccount,
+	ComputeBudgetProgram,
+} from '@solana/web3.js';
 
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
@@ -53,6 +55,7 @@ export class TriggerBot implements Bot {
 
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
+	private triggerConfig: TriggerConfig;
 	private dlobSubscriber?: DLOBSubscriber;
 	private blockhashSubscriber: BlockhashSubscriber;
 	private lookupTableAccounts?: AddressLookupTableAccount[];
@@ -61,7 +64,7 @@ export class TriggerBot implements Bot {
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private userMap: UserMap;
 
-	private priorityFeeCalculator: PriorityFeeCalculator;
+	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	// metrics
 	private metricsInitialized = false;
@@ -84,10 +87,12 @@ export class TriggerBot implements Bot {
 		blockhashSubscriber: BlockhashSubscriber,
 		userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
-		config: BaseBotConfig
+		config: TriggerConfig,
+		priorityFeeSubscriber: PriorityFeeSubscriber
 	) {
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
+		this.triggerConfig = config;
 		this.driftClient = driftClient;
 		this.userMap = userMap;
 		this.runtimeSpec = runtimeSpec;
@@ -98,7 +103,11 @@ export class TriggerBot implements Bot {
 		if (this.metricsPort) {
 			this.initializeMetrics();
 		}
-		this.priorityFeeCalculator = new PriorityFeeCalculator(Date.now());
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.priorityFeeSubscriber.updateAddresses([
+			new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC
+			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
+		]);
 	}
 
 	private initializeMetrics() {
@@ -165,7 +174,9 @@ export class TriggerBot implements Bot {
 	}
 
 	public async init() {
-		logger.info(`${this.name} initing`);
+		logger.info(
+			`${this.name} initing (trigger cu boost: ${this.triggerConfig.triggerPriorityFeeMultiplier})`
+		);
 
 		this.dlobSubscriber = new DLOBSubscriber({
 			dlobSource: this.userMap,
@@ -270,7 +281,18 @@ export class TriggerBot implements Bot {
 					nodeToTrigger.node.userAccount.toString()
 				);
 
-				const ixs = [];
+				const ixs = [
+					ComputeBudgetProgram.setComputeUnitLimit({
+						units: 100_000,
+					}),
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: Math.floor(
+							this.priorityFeeSubscriber.getCustomStrategyResult() *
+								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier() *
+								(this.triggerConfig.triggerPriorityFeeMultiplier ?? 1.0)
+						),
+					}),
+				];
 				ixs.push(
 					await this.driftClient.getTriggerOrderIx(
 						new PublicKey(nodeToTrigger.node.userAccount),
@@ -373,23 +395,14 @@ export class TriggerBot implements Bot {
 					nodeToTrigger.node.userAccount.toString()
 				);
 
-				const usePriorityFee = this.priorityFeeCalculator.updatePriorityFee(
-					Date.now(),
-					this.driftClient.txSender.getTimeoutCount()
-				);
-				let txParams: TxParams | undefined = undefined;
-				if (usePriorityFee) {
-					const computeUnits = 100_000;
-					const computeUnitsPrice =
-						this.priorityFeeCalculator.calculateComputeUnitPrice(
-							computeUnits,
-							1_000_000_000 // 1000 lamports
-						);
-					txParams = {
-						computeUnits,
-						computeUnitsPrice,
-					};
-				}
+				const txParams = {
+					computeUnits: 100_000,
+					computeUnitsPrice: Math.floor(
+						this.priorityFeeSubscriber.getCustomStrategyResult() *
+							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier() *
+							(this.triggerConfig.triggerPriorityFeeMultiplier ?? 1.0)
+					),
+				};
 
 				this.driftClient
 					.triggerOrder(
