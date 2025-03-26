@@ -314,9 +314,10 @@ export class TriggerBot implements Bot {
 					.sendTransaction(tx)
 					.then((txSig) => {
 						logger.info(
-							`Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
+							`Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}: ${
+								txSig.txSig
+							}`
 						);
-						logger.info(`Tx: ${txSig}`);
 					})
 					.catch((error) => {
 						nodeToTrigger.node.haveTrigger = false;
@@ -413,9 +414,8 @@ export class TriggerBot implements Bot {
 					)
 					.then((txSig) => {
 						logger.info(
-							`Triggered user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
+							`Triggered spot user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}: ${txSig}`
 						);
-						logger.info(`Tx: ${txSig}`);
 					})
 					.catch((error) => {
 						nodeToTrigger.node.haveTrigger = false;
