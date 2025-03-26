@@ -158,7 +158,7 @@ export class SwiftPlacer {
 						.equals(
 							Uint8Array.from(
 								Buffer.from(
-									sha256('global' + ':' + 'SignedMsgOrderParamDelegateMessage')
+									sha256('global' + ':' + 'SignedMsgOrderParamsDelegateMessage')
 								).slice(0, 8)
 							)
 						);
