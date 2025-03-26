@@ -520,7 +520,7 @@ export class FillerBot extends TxThreaded implements Bot {
 		);
 		this.hasEnoughSolToFill = fillerSolBalance >= this.minGasBalanceToFill;
 		logger.info(
-			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}`
+			`${this.name}: hasEnoughSolToFill: ${this.hasEnoughSolToFill}, balance: ${fillerSolBalance}, cu boost: ${this.fillerConfig.triggerPriorityFeeMultiplier}`
 		);
 
 		const startInitUserStatsMap = Date.now();
@@ -571,8 +571,6 @@ export class FillerBot extends TxThreaded implements Bot {
 			driftClient: this.driftClient,
 		});
 		await this.dlobSubscriber.subscribe();
-
-		await webhookMessage(`[${this.name}]: started`);
 	}
 
 	public async reset() {
@@ -1950,7 +1948,8 @@ export class FillerBot extends TxThreaded implements Bot {
 					ComputeBudgetProgram.setComputeUnitPrice({
 						microLamports: Math.floor(
 							this.priorityFeeSubscriber.getCustomStrategyResult() *
-								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier() *
+								(this.fillerConfig.triggerPriorityFeeMultiplier ?? 1.0)
 						),
 					})
 				);

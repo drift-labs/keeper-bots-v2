@@ -228,6 +228,7 @@ export class SpotFillerBot implements Bot {
 	/// Connection to use specifically for confirming transactions
 	private txConfirmationConnection: Connection;
 	private globalConfig: GlobalConfig;
+	private fillerConfig: FillerConfig;
 	private blockhashSubscriber: BlockhashSubscriber;
 	private pollingIntervalMs: number;
 	private fillTxId = 0;
@@ -330,6 +331,7 @@ export class SpotFillerBot implements Bot {
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
+		this.fillerConfig = config;
 		this.name = config.botId;
 		this.dryRun = config.dryRun;
 		this.driftClient = driftClient;
@@ -631,7 +633,9 @@ export class SpotFillerBot implements Bot {
 	}
 
 	public async init() {
-		logger.info(`${this.name} initing`);
+		logger.info(
+			`${this.name} initing (filler cu boost: ${this.fillerConfig.triggerPriorityFeeMultiplier})`
+		);
 
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
@@ -694,8 +698,6 @@ export class SpotFillerBot implements Bot {
 		);
 
 		await this.clockSubscriber.subscribe();
-
-		await webhookMessage(`[${this.name}]: started`);
 	}
 
 	public async reset() {
@@ -2155,7 +2157,9 @@ export class SpotFillerBot implements Bot {
 				ixs.push(
 					ComputeBudgetProgram.setComputeUnitPrice({
 						microLamports: Math.floor(
-							this.priorityFeeSubscriber.getCustomStrategyResult()
+							this.priorityFeeSubscriber.getCustomStrategyResult() *
+								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier() *
+								(this.fillerConfig.triggerPriorityFeeMultiplier ?? 1.0)
 						),
 					})
 				);
