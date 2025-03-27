@@ -23,6 +23,10 @@ export type BaseBotConfig = {
 	runOnce?: boolean;
 };
 
+export type TriggerConfig = BaseBotConfig & {
+	triggerPriorityFeeMultiplier?: number;
+};
+
 export type UserPnlSettlerConfig = BaseBotConfig & {
 	/// perp market indexes to filter for settling pnl
 	perpMarketIndicies?: Array<number>;
@@ -45,6 +49,8 @@ export type FillerMultiThreadedConfig = BaseBotConfig & {
 	minGasBalanceToFill?: number;
 	bidToFillerReward?: boolean;
 	pythLazerChunkSize?: number;
+
+	triggerPriorityFeeMultiplier?: number;
 };
 
 export type FillerConfig = BaseBotConfig & {
@@ -55,6 +61,8 @@ export type FillerConfig = BaseBotConfig & {
 	rebalanceFiller?: boolean;
 	rebalanceSettledPnlThreshold?: number;
 	minGasBalanceToFill?: number;
+
+	triggerPriorityFeeMultiplier?: number;
 };
 
 export type SubaccountConfig = {
@@ -135,7 +143,7 @@ export type BotConfigMap = {
 	filler?: FillerConfig;
 	fillerLite?: FillerConfig;
 	spotFiller?: FillerConfig;
-	trigger?: BaseBotConfig;
+	trigger?: TriggerConfig;
 	liquidator?: LiquidatorConfig;
 	floatingMaker?: BaseBotConfig;
 	ifRevenueSettler?: BaseBotConfig;
@@ -409,6 +417,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			runOnce: opts.runOnce ?? false,
 			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
 			rebalanceFiller: opts.rebalanceFiller ?? false,
+			triggerPriorityFeeMultiplier: opts.triggerPriorityFeeMultiplier ?? 1.5,
 		};
 	}
 	if (opts.fillerLite) {
@@ -421,6 +430,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			runOnce: opts.runOnce ?? false,
 			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
 			rebalanceFiller: opts.rebalanceFiller ?? false,
+			triggerPriorityFeeMultiplier: opts.triggerPriorityFeeMultiplier ?? 1.5,
 		};
 	}
 	if (opts.spotFiller) {
@@ -433,6 +443,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			runOnce: opts.runOnce ?? false,
 			simulateTxForCUEstimate: opts.simulateTxForCUEstimate ?? true,
 			rebalanceFiller: opts.rebalanceFiller ?? false,
+			triggerPriorityFeeMultiplier: opts.triggerPriorityFeeMultiplier ?? 1.5,
 		};
 	}
 	if (opts.liquidator) {
@@ -463,6 +474,7 @@ export function loadConfigFromOpts(opts: any): Config {
 			botId: process.env.BOT_ID ?? 'trigger',
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
+			triggerPriorityFeeMultiplier: opts.triggerPriorityFeeMultiplier ?? 1.5,
 		};
 	}
 	if (opts.ifRevenueSettler) {
