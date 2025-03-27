@@ -30,6 +30,7 @@ import {
 	PRICE_PRECISION,
 	convertToNumber,
 	BASE_PRECISION,
+	SignedMsgOrderParamsDelegateMessage,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -43,6 +44,7 @@ import {
 import { getDriftClientFromArgs, serializeNodeToFill } from './utils';
 import { initializeSpotFulfillmentAccounts, sleepMs } from '../../utils';
 import { LRUCache } from 'lru-cache';
+import { sha256 } from '@noble/hashes/sha256';
 
 const EXPIRE_ORDER_BUFFER_SEC = 30; // add an extra 30 seconds before trying to expire orders (want to avoid 6252 error due to clock drift)
 
@@ -187,13 +189,28 @@ class DLOBBuilder {
 
 	public async insertSignedMsgOrder(orderData: any, uuid: number) {
 		// Deserialize and store
-		const {
-			signedMsgOrderParams,
-			subAccountId: takerSubaccountId,
-			slot,
-		}: SignedMsgOrderParamsMessage = this.driftClient.decodeSignedMsgOrderParamsMessage(
-			Buffer.from(orderData['order_message'], 'hex')
+		const signedMsgOrderParamsBuf = Buffer.from(
+			orderData['order_message'],
+			'hex'
 		);
+		const isDelegateSigner = signedMsgOrderParamsBuf
+			.slice(0, 8)
+			.equals(
+				Uint8Array.from(
+					Buffer.from(
+						sha256('global' + ':' + 'SignedMsgOrderParamsDelegateMessage')
+					).slice(0, 8)
+				)
+			);
+		const signedMessage:
+			| SignedMsgOrderParamsMessage
+			| SignedMsgOrderParamsDelegateMessage =
+			this.driftClient.decodeSignedMsgOrderParamsMessage(
+				signedMsgOrderParamsBuf,
+				isDelegateSigner
+			);
+
+		const signedMsgOrderParams = signedMessage.signedMsgOrderParams;
 
 		if (
 			!signedMsgOrderParams.auctionDuration ||
@@ -210,11 +227,13 @@ class DLOBBuilder {
 		}
 
 		const takerAuthority = new PublicKey(orderData['taker_authority']);
-		const takerUserPubkey = await getUserAccountPublicKey(
-			this.driftClient.program.programId,
-			takerAuthority,
-			takerSubaccountId
-		);
+		const takerUserPubkey = isDelegateSigner
+			? (signedMessage as SignedMsgOrderParamsDelegateMessage).takerPubkey
+			: await getUserAccountPublicKey(
+					this.driftClient.program.programId,
+					takerAuthority,
+					(signedMessage as SignedMsgOrderParamsMessage).subAccountId
+			  );
 		logger.info(
 			`Received signedMsgOrder: pubkey: ${takerUserPubkey.toString()}, direction: ${getVariant(
 				signedMsgOrderParams.direction
@@ -239,7 +258,9 @@ class DLOBBuilder {
 			orderData['signing_authority']
 		);
 
-		const maxSlot = slot.addn(signedMsgOrderParams.auctionDuration ?? 0);
+		const maxSlot = signedMessage.slot.addn(
+			signedMsgOrderParams.auctionDuration ?? 0
+		);
 		if (maxSlot.toNumber() < this.slotSubscriber.getSlot()) {
 			logger.warn(
 				`${logPrefix} Received expired signedMsg order with uuid: ${uuid}`
@@ -247,7 +268,10 @@ class DLOBBuilder {
 			return;
 		}
 
-		const orderSlot = Math.min(slot.toNumber(), this.slotSubscriber.getSlot());
+		const orderSlot = Math.min(
+			signedMessage.slot.toNumber(),
+			this.slotSubscriber.getSlot()
+		);
 
 		const signedMsgOrder: Order = {
 			status: OrderStatus.OPEN,

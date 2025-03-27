@@ -9,6 +9,7 @@ import {
 	PostOnlyParams,
 	PriorityFeeSubscriberMap,
 	PublicKey,
+	SignedMsgOrderParamsDelegateMessage,
 	SignedMsgOrderParamsMessage,
 	UserMap,
 } from '@drift-labs/sdk';
@@ -23,6 +24,7 @@ import {
 	TransactionInstruction,
 } from '@solana/web3.js';
 import { getPriorityFeeInstruction } from '../filler-common/utils';
+import { sha256 } from '@noble/hashes/sha256';
 
 export class SwiftMaker {
 	interval: NodeJS.Timeout | null = null;
@@ -157,21 +159,36 @@ export class SwiftMaker {
 						order['order_message'],
 						'hex'
 					);
-					const {
-						signedMsgOrderParams,
-						subAccountId: takerSubaccountId,
-					}: SignedMsgOrderParamsMessage =
-						this.driftClient.decodeSignedMsgOrderParamsMessage(
-							signedMsgOrderParamsBuf
+
+					const isDelegateSigner = signedMsgOrderParamsBuf
+						.slice(0, 8)
+						.equals(
+							Uint8Array.from(
+								Buffer.from(
+									sha256('global' + ':' + 'SignedMsgOrderParamsDelegateMessage')
+								).slice(0, 8)
+							)
 						);
+
+					const signedMessage:
+						| SignedMsgOrderParamsMessage
+						| SignedMsgOrderParamsDelegateMessage =
+						this.driftClient.decodeSignedMsgOrderParamsMessage(
+							signedMsgOrderParamsBuf,
+							isDelegateSigner
+						);
+
+					const signedMsgOrderParams = signedMessage.signedMsgOrderParams;
 
 					const signingAuthority = new PublicKey(order['signing_authority']);
 					const takerAuthority = new PublicKey(order['taker_authority']);
-					const takerUserPubkey = await getUserAccountPublicKey(
-						this.driftClient.program.programId,
-						takerAuthority,
-						takerSubaccountId
-					);
+					const takerUserPubkey = isDelegateSigner
+						? (signedMessage as SignedMsgOrderParamsDelegateMessage).takerPubkey
+						: await getUserAccountPublicKey(
+								this.driftClient.program.programId,
+								takerAuthority,
+								(signedMessage as SignedMsgOrderParamsMessage).subAccountId
+						  );
 					const takerUserAccount = (
 						await this.userMap.mustGet(takerUserPubkey.toString())
 					).getUserAccount();
