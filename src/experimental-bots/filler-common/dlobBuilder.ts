@@ -215,9 +215,7 @@ class DLOBBuilder {
 		if (
 			!signedMsgOrderParams.auctionDuration ||
 			!signedMsgOrderParams.auctionStartPrice ||
-			!signedMsgOrderParams.auctionEndPrice ||
-			signedMsgOrderParams.auctionStartPrice.eq(ZERO) ||
-			signedMsgOrderParams.auctionEndPrice.eq(ZERO)
+			!signedMsgOrderParams.auctionEndPrice
 		) {
 			return;
 		}
