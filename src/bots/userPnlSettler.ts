@@ -53,7 +53,7 @@ const SLEEP_MS = 500;
 const CU_EST_MULTIPLIER = 1.25;
 
 const FILTER_FOR_MARKET = undefined; // undefined;
-const EMPTY_USER_SETTLE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const EMPTY_USER_SETTLE_INTERVAL_MS = 1 * 60 * 1000; // 1 minutes
 
 const errorCodesToSuppress = [
 	6010, // Error Code: UserHasNoPositionInMarket. Error Number: 6010. Error Message: User Has No Position In Market.
@@ -67,7 +67,7 @@ export class UserPnlSettlerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
 	public readonly runOnce: boolean;
-	public readonly defaultIntervalMs: number = 15 * 60 * 1000;
+	public readonly defaultIntervalMs: number = 5 * 60 * 1000;
 
 	private driftClient: DriftClient;
 	private slotSubscriber: SlotSubscriber;
@@ -247,6 +247,9 @@ export class UserPnlSettlerBot implements Bot {
 
 			for (const user of this.userMap!.values()) {
 				const userAccount = user.getUserAccount();
+				if (userAccount.poolId !== 0) {
+					continue;
+				}
 				const userAccKeyStr = user.getUserAccountPublicKey().toBase58();
 				const isUsdcBorrow =
 					userAccount.spotPositions[0] &&
@@ -604,6 +607,9 @@ export class UserPnlSettlerBot implements Bot {
 				}[]
 			> = new Map();
 			for (const user of this.userMap!.values()) {
+				if (user.getUserAccount().poolId !== 0) {
+					continue;
+				}
 				const perpPositions = user.getActivePerpPositions();
 				for (const perpPosition of perpPositions) {
 					// this loop only processes empty positions
