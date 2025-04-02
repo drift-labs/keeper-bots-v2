@@ -635,27 +635,29 @@ export class UserPnlSettlerBot implements Bot {
 						perpPosition.quoteAssetAmount,
 						QUOTE_PRECISION
 					);
-					logger.info(
-						`[trySettleUsersWithNoPositions] User ${user
-							.getUserAccountPublicKey()
-							.toBase58()} has empty perp position in market ${
-							perpPosition.marketIndex
-						} with unsettled pnl: ${pnl}`
-					);
+					if (pnl !== 0) {
+						logger.info(
+							`[trySettleUsersWithNoPositions] User ${user
+								.getUserAccountPublicKey()
+								.toBase58()} has empty perp position in market ${
+								perpPosition.marketIndex
+							} with unsettled pnl: ${pnl}`
+						);
 
-					const userData = {
-						settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
-						settleeUserAccount: user.getUserAccount(),
-						pnl,
-					};
+						const userData = {
+							settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
+							settleeUserAccount: user.getUserAccount(),
+							pnl,
+						};
 
-					if (usersToSettleMap.has(perpPosition.marketIndex)) {
-						const existingData = usersToSettleMap.get(
-							perpPosition.marketIndex
-						)!;
-						existingData.push(userData);
-					} else {
-						usersToSettleMap.set(perpPosition.marketIndex, [userData]);
+						if (usersToSettleMap.has(perpPosition.marketIndex)) {
+							const existingData = usersToSettleMap.get(
+								perpPosition.marketIndex
+							)!;
+							existingData.push(userData);
+						} else {
+							usersToSettleMap.set(perpPosition.marketIndex, [userData]);
+						}
 					}
 				}
 			}
@@ -821,18 +823,24 @@ export class UserPnlSettlerBot implements Bot {
 				doSimulation: true,
 				recentBlockhash: recentBlockhash.blockhash,
 			});
-			logger.info(
-				`[sendTxForChunk] Settle Pnl estimated ${simResult.cuEstimate} CUs for ${ixs.length} ixs, ${users.length} users.`
-			);
 			if (simResult.simError !== null) {
 				logger.error(
-					`Sim error: ${JSON.stringify(simResult.simError)}\n${
+					`Sim error for users: ${users
+						.map((u) => u.settleeUserAccountPublicKey.toBase58())
+						.join(', ')}: ${JSON.stringify(simResult.simError)}\n${
 						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 					}`
 				);
 				handleSimResultError(simResult, errorCodesToSuppress, `(settlePnL)`);
 				success = false;
 			} else {
+				logger.info(
+					`[sendTxForChunk] Settle Pnl estimated ${
+						simResult.cuEstimate
+					} CUs for ${ixs.length} ixs, ${users.length} users (${users
+						.map((u) => u.settleeUserAccountPublicKey.toBase58())
+						.join(', ')})`
+				);
 				const sendTxStart = Date.now();
 				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
 					simResult.tx,
