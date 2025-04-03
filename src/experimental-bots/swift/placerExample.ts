@@ -49,6 +49,9 @@ const IGNORE_PUBKEYS = [
 	'6BGtdW8BCcPpwqhRom5oY2xv29WWiB6wpee4GXwLSasB',
 	'h5q9e3aTiD6QLJzaVCdbwV6nTLsrrCjpW1Vf3yT9KHo',
 	'4y89nCQCUewvVsdKv2o71Ri3frGUUJsjBdPxtJzY5FuE',
+	'DAAzFssAixSQfywpRMwt8GfUrGp3bwQ7GWb6tamF1UGv',
+	'H5jfagEnMVNH3PMc2TU2F7tNuXE6b4zCwoL5ip1b4ZHi',
+	'4SRzHK9nUsqv2V1DtVJRY3S4eiydMda9MstVbdzQRULt',
 ];
 
 export class SwiftPlacer {
