@@ -45,6 +45,12 @@ import axios from 'axios';
 import { logger } from '../../logger';
 import { sha256 } from '@noble/hashes/sha256';
 
+const IGNORE_PUBKEYS = [
+	'6BGtdW8BCcPpwqhRom5oY2xv29WWiB6wpee4GXwLSasB',
+	'h5q9e3aTiD6QLJzaVCdbwV6nTLsrrCjpW1Vf3yT9KHo',
+	'4y89nCQCUewvVsdKv2o71Ri3frGUUJsjBdPxtJzY5FuE',
+];
+
 export class SwiftPlacer {
 	interval: NodeJS.Timeout | null = null;
 	private ws: WebSocket | null = null;
@@ -181,6 +187,12 @@ export class SwiftPlacer {
 								takerAuthority,
 								(signedMessage as SignedMsgOrderParamsMessage).subAccountId
 						  );
+
+					if (IGNORE_PUBKEYS.includes(takerUserPubkey.toString())) {
+						console.log(`Ignoring order from ${takerUserPubkey.toString()}`);
+						return;
+					}
+
 					const takerUser = await this.userMap.mustGet(
 						takerUserPubkey.toString()
 					);
