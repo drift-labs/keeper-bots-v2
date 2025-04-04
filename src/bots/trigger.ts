@@ -10,6 +10,8 @@ import {
 	PublicKey,
 	BlockhashSubscriber,
 	PriorityFeeSubscriber,
+	isVariant,
+	getVariant,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -46,6 +48,7 @@ enum METRIC_TYPES {
 	runtime_specs = 'runtime_specs',
 	mutex_busy = 'mutex_busy',
 	errors = 'errors',
+	trigger_attempts = 'trigger_attempts',
 }
 
 export class TriggerBot implements Bot {
@@ -76,6 +79,7 @@ export class TriggerBot implements Bot {
 	private runtimeSpec: RuntimeSpec;
 	private mutexBusyCounter?: Counter;
 	private errorCounter?: Counter;
+	private triggerCounter?: Counter;
 	private tryTriggerDurationHistogram?: Histogram;
 
 	private watchdogTimerMutex = new Mutex();
@@ -164,6 +168,12 @@ export class TriggerBot implements Bot {
 		this.errorCounter = this.meter.createCounter(METRIC_TYPES.errors, {
 			description: 'Count of errors',
 		});
+		this.triggerCounter = this.meter.createCounter(
+			METRIC_TYPES.trigger_attempts,
+			{
+				description: 'Count of trigger attempts',
+			}
+		);
 		this.tryTriggerDurationHistogram = this.meter.createHistogram(
 			METRIC_TYPES.try_trigger_duration_histogram,
 			{
@@ -232,19 +242,24 @@ export class TriggerBot implements Bot {
 		return recentBlockhash.blockhash;
 	}
 
-	private async tryTriggerForPerpMarket(market: PerpMarketAccount) {
+	private async tryTriggerForMarket(
+		market: PerpMarketAccount | SpotMarketAccount,
+		marketType: MarketType
+	) {
 		const marketIndex = market.marketIndex;
+		const marketTypeStr = getVariant(marketType);
 
 		try {
-			const oraclePriceData =
-				this.driftClient.getOracleDataForPerpMarket(marketIndex);
+			const oraclePriceData = isVariant(marketType, 'perp')
+				? this.driftClient.getOracleDataForPerpMarket(marketIndex)
+				: this.driftClient.getOracleDataForSpotMarket(marketIndex);
 
 			const dlob = this.dlobSubscriber!.getDLOB();
 			const nodesToTrigger = dlob.findNodesToTrigger(
 				marketIndex,
 				this.slotSubscriber.getSlot(),
 				oraclePriceData.price,
-				MarketType.PERP,
+				marketType,
 				this.driftClient.getStateAccount()
 			);
 
@@ -272,9 +287,9 @@ export class TriggerBot implements Bot {
 				this.triggeringNodes.set(nodeToFillSignature, Date.now());
 
 				logger.info(
-					`trying to trigger perp order on market ${
+					`trying to trigger ${marketTypeStr} order on market ${
 						nodeToTrigger.node.order.marketIndex
-					} (account: ${nodeToTrigger.node.userAccount.toString()}) perp order ${nodeToTrigger.node.order.orderId.toString()}`
+					}. user: ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}`
 				);
 
 				const user = await this.userMap!.mustGet(
@@ -313,8 +328,9 @@ export class TriggerBot implements Bot {
 				this.driftClient
 					.sendTransaction(tx)
 					.then((txSig) => {
+						this.triggerCounter!.add(1, { marketType: marketTypeStr });
 						logger.info(
-							`Triggered perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}: ${
+							`Triggered ${marketTypeStr}. user: ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}: ${
 								txSig.txSig
 							}`
 						);
@@ -334,15 +350,15 @@ export class TriggerBot implements Bot {
 								this.errorCounter!.add(1, { errorCode: errorCode.toString() });
 							}
 							logger.error(
-								`Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}`
+								`Error (${errorCode}) triggering ${marketTypeStr} order for user ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}`
 							);
 							logger.error(error);
 							webhookMessage(
 								`[${
 									this.name
-								}]: :x: Error (${errorCode}) triggering perp user (account: ${nodeToTrigger.node.userAccount.toString()}) perp order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-									error.logs ? (error.logs as Array<string>).join('\n') : ''
-								}\n${error.stack ? error.stack : error.message}`
+								}]: :x: Error (${errorCode}) triggering ${marketTypeStr} order for user (account: ${nodeToTrigger.node.userAccount.toString()}) ${marketTypeStr} order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+									error.stack ? error.stack : error.message
+								}`
 							);
 						}
 					})
@@ -352,104 +368,16 @@ export class TriggerBot implements Bot {
 			}
 		} catch (e) {
 			logger.error(
-				`Unexpected error for market ${marketIndex.toString()} during triggers`
+				`Unexpected error for ${marketTypeStr} market ${marketIndex.toString()} during triggers`
 			);
 			console.error(e);
 			if (e instanceof Error) {
 				webhookMessage(
 					`[${this.name}]: :x: Uncaught error:\n${
 						e.stack ? e.stack : e.message
-					}}`
+					}`
 				);
 			}
-		}
-	}
-
-	private async tryTriggerForSpotMarket(market: SpotMarketAccount) {
-		const marketIndex = market.marketIndex;
-
-		try {
-			const oraclePriceData =
-				this.driftClient.getOracleDataForSpotMarket(marketIndex);
-
-			const dlob = this.dlobSubscriber!.getDLOB();
-			const nodesToTrigger = dlob.findNodesToTrigger(
-				marketIndex,
-				this.slotSubscriber.getSlot(),
-				oraclePriceData.price,
-				MarketType.SPOT,
-				this.driftClient.getStateAccount()
-			);
-
-			for (const nodeToTrigger of nodesToTrigger) {
-				if (nodeToTrigger.node.haveTrigger) {
-					continue;
-				}
-
-				nodeToTrigger.node.haveTrigger = true;
-
-				logger.info(
-					`trying to trigger (account: ${nodeToTrigger.node.userAccount.toString()}) spot order ${nodeToTrigger.node.order.orderId.toString()}`
-				);
-
-				const user = await this.userMap!.mustGet(
-					nodeToTrigger.node.userAccount.toString()
-				);
-
-				const txParams = {
-					computeUnits: 100_000,
-					computeUnitsPrice: Math.floor(
-						this.priorityFeeSubscriber.getCustomStrategyResult() *
-							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier() *
-							(this.triggerConfig.triggerPriorityFeeMultiplier ?? 1.0)
-					),
-				};
-
-				this.driftClient
-					.triggerOrder(
-						new PublicKey(nodeToTrigger.node.userAccount),
-						user.getUserAccount(),
-						nodeToTrigger.node.order,
-						txParams
-					)
-					.then((txSig) => {
-						logger.info(
-							`Triggered spot user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}: ${txSig}`
-						);
-					})
-					.catch((error) => {
-						nodeToTrigger.node.haveTrigger = false;
-
-						const errorCode = getErrorCode(error);
-						if (
-							errorCode &&
-							!errorCodesToSuppress.includes(errorCode) &&
-							!(error as Error).message.includes(
-								'Transaction was not confirmed'
-							)
-						) {
-							if (errorCode) {
-								this.errorCounter!.add(1, { errorCode: errorCode.toString() });
-							}
-							logger.error(
-								`Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}`
-							);
-							logger.error(error);
-							webhookMessage(
-								`[${
-									this.name
-								}]: :x: Error (${errorCode}) triggering spot order for user (account: ${nodeToTrigger.node.userAccount.toString()}) spot order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-									error.stack ? error.stack : error.message
-								}`
-							);
-						}
-					});
-			}
-		} catch (e) {
-			logger.error(
-				`Unexpected error for spot market ${marketIndex.toString()} during triggers`
-			);
-			console.error(e);
 		}
 	}
 
@@ -466,10 +394,10 @@ export class TriggerBot implements Bot {
 			await tryAcquire(this.periodicTaskMutex).runExclusive(async () => {
 				await Promise.all([
 					this.driftClient.getPerpMarketAccounts().map((marketAccount) => {
-						this.tryTriggerForPerpMarket(marketAccount);
+						this.tryTriggerForMarket(marketAccount, MarketType.PERP);
 					}),
 					this.driftClient.getSpotMarketAccounts().map((marketAccount) => {
-						this.tryTriggerForSpotMarket(marketAccount);
+						this.tryTriggerForMarket(marketAccount, MarketType.SPOT);
 					}),
 				]);
 				ran = true;
