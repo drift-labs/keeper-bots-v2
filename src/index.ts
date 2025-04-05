@@ -577,7 +577,6 @@ const runBot = async () => {
 				config.botConfigs!.pythLazerCranker!,
 				driftClient,
 				priorityFeeSubscriber,
-				bundleSender,
 				[]
 			)
 		);
@@ -758,6 +757,7 @@ const runBot = async () => {
 					walletAuthority: wallet.publicKey.toBase58(),
 				},
 				config.botConfigs!.trigger!,
+				config.global,
 				priorityFeeSubscriber
 			)
 		);

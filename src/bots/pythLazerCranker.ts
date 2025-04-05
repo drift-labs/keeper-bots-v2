@@ -14,7 +14,6 @@ import {
 	PriorityFeeSubscriber,
 	TxSigAndSlot,
 } from '@drift-labs/sdk';
-import { BundleSender } from '../bundleSender';
 import {
 	AddressLookupTableAccount,
 	ComputeBudgetProgram,
@@ -48,12 +47,15 @@ export class PythLazerCrankerBot implements Bot {
 		private crankConfigs: PythLazerCrankerBotConfig,
 		private driftClient: DriftClient,
 		private priorityFeeSubscriber?: PriorityFeeSubscriber,
-		private bundleSender?: BundleSender,
 		private lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.name = crankConfigs.botId;
 		this.dryRun = crankConfigs.dryRun;
 		this.intervalMs = crankConfigs.intervalMs;
+
+		if (this.globalConfig.useJito) {
+			throw new Error('Jito is not supported for pyth lazer cranker');
+		}
 
 		const spotMarkets =
 			this.globalConfig.driftEnv === 'mainnet-beta'
@@ -158,41 +160,18 @@ export class PythLazerCrankerBot implements Bot {
 					units: 1_400_000,
 				}),
 			];
-			if (this.globalConfig.useJito) {
-				ixs.push(this.bundleSender!.getTipIx());
-				const simResult = await simulateAndGetTxWithCUs({
-					ixs,
-					connection: this.driftClient.connection,
-					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: this.lookupTableAccounts,
-					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-					doSimulation: true,
-					recentBlockhash: await this.getBlockhashForTx(),
-				});
-				simResult.tx.sign([
-					// @ts-ignore
-					this.driftClient.wallet.payer,
-				]);
-				this.bundleSender?.sendTransactions(
-					[simResult.tx],
-					undefined,
-					undefined,
-					false
-				);
-			} else {
-				const priorityFees = Math.floor(
-					(this.priorityFeeSubscriber?.getCustomStrategyResult() || 0) *
-						this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-				);
-				logger.info(
-					`Priority fees to use: ${priorityFees} with multiplier: ${this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()}`
-				);
-				ixs.push(
-					ComputeBudgetProgram.setComputeUnitPrice({
-						microLamports: priorityFees,
-					})
-				);
-			}
+			const priorityFees = Math.floor(
+				(this.priorityFeeSubscriber?.getCustomStrategyResult() || 0) *
+					this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+			);
+			logger.info(
+				`Priority fees to use: ${priorityFees} with multiplier: ${this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()}`
+			);
+			ixs.push(
+				ComputeBudgetProgram.setComputeUnitPrice({
+					microLamports: priorityFees,
+				})
+			);
 			const pythLazerIxs =
 				await this.driftClient.getPostPythLazerOracleUpdateIxs(
 					feedIds,

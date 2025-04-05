@@ -6,6 +6,7 @@ import * as axios from 'axios';
 export class PythLazerSubscriber {
 	private pythLazerClient?: PythLazerClient;
 	feedIdChunkToPriceMessage: Map<string, string> = new Map();
+	feedIdToPrice: Map<number, number> = new Map();
 	feedIdHashToFeedIds: Map<string, number[]> = new Map();
 	subscriptionIdsToFeedIdsHash: Map<number, string> = new Map();
 	allSubscribedIds: number[] = [];
@@ -15,6 +16,7 @@ export class PythLazerSubscriber {
 	isUnsubscribing = false;
 
 	marketIndextoPriceFeedIdChunk: Map<number, number[]> = new Map();
+	marketIndextoPriceFeedId: Map<number, number> = new Map();
 	useHttpRequests: boolean = false;
 
 	constructor(
@@ -48,6 +50,10 @@ export class PythLazerSubscriber {
 					market.marketIndex,
 					priceFeedIds
 				);
+				this.marketIndextoPriceFeedId.set(
+					market.marketIndex,
+					market.pythLazerId!
+				);
 			}
 		}
 	}
@@ -80,6 +86,14 @@ export class PythLazerSubscriber {
 									)!,
 									message.value.solana.data
 								);
+							}
+							if (message.value.parsed?.priceFeeds) {
+								for (const priceFeed of message.value.parsed.priceFeeds) {
+									const price =
+										Number(priceFeed.price!) *
+										Math.pow(10, Number(priceFeed.exponent!));
+									this.feedIdToPrice.set(priceFeed.priceFeedId, price);
+								}
 							}
 						}
 						break;
@@ -202,5 +216,13 @@ export class PythLazerSubscriber {
 
 	getPriceFeedIdsFromHash(hash: string): number[] {
 		return this.feedIdHashToFeedIds.get(hash) || [];
+	}
+
+	getPriceFromMarketIndex(marketIndex: number): number | undefined {
+		const feedId = this.marketIndextoPriceFeedId.get(marketIndex);
+		if (feedId === undefined) {
+			return undefined;
+		}
+		return this.feedIdToPrice.get(feedId);
 	}
 }

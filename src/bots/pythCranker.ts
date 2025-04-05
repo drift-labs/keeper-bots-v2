@@ -57,7 +57,7 @@ export const updateDefault: PythUpdateConfigs = {
 	priceDiffPct: 0.35,
 };
 
-type FeedIdToCrankInfo = {
+export type FeedIdToCrankInfo = {
 	baseSymbol: string;
 	feedId: string;
 	updateConfig: PythUpdateConfigs;
