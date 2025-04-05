@@ -611,7 +611,9 @@ export class TriggerBot implements Bot {
 						nodeToTrigger.node.order.marketIndex
 					}. user: ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}. oracleUpdate: ${
 						this.updateOracleWithTrigger
-					}. OnChainPrice: ${oraclePriceData.price}. OffChainPrice: ${
+					}. OnChainPrice: ${convertToNumber(
+						oraclePriceData.price
+					)}. OffChainPrice: ${
 						offChainPrice ? convertToNumber(offChainPrice) : 'N/A'
 					}`
 				);
