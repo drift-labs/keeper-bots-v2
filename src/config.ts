@@ -124,6 +124,7 @@ export type PythLazerCrankerBotConfig = BaseBotConfig & {
 	txSuccessRateThreshold: number;
 	intervalMs: number;
 	onlyCrankUsedOracles?: boolean;
+	websocket?: boolean;
 };
 
 export type SwitchboardCrankerBotConfig = BaseBotConfig & {

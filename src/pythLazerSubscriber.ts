@@ -26,17 +26,19 @@ export class PythLazerSubscriber {
 		env: DriftEnv = 'devnet',
 		private redisClient?: RedisClient,
 		private httpEndpoints: string[] = [],
-		private resubTimeoutMs: number = 2000
+		private resubTimeoutMs: number = 2000,
+		useHttp = false,
 	) {
 		const markets = PerpMarkets[env].filter(
 			(market) => market.pythLazerId !== undefined
 		);
 
 		this.allSubscribedIds = this.priceFeedIdsArrays.flat();
+		const overrideUseHttp = 	priceFeedIdsArrays[0].length === 1 &&
+		this.allSubscribedIds.length > 3 &&
+		this.httpEndpoints.length > 0;
 		if (
-			priceFeedIdsArrays[0].length === 1 &&
-			this.allSubscribedIds.length > 3 &&
-			this.httpEndpoints.length > 0
+			overrideUseHttp || useHttp
 		) {
 			this.useHttpRequests = true;
 		}
@@ -182,7 +184,8 @@ export class PythLazerSubscriber {
 					priceFeedIds: feedIds,
 					properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
 					chains: ['solana'],
-					channel: 'real_time',
+					channel: 'fixed_rate@200ms',
+					deliveryFormat: 'json',
 					jsonBinaryEncoding: 'hex',
 				},
 				{

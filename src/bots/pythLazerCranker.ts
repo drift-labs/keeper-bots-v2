@@ -42,6 +42,9 @@ export class PythLazerCrankerBot implements Bot {
 	private blockhashSubscriber: BlockhashSubscriber;
 	private health: boolean = true;
 
+	private feedIdChunks: number[][];
+	private useWebsocket: boolean;
+
 	constructor(
 		private globalConfig: GlobalConfig,
 		private crankConfigs: PythLazerCrankerBotConfig,
@@ -52,7 +55,8 @@ export class PythLazerCrankerBot implements Bot {
 		this.name = crankConfigs.botId;
 		this.dryRun = crankConfigs.dryRun;
 		this.intervalMs = crankConfigs.intervalMs;
-
+		this.useWebsocket = crankConfigs.websocket ?? true;
+	
 		if (this.globalConfig.useJito) {
 			throw new Error('Jito is not supported for pyth lazer cranker');
 		}
@@ -78,16 +82,22 @@ export class PythLazerCrankerBot implements Bot {
 		}
 		const allFeedIdsSet = new Set(allFeedIds);
 		const feedIdChunks = chunks(Array.from(allFeedIdsSet), 11);
+		this.feedIdChunks = feedIdChunks;
 		console.log(feedIdChunks);
 
 		if (!this.globalConfig.lazerEndpoints || !this.globalConfig.lazerToken) {
 			throw new Error('Missing lazerEndpoint or lazerToken in global config');
 		}
+
 		this.pythLazerClient = new PythLazerSubscriber(
 			this.globalConfig.lazerEndpoints,
 			this.globalConfig.lazerToken,
 			feedIdChunks,
-			this.globalConfig.driftEnv
+			this.globalConfig.driftEnv,
+			undefined,
+			this.globalConfig.lazerHttpEndpoints,
+			undefined,
+			!this.useWebsocket,
 		);
 		this.decodeFunc =
 			this.driftClient.program.account.pythLazerOracle.coder.accounts.decodeUnchecked.bind(
@@ -150,11 +160,26 @@ export class PythLazerCrankerBot implements Bot {
 	}
 
 	async runCrankLoop() {
-		for (const [
-			feedIdsStr,
-			priceMessage,
-		] of this.pythLazerClient.feedIdChunkToPriceMessage.entries()) {
-			const feedIds = this.pythLazerClient.getPriceFeedIdsFromHash(feedIdsStr);
+		for (const feedIds of this.feedIdChunks) {
+			let priceMessage: string | undefined;
+			if (this.useWebsocket) {
+				const hash = this.pythLazerClient.hash(feedIds);
+				priceMessage = this.pythLazerClient.feedIdChunkToPriceMessage.get(hash);
+				console.log(
+					`Using websocket for ${feedIds}, priceMessage: ${priceMessage}`
+				);
+			} else {
+				priceMessage = await this.pythLazerClient.getLatestPriceMessage(feedIds);
+				console.log(
+					`Using polling for ${feedIds}, priceMessage: ${priceMessage}`
+				);
+			}
+
+			if (!priceMessage) {
+				logger.error(`No price message for ${feedIds}`);
+				continue;
+			}
+			
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
 					units: 1_400_000,
