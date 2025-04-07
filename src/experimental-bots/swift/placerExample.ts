@@ -9,6 +9,7 @@ import {
 	MakerInfo,
 	MarketType,
 	Order,
+	OrderParams,
 	OrderStatus,
 	OrderTriggerCondition,
 	PerpMarkets,
@@ -123,7 +124,6 @@ export class SwiftPlacer {
 					const messageBytes = decodeUTF8(message['nonce']);
 					const signature = nacl.sign.detached(messageBytes, keypair.secretKey);
 					const signatureBase64 = Buffer.from(signature).toString('base64');
-					console.log(stakeKeypair?.publicKey.toBase58());
 					ws.send(
 						JSON.stringify({
 							pubkey: keypair.publicKey.toBase58(),
@@ -191,8 +191,11 @@ export class SwiftPlacer {
 								(signedMessage as SignedMsgOrderParamsMessage).subAccountId
 						  );
 
+					const logPrefix = `[${takerUserPubkey.toBase58()}|${order['uuid']}|${
+						order['signing_authority']
+					}]`;
+
 					if (IGNORE_PUBKEYS.includes(takerUserPubkey.toString())) {
-						console.log(`Ignoring order from ${takerUserPubkey.toString()}`);
 						return;
 					}
 
@@ -364,23 +367,19 @@ export class SwiftPlacer {
 					}
 
 					if (resp.simError) {
-						console.log(resp.simTxLogs);
+						logger.info(`${logPrefix}: ${resp.simTxLogs}`);
 						return;
 					}
-					console.timeEnd(`placing order-${order['uuid']}`);
+
+					const orderStr = prettyPrintOrderParams(
+						signedMessage.signedMsgOrderParams
+					);
+					logger.info(`${logPrefix}: placing order: ${orderStr}`);
 
 					this.driftClient.txSender
 						.sendVersionedTransaction(resp.tx)
 						.then((r) => {
-							console.log(
-								`Placed order. uuid: ${
-									order['uuid']
-								}, taker: ${takerUserPubkey.toBase58()}, marketType: ${getVariant(
-									signedMsgOrder.marketType
-								)}, marketIndex: ${signedMsgOrder.marketIndex}, tx: ${
-									r.txSig
-								}, slot: ${r.slot}`
-							);
+							logger.info(`${logPrefix}: placed order: ${r.txSig}`);
 						})
 						.catch((error) => {
 							console.log(error);
@@ -427,4 +426,15 @@ export class SwiftPlacer {
 			this.subscribeWs();
 		}, 1000);
 	}
+}
+
+function prettyPrintOrderParams(orderParams: OrderParams) {
+	const orderParamsStr = `marketIndex:${
+		orderParams.marketIndex
+	}|orderType:${getVariant(
+		orderParams.orderType
+	)}|baseAssetAmount:${orderParams.baseAssetAmount.toNumber()}|auctionDuration:${
+		orderParams.auctionDuration
+	}|auctionStartPrice:${orderParams.auctionStartPrice?.toNumber()}|auctionEndPrice:${orderParams.auctionEndPrice?.toNumber()}|`;
+	return orderParamsStr;
 }
