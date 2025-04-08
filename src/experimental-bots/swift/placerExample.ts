@@ -1,5 +1,7 @@
 import {
+	BASE_PRECISION,
 	BN,
+	convertToNumber,
 	DriftClient,
 	DriftEnv,
 	getUserAccountPublicKey,
@@ -14,6 +16,7 @@ import {
 	OrderTriggerCondition,
 	PerpMarkets,
 	PositionDirection,
+	PRICE_PRECISION,
 	PriorityFeeSubscriberMap,
 	PublicKey,
 	ReferrerInfo,
@@ -431,8 +434,17 @@ function prettyPrintOrderParams(orderParams: OrderParams) {
 		orderParams.marketIndex
 	}|orderType:${getVariant(
 		orderParams.orderType
-	)}|baseAssetAmount:${orderParams.baseAssetAmount.toNumber()}|auctionDuration:${
+	)}|baseAssetAmount:${convertToNumber(
+		orderParams.baseAssetAmount,
+		BASE_PRECISION
+	)}|auctionDuration:${
 		orderParams.auctionDuration
-	}|auctionStartPrice:${orderParams.auctionStartPrice?.toNumber()}|auctionEndPrice:${orderParams.auctionEndPrice?.toNumber()}|`;
+	}|auctionStartPrice:${convertToNumber(
+		orderParams.auctionStartPrice!,
+		PRICE_PRECISION
+	)}|auctionEndPrice:${convertToNumber(
+		orderParams.auctionEndPrice!,
+		PRICE_PRECISION
+	)}|`;
 	return orderParamsStr;
 }
