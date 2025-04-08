@@ -152,9 +152,6 @@ export class SwiftPlacer {
 
 				if (message['order'] && this.driftClient.isSubscribed) {
 					const order = message['order'];
-					console.info(`uuid: ${order['uuid']} at ${Date.now()}`);
-					console.time(`placing order-${order['uuid']}`);
-
 					const signedMsgOrderParamsBufHex = Buffer.from(
 						order['order_message']
 					);
