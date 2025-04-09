@@ -719,22 +719,6 @@ export class TriggerBot implements Bot {
 		}
 	}
 
-	private getLatestPriceForMarket(
-		marketType: MarketType,
-		marketIndex: number
-	): BN | undefined {
-		if (!this.updateOracleWithTrigger) return undefined;
-
-		if (isVariant(marketType, 'perp')) {
-			// only tracking lazer for perp markets for now
-			// TODO: update pythlazersubscriber to support spot markets
-			const price =
-				this.pythLazerClient?.getLatestPriceMessageForMarketIndex(marketIndex);
-			if (!price) return undefined;
-		} else {
-		}
-	}
-
 	private async tryTrigger() {
 		const start = Date.now();
 		let ran = false;

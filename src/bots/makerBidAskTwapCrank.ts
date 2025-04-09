@@ -27,7 +27,6 @@ import {
 	ComputeBudgetProgram,
 	TransactionInstruction,
 	TransactionExpiredBlockheightExceededError,
-	SendTransactionError,
 } from '@solana/web3.js';
 import { webhookMessage } from '../webhook';
 import { ConfirmOptions, Signer } from '@solana/web3.js';
@@ -341,43 +340,43 @@ export class MakerBidAskTwapCrank implements Bot {
 		marketIndex: number,
 		tx: VersionedTransaction
 	): Promise<void> {
-		let simResult: SimulateAndGetTxWithCUsResponse | undefined;
 		try {
 			const sendTxStart = Date.now();
-			this.driftClient.txSender
-				.sendVersionedTransaction(tx, [], {
+			const txSig = await this.driftClient.txSender.sendVersionedTransaction(
+				tx,
+				[],
+				{
 					...this.driftClient.opts,
-				})
-				.then((txSig) => {
-					logger.info(
-						`[${
-							this.name
-						}] makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
-							Date.now() - sendTxStart
-						}ms tx: https://solana.fm/tx/${txSig.txSig}, txSig: ${
-							txSig.txSig
-						}, slot: ${txSig.slot}`
-					);
-				});
+				}
+			);
+			logger.info(
+				`[${
+					this.name
+				}] makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
+					Date.now() - sendTxStart
+				}ms tx: https://solana.fm/tx/${txSig.txSig}, txSig: ${
+					txSig.txSig
+				}, slot: ${txSig.slot}`
+			);
 		} catch (err: any) {
-			console.error(err);
+			logger.error(
+				`[${
+					this.name
+				}] for market ${marketIndex} error sending tx: ${JSON.stringify(err)}`
+			);
+			logger.error(
+				`Dumped tx: ${Buffer.from(tx.serialize()).toString('base64')}`
+			);
 			if (err instanceof TransactionExpiredBlockheightExceededError) {
 				logger.info(
 					`[${this.name}] Blockheight exceeded error, retrying with market: ${marketIndex})`
 				);
 			} else if (err instanceof Error) {
 				if (isCriticalError(err)) {
-					const e = err as SendTransactionError;
-					await webhookMessage(
-						`[${
-							this.name
-						}] failed to crank maker twaps for perp market ${marketIndex}. simulated CUs: ${simResult?.cuEstimate}, simError: ${JSON.stringify(
-							simResult?.simError
-						)}:\n${e.logs ? (e.logs as Array<string>).join('\n') : ''} \n${
-							e.stack ? e.stack : e.message
-						}`
+					logger.error(
+						`[${this.name}] for market ${marketIndex} critical error: ${err}`
 					);
-					return;
+					throw err;
 				} else {
 					return;
 				}
@@ -509,49 +508,6 @@ export class MakerBidAskTwapCrank implements Bot {
 			let txsToBundle: VersionedTransaction[] = [];
 
 			for (const mi of crankMarkets) {
-				const usingSwitchboardOnDemand = isVariant(
-					this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-					'switchboardOnDemand'
-				);
-				const ixs = [
-					ComputeBudgetProgram.setComputeUnitLimit({
-						units: usingSwitchboardOnDemand
-							? 350_000 // switchboard simulation is unreliable, use hardcoded CU limit
-							: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
-					}),
-				];
-
-				// add priority fees if not using jito
-				const useJito = this.sendThroughJito();
-				if (!useJito) {
-					const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
-						'perp',
-						mi
-					);
-					let microLamports = MIN_PRIORITY_FEE;
-					if (pfs) {
-						microLamports = Math.floor(
-							pfs.low *
-								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-						);
-					}
-					const clampedMicroLamports = Math.min(
-						microLamports,
-						MAX_PRIORITY_FEE
-					);
-					console.log(
-						`market index ${mi}: microLamports: ${microLamports} (clamped: ${clampedMicroLamports})`
-					);
-					microLamports = clampedMicroLamports;
-					ixs.push(
-						ComputeBudgetProgram.setComputeUnitPrice({
-							microLamports: isNaN(microLamports)
-								? MIN_PRIORITY_FEE
-								: microLamports,
-						})
-					);
-				}
-
 				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
 
 				const bidMakers = this.dlob!.getBestMakers({
@@ -575,6 +531,67 @@ export class MakerBidAskTwapCrank implements Bot {
 					`[${this.name}] loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
 				);
 
+				const usingSwitchboardOnDemand = isVariant(
+					this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
+					'switchboardOnDemand'
+				);
+
+				const ixs = [];
+				if (usingSwitchboardOnDemand) {
+					const switchboardIx =
+						await this.driftClient.getPostManySwitchboardOnDemandUpdatesAtomicIxs(
+							[this.driftClient.getPerpMarketAccount(mi)!.amm.oracle],
+							undefined,
+							askMakers.length + bidMakers.length > 3 ? 2 : 3
+						);
+					if (switchboardIx) {
+						ixs.push(...switchboardIx);
+						ixs.push(
+							ComputeBudgetProgram.setComputeUnitLimit({
+								units: 120_000, // switchboard simulation is unreliable, use hardcoded CU limit
+							})
+						);
+					} else {
+						logger.error(
+							`[${this.name}] failed to get switchboardIx for market: ${mi}`
+						);
+					}
+				} else {
+					ixs.push(
+						ComputeBudgetProgram.setComputeUnitLimit({
+							units: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
+						})
+					);
+				}
+
+				// add priority fees if not using jito
+				const useJito = this.sendThroughJito();
+				if (!useJito) {
+					const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
+						'perp',
+						mi
+					);
+					let microLamports = MIN_PRIORITY_FEE;
+					if (pfs) {
+						microLamports = Math.floor(
+							pfs.low *
+								this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+						);
+					}
+					const clampedMicroLamports = Math.min(
+						microLamports,
+						MAX_PRIORITY_FEE
+					);
+					microLamports = clampedMicroLamports;
+					ixs.push(
+						ComputeBudgetProgram.setComputeUnitPrice({
+							microLamports: isNaN(microLamports)
+								? MIN_PRIORITY_FEE
+								: microLamports,
+						})
+					);
+				}
+
 				let pythIxsPushed = false;
 				if (
 					this.pythPriceSubscriber &&
@@ -595,18 +612,6 @@ export class MakerBidAskTwapCrank implements Bot {
 					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi, ixs);
 					ixs.push(...pythIxs);
 					pythIxsPushed = true;
-				} else if (usingSwitchboardOnDemand) {
-					const switchboardIx =
-						await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
-							this.driftClient.getPerpMarketAccount(mi)!.amm.oracle,
-							undefined,
-							askMakers.length + bidMakers.length > 3 ? 2 : 3
-						);
-					if (switchboardIx) ixs.push(switchboardIx);
-					else
-						logger.error(
-							`[${this.name}] failed to get switchboardIx for market: ${mi}`
-						);
 				}
 
 				const concatenatedList = [
