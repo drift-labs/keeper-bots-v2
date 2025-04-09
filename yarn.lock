@@ -441,20 +441,50 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.15.17":
-  version "0.15.17"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.15.17.tgz#d452da11ce43c3ebb72969157cfd76d66e9884f2"
-  integrity sha512-y28+pvgTfLGJE+WCUBCKClRij+8z79thdsxg6azRLU+5f1uWyEaW9qtAPHY1QPn5gu6ETQbCcdyBJ3NnqVNy+Q==
+"@drift-labs/jit-proxy@0.15.19":
+  version "0.15.19"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.15.19.tgz#a5053ece54ac13cf3fa6840e11a2df64fc5fb110"
+  integrity sha512-rGVWULx8lbTgzoQFkZrlOnilYwwUUcWP7lwW5Q90LzTK6PzHTLYLT2qG9WX0QonCXbEuYVbxZWwSrbksmoG3WQ==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.118.0-beta.3"
+    "@drift-labs/sdk" "2.118.0-beta.4"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.118.0-beta.3":
-  version "2.118.0-beta.3"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.118.0-beta.3.tgz#6c6574cf8a522fbceb3c598ff934b31e8253c374"
-  integrity sha512-wrmCMz5mX21bce6VN7EdMCLg7/TESKFiagnE/0me/OiZBNQsIDtK/TMfMGqOijlrD+68wETh2vx6tJr9xFYZ2A==
+"@drift-labs/sdk@2.118.0-beta.4":
+  version "2.118.0-beta.4"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.118.0-beta.4.tgz#03cdbd0c913cbfdc7d4cd2ef38df68e397844f21"
+  integrity sha512-6gWtKieVTkf0ezbvHOjECt52ryYt7vPx3kmKpV84DXe+FVo4rvvgawunIywy51wBH6PzqYGqR2YLZhfcy2fY7Q==
+  dependencies:
+    "@coral-xyz/anchor" "0.29.0"
+    "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
+    "@ellipsis-labs/phoenix-sdk" "1.4.5"
+    "@grpc/grpc-js" "1.12.6"
+    "@openbook-dex/openbook-v2" "0.2.10"
+    "@project-serum/serum" "0.13.65"
+    "@pythnetwork/client" "2.5.3"
+    "@pythnetwork/price-service-sdk" "1.7.1"
+    "@pythnetwork/pyth-solana-receiver" "0.7.0"
+    "@solana/spl-token" "0.3.7"
+    "@solana/web3.js" "1.92.3"
+    "@switchboard-xyz/on-demand" "2.4.0"
+    "@triton-one/yellowstone-grpc" "1.3.0"
+    anchor-bankrun "0.3.0"
+    nanoid "3.3.4"
+    node-cache "5.1.2"
+    rpc-websockets "7.5.1"
+    solana-bankrun "0.3.1"
+    strict-event-emitter-types "2.0.0"
+    tweetnacl "1.0.3"
+    tweetnacl-util "0.15.1"
+    uuid "8.3.2"
+    yargs "17.7.2"
+    zstddec "0.1.0"
+
+"@drift-labs/sdk@2.118.0-beta.5":
+  version "2.118.0-beta.5"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.118.0-beta.5.tgz#fabea6312758a2120c0eeb8d4c6b6dc811bf36e6"
+  integrity sha512-zuzXyQDoaXn8Cu5nCYXUTayc93ieM4F6nfugx7HUk6Tmj15epLXcMKjkZvNCI5WXL69Jloy5vz2TKP0LOMFwYA==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -512,7 +542,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-64308df0-d632-4bb3-b64e-4bafdb0bd810-1743713710341/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-23ded313-6f04-46c2-a59d-3f04688ca989-1744239875905/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
