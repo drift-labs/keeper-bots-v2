@@ -548,9 +548,7 @@ export class MakerBidAskTwapCrank implements Bot {
 						ixs.push(...switchboardIx);
 						ixs.push(
 							ComputeBudgetProgram.setComputeUnitLimit({
-								units: usingSwitchboardOnDemand
-									? 120_000 // switchboard simulation is unreliable, use hardcoded CU limit
-									: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
+								units: 120_000, // switchboard simulation is unreliable, use hardcoded CU limit
 							})
 						);
 					} else {
@@ -561,9 +559,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				} else {
 					ixs.push(
 						ComputeBudgetProgram.setComputeUnitLimit({
-							units: usingSwitchboardOnDemand
-								? 350_000 // switchboard simulation is unreliable, use hardcoded CU limit
-								: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
+							units: 1_400_000, // will be overwritten by simulateAndGetTxWithCUs
 						})
 					);
 				}
