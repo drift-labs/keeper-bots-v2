@@ -49,15 +49,7 @@ import axios from 'axios';
 import { logger } from '../../logger';
 import { sha256 } from '@noble/hashes/sha256';
 
-const IGNORE_PUBKEYS = [
-	'6BGtdW8BCcPpwqhRom5oY2xv29WWiB6wpee4GXwLSasB',
-	'h5q9e3aTiD6QLJzaVCdbwV6nTLsrrCjpW1Vf3yT9KHo',
-	'4y89nCQCUewvVsdKv2o71Ri3frGUUJsjBdPxtJzY5FuE',
-	'DAAzFssAixSQfywpRMwt8GfUrGp3bwQ7GWb6tamF1UGv',
-	'H5jfagEnMVNH3PMc2TU2F7tNuXE6b4zCwoL5ip1b4ZHi',
-	'4SRzHK9nUsqv2V1DtVJRY3S4eiydMda9MstVbdzQRULt',
-	'H7x31NQF2g4XY2G7BoFZr49cmrVCJ8JLLmn7RY8f7bqV',
-];
+const IGNORE_AUTHORITIES = ['CTh4Q6xooiaJMWCwKP5KLQ4j7X3NEJPf3Uq6rX8UsKSi'];
 
 export class SwiftPlacer {
 	interval: NodeJS.Timeout | null = null;
@@ -196,7 +188,7 @@ export class SwiftPlacer {
 						order['signing_authority']
 					}]`;
 
-					if (IGNORE_PUBKEYS.includes(takerUserPubkey.toString())) {
+					if (IGNORE_AUTHORITIES.includes(takerAuthority.toString())) {
 						return;
 					}
 
