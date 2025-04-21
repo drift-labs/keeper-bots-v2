@@ -107,6 +107,11 @@ export class UserIdleFlipperBot implements Bot {
 			const currentSlot = await this.driftClient.connection.getSlot();
 			const usersToIdle: Array<[PublicKey, UserAccount]> = [];
 			for (const user of this.userMap.values()) {
+				// dont mark isolated pool users idle
+				if (user.getUserAccount().poolId !== 0) {
+					continue;
+				}
+
 				if (user.canMakeIdle(new BN(currentSlot))) {
 					usersToIdle.push([
 						user.getUserAccountPublicKey(),
