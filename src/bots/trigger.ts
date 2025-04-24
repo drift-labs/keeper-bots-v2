@@ -622,9 +622,17 @@ export class TriggerBot implements Bot {
 					nodeToTrigger.node.userAccount.toString()
 				);
 
+				let cuUnits = 100_000; // base case
+				const activePositions =
+					user.getActivePerpPositions().length +
+					user.getActiveSpotPositions().length;
+				const openOrders = user.getUserAccount().openOrders;
+				cuUnits += activePositions * 15_000;
+				cuUnits += openOrders * 5_000;
+
 				let ixs = [
 					ComputeBudgetProgram.setComputeUnitLimit({
-						units: 100_000,
+						units: cuUnits,
 					}),
 					ComputeBudgetProgram.setComputeUnitPrice({
 						microLamports: Math.floor(
@@ -664,7 +672,7 @@ export class TriggerBot implements Bot {
 						logger.info(
 							`Triggered ${marketTypeStr}. user: ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}: ${
 								txSig.txSig
-							}`
+							}, cuUnits: ${cuUnits}, activePositions: ${activePositions}, openOrders: ${openOrders}`
 						);
 					})
 					.catch((error) => {
