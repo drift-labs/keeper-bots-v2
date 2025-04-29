@@ -441,20 +441,20 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.17.4":
-  version "0.17.4"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.17.4.tgz#41f8555d26524cba5ffd2727d2c36296d939fbe3"
-  integrity sha512-CMqOOXD2sLS+KuJOrIJHoVmcEz0Fnit+9R3E3135ph0hDJTb6h9qVCalWcrLWZh4EMGW1kPgZuaINF+sGngwyw==
+"@drift-labs/jit-proxy@0.17.5":
+  version "0.17.5"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.17.5.tgz#791d8a1c89c11ef0977602ffa13a8f30df4936ce"
+  integrity sha512-xqgh/UxKGmvuXS3Y9IxTuQgpZz9wArJHi9XyEBxMoTrHOEzYX2nwxTxMKFUPyAJUYwKd+1YlZf8ii0keLcaOkg==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.120.0-beta.2"
+    "@drift-labs/sdk" "2.120.0-beta.3"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.120.0-beta.2":
-  version "2.120.0-beta.2"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.120.0-beta.2.tgz#f724ad8dfda335e54d49c1b5459005d12d0e4ec6"
-  integrity sha512-su+IQhAju7GjDPgJ63Uyv5a734Plq/vOzofAIyIqjNU80RrVhvSMxAtxwFN4Q2tu67pt9qvJaWfcsLSx0Be39Q==
+"@drift-labs/sdk@2.120.0-beta.3":
+  version "2.120.0-beta.3"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.120.0-beta.3.tgz#efe6416e409a6769d894fe9dc413a8c8e779757e"
+  integrity sha512-bWyzMFjy5UXlt1FE+c+oLQLPr0bj3xozVal8l3NYxOK/00dl5et8gbEqXICz/G/YOwVon5o7VllGuAFU8cV5rw==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -512,7 +512,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-00633773-5025-4662-9df5-ca24d6ea7b1c-1745601375334/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-f455e158-db67-4c84-b9b8-c8b2744ad03b-1745945400558/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
