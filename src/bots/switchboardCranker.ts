@@ -124,7 +124,7 @@ export class SwitchboardCrankerBot implements Bot {
 	async runCrankLoop() {
 		const pullFeedAliases = chunks(
 			shuffle(Object.keys(this.crankConfigs.pullFeedConfigs)),
-			3
+			5
 		);
 		for (const aliasChunk of pullFeedAliases) {
 			try {
@@ -159,11 +159,6 @@ export class SwitchboardCrankerBot implements Bot {
 						})
 					);
 				}
-
-				// const pullIxs = (
-				// 	await Promise.all(aliasChunk.map((alias) => this.getPullIx(alias)))
-				// ).filter((ix) => ix !== undefined) as TransactionInstruction[];
-				// ixs.push(...pullIxs);
 
 				const tx = getVersionedTransaction(
 					this.driftClient.wallet.publicKey,

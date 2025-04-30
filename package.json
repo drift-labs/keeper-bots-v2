@@ -5,8 +5,8 @@
 	"main": "lib/index.js",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@drift-labs/jit-proxy": "0.16.4",
-		"@drift-labs/sdk": "2.119.0-beta.3",
+		"@drift-labs/jit-proxy": "0.17.12",
+		"@drift-labs/sdk": "2.121.0-beta.5",
 		"@drift/common": "file:./drift-common/common-ts",
 		"@opentelemetry/api": "1.7.0",
 		"@opentelemetry/auto-instrumentations-node": "0.31.2",
@@ -21,6 +21,7 @@
 		"@types/bn.js": "5.1.5",
 		"@types/minimist": "1.2.5",
 		"@types/mocha": "10.0.6",
+		"@types/node": "20.12.7",
 		"async": "3.2.5",
 		"async-mutex": "0.3.2",
 		"aws-sdk": "2.1511.0",
@@ -38,6 +39,9 @@
 		"winston": "3.11.0",
 		"ws": "8.18.0",
 		"yaml": "2.3.4"
+	},
+	"resolutions": {
+		"jito-ts": "4.1.1"
 	},
 	"devDependencies": {
 		"@types/chai": "4.3.11",
