@@ -31,6 +31,7 @@ import {
 	convertToNumber,
 	BASE_PRECISION,
 	SignedMsgOrderParamsDelegateMessage,
+	OrderParamsBitFlag,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -282,7 +283,10 @@ class DLOBBuilder {
 			auctionDuration: signedMsgOrderParams.auctionDuration,
 			auctionStartPrice: signedMsgOrderParams.auctionStartPrice,
 			auctionEndPrice: signedMsgOrderParams.auctionEndPrice,
-			immediateOrCancel: signedMsgOrderParams.immediateOrCancel ?? false,
+			immediateOrCancel:
+				(signedMsgOrderParams.bitFlags &
+					OrderParamsBitFlag.ImmediateOrCancel) !==
+				0,
 			direction: signedMsgOrderParams.direction,
 			postOnly: false,
 			oraclePriceOffset: signedMsgOrderParams.oraclePriceOffset ?? 0,
