@@ -21,6 +21,7 @@
 		"@types/bn.js": "5.1.5",
 		"@types/minimist": "1.2.5",
 		"@types/mocha": "10.0.6",
+		"@types/node": "20.12.7",
 		"async": "3.2.5",
 		"async-mutex": "0.3.2",
 		"aws-sdk": "2.1511.0",
