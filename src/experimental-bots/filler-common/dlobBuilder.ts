@@ -282,7 +282,7 @@ class DLOBBuilder {
 			auctionDuration: signedMsgOrderParams.auctionDuration,
 			auctionStartPrice: signedMsgOrderParams.auctionStartPrice,
 			auctionEndPrice: signedMsgOrderParams.auctionEndPrice,
-			immediateOrCancel: signedMsgOrderParams.immediateOrCancel ?? false,
+			immediateOrCancel: false,
 			direction: signedMsgOrderParams.direction,
 			postOnly: false,
 			oraclePriceOffset: signedMsgOrderParams.oraclePriceOffset ?? 0,

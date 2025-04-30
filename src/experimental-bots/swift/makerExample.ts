@@ -241,7 +241,6 @@ export class SwiftMaker {
 									? signedMsgOrderParams.auctionStartPrice!.muln(99).divn(100)
 									: signedMsgOrderParams.auctionEndPrice!.muln(101).divn(100),
 								postOnly: PostOnlyParams.MUST_POST_ONLY,
-								immediateOrCancel: true,
 							}),
 							undefined,
 							undefined,
