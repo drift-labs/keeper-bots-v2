@@ -280,7 +280,7 @@ export class SwiftPlacer {
 						baseAssetAmountFilled: ZERO,
 						quoteAssetAmountFilled: ZERO,
 						quoteAssetAmount: ZERO,
-						bitFlags: 0,
+						bitFlags: signedMsgOrderParams.bitFlags,
 						postedSlotTail: 0,
 					};
 

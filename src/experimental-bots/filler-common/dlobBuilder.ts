@@ -31,6 +31,7 @@ import {
 	convertToNumber,
 	BASE_PRECISION,
 	SignedMsgOrderParamsDelegateMessage,
+	OrderParamsBitFlag,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
