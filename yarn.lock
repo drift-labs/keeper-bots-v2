@@ -481,7 +481,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-93392cbf-f90d-4663-9e9a-d9d0175fddc3-1746044681964/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-9ec3ea99-0db1-4b81-9aa6-8014099638a8-1746055942266/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
@@ -3681,9 +3681,9 @@ duplexify@^4.1.2:
     stream-shift "^1.0.2"
 
 electron-to-chromium@^1.5.73:
-  version "1.5.145"
-  resolved "https://registry.yarnpkg.com/electron-to-chromium/-/electron-to-chromium-1.5.145.tgz#abd50700ac2c809e40a4694584f66711ee937fb6"
-  integrity sha512-pZ5EcTWRq/055MvSBgoFEyKf2i4apwfoqJbK/ak2jnFq8oHjZ+vzc3AhRcz37Xn+ZJfL58R666FLJx0YOK9yTw==
+  version "1.5.146"
+  resolved "https://registry.yarnpkg.com/electron-to-chromium/-/electron-to-chromium-1.5.146.tgz#c09fb78882a89f94c02c37b99f4e61fb88ce837c"
+  integrity sha512-KI0DFJBdqehWSqXmNKIAHpjW4rHL1ugBx4ljOXli41E+IV3JKyTxZ6E7/NgVifzDXBHUqR8Ae1I+eu9vAIqfyQ==
 
 emoji-regex@^8.0.0:
   version "8.0.0"
@@ -4797,7 +4797,7 @@ jest-worker@^29.7.0:
     merge-stream "^2.0.0"
     supports-color "^8.0.0"
 
-jito-ts@4.1.1:
+jito-ts@4.1.1, jito-ts@^3.0.1:
   version "4.1.1"
   resolved "https://registry.yarnpkg.com/jito-ts/-/jito-ts-4.1.1.tgz#b7ba0941102ad346b8b499e631a6a64779ab7958"
   integrity sha512-5a/z7AvtitpExcyxYh1RhPoWRfCA4IPopE5hM5Cxw7/zHnV+VBNZL0m4t3fjfPgMnmPkeoTx2xTw+mSD4PDG7w==
@@ -4808,20 +4808,6 @@ jito-ts@4.1.1:
     "@types/bs58" "^4.0.4"
     agentkeepalive "^4.3.0"
     bs58 "^6.0.0"
-    dotenv "^16.0.3"
-    jayson "^4.0.0"
-    node-fetch "^2.6.7"
-    superstruct "^1.0.3"
-
-jito-ts@^3.0.1:
-  version "3.0.1"
-  resolved "https://registry.yarnpkg.com/jito-ts/-/jito-ts-3.0.1.tgz#24126389896e042c26d303c4e802064b249ed27e"
-  integrity sha512-TSofF7KqcwyaWGjPaSYC8RDoNBY1TPRNBHdrw24bdIi7mQ5bFEDdYK3D//llw/ml8YDvcZlgd644WxhjLTS9yg==
-  dependencies:
-    "@grpc/grpc-js" "^1.8.13"
-    "@noble/ed25519" "^1.7.1"
-    "@solana/web3.js" "~1.77.3"
-    agentkeepalive "^4.3.0"
     dotenv "^16.0.3"
     jayson "^4.0.0"
     node-fetch "^2.6.7"
