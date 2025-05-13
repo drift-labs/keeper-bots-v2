@@ -405,25 +405,33 @@ export class PythCrankerBot implements Bot {
 						))
 					);
 					ixs.push(this.bundleSender!.getTipIx());
-					const simResult = await simulateAndGetTxWithCUs({
-						ixs,
-						connection: this.driftClient.connection,
-						payerPublicKey: this.driftClient.wallet.publicKey,
-						lookupTableAccounts: this.lookupTableAccounts,
-						cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-						doSimulation: true,
-						recentBlockhash: await this.getBlockhashForTx(),
-					});
-					simResult.tx.sign([
-						// @ts-ignore
-						this.driftClient.wallet.payer,
-					]);
-					this.bundleSender?.sendTransactions(
-						[simResult.tx],
-						undefined,
-						undefined,
-						false
-					);
+					try {
+						const simResult = await simulateAndGetTxWithCUs({
+							ixs,
+							connection: this.driftClient.connection,
+							payerPublicKey: this.driftClient.wallet.publicKey,
+							lookupTableAccounts: this.lookupTableAccounts,
+							cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+							doSimulation: true,
+							recentBlockhash: await this.getBlockhashForTx(),
+						});
+						simResult.tx.sign([
+							// @ts-ignore
+							this.driftClient.wallet.payer,
+						]);
+						this.bundleSender?.sendTransactions(
+							[simResult.tx],
+							undefined,
+							undefined,
+							false
+						);
+					} catch (e) {
+						logger.error(
+							`Failed to simulate tx for ${feedIds.map(
+								(feedId) => feedId.baseSymbol
+							)}: ${e}`
+						);
+					}
 				} else {
 					const priorityFees = Math.floor(
 						(this.priorityFeeSubscriber?.getCustomStrategyResult() || 0) *
@@ -443,30 +451,38 @@ export class PythCrankerBot implements Bot {
 							feedIds.map((f) => f.feedId)
 						))
 					);
-					const simResult = await simulateAndGetTxWithCUs({
-						ixs,
-						connection: this.driftClient.connection,
-						payerPublicKey: this.driftClient.wallet.publicKey,
-						lookupTableAccounts: this.lookupTableAccounts,
-						cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-						doSimulation: true,
-						recentBlockhash: await this.getBlockhashForTx(),
-					});
-					const startTime = Date.now();
-					this.driftClient
-						.sendTransaction(simResult.tx)
-						.then((txSigAndSlot: TxSigAndSlot) => {
-							logger.info(
-								`Posted multi pyth pull oracle for ${feedIds.map(
-									(feedId) => feedId.baseSymbol
-								)} update atomic tx: ${txSigAndSlot.txSig}, took ${
-									Date.now() - startTime
-								}ms`
-							);
-						})
-						.catch((e) => {
-							console.log(e);
+					try {
+						const simResult = await simulateAndGetTxWithCUs({
+							ixs,
+							connection: this.driftClient.connection,
+							payerPublicKey: this.driftClient.wallet.publicKey,
+							lookupTableAccounts: this.lookupTableAccounts,
+							cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+							doSimulation: true,
+							recentBlockhash: await this.getBlockhashForTx(),
 						});
+						const startTime = Date.now();
+						this.driftClient
+							.sendTransaction(simResult.tx)
+							.then((txSigAndSlot: TxSigAndSlot) => {
+								logger.info(
+									`Posted multi pyth pull oracle for ${feedIds.map(
+										(feedId) => feedId.baseSymbol
+									)} update atomic tx: ${txSigAndSlot.txSig}, took ${
+										Date.now() - startTime
+									}ms`
+								);
+							})
+							.catch((e) => {
+								console.log(e);
+							});
+					} catch (e) {
+						logger.error(
+							`Failed to simulate tx for ${feedIds.map(
+								(feedId) => feedId.baseSymbol
+							)}: ${e}`
+						);
+					}
 				}
 			})
 		);
