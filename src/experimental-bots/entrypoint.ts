@@ -224,11 +224,7 @@ const runBot = async () => {
 	if (config.global.hermesEndpoint) {
 		pythPriceSubscriber = new PythPriceFeedSubscriber(
 			config.global.hermesEndpoint,
-			{
-				priceFeedRequestConfig: {
-					binary: true,
-				},
-			}
+			{}
 		);
 	}
 

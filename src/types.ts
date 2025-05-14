@@ -1,5 +1,5 @@
 import { BN, PositionDirection } from '@drift-labs/sdk';
-import { PriceServiceConnection } from '@pythnetwork/price-service-client';
+import { HermesClient } from '@pythnetwork/hermes-client';
 
 export const constants = {
 	devnet: {
@@ -116,7 +116,7 @@ export interface Bot {
 	readonly name: string;
 	readonly dryRun: boolean;
 	readonly defaultIntervalMs?: number;
-	readonly pythConnection?: PriceServiceConnection;
+	readonly pythConnection?: HermesClient;
 
 	/**
 	 * Initialize the bot
@@ -138,3 +138,10 @@ export interface Bot {
 	 */
 	healthCheck: () => Promise<boolean>;
 }
+
+export type PythPullPriceData = {
+	conf: number;
+	price: number;
+	expo: number;
+	publishTime: number;
+};

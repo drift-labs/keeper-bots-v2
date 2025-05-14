@@ -1,14 +1,11 @@
-import { Bot } from '../types';
+import { Bot, PythPullPriceData } from '../types';
 import { logger } from '../logger';
 import {
 	GlobalConfig,
 	PythCrankerBotConfig,
 	PythUpdateConfigs,
 } from '../config';
-import {
-	PriceFeed,
-	PriceServiceConnection,
-} from '@pythnetwork/price-service-client';
+import { HermesClient, PriceUpdate } from '@pythnetwork/hermes-client';
 import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSolanaReceiver';
 import {
 	BlockhashSubscriber,
@@ -66,7 +63,8 @@ export type FeedIdToCrankInfo = {
 };
 
 export class PythCrankerBot implements Bot {
-	private priceServiceConnection: PriceServiceConnection;
+	private priceServiceConnection: HermesClient;
+	private pythEventSource: EventSource | undefined;
 	private feedIdsToCrank: FeedIdToCrankInfo[] = [];
 	private pythOracleClient: OracleClient;
 	readonly decodeFunc: (name: string, data: Buffer) => PriceUpdateAccount;
@@ -74,7 +72,7 @@ export class PythCrankerBot implements Bot {
 	public name: string;
 	public dryRun: boolean;
 	private intervalMs: number;
-	private feedIdToPriceFeedMap: Map<string, PriceFeed> = new Map();
+	private feedIdToPriceUpdateMap: Map<string, PythPullPriceData> = new Map();
 	public defaultIntervalMs = 30_000;
 
 	private blockhashSubscriber: BlockhashSubscriber;
@@ -96,7 +94,7 @@ export class PythCrankerBot implements Bot {
 		if (!globalConfig.hermesEndpoint) {
 			throw new Error('Missing hermesEndpoint in global config');
 		}
-		this.priceServiceConnection = new PriceServiceConnection(
+		this.priceServiceConnection = new HermesClient(
 			globalConfig.hermesEndpoint,
 			{
 				timeout: 10_000,
@@ -233,12 +231,28 @@ export class PythCrankerBot implements Bot {
 			});
 		}
 
-		await this.priceServiceConnection.subscribePriceFeedUpdates(
-			this.feedIdsToCrank.map((x) => x.feedId),
-			(priceFeed) => {
-				this.feedIdToPriceFeedMap.set(priceFeed.id, priceFeed);
+		this.pythEventSource =
+			await this.priceServiceConnection.getPriceUpdatesStream(
+				this.feedIdsToCrank.map((x) => x.feedId)
+			);
+
+		this.pythEventSource.onmessage = async (event) => {
+			const priceUpdate = JSON.parse(event.data) as PriceUpdate;
+			if (priceUpdate.parsed) {
+				for (const update of priceUpdate.parsed) {
+					this.feedIdToPriceUpdateMap.set(update.id, {
+						expo: update.price.expo,
+						publishTime: update.price.publish_time,
+						price: +update.price.price as number,
+						conf: +update.price.conf,
+					});
+				}
+			} else {
+				logger.warn(
+					`Received invalid price update: ${JSON.stringify(priceUpdate)}`
+				);
 			}
-		);
+		};
 
 		this.priorityFeeSubscriber?.updateAddresses([
 			this.driftClient.getReceiverProgram().programId,
@@ -250,9 +264,7 @@ export class PythCrankerBot implements Bot {
 		this.feedIdsToCrank = [];
 		this.blockhashSubscriber.unsubscribe();
 		await this.driftClient.unsubscribe();
-		await this.priceServiceConnection.unsubscribePriceFeedUpdates(
-			this.feedIdsToCrank.map((x) => x.feedId)
-		);
+		this.pythEventSource?.close();
 	}
 
 	async startIntervalLoop(intervalMs = this.intervalMs): Promise<void> {
@@ -266,17 +278,13 @@ export class PythCrankerBot implements Bot {
 	}
 
 	async getVaaForPriceFeedIds(feedIds: string[]): Promise<string> {
-		const latestVaa = await this.priceServiceConnection.getLatestVaas(feedIds);
-		return latestVaa[0];
-	}
-
-	async getLatestPriceFeedUpdatesForFeedIds(
-		feedIds: string[]
-	): Promise<PriceFeed[] | undefined> {
-		const latestPrices = await this.priceServiceConnection.getLatestPriceFeeds(
-			feedIds
+		const latestVaa = await this.priceServiceConnection.getLatestPriceUpdates(
+			feedIds,
+			{
+				encoding: 'base64',
+			}
 		);
-		return latestPrices;
+		return latestVaa.binary.data[0];
 	}
 
 	private async getBlockhashForTx(): Promise<string> {
@@ -327,16 +335,15 @@ export class PythCrankerBot implements Bot {
 				);
 				return;
 			}
-			const pythnetPriceFeed = this.feedIdToPriceFeedMap.get(
+			const pythnetPriceData = this.feedIdToPriceUpdateMap.get(
 				trimFeedId(feedIdCrankInfo.feedId)
 			);
 
-			if (!pythnetPriceFeed || !onChainPriceFeed) {
+			if (!pythnetPriceData || !onChainPriceFeed) {
 				logger.info(`Missing price feed data for ${feedIdCrankInfo.feedId}`);
 				return;
 			}
 
-			const pythnetPriceData = pythnetPriceFeed.getPriceUnchecked();
 			const onChainPriceData =
 				this.pythOracleClient.getOraclePriceDataFromBuffer(result.data);
 			const onChainSlot = onChainPriceData.slot.toNumber();

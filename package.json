@@ -14,7 +14,7 @@
 		"@opentelemetry/sdk-node": "0.31.0",
 		"@project-serum/anchor": "0.19.1-beta.1",
 		"@project-serum/serum": "0.13.65",
-		"@pythnetwork/price-service-client": "1.9.0",
+		"@pythnetwork/hermes-client": "2.0.0",
 		"@pythnetwork/pyth-lazer-sdk": "0.3.2",
 		"@solana/spl-token": "0.3.7",
 		"@solana/web3.js": "1.92.3",
@@ -83,5 +83,8 @@
 	},
 	"engines": {
 		"node": ">=20.18.0"
+	},
+	"resolutions": {
+		"jito-ts": "4.1.1"
 	}
 }

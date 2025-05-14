@@ -54,7 +54,7 @@ import {
 } from '@solana/web3.js';
 import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSolanaReceiver';
 import { PythLazerSubscriber } from '../pythLazerSubscriber';
-import { PriceServiceConnection } from '@pythnetwork/price-service-client';
+import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
@@ -101,15 +101,14 @@ function getPythPullFeedIdsToCrank(
 	const marketIdToFeedId: Map<string, string> = new Map();
 
 	for (const market of [...spotMarkets, ...perpMarkets]) {
-		if (!getVariant(market.oracleSource).toLowerCase().includes('pull')) {
-			continue;
-		}
-		if (market.pythFeedId === undefined) {
-			logger.warn(
-				`No pyth feed id for market ${
-					market.symbol
-				} with oracleSource ${getVariant(market.oracleSource)}`
-			);
+		const oracleSourceStr = getVariant(market.oracleSource).toLowerCase();
+		if (
+			!(
+				oracleSourceStr.includes('pull') &&
+				oracleSourceStr.includes('pyth') &&
+				market.pythFeedId !== undefined
+			)
+		) {
 			continue;
 		}
 
@@ -193,7 +192,7 @@ export class TriggerBot implements Bot {
 
 	private pythLazerClient?: PythLazerSubscriber;
 	private pythPullFeedIdsToCrank: FeedIdToCrankInfo[] = [];
-	private pythPullClient?: PriceServiceConnection;
+	private pythPullClient?: PythPriceFeedSubscriber;
 
 	// map from marketId (i.e. perp-0 or spot-0) to pyth feed id
 	private marketIdToPythPullFeedId: Map<string, string> = new Map();
@@ -269,7 +268,7 @@ export class TriggerBot implements Bot {
 				this.globalConfig.driftEnv
 			);
 
-			this.pythPullClient = new PriceServiceConnection(
+			this.pythPullClient = new PythPriceFeedSubscriber(
 				this.globalConfig.hermesEndpoint,
 				{
 					timeout: 10_000,
@@ -414,12 +413,8 @@ export class TriggerBot implements Bot {
 			this.pythPullClient
 		) {
 			await this.pythLazerClient.subscribe();
-			await this.pythPullClient.subscribePriceFeedUpdates(
-				this.pythPullFeedIdsToCrank.map((x) => x.feedId),
-				(priceFeed) => {
-					const p = priceFeed.getPriceUnchecked().getPriceAsNumberUnchecked();
-					this.pythPullFeedIdToPrice.set('0x' + priceFeed.id, p);
-				}
+			await this.pythPullClient.subscribe(
+				this.pythPullFeedIdsToCrank.map((x) => x.feedId)
 			);
 		}
 	}
@@ -522,7 +517,7 @@ export class TriggerBot implements Bot {
 			if (!feedId) {
 				return [];
 			}
-			const vaa = await this.pythPullClient?.getLatestVaas([feedId]);
+			const vaa = await this.pythPullClient?.getLatestCachedVaa(feedId);
 			if (!vaa) {
 				return [];
 			}
