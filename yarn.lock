@@ -409,10 +409,10 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.17.33":
-  version "0.17.33"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.17.33.tgz#2634d9382880df9b0b29fa7c4b9781a7679457c3"
-  integrity sha512-WLRAE1wcsFrlcDmaaFslDEqpMmuDsp8Jb0XT5hersfR/543Gp3OwoRK054Iyfk+gRImbl6nlVga9jjG8b2rpOA==
+"@drift-labs/jit-proxy@0.17.34":
+  version "0.17.34"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.17.34.tgz#9fa74eb6e6349369fc744c3ec326db91cfc67b60"
+  integrity sha512-S0V7ZpWLWqqhoG6zfX3NiO5kkMYkpVftc3ZhsTmH97V2ifZvktx/gecmcxSjmsmat6xaJcBZ8CmZoDSsT7ue2g==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
     "@drift-labs/sdk" "2.121.0-beta.26"
@@ -481,7 +481,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-819f4b68-4b35-4a3e-a2bd-a4190b0604bb-1747940228252/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-c07a80be-5855-4c3f-b75b-4f68f11cdb42-1748282247236/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
