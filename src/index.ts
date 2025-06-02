@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
+import 'rpc-websockets/dist/lib/client';
 import { program, Option } from 'commander';
-import * as http from 'http';
+import * as http from 'node:http';
 
 import {
 	Connection,
@@ -455,11 +456,7 @@ const runBot = async () => {
 	if (config.global.hermesEndpoint) {
 		pythPriceSubscriber = new PythPriceFeedSubscriber(
 			config.global.hermesEndpoint,
-			{
-				priceFeedRequestConfig: {
-					binary: true,
-				},
-			}
+			{}
 		);
 	}
 
