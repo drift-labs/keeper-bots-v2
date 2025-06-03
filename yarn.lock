@@ -409,20 +409,20 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.17.39":
-  version "0.17.39"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.17.39.tgz#efd557f5443e4712ae0ecf1abbac4c142f865c59"
-  integrity sha512-2DB4XZMrOGhtZXq1Lkt6/Z6YdZdilkEj91LI59obchPlumAoLoet6YhcWZ3/oA1wx/GEB3S4kuDrRPzyR2M5qw==
+"@drift-labs/jit-proxy@0.17.40":
+  version "0.17.40"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.17.40.tgz#7785b0687b965bb3fd85135d505919c437d162f6"
+  integrity sha512-0LF+TTdI49YPhaXpA0JeUV4dOGB/ubun1cppUPXGrY/dQD7fY5GkHgrO5aYVdE/M0QvfD9K7Gaw6KJUF1jZWNg==
   dependencies:
     "@coral-xyz/anchor" "0.26.0"
-    "@drift-labs/sdk" "2.122.0-beta.1"
+    "@drift-labs/sdk" "2.122.0-beta.2"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.122.0-beta.1":
-  version "2.122.0-beta.1"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.122.0-beta.1.tgz#3d554fe3569b91f501518295cc848080a870a537"
-  integrity sha512-5bxn0I0ft757xYLknbkoXI79CSuBovq2ysCRl7+A1KhvPHGEroD0nc63+ezuwGSANFJKmdft5qoDjRtAdJbYiA==
+"@drift-labs/sdk@2.122.0-beta.2":
+  version "2.122.0-beta.2"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.122.0-beta.2.tgz#a36101ad7185135ffcc14bc4022bd9cb7ad97e48"
+  integrity sha512-TLqwjy/IXImbCTpkcB2MRVjKFV11l2Zdi03MU9ox/asNOByk3d3DmEymfSSsC7JjXerhPs+voOfHzQKOEkcY9g==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -481,7 +481,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-d6f63258-6f11-41bc-a1f4-54ebaf1d24ec-1748885683749/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-9ce5fef1-f0f8-4a14-8638-823129261d1f-1748975021349/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
