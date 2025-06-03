@@ -322,11 +322,6 @@ export class SwiftPlacer {
 						true,
 						await this.driftClient.fetchAllLookupTableAccounts()
 					);
-					console.log(logPrefix, txSize.accounts);
-					console.log(
-						logPrefix,
-						makerInfos.map((x) => x.maker.toBase58())
-					);
 					while (
 						txSize.bytes > PACKET_DATA_SIZE ||
 						txSize.accounts > MAX_ACCOUNTS_PER_TX
