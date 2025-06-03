@@ -1710,6 +1710,22 @@ export class FillerMultithreaded {
 						.map((m) => `  ${m.data.maker.toBase58()}: ${m.slot}`)
 						.join('\n')}`
 				);
+				try {
+					if (
+						(simResult.simError as any)['InstructionError'] &&
+						(simResult.simError as any)['InstructionError'][1]['Custom'] < 6000
+					) {
+						logger.info(
+							`${logPrefix} (fillTxId: ${fillTxId}) sim logs: ${simResult.simTxLogs?.join(
+								'\n'
+							)}`
+						);
+					}
+				} catch (e) {
+					logger.error(
+						`${logPrefix} Error parsing sim logs (fillTxId: ${fillTxId}): ${e}`
+					);
+				}
 			} else {
 				if (this.hasEnoughSolToFill) {
 					this.sendFillTxAndParseLogs(
