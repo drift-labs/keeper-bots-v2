@@ -1433,13 +1433,13 @@ export function getSizeOfTransaction(
 		.reduce((a, b) => a + b, 0);
 
 	let numberOfAddressLookups = 0;
+	const totalNumberOfAccounts = accounts.size;
 	if (addressLookupTables.length > 0) {
 		const lookupTableAddresses = addressLookupTables
 			.map((addressLookupTable) =>
 				addressLookupTable.state.addresses.map((address) => address.toBase58())
 			)
 			.flat();
-		const totalNumberOfAccounts = accounts.size;
 		accounts = new Set(
 			[...accounts].filter((account) => !lookupTableAddresses.includes(account))
 		);
@@ -1461,7 +1461,7 @@ export function getSizeOfTransaction(
 			(versionedTransaction ? 32 * addressLookupTables.length : 0) +
 			(versionedTransaction && addressLookupTables.length > 0 ? 2 : 0) +
 			numberOfAddressLookups,
-		accounts: accounts.size,
+		accounts: totalNumberOfAccounts,
 	};
 }
 
