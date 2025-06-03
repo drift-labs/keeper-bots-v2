@@ -49,6 +49,7 @@ import axios from 'axios';
 import { logger } from '../../logger';
 import { sha256 } from '@noble/hashes/sha256';
 
+const MAX_ACCOUNTS_PER_TX = 64;
 const IGNORE_AUTHORITIES = ['CTh4Q6xooiaJMWCwKP5KLQ4j7X3NEJPf3Uq6rX8UsKSi'];
 
 export class SwiftPlacer {
@@ -321,7 +322,10 @@ export class SwiftPlacer {
 						true,
 						await this.driftClient.fetchAllLookupTableAccounts()
 					);
-					while (txSize > PACKET_DATA_SIZE) {
+					while (
+						txSize.bytes > PACKET_DATA_SIZE ||
+						txSize.accounts > MAX_ACCOUNTS_PER_TX
+					) {
 						if (makerInfos.length === 0) {
 							console.log('No more makers to try');
 							break;
@@ -349,7 +353,7 @@ export class SwiftPlacer {
 							connection: this.driftClient.connection,
 							payerPublicKey: this.driftClient.wallet.payer!.publicKey,
 							ixs: [...computeBudgetIxs, ...ixs, fillIx],
-							cuLimitMultiplier: 1.5,
+							cuLimitMultiplier: 2,
 							lookupTableAccounts:
 								await this.driftClient.fetchAllLookupTableAccounts(),
 							doSimulation: true,
@@ -360,7 +364,7 @@ export class SwiftPlacer {
 					}
 
 					if (resp.simError) {
-						logger.info(`${logPrefix}: ${resp.simTxLogs}`);
+						logger.info(`${logPrefix}: ${resp.simError}, ${resp.simTxLogs}`);
 						return;
 					}
 

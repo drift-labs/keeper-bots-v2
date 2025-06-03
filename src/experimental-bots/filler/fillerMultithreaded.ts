@@ -1603,7 +1603,7 @@ export class FillerMultithreaded {
 					ixsToUse,
 					true,
 					this.lookupTableAccounts
-				);
+				).bytes;
 				if (txSize > PACKET_DATA_SIZE && this.pythPriceSubscriber) {
 					logger.info(`tx too large, removing pyth ixs.
 							keys: ${ixsToUse.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
@@ -1867,7 +1867,7 @@ export class FillerMultithreaded {
 			ixsToUse,
 			true,
 			this.lookupTableAccounts
-		);
+		).bytes;
 		if (txSize > PACKET_DATA_SIZE) {
 			const lutAccounts = this.lookupTableAccounts
 				.map((lut) => lut.state.addresses.map((a) => a.toBase58()))

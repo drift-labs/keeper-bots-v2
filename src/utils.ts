@@ -1405,7 +1405,7 @@ export function getSizeOfTransaction(
 	instructions: TransactionInstruction[],
 	versionedTransaction = true,
 	addressLookupTables: AddressLookupTableAccount[] = []
-): number {
+): { bytes: number; accounts: number } {
 	const programs = new Set<string>();
 	const signers = new Set<string>();
 	let accounts = new Set<string>();
@@ -1447,20 +1447,22 @@ export function getSizeOfTransaction(
 		numberOfAddressLookups = totalNumberOfAccounts - accounts.size;
 	}
 
-	return (
-		getSizeOfCompressedU16(signers.size) +
-		signers.size * 64 + // array of signatures
-		3 +
-		getSizeOfCompressedU16(accounts.size) +
-		32 * accounts.size + // array of account addresses
-		32 + // recent blockhash
-		getSizeOfCompressedU16(instructions.length) +
-		instruction_sizes + // array of instructions
-		(versionedTransaction ? 1 + getSizeOfCompressedU16(0) : 0) +
-		(versionedTransaction ? 32 * addressLookupTables.length : 0) +
-		(versionedTransaction && addressLookupTables.length > 0 ? 2 : 0) +
-		numberOfAddressLookups
-	);
+	return {
+		bytes:
+			getSizeOfCompressedU16(signers.size) +
+			signers.size * 64 + // array of signatures
+			3 +
+			getSizeOfCompressedU16(accounts.size) +
+			32 * accounts.size + // array of account addresses
+			32 + // recent blockhash
+			getSizeOfCompressedU16(instructions.length) +
+			instruction_sizes + // array of instructions
+			(versionedTransaction ? 1 + getSizeOfCompressedU16(0) : 0) +
+			(versionedTransaction ? 32 * addressLookupTables.length : 0) +
+			(versionedTransaction && addressLookupTables.length > 0 ? 2 : 0) +
+			numberOfAddressLookups,
+		accounts: accounts.size,
+	};
 }
 
 function getSizeOfCompressedU16(n: number) {
