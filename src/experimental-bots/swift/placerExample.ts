@@ -364,7 +364,11 @@ export class SwiftPlacer {
 					}
 
 					if (resp.simError) {
-						logger.info(`${logPrefix}: ${JSON.stringify(resp.simError)}, ${resp.simTxLogs}`);
+						logger.info(
+							`${logPrefix}: ${JSON.stringify(resp.simError)}, ${
+								resp.simTxLogs
+							}`
+						);
 						return;
 					}
 
