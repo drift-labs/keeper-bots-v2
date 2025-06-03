@@ -1,4 +1,4 @@
-import { PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
+import { Channel, PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
 import { DriftEnv, PerpMarkets } from '@drift-labs/sdk';
 import { RedisClient } from '@drift/common/clients';
 import * as axios from 'axios';
@@ -26,7 +26,8 @@ export class PythLazerSubscriber {
 		env: DriftEnv = 'devnet',
 		private redisClient?: RedisClient,
 		private httpEndpoints: string[] = [],
-		private resubTimeoutMs: number = 2000
+		private resubTimeoutMs: number = 2000,
+		private subscribeChannel = 'fixed_rate@200ms'
 	) {
 		const markets = PerpMarkets[env].filter(
 			(market) => market.pythLazerId !== undefined
@@ -111,7 +112,7 @@ export class PythLazerSubscriber {
 				properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
 				chains: ['solana'],
 				deliveryFormat: 'json',
-				channel: 'fixed_rate@200ms',
+				channel: this.subscribeChannel as Channel,
 				jsonBinaryEncoding: 'hex',
 			});
 			subscriptionId++;
