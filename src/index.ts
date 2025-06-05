@@ -365,7 +365,8 @@ const runBot = async () => {
 			configHasBot(config, 'fillerLite') ||
 			configHasBot(config, 'filler') ||
 			configHasBot(config, 'spotFiller') ||
-			configHasBot(config, 'liquidator');
+			configHasBot(config, 'liquidator') ||
+			configHasBot(config, 'pythLazerCranker');
 		txSender = new FastSingleTxSender({
 			connection: sendTxConnection,
 			blockhashRefreshInterval: 500,
