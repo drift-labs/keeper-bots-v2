@@ -81,6 +81,11 @@ export class PythLazerCrankerBot implements Bot {
 					market.pythLazerId == undefined
 				)
 					continue;
+				if (
+					this.crankConfigs.ignorePythLazerIds?.includes(market.pythLazerId!)
+				) {
+					continue;
+				}
 				allFeedIds.push(market.pythLazerId!);
 			}
 			const allFeedIdsSet = new Set(allFeedIds);

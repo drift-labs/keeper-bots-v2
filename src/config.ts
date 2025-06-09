@@ -122,6 +122,7 @@ export type PythCrankerBotConfig = BaseBotConfig & {
 export type PythLazerCrankerBotConfig = BaseBotConfig & {
 	skipSimulation?: boolean;
 	pythLazerChannel?: string;
+	ignorePythLazerIds?: number[];
 	pythLazerIds?: number[];
 	slotStalenessThresholdRestart: number;
 	txSuccessRateThreshold: number;
