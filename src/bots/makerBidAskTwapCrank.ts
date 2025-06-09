@@ -128,12 +128,12 @@ function buildCrankIntervalToMarketIds(driftClient: DriftClient): {
 			marketType: 'perp',
 			marketIndex: perpMarket.marketIndex,
 		});
-		let crankPeriodMs = 20_000;
+		let crankPeriodMs = 30_000;
 		const isPreLaunch = false;
 		if (isOneOfVariant(perpMarket.contractTier, ['a', 'b'])) {
-			crankPeriodMs = 10_000;
+			crankPeriodMs = 30_000;
 		} else if (isVariant(perpMarket.amm.oracleSource, 'prelaunch')) {
-			crankPeriodMs = 15_000;
+			crankPeriodMs = 60_000;
 		}
 		logger.info(
 			`Perp market ${perpMarket.marketIndex} contractTier: ${getVariant(
