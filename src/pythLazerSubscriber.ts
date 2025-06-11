@@ -1,4 +1,8 @@
-import { Channel, PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
+import {
+	JsonOrBinaryResponse,
+	PythLazerClient,
+	Channel,
+} from '@pythnetwork/pyth-lazer-sdk';
 import { DriftEnv, PerpMarkets } from '@drift-labs/sdk';
 import { RedisClient } from '@drift/common/clients';
 import * as axios from 'axios';
@@ -13,7 +17,6 @@ export class PythLazerSubscriber {
 
 	timeoutId?: NodeJS.Timeout;
 	receivingData = false;
-	isUnsubscribing = false;
 
 	marketIndextoPriceFeedIdChunk: Map<number, number[]> = new Map();
 	marketIndextoPriceFeedId: Map<number, number> = new Map();
@@ -43,17 +46,24 @@ export class PythLazerSubscriber {
 		}
 
 		for (const priceFeedIds of priceFeedIdsArrays) {
-			const filteredMarkets = markets.filter((market) =>
-				priceFeedIds.includes(market.pythLazerId!)
+			const filteredMarkets = markets.filter(
+				(market) =>
+					market.pythLazerId !== undefined &&
+					priceFeedIds.includes(market.pythLazerId)
 			);
 			for (const market of filteredMarkets) {
 				this.marketIndextoPriceFeedIdChunk.set(
 					market.marketIndex,
 					priceFeedIds
 				);
+				if (market.pythLazerId === undefined) {
+					throw new Error(
+						`Pyth Lazer ID not found for market index ${market.marketIndex}`
+					);
+				}
 				this.marketIndextoPriceFeedId.set(
 					market.marketIndex,
-					market.pythLazerId!
+					market.pythLazerId
 				);
 			}
 		}
@@ -65,52 +75,70 @@ export class PythLazerSubscriber {
 			return;
 		}
 
-		this.pythLazerClient = await PythLazerClient.create(
-			this.endpoints,
-			this.token
-		);
+		this.pythLazerClient = await PythLazerClient.create({
+			urls: this.endpoints,
+			token: this.token,
+			numConnections: 3,
+		});
+
+		this.pythLazerClient.addAllConnectionsDownListener(() => {
+			console.log(`All connections to pyth lazer are down`);
+			this.receivingData = false;
+		});
+
 		let subscriptionId = 1;
 		for (const priceFeedIds of this.priceFeedIdsArrays) {
 			const feedIdsHash = this.hash(priceFeedIds);
 			this.feedIdHashToFeedIds.set(feedIdsHash, priceFeedIds);
 			this.subscriptionIdsToFeedIdsHash.set(subscriptionId, feedIdsHash);
-			this.pythLazerClient.addMessageListener((message) => {
-				this.receivingData = true;
-				clearTimeout(this.timeoutId);
-				switch (message.type) {
-					case 'json': {
-						if (message.value.type == 'streamUpdated') {
-							if (message.value.solana?.data) {
-								this.feedIdChunkToPriceMessage.set(
-									this.subscriptionIdsToFeedIdsHash.get(
+			this.pythLazerClient.addMessageListener(
+				(message: JsonOrBinaryResponse) => {
+					this.receivingData = true;
+					switch (message.type) {
+						case 'json': {
+							if (message.value.type == 'streamUpdated') {
+								if (message.value.solana?.data) {
+									const feedIdHash = this.subscriptionIdsToFeedIdsHash.get(
 										message.value.subscriptionId
-									)!,
-									message.value.solana.data
-								);
-							}
-							if (message.value.parsed?.priceFeeds) {
-								for (const priceFeed of message.value.parsed.priceFeeds) {
-									const price =
-										Number(priceFeed.price!) *
-										Math.pow(10, Number(priceFeed.exponent!));
-									this.feedIdToPrice.set(priceFeed.priceFeedId, price);
+									);
+									if (!feedIdHash) {
+										throw new Error(
+											`feedIdHash not found for subscriptionId ${message.value.subscriptionId}`
+										);
+									}
+									this.feedIdChunkToPriceMessage.set(
+										feedIdHash,
+										message.value.solana.data
+									);
+								}
+								if (message.value.parsed?.priceFeeds) {
+									for (const priceFeed of message.value.parsed.priceFeeds) {
+										if (!priceFeed.price || !priceFeed.exponent) {
+											throw new Error(
+												`price or exponent not found for priceFeed ${priceFeed.priceFeedId}`
+											);
+										}
+										const price =
+											Number(priceFeed.price) *
+											Math.pow(10, Number(priceFeed.exponent));
+										this.feedIdToPrice.set(priceFeed.priceFeedId, price);
+									}
 								}
 							}
+							break;
 						}
-						break;
-					}
-					default: {
-						break;
+						default: {
+							break;
+						}
 					}
 				}
-				this.setTimeout();
-			});
-			this.pythLazerClient.send({
+			);
+			this.pythLazerClient.subscribe({
 				type: 'subscribe',
 				subscriptionId,
 				priceFeedIds,
 				properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
-				chains: ['solana'],
+				formats: ['solana'],
 				deliveryFormat: 'json',
 				channel: this.subscribeChannel as Channel,
 				jsonBinaryEncoding: 'hex',
@@ -119,32 +147,11 @@ export class PythLazerSubscriber {
 		}
 
 		this.receivingData = true;
-		this.setTimeout();
-	}
-
-	protected setTimeout(): void {
-		this.timeoutId = setTimeout(async () => {
-			if (this.isUnsubscribing) {
-				// If we are in the process of unsubscribing, do not attempt to resubscribe
-				return;
-			}
-
-			if (this.receivingData) {
-				console.log(`No ws data from pyth lazer client resubscribing`);
-				await this.unsubscribe();
-				this.receivingData = false;
-				await this.subscribe();
-			}
-		}, this.resubTimeoutMs);
 	}
 
 	async unsubscribe() {
-		this.isUnsubscribing = true;
 		this.pythLazerClient?.shutdown();
 		this.pythLazerClient = undefined;
-		clearTimeout(this.timeoutId);
-		this.timeoutId = undefined;
-		this.isUnsubscribing = false;
 	}
 
 	hash(arr: number[]): string {
