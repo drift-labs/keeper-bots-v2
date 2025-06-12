@@ -27,7 +27,7 @@ export class PythLazerSubscriber {
 		private redisClient?: RedisClient,
 		private httpEndpoints: string[] = [],
 		private resubTimeoutMs: number = 2000,
-		private subscribeChannel = 'fixed_rate@200ms'
+		private feedIdToChannelMap?: Map<number, string>
 	) {
 		const markets = PerpMarkets[env].filter(
 			(market) => market.pythLazerId !== undefined
@@ -105,6 +105,10 @@ export class PythLazerSubscriber {
 				}
 				this.setTimeout();
 			});
+
+			// Get the channel for the first feed id in the chunk
+			const channel =
+				this.feedIdToChannelMap?.get(priceFeedIds[0]) ?? 'fixed_rate@200ms';
 			this.pythLazerClient.send({
 				type: 'subscribe',
 				subscriptionId,
@@ -112,7 +116,7 @@ export class PythLazerSubscriber {
 				properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
 				chains: ['solana'],
 				deliveryFormat: 'json',
-				channel: this.subscribeChannel as Channel,
+				channel: channel as Channel,
 				jsonBinaryEncoding: 'hex',
 			});
 			subscriptionId++;
@@ -177,13 +181,14 @@ export class PythLazerSubscriber {
 		feedIds: number[]
 	): Promise<string | undefined> {
 		try {
+			const channel = this.feedIdToChannelMap?.get(feedIds[0]) ?? 'real_time';
 			const result = await axios.default.post(
 				url,
 				{
 					priceFeedIds: feedIds,
 					properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
 					chains: ['solana'],
-					channel: 'real_time',
+					channel: channel as Channel,
 					jsonBinaryEncoding: 'hex',
 				},
 				{
