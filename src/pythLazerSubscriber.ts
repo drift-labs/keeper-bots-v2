@@ -27,7 +27,7 @@ export class PythLazerSubscriber {
 		private redisClient?: RedisClient,
 		private httpEndpoints: string[] = [],
 		private resubTimeoutMs: number = 2000,
-		private feedIdToChannelMap?: Map<number, string>
+		private subscribeChannel = 'fixed_rate@200ms'
 	) {
 		const markets = PerpMarkets[env].filter(
 			(market) => market.pythLazerId !== undefined
@@ -43,18 +43,22 @@ export class PythLazerSubscriber {
 		}
 
 		for (const priceFeedIds of priceFeedIdsArrays) {
-			const filteredMarkets = markets.filter((market) =>
-				priceFeedIds.includes(market.pythLazerId!)
+			const filteredMarkets = markets.filter(
+				(market) =>
+					market.pythLazerId !== undefined &&
+					priceFeedIds.includes(market.pythLazerId)
 			);
 			for (const market of filteredMarkets) {
 				this.marketIndextoPriceFeedIdChunk.set(
 					market.marketIndex,
 					priceFeedIds
 				);
-				this.marketIndextoPriceFeedId.set(
-					market.marketIndex,
-					market.pythLazerId!
-				);
+				if (market.pythLazerId !== undefined) {
+					this.marketIndextoPriceFeedId.set(
+						market.marketIndex,
+						market.pythLazerId
+					);
+				}
 			}
 		}
 	}
@@ -81,18 +85,29 @@ export class PythLazerSubscriber {
 					case 'json': {
 						if (message.value.type == 'streamUpdated') {
 							if (message.value.solana?.data) {
+								const feedIdsHash = this.subscriptionIdsToFeedIdsHash.get(
+									message.value.subscriptionId
+								);
+								if (!feedIdsHash) {
+									throw new Error(
+										`No feedIdsHash found for subscriptionId: ${message.value.subscriptionId}`
+									);
+								}
 								this.feedIdChunkToPriceMessage.set(
-									this.subscriptionIdsToFeedIdsHash.get(
-										message.value.subscriptionId
-									)!,
+									feedIdsHash,
 									message.value.solana.data
 								);
 							}
 							if (message.value.parsed?.priceFeeds) {
 								for (const priceFeed of message.value.parsed.priceFeeds) {
+									if (!priceFeed.price || !priceFeed.exponent) {
+										throw new Error(
+											`Price or exponent is undefined for priceFeed: ${priceFeed}`
+										);
+									}
 									const price =
-										Number(priceFeed.price!) *
-										Math.pow(10, Number(priceFeed.exponent!));
+										Number(priceFeed.price) *
+										Math.pow(10, Number(priceFeed.exponent));
 									this.feedIdToPrice.set(priceFeed.priceFeedId, price);
 								}
 							}
@@ -106,9 +121,6 @@ export class PythLazerSubscriber {
 				this.setTimeout();
 			});
 
-			// Get the channel for the first feed id in the chunk
-			const channel =
-				this.feedIdToChannelMap?.get(priceFeedIds[0]) ?? 'fixed_rate@200ms';
 			this.pythLazerClient.send({
 				type: 'subscribe',
 				subscriptionId,
@@ -116,7 +128,7 @@ export class PythLazerSubscriber {
 				properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
 				chains: ['solana'],
 				deliveryFormat: 'json',
-				channel: channel as Channel,
+				channel: this.subscribeChannel as Channel,
 				jsonBinaryEncoding: 'hex',
 			});
 			subscriptionId++;
@@ -181,14 +193,13 @@ export class PythLazerSubscriber {
 		feedIds: number[]
 	): Promise<string | undefined> {
 		try {
-			const channel = this.feedIdToChannelMap?.get(feedIds[0]) ?? 'real_time';
 			const result = await axios.default.post(
 				url,
 				{
 					priceFeedIds: feedIds,
 					properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
 					chains: ['solana'],
-					channel: channel as Channel,
+					channel: 'real_time',
 					jsonBinaryEncoding: 'hex',
 				},
 				{

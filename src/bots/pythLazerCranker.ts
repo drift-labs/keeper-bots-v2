@@ -62,13 +62,7 @@ export class PythLazerCrankerBot implements Bot {
 			throw new Error('Jito is not supported for pyth lazer cranker');
 		}
 
-		let feedIdChunks: number[][] = [];
-		const feedIdToChannelMap = new Map<number, string>();
-		if (this.crankConfigs.pythLazerRealTimeFeedIds) {
-			for (const feedId of this.crankConfigs.pythLazerRealTimeFeedIds) {
-				feedIdToChannelMap.set(feedId, 'real_time');
-			}
-		}
+		let allFeedIds: number[];
 		if (!this.crankConfigs.pythLazerIds) {
 			const spotMarkets =
 				this.globalConfig.driftEnv === 'mainnet-beta'
@@ -79,7 +73,7 @@ export class PythLazerCrankerBot implements Bot {
 					? MainnetPerpMarkets
 					: DevnetPerpMarkets;
 
-			const allFeedIds: number[] = [];
+			const feeds = [];
 			for (const market of [...spotMarkets, ...perpMarkets]) {
 				if (
 					(this.crankConfigs.onlyCrankUsedOracles &&
@@ -88,35 +82,75 @@ export class PythLazerCrankerBot implements Bot {
 				)
 					continue;
 				if (
-					this.crankConfigs.ignorePythLazerIds?.includes(market.pythLazerId!)
+					this.crankConfigs.ignorePythLazerIds?.includes(market.pythLazerId)
 				) {
 					continue;
 				}
-				allFeedIds.push(market.pythLazerId!);
+				feeds.push(market.pythLazerId);
 			}
-			const allFeedIdsSet = new Set(allFeedIds);
-			feedIdChunks = chunks(Array.from(allFeedIdsSet), 11);
+			allFeedIds = Array.from(new Set(feeds));
 		} else {
-			feedIdChunks = chunks(Array.from(this.crankConfigs.pythLazerIds), 11);
+			allFeedIds = Array.from(new Set(this.crankConfigs.pythLazerIds));
 		}
-		console.log(feedIdChunks);
+
+		const realTimeFeedIds = new Set(
+			this.crankConfigs.pythLazerRealTimeFeedIds ?? []
+		);
+		const defaultChannelFeeds: number[] = [];
+		const realTimeChannelFeeds: number[] = [];
+
+		for (const feedId of allFeedIds) {
+			if (realTimeFeedIds.has(feedId)) {
+				realTimeChannelFeeds.push(feedId);
+			} else {
+				defaultChannelFeeds.push(feedId);
+			}
+		}
 
 		if (!this.globalConfig.lazerEndpoints || !this.globalConfig.lazerToken) {
 			throw new Error('Missing lazerEndpoint or lazerToken in global config');
 		}
 
-		console.log(this.crankConfigs.pythLazerChannel);
-		const defaultSubscriber = new PythLazerSubscriber(
-			this.globalConfig.lazerEndpoints,
-			this.globalConfig.lazerToken,
-			feedIdChunks,
-			this.globalConfig.driftEnv,
-			undefined,
-			undefined,
-			undefined,
-			feedIdToChannelMap
-		);
-		this.pythLazerSubscribers.push(defaultSubscriber);
+		if (realTimeChannelFeeds.length > 0) {
+			const feedIdChunks = chunks(realTimeChannelFeeds, 11);
+			logger.info(
+				`Creating real_time subscriber for feeds: ${realTimeChannelFeeds.join(
+					', '
+				)}`
+			);
+			const subscriber = new PythLazerSubscriber(
+				this.globalConfig.lazerEndpoints,
+				this.globalConfig.lazerToken,
+				feedIdChunks,
+				this.globalConfig.driftEnv,
+				undefined,
+				undefined,
+				undefined,
+				'real_time'
+			);
+			this.pythLazerSubscribers.push(subscriber);
+		}
+
+		if (defaultChannelFeeds.length > 0) {
+			const feedIdChunks = chunks(defaultChannelFeeds, 11);
+			const channel = this.crankConfigs.pythLazerChannel ?? 'fixed_rate@200ms';
+			logger.info(
+				`Creating ${channel} subscriber for feeds: ${defaultChannelFeeds.join(
+					', '
+				)}`
+			);
+			const subscriber = new PythLazerSubscriber(
+				this.globalConfig.lazerEndpoints,
+				this.globalConfig.lazerToken,
+				feedIdChunks,
+				this.globalConfig.driftEnv,
+				undefined,
+				undefined,
+				undefined,
+				channel
+			);
+			this.pythLazerSubscribers.push(subscriber);
+		}
 
 		this.decodeFunc =
 			this.driftClient.program.account.pythLazerOracle.coder.accounts.decodeUnchecked.bind(
