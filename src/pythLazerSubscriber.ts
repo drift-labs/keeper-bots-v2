@@ -43,18 +43,22 @@ export class PythLazerSubscriber {
 		}
 
 		for (const priceFeedIds of priceFeedIdsArrays) {
-			const filteredMarkets = markets.filter((market) =>
-				priceFeedIds.includes(market.pythLazerId!)
+			const filteredMarkets = markets.filter(
+				(market) =>
+					market.pythLazerId !== undefined &&
+					priceFeedIds.includes(market.pythLazerId)
 			);
 			for (const market of filteredMarkets) {
 				this.marketIndextoPriceFeedIdChunk.set(
 					market.marketIndex,
 					priceFeedIds
 				);
-				this.marketIndextoPriceFeedId.set(
-					market.marketIndex,
-					market.pythLazerId!
-				);
+				if (market.pythLazerId !== undefined) {
+					this.marketIndextoPriceFeedId.set(
+						market.marketIndex,
+						market.pythLazerId
+					);
+				}
 			}
 		}
 	}
@@ -81,18 +85,29 @@ export class PythLazerSubscriber {
 					case 'json': {
 						if (message.value.type == 'streamUpdated') {
 							if (message.value.solana?.data) {
+								const feedIdsHash = this.subscriptionIdsToFeedIdsHash.get(
+									message.value.subscriptionId
+								);
+								if (!feedIdsHash) {
+									throw new Error(
+										`No feedIdsHash found for subscriptionId: ${message.value.subscriptionId}`
+									);
+								}
 								this.feedIdChunkToPriceMessage.set(
-									this.subscriptionIdsToFeedIdsHash.get(
-										message.value.subscriptionId
-									)!,
+									feedIdsHash,
 									message.value.solana.data
 								);
 							}
 							if (message.value.parsed?.priceFeeds) {
 								for (const priceFeed of message.value.parsed.priceFeeds) {
+									if (!priceFeed.price || !priceFeed.exponent) {
+										throw new Error(
+											`Price or exponent is undefined for priceFeed: ${priceFeed}`
+										);
+									}
 									const price =
-										Number(priceFeed.price!) *
-										Math.pow(10, Number(priceFeed.exponent!));
+										Number(priceFeed.price) *
+										Math.pow(10, Number(priceFeed.exponent));
 									this.feedIdToPrice.set(priceFeed.priceFeedId, price);
 								}
 							}
@@ -105,6 +120,7 @@ export class PythLazerSubscriber {
 				}
 				this.setTimeout();
 			});
+
 			this.pythLazerClient.send({
 				type: 'subscribe',
 				subscriptionId,

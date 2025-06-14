@@ -37,7 +37,7 @@ const SIM_CU_ESTIMATE_MULTIPLIER = 1.5;
 const DEFAULT_INTEVAL_MS = 30000;
 
 export class PythLazerCrankerBot implements Bot {
-	private pythLazerClient: PythLazerSubscriber;
+	private pythLazerSubscribers: PythLazerSubscriber[] = [];
 	readonly decodeFunc: (name: string, data: Buffer) => PriceUpdateAccount;
 
 	public name: string;
@@ -62,7 +62,7 @@ export class PythLazerCrankerBot implements Bot {
 			throw new Error('Jito is not supported for pyth lazer cranker');
 		}
 
-		let feedIdChunks: number[][] = [];
+		let allFeedIds: number[];
 		if (!this.crankConfigs.pythLazerIds) {
 			const spotMarkets =
 				this.globalConfig.driftEnv === 'mainnet-beta'
@@ -73,7 +73,7 @@ export class PythLazerCrankerBot implements Bot {
 					? MainnetPerpMarkets
 					: DevnetPerpMarkets;
 
-			const allFeedIds: number[] = [];
+			const feeds = [];
 			for (const market of [...spotMarkets, ...perpMarkets]) {
 				if (
 					(this.crankConfigs.onlyCrankUsedOracles &&
@@ -82,34 +82,76 @@ export class PythLazerCrankerBot implements Bot {
 				)
 					continue;
 				if (
-					this.crankConfigs.ignorePythLazerIds?.includes(market.pythLazerId!)
+					this.crankConfigs.ignorePythLazerIds?.includes(market.pythLazerId)
 				) {
 					continue;
 				}
-				allFeedIds.push(market.pythLazerId!);
+				feeds.push(market.pythLazerId);
 			}
-			const allFeedIdsSet = new Set(allFeedIds);
-			feedIdChunks = chunks(Array.from(allFeedIdsSet), 11);
+			allFeedIds = Array.from(new Set(feeds));
 		} else {
-			feedIdChunks = chunks(Array.from(this.crankConfigs.pythLazerIds), 11);
+			allFeedIds = Array.from(new Set(this.crankConfigs.pythLazerIds));
 		}
-		console.log(feedIdChunks);
+
+		const realTimeFeedIds = new Set(
+			this.crankConfigs.pythLazerRealTimeFeedIds ?? []
+		);
+		const defaultChannelFeeds: number[] = [];
+		const realTimeChannelFeeds: number[] = [];
+
+		for (const feedId of allFeedIds) {
+			if (realTimeFeedIds.has(feedId)) {
+				realTimeChannelFeeds.push(feedId);
+			} else {
+				defaultChannelFeeds.push(feedId);
+			}
+		}
 
 		if (!this.globalConfig.lazerEndpoints || !this.globalConfig.lazerToken) {
 			throw new Error('Missing lazerEndpoint or lazerToken in global config');
 		}
 
-		console.log(this.crankConfigs.pythLazerChannel);
-		this.pythLazerClient = new PythLazerSubscriber(
-			this.globalConfig.lazerEndpoints,
-			this.globalConfig.lazerToken,
-			feedIdChunks,
-			this.globalConfig.driftEnv,
-			undefined,
-			undefined,
-			undefined,
-			this.crankConfigs.pythLazerChannel ?? 'fixed_rate@200ms'
-		);
+		if (realTimeChannelFeeds.length > 0) {
+			const feedIdChunks = chunks(realTimeChannelFeeds, 11);
+			logger.info(
+				`Creating real_time subscriber for feeds: ${realTimeChannelFeeds.join(
+					', '
+				)}`
+			);
+			const subscriber = new PythLazerSubscriber(
+				this.globalConfig.lazerEndpoints,
+				this.globalConfig.lazerToken,
+				feedIdChunks,
+				this.globalConfig.driftEnv,
+				undefined,
+				undefined,
+				undefined,
+				'real_time'
+			);
+			this.pythLazerSubscribers.push(subscriber);
+		}
+
+		if (defaultChannelFeeds.length > 0) {
+			const feedIdChunks = chunks(defaultChannelFeeds, 11);
+			const channel = this.crankConfigs.pythLazerChannel ?? 'fixed_rate@200ms';
+			logger.info(
+				`Creating ${channel} subscriber for feeds: ${defaultChannelFeeds.join(
+					', '
+				)}`
+			);
+			const subscriber = new PythLazerSubscriber(
+				this.globalConfig.lazerEndpoints,
+				this.globalConfig.lazerToken,
+				feedIdChunks,
+				this.globalConfig.driftEnv,
+				undefined,
+				undefined,
+				undefined,
+				channel
+			);
+			this.pythLazerSubscribers.push(subscriber);
+		}
+
 		this.decodeFunc =
 			this.driftClient.program.account.pythLazerOracle.coder.accounts.decodeUnchecked.bind(
 				this.driftClient.program.account.pythLazerOracle.coder.accounts
@@ -127,23 +169,26 @@ export class PythLazerCrankerBot implements Bot {
 			...(await this.driftClient.fetchAllLookupTableAccounts())
 		);
 
-		await this.pythLazerClient.subscribe();
-
-		this.priorityFeeSubscriber?.updateAddresses(
-			this.pythLazerClient.allSubscribedIds.map((feedId) =>
-				getPythLazerOraclePublicKey(
-					this.driftClient.program.programId,
-					Number(feedId)
+		for (const subscriber of this.pythLazerSubscribers) {
+			await subscriber.subscribe();
+			this.priorityFeeSubscriber?.updateAddresses(
+				subscriber.allSubscribedIds.map((feedId) =>
+					getPythLazerOraclePublicKey(
+						this.driftClient.program.programId,
+						Number(feedId)
+					)
 				)
-			)
-		);
+			);
+		}
 	}
 
 	async reset(): Promise<void> {
 		logger.info(`Resetting ${this.name} bot`);
 		this.blockhashSubscriber.unsubscribe();
 		await this.driftClient.unsubscribe();
-		this.pythLazerClient.unsubscribe();
+		for (const subscriber of this.pythLazerSubscribers) {
+			subscriber.unsubscribe();
+		}
 	}
 
 	async startIntervalLoop(intervalMs = this.defaultIntervalMs): Promise<void> {
@@ -171,88 +216,90 @@ export class PythLazerCrankerBot implements Bot {
 	}
 
 	async runCrankLoop() {
-		for (const [
-			feedIdsStr,
-			priceMessage,
-		] of this.pythLazerClient.feedIdChunkToPriceMessage.entries()) {
-			const feedIds = this.pythLazerClient.getPriceFeedIdsFromHash(feedIdsStr);
-			const ixs = [
-				ComputeBudgetProgram.setComputeUnitLimit({
-					units: 30_000,
-				}),
-			];
-			const priorityFees = Math.floor(
-				(this.priorityFeeSubscriber?.getCustomStrategyResult() || 0) *
-					this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-			);
-			logger.info(
-				`Priority fees to use: ${priorityFees} with multiplier: ${this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()}`
-			);
-			ixs.push(
-				ComputeBudgetProgram.setComputeUnitPrice({
-					microLamports: priorityFees,
-				})
-			);
-			const pythLazerIxs =
-				await this.driftClient.getPostPythLazerOracleUpdateIxs(
-					feedIds,
-					priceMessage,
-					ixs
+		for (const subscriber of this.pythLazerSubscribers) {
+			for (const [
+				feedIdsStr,
+				priceMessage,
+			] of subscriber.feedIdChunkToPriceMessage.entries()) {
+				const feedIds = subscriber.getPriceFeedIdsFromHash(feedIdsStr);
+				const ixs = [
+					ComputeBudgetProgram.setComputeUnitLimit({
+						units: 30_000,
+					}),
+				];
+				const priorityFees = Math.floor(
+					(this.priorityFeeSubscriber?.getCustomStrategyResult() || 0) *
+						this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 				);
-			ixs.push(...pythLazerIxs);
-
-			if (!this.crankConfigs.skipSimulation) {
-				ixs[0] = ComputeBudgetProgram.setComputeUnitLimit({
-					units: 1_400_000,
-				});
-				const simResult = await simulateAndGetTxWithCUs({
-					ixs,
-					connection: this.driftClient.connection,
-					payerPublicKey: this.driftClient.wallet.publicKey,
-					lookupTableAccounts: this.lookupTableAccounts,
-					cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
-					doSimulation: true,
-					recentBlockhash: await this.getBlockhashForTx(),
-				});
-				if (simResult.simError) {
-					logger.error(
-						`Error simulating pyth lazer oracles for ${feedIds}: ${simResult.simTxLogs}`
+				logger.info(
+					`Priority fees to use: ${priorityFees} with multiplier: ${this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()}`
+				);
+				ixs.push(
+					ComputeBudgetProgram.setComputeUnitPrice({
+						microLamports: priorityFees,
+					})
+				);
+				const pythLazerIxs =
+					await this.driftClient.getPostPythLazerOracleUpdateIxs(
+						feedIds,
+						priceMessage,
+						ixs
 					);
-					continue;
+				ixs.push(...pythLazerIxs);
+
+				if (!this.crankConfigs.skipSimulation) {
+					ixs[0] = ComputeBudgetProgram.setComputeUnitLimit({
+						units: 1_400_000,
+					});
+					const simResult = await simulateAndGetTxWithCUs({
+						ixs,
+						connection: this.driftClient.connection,
+						payerPublicKey: this.driftClient.wallet.publicKey,
+						lookupTableAccounts: this.lookupTableAccounts,
+						cuLimitMultiplier: SIM_CU_ESTIMATE_MULTIPLIER,
+						doSimulation: true,
+						recentBlockhash: await this.getBlockhashForTx(),
+					});
+					if (simResult.simError) {
+						logger.error(
+							`Error simulating pyth lazer oracles for ${feedIds}: ${simResult.simTxLogs}`
+						);
+						continue;
+					}
+					const startTime = Date.now();
+					this.driftClient
+						.sendTransaction(simResult.tx)
+						.then((txSigAndSlot: TxSigAndSlot) => {
+							logger.info(
+								`Posted pyth lazer oracles for ${feedIds} update atomic tx: ${
+									txSigAndSlot.txSig
+								}, took ${Date.now() - startTime}ms`
+							);
+						})
+						.catch((e) => {
+							console.log(e);
+						});
+				} else {
+					const startTime = Date.now();
+					const tx = getVersionedTransaction(
+						this.driftClient.wallet.publicKey,
+						ixs,
+						this.lookupTableAccounts,
+						await this.getBlockhashForTx()
+					);
+					this.driftClient
+						.sendTransaction(tx)
+						.then((txSigAndSlot: TxSigAndSlot) => {
+							logger.info(
+								`Posted pyth lazer oracles for ${feedIds} update atomic tx: ${
+									txSigAndSlot.txSig
+								}, took ${Date.now() - startTime}ms`
+							);
+						})
+						.catch((e) => {
+							console.log(e);
+						});
 				}
-				const startTime = Date.now();
-				this.driftClient
-					.sendTransaction(simResult.tx)
-					.then((txSigAndSlot: TxSigAndSlot) => {
-						logger.info(
-							`Posted pyth lazer oracles for ${feedIds} update atomic tx: ${
-								txSigAndSlot.txSig
-							}, took ${Date.now() - startTime}ms`
-						);
-					})
-					.catch((e) => {
-						console.log(e);
-					});
-			} else {
-				const startTime = Date.now();
-				const tx = getVersionedTransaction(
-					this.driftClient.wallet.publicKey,
-					ixs,
-					this.lookupTableAccounts,
-					await this.getBlockhashForTx()
-				);
-				this.driftClient
-					.sendTransaction(tx)
-					.then((txSigAndSlot: TxSigAndSlot) => {
-						logger.info(
-							`Posted pyth lazer oracles for ${feedIds} update atomic tx: ${
-								txSigAndSlot.txSig
-							}, took ${Date.now() - startTime}ms`
-						);
-					})
-					.catch((e) => {
-						console.log(e);
-					});
 			}
 		}
 	}
