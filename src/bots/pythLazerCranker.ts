@@ -25,7 +25,11 @@ import {
 	sleepMs,
 } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
-import { PythLazerSubscriber } from '../pythLazerSubscriber';
+import {
+	PythLazerPriceFeedArray,
+	PythLazerSubscriber,
+} from '../pythLazerSubscriber';
+import { Channel } from '@pythnetwork/pyth-lazer-sdk';
 
 setGlobalDispatcher(
 	new Agent({
@@ -62,8 +66,11 @@ export class PythLazerCrankerBot implements Bot {
 			throw new Error('Jito is not supported for pyth lazer cranker');
 		}
 
-		let feedIdChunks: number[][] = [];
-		if (!this.crankConfigs.pythLazerIds) {
+		let feedIdChunks: PythLazerPriceFeedArray[] = [];
+		if (
+			!this.crankConfigs.pythLazerIds &&
+			!this.crankConfigs.pythLazerIdsByChannel
+		) {
 			const spotMarkets =
 				this.globalConfig.driftEnv === 'mainnet-beta'
 					? MainnetSpotMarkets
@@ -89,9 +96,35 @@ export class PythLazerCrankerBot implements Bot {
 				allFeedIds.push(market.pythLazerId!);
 			}
 			const allFeedIdsSet = new Set(allFeedIds);
-			feedIdChunks = chunks(Array.from(allFeedIdsSet), 11);
+			feedIdChunks = chunks(Array.from(allFeedIdsSet), 11).map((ids) => {
+				return {
+					priceFeedIds: ids,
+					channel: 'fixed_rate@200ms',
+				};
+			});
+		} else if (this.crankConfigs.pythLazerIdsByChannel) {
+			for (const key of Object.keys(
+				this.crankConfigs.pythLazerIdsByChannel
+			) as Channel[]) {
+				const ids = this.crankConfigs.pythLazerIdsByChannel[key];
+				if (!ids || ids.length === 0) {
+					continue;
+				}
+				feedIdChunks.push({
+					priceFeedIds: ids,
+					channel: key as Channel,
+				});
+			}
 		} else {
-			feedIdChunks = chunks(Array.from(this.crankConfigs.pythLazerIds), 11);
+			feedIdChunks = chunks(
+				Array.from(this.crankConfigs.pythLazerIds!),
+				11
+			).map((ids) => {
+				return {
+					priceFeedIds: ids,
+					channel: 'real_time',
+				};
+			});
 		}
 		console.log(feedIdChunks);
 
@@ -107,8 +140,7 @@ export class PythLazerCrankerBot implements Bot {
 			this.globalConfig.driftEnv,
 			undefined,
 			undefined,
-			undefined,
-			this.crankConfigs.pythLazerChannel ?? 'fixed_rate@200ms'
+			undefined
 		);
 		this.decodeFunc =
 			this.driftClient.program.account.pythLazerOracle.coder.accounts.decodeUnchecked.bind(
@@ -176,9 +208,10 @@ export class PythLazerCrankerBot implements Bot {
 			priceMessage,
 		] of this.pythLazerClient.feedIdChunkToPriceMessage.entries()) {
 			const feedIds = this.pythLazerClient.getPriceFeedIdsFromHash(feedIdsStr);
+			const cus = Math.max(0, feedIds.length - 3) * 6_000 + 30_000;
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
-					units: 30_000,
+					units: cus,
 				}),
 			];
 			const priorityFees = Math.floor(

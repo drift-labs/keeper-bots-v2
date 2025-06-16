@@ -53,7 +53,10 @@ import {
 	TransactionInstruction,
 } from '@solana/web3.js';
 import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSolanaReceiver';
-import { PythLazerSubscriber } from '../pythLazerSubscriber';
+import {
+	PythLazerPriceFeedArray,
+	PythLazerSubscriber,
+} from '../pythLazerSubscriber';
 import { PriceServiceConnection } from '@pythnetwork/price-service-client';
 
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
@@ -76,7 +79,7 @@ function getPythLazerFeedIdChunks(
 	spotMarkets: SpotMarketConfig[],
 	perpMarkets: PerpMarketConfig[],
 	chunkSize = 11
-): number[][] {
+): PythLazerPriceFeedArray[] {
 	const allFeedIds: number[] = [];
 	for (const market of [...spotMarkets, ...perpMarkets]) {
 		if (
@@ -89,7 +92,12 @@ function getPythLazerFeedIdChunks(
 	}
 
 	const allFeedIdsSet = new Set(allFeedIds);
-	return chunks(Array.from(allFeedIdsSet), chunkSize);
+	return chunks(Array.from(allFeedIdsSet), chunkSize).map((ids) => {
+		return {
+			priceFeedIds: ids,
+			channel: 'fixed_rate@200ms',
+		};
+	});
 }
 
 function getPythPullFeedIdsToCrank(
