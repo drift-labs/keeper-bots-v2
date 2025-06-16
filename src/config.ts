@@ -124,6 +124,11 @@ export type PythLazerCrankerBotConfig = BaseBotConfig & {
 	pythLazerChannel?: string;
 	ignorePythLazerIds?: number[];
 	pythLazerIds?: number[];
+	pythLazerIdsByChannel?: {
+		real_time: number[];
+		'fixed_rate@50ms': number[];
+		'fixed_rate@200ms': number[];
+	};
 	slotStalenessThresholdRestart: number;
 	txSuccessRateThreshold: number;
 	intervalMs: number;
