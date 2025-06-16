@@ -3,6 +3,11 @@ import { DriftEnv, PerpMarkets } from '@drift-labs/sdk';
 import { RedisClient } from '@drift/common/clients';
 import * as axios from 'axios';
 
+export type PythLazerPriceFeedArray = {
+	channel?: Channel;
+	priceFeedIds: number[];
+};
+
 export class PythLazerSubscriber {
 	private pythLazerClient?: PythLazerClient;
 	feedIdChunkToPriceMessage: Map<string, string> = new Map();
@@ -22,34 +27,35 @@ export class PythLazerSubscriber {
 	constructor(
 		private endpoints: string[],
 		private token: string,
-		private priceFeedIdsArrays: number[][],
+		private priceFeedArrays: PythLazerPriceFeedArray[],
 		env: DriftEnv = 'devnet',
 		private redisClient?: RedisClient,
 		private httpEndpoints: string[] = [],
-		private resubTimeoutMs: number = 2000,
-		private subscribeChannel = 'fixed_rate@200ms'
+		private resubTimeoutMs: number = 2000
 	) {
 		const markets = PerpMarkets[env].filter(
 			(market) => market.pythLazerId !== undefined
 		);
 
-		this.allSubscribedIds = this.priceFeedIdsArrays.flat();
+		this.allSubscribedIds = this.priceFeedArrays
+			.map((array) => array.priceFeedIds)
+			.flat();
 		if (
-			priceFeedIdsArrays[0].length === 1 &&
+			priceFeedArrays[0].priceFeedIds.length === 1 &&
 			this.allSubscribedIds.length > 3 &&
 			this.httpEndpoints.length > 0
 		) {
 			this.useHttpRequests = true;
 		}
 
-		for (const priceFeedIds of priceFeedIdsArrays) {
+		for (const priceFeedIds of priceFeedArrays) {
 			const filteredMarkets = markets.filter((market) =>
-				priceFeedIds.includes(market.pythLazerId!)
+				priceFeedIds.priceFeedIds.includes(market.pythLazerId!)
 			);
 			for (const market of filteredMarkets) {
 				this.marketIndextoPriceFeedIdChunk.set(
 					market.marketIndex,
-					priceFeedIds
+					priceFeedIds.priceFeedIds
 				);
 				this.marketIndextoPriceFeedId.set(
 					market.marketIndex,
@@ -70,9 +76,9 @@ export class PythLazerSubscriber {
 			this.token
 		);
 		let subscriptionId = 1;
-		for (const priceFeedIds of this.priceFeedIdsArrays) {
-			const feedIdsHash = this.hash(priceFeedIds);
-			this.feedIdHashToFeedIds.set(feedIdsHash, priceFeedIds);
+		for (const priceFeedIds of this.priceFeedArrays) {
+			const feedIdsHash = this.hash(priceFeedIds.priceFeedIds);
+			this.feedIdHashToFeedIds.set(feedIdsHash, priceFeedIds.priceFeedIds);
 			this.subscriptionIdsToFeedIdsHash.set(subscriptionId, feedIdsHash);
 			this.pythLazerClient.addMessageListener((message) => {
 				this.receivingData = true;
@@ -108,11 +114,11 @@ export class PythLazerSubscriber {
 			this.pythLazerClient.send({
 				type: 'subscribe',
 				subscriptionId,
-				priceFeedIds,
+				priceFeedIds: priceFeedIds.priceFeedIds,
 				properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
 				chains: ['solana'],
 				deliveryFormat: 'json',
-				channel: this.subscribeChannel as Channel,
+				channel: priceFeedIds.channel ?? ('fixed_rate@200ms' as Channel),
 				jsonBinaryEncoding: 'hex',
 			});
 			subscriptionId++;

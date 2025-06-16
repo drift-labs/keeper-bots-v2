@@ -387,7 +387,12 @@ export class FillerBot extends TxThreaded implements Bot {
 			this.pythLazerSubscriber = new PythLazerSubscriber(
 				this.globalConfig.lazerEndpoints,
 				this.globalConfig.lazerToken,
-				pythLazerIdsChunks,
+				pythLazerIdsChunks.map((ids) => {
+					return {
+						priceFeedIds: ids,
+						channel: 'fixed_rate@200ms',
+					};
+				}),
 				this.globalConfig.driftEnv
 			);
 		}
