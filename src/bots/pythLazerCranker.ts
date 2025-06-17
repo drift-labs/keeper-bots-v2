@@ -60,7 +60,15 @@ export class PythLazerCrankerBot implements Bot {
 	) {
 		this.name = crankConfigs.botId;
 		this.dryRun = crankConfigs.dryRun;
-		this.defaultIntervalMs = crankConfigs.intervalMs ?? DEFAULT_INTEVAL_MS;
+
+		let interval = crankConfigs.intervalMs ?? DEFAULT_INTEVAL_MS;
+		if (typeof interval === 'string') {
+			interval = parseInt((interval as string).replace(/_/g, ''));
+		}
+		if (Number.isNaN(interval)) {
+			interval = DEFAULT_INTEVAL_MS;
+		}
+		this.defaultIntervalMs = interval;
 
 		if (this.globalConfig.useJito) {
 			throw new Error('Jito is not supported for pyth lazer cranker');
