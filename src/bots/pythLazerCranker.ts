@@ -61,14 +61,14 @@ export class PythLazerCrankerBot implements Bot {
 		this.name = crankConfigs.botId;
 		this.dryRun = crankConfigs.dryRun;
 
-		let interval = crankConfigs.intervalMs ?? DEFAULT_INTEVAL_MS;
-		if (typeof interval === 'string') {
-			interval = parseInt((interval as string).replace(/_/g, ''));
+		const interval = crankConfigs.intervalMs ?? DEFAULT_INTEVAL_MS;
+		const numericInterval = Number(interval);
+		if (Number.isNaN(numericInterval) || numericInterval <= 0) {
+			throw new Error(
+				`pythLazerCranker.intervalMs in config ('${crankConfigs.intervalMs}') is not a valid positive number. Please use a number (e.g. 20000 not '20_000').`
+			);
 		}
-		if (Number.isNaN(interval)) {
-			interval = DEFAULT_INTEVAL_MS;
-		}
-		this.defaultIntervalMs = interval;
+		this.defaultIntervalMs = numericInterval;
 
 		if (this.globalConfig.useJito) {
 			throw new Error('Jito is not supported for pyth lazer cranker');
