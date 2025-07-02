@@ -159,6 +159,7 @@ export class PythLazerSubscriber {
 
 	async getLatestPriceMessage(feedIds: number[]): Promise<string | undefined> {
 		console.log(`pythLazer getLatestPriceMessage: ${feedIds}`);
+		console.log(`pythLazerData:${feedIds[0]}`);
 		if (this.useHttpRequests) {
 			if (feedIds.length === 1 && this.redisClient) {
 				const priceMessage = (await this.redisClient.get(
