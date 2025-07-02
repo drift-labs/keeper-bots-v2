@@ -1937,6 +1937,10 @@ export class FillerMultithreaded {
 		);
 
 		if (simResult.simError) {
+			for (const ix of pythIxs) {
+				console.log('pyth ix');
+				console.log(`pyth ixs: ${JSON.stringify(ix)}`);
+			}
 			logger.error(
 				`simError: ${JSON.stringify(
 					simResult.simError
