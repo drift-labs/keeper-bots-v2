@@ -1645,6 +1645,11 @@ export class FillerMultithreaded {
 					logger.error(`Error simulating tx: ${error}`);
 					return;
 				}
+				if (simResult.simError) {
+					logger.error(
+						`Error simulating tx result: ${simResult.simError.toString()}`
+					);
+				}
 
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
