@@ -165,7 +165,7 @@ export class PythLazerSubscriber {
 					`pythLazerData:${feedIds[0]}`
 				)) as { data: string; ts: number } | undefined;
 				if (priceMessage?.data && Date.now() - priceMessage.ts < 5000) {
-					console.log(`pythLazer price: redis: ${priceMessage}`);
+					console.log(`pythLazer price: redis: ${priceMessage.data}`);
 					return priceMessage.data;
 				}
 			}
