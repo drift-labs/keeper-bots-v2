@@ -158,31 +158,25 @@ export class PythLazerSubscriber {
 	}
 
 	async getLatestPriceMessage(feedIds: number[]): Promise<string | undefined> {
-		console.log(`pythLazer getLatestPriceMessage: ${feedIds}`);
-		console.log(`pythLazerData:${feedIds[0]}`);
 		if (this.useHttpRequests) {
 			if (feedIds.length === 1 && this.redisClient) {
 				const priceMessage = (await this.redisClient.get(
 					`pythLazerData:${feedIds[0]}`
 				)) as { data: string; ts: number } | undefined;
 				if (priceMessage?.data && Date.now() - priceMessage.ts < 5000) {
-					console.log(`pythLazer price: redis: ${priceMessage.data}`);
 					return priceMessage.data;
 				}
 			}
 			for (const url of this.httpEndpoints) {
 				const priceMessage = await this.fetchLatestPriceMessage(url, feedIds);
 				if (priceMessage) {
-					console.log(`pythLazer price: HTTP: ${priceMessage}`);
 					return priceMessage;
 				}
 			}
 			console.log(`pythLazer price undefined`);
 			return undefined;
 		}
-		const res = this.feedIdChunkToPriceMessage.get(this.hash(feedIds));
-		console.log(`pythLazer price: feedIdChunkToPriceMessage: ${res}`);
-		return res;
+		return this.feedIdChunkToPriceMessage.get(this.hash(feedIds));
 	}
 
 	async fetchLatestPriceMessage(
