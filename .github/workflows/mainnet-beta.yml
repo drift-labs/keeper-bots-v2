@@ -71,8 +71,8 @@ jobs:
           kubectl rollout restart -n $BRANCH_NAME deployment/user-pnl-settler-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/pyth-cranker-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/pyth-lazer-cranker-bot
+          kubectl rollout restart -n $BRANCH_NAME deployment/pyth-lazer-majors-cranker-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/switchboard-cranker-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/swift-placer-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/switchboard-cranker-exponent-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/switchboard-cranker-isolated-pool-bot
-          

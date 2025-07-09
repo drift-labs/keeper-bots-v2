@@ -380,20 +380,20 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.17.77":
-  version "0.17.77"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.17.77.tgz#e42bfee1444216a3cc620a720d5b7603e4d17524"
-  integrity sha512-vDJNlCVF7HnvnkEZRKrp9G76y/oHRLNgNP882HwkQuza27rOJ2VjvkiFb6dse0phA1us9Y/Hd9t3CDGqRQcu4g==
+"@drift-labs/jit-proxy@0.17.87":
+  version "0.17.87"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.17.87.tgz#fd61894a16e090be7e83c3adf8e01e24637c824b"
+  integrity sha512-spNVkQyaibqAGJl6/Befiz7WsV9uh4zAPipcGG9gNvjwZ45pvSH3Hq6UzrHdFGSwGYRIMhks1OCYL3r2O+gyyg==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.126.0-beta.7"
+    "@drift-labs/sdk" "2.127.0-beta.0"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.126.0-beta.7":
-  version "2.126.0-beta.7"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.126.0-beta.7.tgz#911d047e5ec4f05582f73b9617bac6b6c40cb719"
-  integrity sha512-R1DMG/2dk5dFsCoThTsGMy2wAMlfJdjqxP8LPah8j9pLvvo3gqPN3SYjmXNK3HF2LHeCt2CobmvYwerrBQumSw==
+"@drift-labs/sdk@2.127.0-beta.0":
+  version "2.127.0-beta.0"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.127.0-beta.0.tgz#2a789869a7bae2da2f51595bffe4e096557b91f1"
+  integrity sha512-wGDmRXa1UB/Tnk1HNTA6lScatcnVOX8KvDYOCf6IWgsYWr6DuoVC2/85hxKVk9Jrvj61BYYIvPAUc057xhgsnA==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -452,7 +452,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-43f30413-546f-45ac-809e-e121017e9736-1751326465720/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-bd6e53db-b97e-42dd-baaf-9d17d6be5bdc-1752075908758/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
@@ -1687,14 +1687,12 @@
   dependencies:
     bn.js "^5.2.1"
 
-"@pythnetwork/pyth-lazer-sdk@0.3.2":
-  version "0.3.2"
-  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-0.3.2.tgz#5837ca483efe7f5380c2f079d9cd4cd20ec3704e"
-  integrity sha512-YpkbZvoq7aKGA0303QmDA8n9zS/7upQTOrhhi99+SUWXm3WI9PvmZilhYPp/hqHsXzKEieCwlfPqvO+nkCMXdQ==
+"@pythnetwork/pyth-lazer-sdk@2.0.0":
+  version "2.0.0"
+  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-2.0.0.tgz#29f82f239859b9a1a33b4aeded81239bd39ae184"
+  integrity sha512-0zMRvJqfO/jZxCSoCZs/XFiP0qp1WF4DrceXLTkgb6AWBvbONx3rhj2UGUjqBJlAfppuTsJ1I6XTgNIV+elEwA==
   dependencies:
     "@isaacs/ttlcache" "^1.4.1"
-    "@solana/buffer-layout" "^4.0.1"
-    "@solana/web3.js" "^1.98.0"
     isomorphic-ws "^5.0.0"
     ts-log "^2.2.7"
     ws "^8.18.0"
