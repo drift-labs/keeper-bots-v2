@@ -71,10 +71,16 @@ export class PythLazerSubscriber {
 			return;
 		}
 
-		this.pythLazerClient = await PythLazerClient.create(
-			this.endpoints,
-			this.token
-		);
+		this.pythLazerClient = await PythLazerClient.create({
+			urls: this.endpoints,
+			token: this.token,
+			numConnections: 3,
+			rwsConfig: {
+				heartbeatTimeoutDurationMs: 5000,
+				maxRetryDelayMs: 1000,
+				logAfterRetryCount: 10,
+			},
+		});
 		let subscriptionId = 1;
 		for (const priceFeedIds of this.priceFeedArrays) {
 			const feedIdsHash = this.hash(priceFeedIds.priceFeedIds);
@@ -116,7 +122,7 @@ export class PythLazerSubscriber {
 				subscriptionId,
 				priceFeedIds: priceFeedIds.priceFeedIds,
 				properties: ['price', 'bestAskPrice', 'bestBidPrice', 'exponent'],
-				chains: ['solana'],
+				formats: ['solana'],
 				deliveryFormat: 'json',
 				channel: priceFeedIds.channel ?? ('fixed_rate@200ms' as Channel),
 				jsonBinaryEncoding: 'hex',

@@ -452,7 +452,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-65c53c63-b92d-4b18-8176-dc7ec34e8646-1752067937920/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-bd6e53db-b97e-42dd-baaf-9d17d6be5bdc-1752075908758/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
@@ -1687,14 +1687,12 @@
   dependencies:
     bn.js "^5.2.1"
 
-"@pythnetwork/pyth-lazer-sdk@0.3.2":
-  version "0.3.2"
-  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-0.3.2.tgz#5837ca483efe7f5380c2f079d9cd4cd20ec3704e"
-  integrity sha512-YpkbZvoq7aKGA0303QmDA8n9zS/7upQTOrhhi99+SUWXm3WI9PvmZilhYPp/hqHsXzKEieCwlfPqvO+nkCMXdQ==
+"@pythnetwork/pyth-lazer-sdk@2.0.0":
+  version "2.0.0"
+  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-2.0.0.tgz#29f82f239859b9a1a33b4aeded81239bd39ae184"
+  integrity sha512-0zMRvJqfO/jZxCSoCZs/XFiP0qp1WF4DrceXLTkgb6AWBvbONx3rhj2UGUjqBJlAfppuTsJ1I6XTgNIV+elEwA==
   dependencies:
     "@isaacs/ttlcache" "^1.4.1"
-    "@solana/buffer-layout" "^4.0.1"
-    "@solana/web3.js" "^1.98.0"
     isomorphic-ws "^5.0.0"
     ts-log "^2.2.7"
     ws "^8.18.0"
