@@ -35,6 +35,8 @@ export class SwitchboardCrankerBot implements Bot {
 	private blockhashSubscriber: BlockhashSubscriber;
 	private slothashSubscriber: SlothashSubscriber;
 
+	private numFeedsPerIx = 5;
+
 	constructor(
 		private globalConfig: GlobalConfig,
 		private crankConfigs: SwitchboardCrankerBotConfig,
@@ -124,7 +126,7 @@ export class SwitchboardCrankerBot implements Bot {
 	async runCrankLoop() {
 		const pullFeedAliases = chunks(
 			shuffle(Object.keys(this.crankConfigs.pullFeedConfigs)),
-			5
+			this.numFeedsPerIx
 		);
 		for (const aliasChunk of pullFeedAliases) {
 			try {
@@ -191,6 +193,7 @@ export class SwitchboardCrankerBot implements Bot {
 						});
 				}
 			} catch (e) {
+				this.numFeedsPerIx = Math.max(2, this.numFeedsPerIx - 1);
 				logger.error(`Error processing alias ${aliasChunk}: ${e}`);
 			}
 		}
