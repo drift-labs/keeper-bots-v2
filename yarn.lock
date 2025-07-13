@@ -380,20 +380,20 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.17.89":
-  version "0.17.89"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.17.89.tgz#180a6a60a5ed46c24a2172034dae3d229a6d6b08"
-  integrity sha512-tZ/XfLcYiP8EXYvJFq6ZF4LnW+o1cDixF5hgU51ZCXGChQWu/w3eRZdLn/ybDTuhIgG+W+u1nqMCmNpYhmi6Xg==
+"@drift-labs/jit-proxy@0.17.90":
+  version "0.17.90"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.17.90.tgz#6c8d2a8d07414b69c83f4e105c45ab0ff8dc4aca"
+  integrity sha512-Y6upuGMV1EXUpA+41YpXQ+b/lgnV25UOfS29nKEXSc2Emiu3NDHiVGJwAlFK0ULQeB/GbQzXEn9Rt0z2nelO1w==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.127.0-beta.2"
+    "@drift-labs/sdk" "2.127.0-beta.3"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.127.0-beta.2":
-  version "2.127.0-beta.2"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.127.0-beta.2.tgz#f2d4a1bfb84b92a2e266a791df43112e8284d142"
-  integrity sha512-GK3W6rDH5AZ7iXEhV+N/q4hqaOM6VoyL4DSW2IoazKmgwxqNYRgSoZfRMmnaYfTHqCFG5lPWFxE4oV64AvR3RQ==
+"@drift-labs/sdk@2.127.0-beta.3":
+  version "2.127.0-beta.3"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.127.0-beta.3.tgz#0d9cacf026aa708432d71da255da762b0f185f9c"
+  integrity sha512-0hUogUnQ3o5Pdgn0p31wFRpQ8fnWAgj1LrEpc/dSOKRhTBYG3VYeUBQmKTy8lxFm7Y7mFT7/Xdbs0zsFPmSkUw==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -404,7 +404,7 @@
     "@pythnetwork/client" "2.5.3"
     "@pythnetwork/price-service-sdk" "1.7.1"
     "@pythnetwork/pyth-solana-receiver" "0.7.0"
-    "@solana/spl-token" "0.3.7"
+    "@solana/spl-token" "0.4.13"
     "@solana/web3.js" "1.92.3"
     "@switchboard-xyz/common" "3.0.14"
     "@switchboard-xyz/on-demand" "2.4.1"
@@ -452,7 +452,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-f0f6349d-1d7d-4012-9ee4-78c9c305bd1d-1752180318433/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-bec2d7c9-0a42-4033-8e66-22774191b747-1752375620335/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
@@ -1918,6 +1918,17 @@
     "@solana/buffer-layout-utils" "^0.2.0"
     buffer "^6.0.3"
 
+"@solana/spl-token@0.4.13", "@solana/spl-token@^0.4.0":
+  version "0.4.13"
+  resolved "https://registry.yarnpkg.com/@solana/spl-token/-/spl-token-0.4.13.tgz#8f65c3c2b315e1a00a91b8d0f60922c6eb71de62"
+  integrity sha512-cite/pYWQZZVvLbg5lsodSovbetK/eA24gaR0eeUeMuBAMNrT8XFCwaygKy0N2WSg3gSyjjNpIeAGBAKZaY/1w==
+  dependencies:
+    "@solana/buffer-layout" "^4.0.0"
+    "@solana/buffer-layout-utils" "^0.2.0"
+    "@solana/spl-token-group" "^0.0.7"
+    "@solana/spl-token-metadata" "^0.1.6"
+    buffer "^6.0.3"
+
 "@solana/spl-token@^0.1.6":
   version "0.1.8"
   resolved "https://registry.yarnpkg.com/@solana/spl-token/-/spl-token-0.1.8.tgz#f06e746341ef8d04165e21fc7f555492a2a0faa6"
@@ -1938,17 +1949,6 @@
     "@solana/buffer-layout" "^4.0.0"
     "@solana/buffer-layout-utils" "^0.2.0"
     "@solana/spl-token-metadata" "^0.1.2"
-    buffer "^6.0.3"
-
-"@solana/spl-token@^0.4.0":
-  version "0.4.13"
-  resolved "https://registry.yarnpkg.com/@solana/spl-token/-/spl-token-0.4.13.tgz#8f65c3c2b315e1a00a91b8d0f60922c6eb71de62"
-  integrity sha512-cite/pYWQZZVvLbg5lsodSovbetK/eA24gaR0eeUeMuBAMNrT8XFCwaygKy0N2WSg3gSyjjNpIeAGBAKZaY/1w==
-  dependencies:
-    "@solana/buffer-layout" "^4.0.0"
-    "@solana/buffer-layout-utils" "^0.2.0"
-    "@solana/spl-token-group" "^0.0.7"
-    "@solana/spl-token-metadata" "^0.1.6"
     buffer "^6.0.3"
 
 "@solana/web3.js@1.66.2":
