@@ -65,6 +65,10 @@ export type FillerConfig = BaseBotConfig & {
 	triggerPriorityFeeMultiplier?: number;
 };
 
+export type MakerBidAskTwapCrankConfig = BaseBotConfig & {
+	crankIntervalToMarketIndicies?: { [key: number]: number[] };
+};
+
 export type SubaccountConfig = {
 	[key: number]: Array<number>;
 };
@@ -160,7 +164,7 @@ export type BotConfigMap = {
 	userPnlSettler?: UserPnlSettlerConfig;
 	userLpSettler?: BaseBotConfig;
 	userIdleFlipper?: BaseBotConfig;
-	markTwapCrank?: BaseBotConfig;
+	markTwapCrank?: MakerBidAskTwapCrankConfig;
 	pythCranker?: PythCrankerBotConfig;
 	pythLazerCranker?: PythLazerCrankerBotConfig;
 	switchboardCranker?: SwitchboardCrankerBotConfig;

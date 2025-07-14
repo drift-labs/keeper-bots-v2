@@ -18,7 +18,7 @@ import { Mutex } from 'async-mutex';
 
 import { logger } from '../logger';
 import { Bot } from '../types';
-import { BaseBotConfig, GlobalConfig } from '../config';
+import { GlobalConfig, MakerBidAskTwapCrankConfig } from '../config';
 import {
 	TransactionSignature,
 	VersionedTransaction,
@@ -107,12 +107,29 @@ export async function sendVersionedTransaction(
  * @param driftClient
  * @returns
  */
-function buildCrankIntervalToMarketIds(driftClient: DriftClient): {
+function buildCrankIntervalToMarketIds(
+	driftClient: DriftClient,
+	crankIntervalToMarketIndicies?: { [key: number]: number[] }
+): {
 	crankIntervals: { [key: number]: number[] };
 	driftMarkets: DriftMarketInfo[];
 } {
 	const crankIntervals: { [key: number]: number[] } = {};
 	const driftMarkets: DriftMarketInfo[] = [];
+
+	const overrideMarketIndexToCrankingInterval: { [key: number]: number } = {};
+	if (crankIntervalToMarketIndicies) {
+		for (const [interval, marketIndexes] of Object.entries(
+			crankIntervalToMarketIndicies
+		)) {
+			for (const marketIndex of marketIndexes) {
+				overrideMarketIndexToCrankingInterval[marketIndex] = parseInt(interval);
+				logger.info(
+					`Overriding crank interval for market ${marketIndex} to ${interval}ms`
+				);
+			}
+		}
+	}
 
 	for (const perpMarket of driftClient.getPerpMarketAccounts()) {
 		if (isOneOfVariant(perpMarket.status, ['settlement', 'delisted'])) {
@@ -128,17 +145,25 @@ function buildCrankIntervalToMarketIds(driftClient: DriftClient): {
 			marketType: 'perp',
 			marketIndex: perpMarket.marketIndex,
 		});
+
 		let crankPeriodMs = 30_000;
-		const isPreLaunch = false;
-		if (isOneOfVariant(perpMarket.contractTier, ['a', 'b'])) {
-			crankPeriodMs = 30_000;
-		} else if (isVariant(perpMarket.amm.oracleSource, 'prelaunch')) {
-			crankPeriodMs = 60_000;
+		if (perpMarket.marketIndex in overrideMarketIndexToCrankingInterval) {
+			crankPeriodMs =
+				overrideMarketIndexToCrankingInterval[perpMarket.marketIndex];
+		} else {
+			if (isOneOfVariant(perpMarket.contractTier, ['a', 'b'])) {
+				crankPeriodMs = 30_000;
+			} else if (isVariant(perpMarket.amm.oracleSource, 'prelaunch')) {
+				crankPeriodMs = 60_000;
+			}
 		}
 		logger.info(
 			`Perp market ${perpMarket.marketIndex} contractTier: ${getVariant(
 				perpMarket.contractTier
-			)} isPrelaunch: ${isPreLaunch}, crankPeriodMs: ${crankPeriodMs}`
+			)} isPrelaunch: ${isVariant(
+				perpMarket.amm.oracleSource,
+				'prelaunch'
+			)}, crankPeriodMs: ${crankPeriodMs}`
 		);
 		if (crankIntervals[crankPeriodMs] === undefined) {
 			crankIntervals[crankPeriodMs] = [perpMarket.marketIndex];
@@ -184,12 +209,13 @@ export class MakerBidAskTwapCrank implements Bot {
 	private lookupTableAccounts: AddressLookupTableAccount[];
 
 	private bundleSender?: BundleSender;
+	private crankIntervalToMarketIndicies?: { [key: number]: number[] };
 
 	constructor(
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
 		userMap: UserMap,
-		config: BaseBotConfig,
+		config: MakerBidAskTwapCrankConfig,
 		globalConfig: GlobalConfig,
 		runOnce: boolean,
 		pythPriceSubscriber?: PythPriceFeedSubscriber,
@@ -207,6 +233,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.lookupTableAccounts = lookupTableAccounts;
 		this.pythPullOracleClient = new PythPullClient(this.driftClient.connection);
 		this.bundleSender = bundleSender;
+		this.crankIntervalToMarketIndicies = config.crankIntervalToMarketIndicies;
 
 		// Pyth lazer: remember to remove devnet guard
 		if (!this.globalConfig.lazerEndpoints || !this.globalConfig.lazerToken) {
@@ -241,7 +268,10 @@ export class MakerBidAskTwapCrank implements Bot {
 
 		let driftMarkets: DriftMarketInfo[] = [];
 		({ crankIntervals: this.crankIntervalToMarketIds, driftMarkets } =
-			buildCrankIntervalToMarketIds(this.driftClient));
+			buildCrankIntervalToMarketIds(
+				this.driftClient,
+				this.crankIntervalToMarketIndicies
+			));
 		logger.info(
 			`[${this.name}] crankIntervals:\n${JSON.stringify(
 				this.crankIntervalToMarketIds,
