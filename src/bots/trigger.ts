@@ -45,7 +45,7 @@ import { RuntimeSpec, metricAttrFromUserAccount } from '../metrics';
 import {
 	chunks,
 	getNodeToTriggerSignature,
-	getVersionedTransaction,
+	simulateAndGetTxWithCUs,
 } from '../utils';
 import {
 	AddressLookupTableAccount,
@@ -663,56 +663,80 @@ export class TriggerBot implements Bot {
 
 				ixs.push(await this.driftClient.getRevertFillIx());
 
-				const tx = getVersionedTransaction(
-					this.driftClient.wallet.publicKey,
+				// const tx = getVersionedTransaction(
+				// 	this.driftClient.wallet.publicKey,
+				// 	ixs,
+				// 	this.lookupTableAccounts!,
+				// 	await this.getBlockhashForTx()
+				// );
+
+				const resp = await simulateAndGetTxWithCUs({
 					ixs,
-					this.lookupTableAccounts!,
-					await this.getBlockhashForTx()
-				);
+					connection: this.driftClient.connection,
+					payerPublicKey: this.driftClient.wallet.publicKey,
+					lookupTableAccounts: this.lookupTableAccounts!,
+					cuLimitMultiplier: 1.2,
+					doSimulation: true,
+					dumpTx: false,
+					recentBlockhash: this.blockhashSubscriber.getLatestBlockhash(
+						1 + Math.floor(Math.random() * 10)
+					)!.blockhash as string,
+				});
 
-				this.driftClient
-					.sendTransaction(tx)
-					.then((txSig) => {
-						this.triggerCounter!.add(1, {
-							marketType: marketTypeStr,
-							auth: this.driftClient.wallet.publicKey.toString(),
-						});
-						logger.info(
-							`Triggered ${marketTypeStr}. user: ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}: ${
-								txSig.txSig
-							}, cuUnits: ${cuUnits}, activePositions: ${activePositions}, openOrders: ${openOrders}`
-						);
-					})
-					.catch((error) => {
-						nodeToTrigger.node.haveTrigger = false;
+				if (resp.simError) {
+					logger.error(
+						`Error (${JSON.stringify(
+							resp.simError
+						)}) triggering ${marketTypeStr} order for user ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}`
+					);
+					continue;
+				} else {
+					this.driftClient
+						.sendTransaction(resp.tx)
+						.then((txSig) => {
+							this.triggerCounter!.add(1, {
+								marketType: marketTypeStr,
+								auth: this.driftClient.wallet.publicKey.toString(),
+							});
+							logger.info(
+								`Triggered ${marketTypeStr}. user: ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}: ${
+									txSig.txSig
+								}, cuUnits: ${cuUnits}, activePositions: ${activePositions}, openOrders: ${openOrders}`
+							);
+						})
+						.catch((error) => {
+							nodeToTrigger.node.haveTrigger = false;
 
-						const errorCode = getErrorCode(error);
-						if (
-							errorCode &&
-							!errorCodesToSuppress.includes(errorCode) &&
-							!(error as Error).message.includes(
-								'Transaction was not confirmed'
-							)
-						) {
-							if (errorCode) {
-								this.errorCounter!.add(1, { errorCode: errorCode.toString() });
+							const errorCode = getErrorCode(error);
+							if (
+								errorCode &&
+								!errorCodesToSuppress.includes(errorCode) &&
+								!(error as Error).message.includes(
+									'Transaction was not confirmed'
+								)
+							) {
+								if (errorCode) {
+									this.errorCounter!.add(1, {
+										errorCode: errorCode.toString(),
+									});
+								}
+								logger.error(
+									`Error (${errorCode}) triggering ${marketTypeStr} order for user ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}`
+								);
+								logger.error(error);
+								webhookMessage(
+									`[${
+										this.name
+									}]: :x: Error (${errorCode}) triggering ${marketTypeStr} order for user (account: ${nodeToTrigger.node.userAccount.toString()}) ${marketTypeStr} order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+										error.stack ? error.stack : error.message
+									}`
+								);
 							}
-							logger.error(
-								`Error (${errorCode}) triggering ${marketTypeStr} order for user ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}`
-							);
-							logger.error(error);
-							webhookMessage(
-								`[${
-									this.name
-								}]: :x: Error (${errorCode}) triggering ${marketTypeStr} order for user (account: ${nodeToTrigger.node.userAccount.toString()}) ${marketTypeStr} order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-									error.stack ? error.stack : error.message
-								}`
-							);
-						}
-					})
-					.finally(() => {
-						this.removeTriggeringNodes([nodeToTrigger]);
-					});
+						})
+						.finally(() => {
+							this.removeTriggeringNodes([nodeToTrigger]);
+						});
+				}
 			}
 		} catch (e) {
 			logger.error(
