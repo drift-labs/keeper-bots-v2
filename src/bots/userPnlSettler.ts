@@ -372,7 +372,7 @@ export class UserPnlSettlerBot implements Bot {
 					if (
 						(userUnsettledPnl.eq(ZERO) &&
 							settleePositionWithLp.lpShares.eq(ZERO)) ||
-						(!userUnsettledPnl.abs().gte(this.minPnlToSettle) &&
+						(userUnsettledPnl.gt(this.minPnlToSettle) &&
 							!settleePositionWithLp.baseAssetAmount.eq(ZERO) &&
 							!isUsdcBorrow &&
 							settleePositionWithLp.lpShares.eq(ZERO))
