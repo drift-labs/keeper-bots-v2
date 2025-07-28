@@ -30,7 +30,7 @@ import {
 import { Mutex } from 'async-mutex';
 
 import { getErrorCode } from '../error';
-import { logger } from '../logger';
+import { logger, setLogLevel } from '../logger';
 import { Bot } from '../types';
 import { webhookMessage } from '../webhook';
 import { GlobalConfig, UserPnlSettlerConfig } from '../config';
@@ -116,6 +116,7 @@ export class UserPnlSettlerBot implements Bot {
 
 	public async init() {
 		logger.info(`${this.name} initing`);
+		setLogLevel('debug');
 
 		const driftMarkets: DriftMarketInfo[] = [];
 		for (const perpMarket of this.driftClient.getPerpMarketAccounts()) {
