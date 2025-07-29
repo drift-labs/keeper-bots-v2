@@ -74,7 +74,7 @@ export class PythLazerSubscriber {
 		this.pythLazerClient = await PythLazerClient.create({
 			urls: this.endpoints,
 			token: this.token,
-			numConnections: 3,
+			numConnections: 2,
 			rwsConfig: {
 				heartbeatTimeoutDurationMs: 5000,
 				maxRetryDelayMs: 1000,

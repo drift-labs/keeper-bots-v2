@@ -170,7 +170,8 @@ class DLOBBuilder {
 					order,
 					pubkey,
 					this.slotSubscriber.getSlot(),
-					isUserProtectedMaker(userAccount)
+					isUserProtectedMaker(userAccount),
+					order.baseAssetAmount
 				);
 				counter++;
 			});
@@ -332,10 +333,12 @@ class DLOBBuilder {
 				if (!market) {
 					throw new Error('PerpMarket not found');
 				}
+				const mmOraclePriceData =
+					this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
 				oraclePriceData =
 					this.driftClient.getOracleDataForPerpMarket(marketIndex);
-				fallbackBid = calculateBidPrice(market, oraclePriceData);
-				fallbackAsk = calculateAskPrice(market, oraclePriceData);
+				fallbackBid = calculateBidPrice(market, mmOraclePriceData);
+				fallbackAsk = calculateAskPrice(market, mmOraclePriceData);
 			} else {
 				market = this.driftClient.getSpotMarketAccount(marketIndex);
 				if (!market) {
