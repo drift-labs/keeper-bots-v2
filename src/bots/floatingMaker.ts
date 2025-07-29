@@ -255,7 +255,7 @@ export class FloatingPerpMakerBot implements Bot {
 		}
 
 		const openOrders = this.agentState!.openOrders.get(marketIndex) || [];
-		const oracle = this.driftClient.getOracleDataForPerpMarket(marketIndex);
+		const oracle = this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
 		const vAsk = calculateAskPrice(marketAccount, oracle);
 		const vBid = calculateBidPrice(marketAccount, oracle);
 
