@@ -59,7 +59,7 @@ const SLEEP_MS = 500;
 const CU_EST_MULTIPLIER = 1.25;
 
 const FILTER_FOR_MARKET = undefined; // undefined;
-const EMPTY_USER_SETTLE_INTERVAL_MS = 1 * 60 * 1000; // 1 minutes
+const EMPTY_USER_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const POSITIVE_PNL_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const MIN_MARGIN_RATIO_FOR_POSITIVE_PNL = 0.1; // 10% of account value
 
