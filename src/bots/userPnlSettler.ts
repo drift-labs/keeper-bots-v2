@@ -4,7 +4,6 @@ import {
 	UserAccount,
 	PublicKey,
 	PerpMarketAccount,
-	SpotMarketAccount,
 	OraclePriceData,
 	calculateClaimablePnl,
 	QUOTE_PRECISION,
@@ -12,7 +11,6 @@ import {
 	ZERO,
 	calculateNetUserPnlImbalance,
 	convertToNumber,
-	isOracleValid,
 	isVariant,
 	TxSigAndSlot,
 	timeRemainingUntilUpdate,
@@ -79,21 +77,6 @@ interface UserToSettle {
 	settleeUserAccountPublicKey: PublicKey;
 	settleeUserAccount: UserAccount;
 	pnl: number;
-}
-
-interface MarketDataCache {
-	perpMarketAndOracleData: {
-		[marketIndex: number]: {
-			marketAccount: PerpMarketAccount;
-			oraclePriceData: OraclePriceData;
-		};
-	};
-	spotMarketAndOracleData: {
-		[marketIndex: number]: {
-			marketAccount: SpotMarketAccount;
-			oraclePriceData: OraclePriceData;
-		};
-	};
 }
 
 // =============================================================================
@@ -325,64 +308,14 @@ export class UserPnlSettlerBot implements Bot {
 		positiveOnly: boolean;
 		requireLowMargin?: boolean;
 	}) {
-		const marketDataCache = await this.buildMarketDataCache();
-		this.validateOraclePrice(marketDataCache);
-
-		const usersToSettleMap = await this.findUsersToSettle(
-			marketDataCache,
-			options
-		);
+		const usersToSettleMap = await this.findUsersToSettle(options);
 		await this.processUserSettlements(usersToSettleMap);
 	}
 
-	private async buildMarketDataCache(): Promise<MarketDataCache> {
-		const perpMarketAndOracleData: MarketDataCache['perpMarketAndOracleData'] =
-			{};
-		const spotMarketAndOracleData: MarketDataCache['spotMarketAndOracleData'] =
-			{};
-
-		for (const perpMarket of this.driftClient.getPerpMarketAccounts()) {
-			perpMarketAndOracleData[perpMarket.marketIndex] = {
-				marketAccount: perpMarket,
-				oraclePriceData: this.driftClient.getOracleDataForPerpMarket(
-					perpMarket.marketIndex
-				),
-			};
-		}
-
-		for (const spotMarket of this.driftClient.getSpotMarketAccounts()) {
-			spotMarketAndOracleData[spotMarket.marketIndex] = {
-				marketAccount: spotMarket,
-				oraclePriceData: this.driftClient.getOracleDataForSpotMarket(
-					spotMarket.marketIndex
-				),
-			};
-		}
-
-		return { perpMarketAndOracleData, spotMarketAndOracleData };
-	}
-
-	private validateOraclePrice(marketDataCache: MarketDataCache) {
-		for (const market of this.driftClient.getPerpMarketAccounts()) {
-			const oracleValid = isOracleValid(
-				marketDataCache.perpMarketAndOracleData[market.marketIndex]
-					.marketAccount,
-				marketDataCache.perpMarketAndOracleData[market.marketIndex]
-					.oraclePriceData,
-				this.driftClient.getStateAccount().oracleGuardRails,
-				this.slotSubscriber.getSlot()
-			);
-
-			if (!oracleValid) {
-				logger.warn(`Oracle for market ${market.marketIndex} is not valid`);
-			}
-		}
-	}
-
-	private async findUsersToSettle(
-		marketDataCache: MarketDataCache,
-		options: { positiveOnly: boolean; requireLowMargin?: boolean }
-	): Promise<Map<number, UserToSettle[]>> {
+	private async findUsersToSettle(options: {
+		positiveOnly: boolean;
+		requireLowMargin?: boolean;
+	}): Promise<Map<number, UserToSettle[]>> {
 		const usersToSettleMap: Map<number, UserToSettle[]> = new Map();
 		const nowTs = Date.now() / 1000;
 
@@ -393,7 +326,7 @@ export class UserPnlSettlerBot implements Bot {
 			}
 
 			// Check margin requirement for positive PnL settlement
-			if (options.requireLowMargin) {
+			if (options.requireLowMargin && options.positiveOnly) {
 				const userFreeMarginCurrent =
 					user.getFreeCollateral('Initial').toNumber() /
 					QUOTE_PRECISION.toNumber();
@@ -417,7 +350,6 @@ export class UserPnlSettlerBot implements Bot {
 				const settlementDecision = await this.shouldSettleUserPosition(
 					user,
 					settleePosition,
-					marketDataCache,
 					nowTs,
 					isUsdcBorrow,
 					usdcAmount,
@@ -449,7 +381,6 @@ export class UserPnlSettlerBot implements Bot {
 	private async shouldSettleUserPosition(
 		user: User,
 		settleePosition: PerpPosition,
-		marketDataCache: MarketDataCache,
 		nowTs: number,
 		isUsdcBorrow: boolean,
 		usdcAmount: BN,
@@ -489,8 +420,7 @@ export class UserPnlSettlerBot implements Bot {
 		}
 
 		const perpMarketIdx = settleePosition.marketIndex;
-		const perpMarket =
-			marketDataCache.perpMarketAndOracleData[perpMarketIdx].marketAccount;
+		const perpMarket = this.driftClient.getPerpMarketAccount(perpMarketIdx)!;
 		const spotMarketIdx = 0;
 
 		// Check if settlement is paused
@@ -517,22 +447,16 @@ export class UserPnlSettlerBot implements Bot {
 			return { shouldSettle: false };
 		}
 
-		// Check market data availability
-		if (
-			!marketDataCache.perpMarketAndOracleData[perpMarketIdx] ||
-			!marketDataCache.spotMarketAndOracleData[spotMarketIdx]
-		) {
-			logger.error(
-				`Skipping user ${userAccKeyStr}-${settleePosition.marketIndex} because no spot market or oracle data`
-			);
-			return { shouldSettle: false };
-		}
+		// Get fresh market and oracle data
+		const spotMarket = this.driftClient.getSpotMarketAccount(spotMarketIdx)!;
+		const oraclePriceData =
+			this.driftClient.getOracleDataForPerpMarket(perpMarketIdx);
 
 		const userUnsettledPnl = calculateClaimablePnl(
-			marketDataCache.perpMarketAndOracleData[perpMarketIdx].marketAccount,
-			marketDataCache.spotMarketAndOracleData[spotMarketIdx].marketAccount,
+			perpMarket,
+			spotMarket,
 			settleePositionWithLp,
-			marketDataCache.perpMarketAndOracleData[perpMarketIdx].oraclePriceData
+			oraclePriceData
 		);
 
 		// Check LP settlement conditions
@@ -540,7 +464,7 @@ export class UserPnlSettlerBot implements Bot {
 			settleePosition,
 			perpMarket,
 			nowTs,
-			marketDataCache.perpMarketAndOracleData[perpMarketIdx]
+			{ marketAccount: perpMarket, oraclePriceData }
 		);
 
 		if (settleePositionWithLp.lpShares.gt(ZERO) && !shouldSettleLp) {
@@ -560,8 +484,7 @@ export class UserPnlSettlerBot implements Bot {
 				user,
 				userUnsettledPnl,
 				perpMarketIdx,
-				spotMarketIdx,
-				marketDataCache
+				spotMarketIdx
 			);
 			if (!canSettlePositivePnl) {
 				return { shouldSettle: false };
@@ -600,8 +523,7 @@ export class UserPnlSettlerBot implements Bot {
 					user,
 					userUnsettledPnl,
 					perpMarketIdx,
-					spotMarketIdx,
-					marketDataCache
+					spotMarketIdx
 				);
 				if (!canSettlePositivePnl) {
 					return { shouldSettle: false };
@@ -672,16 +594,19 @@ export class UserPnlSettlerBot implements Bot {
 		user: any,
 		userUnsettledPnl: BN,
 		perpMarketIdx: number,
-		spotMarketIdx: number,
-		marketDataCache: MarketDataCache
+		spotMarketIdx: number
 	): Promise<boolean> {
-		const pnlPool =
-			marketDataCache.perpMarketAndOracleData[perpMarketIdx].marketAccount
-				.pnlPool;
+		const perpMarket = this.driftClient.getPerpMarketAccount(perpMarketIdx)!;
+		const oraclePriceData =
+			this.driftClient.getOracleDataForPerpMarket(perpMarketIdx);
+
+		const pnlPool = perpMarket.pnlPool;
+		const pnlPoolSpotMarket = this.driftClient.getSpotMarketAccount(
+			pnlPool.marketIndex
+		)!;
 		const pnlPoolTokenAmount = getTokenAmount(
 			pnlPool.scaledBalance,
-			marketDataCache.spotMarketAndOracleData[pnlPool.marketIndex]
-				.marketAccount,
+			pnlPoolSpotMarket,
 			SpotBalanceType.DEPOSIT
 		);
 
@@ -690,10 +615,7 @@ export class UserPnlSettlerBot implements Bot {
 			return false;
 		}
 
-		const netUserPnl = calculateNetUserPnl(
-			marketDataCache.perpMarketAndOracleData[perpMarketIdx].marketAccount,
-			marketDataCache.perpMarketAndOracleData[perpMarketIdx].oraclePriceData
-		);
+		const netUserPnl = calculateNetUserPnl(perpMarket, oraclePriceData);
 
 		let maxPnlPoolExcess = ZERO;
 		if (netUserPnl.lt(pnlPoolTokenAmount)) {
@@ -713,10 +635,11 @@ export class UserPnlSettlerBot implements Bot {
 			return false;
 		}
 
+		const spotMarket = this.driftClient.getSpotMarketAccount(spotMarketIdx)!;
 		const netUserPnlImbalance = calculateNetUserPnlImbalance(
-			marketDataCache.perpMarketAndOracleData[perpMarketIdx].marketAccount,
-			marketDataCache.spotMarketAndOracleData[spotMarketIdx].marketAccount,
-			marketDataCache.perpMarketAndOracleData[perpMarketIdx].oraclePriceData
+			perpMarket,
+			spotMarket,
+			oraclePriceData
 		);
 
 		if (netUserPnlImbalance.gt(ZERO)) {
