@@ -12,6 +12,7 @@ import {
 	calculateBidAskPrice,
 	getVariant,
 	isVariant,
+	calculateAMMBidAskPrice,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -320,9 +321,9 @@ export class JitMaker implements Bot {
 			oraclePriceData
 		);
 
-		const [ammBid, ammAsk] = calculateBidAskPrice(
+		const [ammBid, ammAsk] = calculateAMMBidAskPrice(
 			perpMarketAccount.amm,
-			oraclePriceData,
+			this.driftClient.getMMOracleDataForPerpMarket(perpIdx),
 			true
 		);
 
