@@ -422,6 +422,36 @@
     yargs "17.7.2"
     zstddec "0.1.0"
 
+"@drift-labs/sdk@file:../protocol-v2/sdk":
+  version "2.132.0-beta.0"
+  dependencies:
+    "@coral-xyz/anchor" "0.29.0"
+    "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
+    "@ellipsis-labs/phoenix-sdk" "1.4.5"
+    "@grpc/grpc-js" "1.12.6"
+    "@openbook-dex/openbook-v2" "0.2.10"
+    "@project-serum/serum" "0.13.65"
+    "@pythnetwork/client" "2.5.3"
+    "@pythnetwork/price-service-sdk" "1.7.1"
+    "@pythnetwork/pyth-solana-receiver" "0.7.0"
+    "@solana/spl-token" "0.4.13"
+    "@solana/web3.js" "1.98.0"
+    "@switchboard-xyz/common" "3.0.14"
+    "@switchboard-xyz/on-demand" "2.4.1"
+    "@triton-one/yellowstone-grpc" "1.3.0"
+    anchor-bankrun "0.3.0"
+    gill "^0.10.2"
+    nanoid "3.3.4"
+    node-cache "5.1.2"
+    rpc-websockets "7.5.1"
+    solana-bankrun "0.3.1"
+    strict-event-emitter-types "2.0.0"
+    tweetnacl "1.0.3"
+    tweetnacl-util "0.15.1"
+    uuid "8.3.2"
+    yargs "17.7.2"
+    zstddec "0.1.0"
+
 "@drift-labs/sdk@file:drift-common/protocol/sdk":
   version "2.114.0-beta.3"
   dependencies:
@@ -453,7 +483,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-2f3a0d29-c96c-4742-aae8-f5bda99b0fc2-1754320531095/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-2133c2d4-1edd-4483-8543-414ad604a17f-1754497681898/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
