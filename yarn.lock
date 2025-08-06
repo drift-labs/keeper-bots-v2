@@ -380,20 +380,20 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.18.24":
-  version "0.18.24"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.18.24.tgz#4ca7285690c3e48b0af54d9f940be9c4a17c8a01"
-  integrity sha512-5cs1wgC/TF9QmWKh7gQQC1Thv4+lvIbDtCQ2+YjOuEILikJ4BzDIYleq7GiDDdECBKqRS6Wr1zUWYT9BtvgeXA==
+"@drift-labs/jit-proxy@0.18.29":
+  version "0.18.29"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.18.29.tgz#479b90749e50a0e596ada38df5a9b31d9b6e3798"
+  integrity sha512-Brlk9cyHzbKhuOofL/eKKzIlKLVjwHpQ+OyAwV3dLHiwAOLrqi5nwlbfMypnlgql+LGvhk0GM6lqs9RU1rzH3g==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.131.0-beta.13"
+    "@drift-labs/sdk" "2.132.0-beta.5"
     "@solana/web3.js" "1.91.7"
     tweetnacl-util "^0.15.1"
 
-"@drift-labs/sdk@2.131.0-beta.13":
-  version "2.131.0-beta.13"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.131.0-beta.13.tgz#d312560d8e9db5026ef0415adfa49d0beda5ad8b"
-  integrity sha512-EiFTlMZhYgDwtoI2T2zmwbS77ah9DHLSDdoa5QJNFLx7VL+3kqeneI2RBJI7BjXDizCcWwk32Bh173et8BdB8A==
+"@drift-labs/sdk@2.132.0-beta.5":
+  version "2.132.0-beta.5"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.132.0-beta.5.tgz#33dcd832e17a4ffb5b4c2b334c9d09cdd7189286"
+  integrity sha512-vbOpOPFKFsqRLK0ZuRt0JstJfL+tPLTzB7H2Tmq1cl+oFUvNxBZ7sxRdVfd77od+1SSsQlJnbxfpUrBoyKMCJA==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -453,7 +453,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-2f3a0d29-c96c-4742-aae8-f5bda99b0fc2-1754320531095/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-e9bb9487-aee2-40dc-82ae-05a4c32cf639-1754497511136/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
