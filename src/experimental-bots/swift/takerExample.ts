@@ -8,6 +8,9 @@ import {
 	generateSignedMsgUuid,
 	BN,
 	OrderParams,
+	QUOTE_PRECISION,
+	BASE_PRECISION,
+	PRICE_PRECISION,
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
 import * as axios from 'axios';
@@ -39,7 +42,7 @@ export class SwiftTaker {
 	}
 
 	async startInterval() {
-		const marketIndexes = [0, 1, 2, 3, 5, 6];
+		const marketIndexes = [0, 1, 2];
 		this.interval = setInterval(async () => {
 			await sleepMs(Math.random() * 1000); // Randomize for different grafana metrics
 			const slot = await this.driftClient.connection.getSlot();
@@ -54,13 +57,26 @@ export class SwiftTaker {
 			const highPrice = oracleInfo.price.muln(101).divn(100);
 			const lowPrice = oracleInfo.price;
 
+			const tradeSizeDollars = sampleBoundedNormal(
+				30_000,
+				20_000,
+				100,
+				200_000
+			);
+			const tradeSize = new BN(tradeSizeDollars)
+				.mul(QUOTE_PRECISION)
+				.mul(PRICE_PRECISION)
+				.mul(BASE_PRECISION.div(PRICE_PRECISION))
+				.div(oracleInfo.price);
+
 			const marketOrderParams = getMarketOrderParams({
 				marketIndex,
 				marketType: MarketType.PERP,
 				direction,
-				baseAssetAmount: this.driftClient
-					.getPerpMarketAccount(marketIndex)!
-					.amm.minOrderSize.muln(2),
+				baseAssetAmount: floorBNToNearest(
+					tradeSize,
+					this.driftClient.getPerpMarketAccount(marketIndex)!.amm.orderStepSize
+				),
 				auctionStartPrice: isVariant(direction, 'long') ? lowPrice : highPrice,
 				auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
 				auctionDuration: 50,
@@ -123,4 +139,28 @@ export class SwiftTaker {
 			console.error('Failed to confirm hash: ', hash);
 		}, this.intervalMs);
 	}
+}
+
+function sampleBoundedNormal(
+	mean: number,
+	stdDev: number,
+	min: number,
+	max: number
+): number {
+	const boxMuller = (): number => {
+		const u1 = Math.random();
+		const u2 = Math.random();
+		return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+	};
+
+	let sample: number;
+	do {
+		sample = boxMuller() * stdDev + mean;
+	} while (sample < min || sample > max);
+
+	return sample;
+}
+
+function floorBNToNearest(value: BN, roundTo: BN): BN {
+	return value.div(roundTo).mul(roundTo);
 }
