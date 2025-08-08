@@ -44,7 +44,7 @@ export class SwiftTaker {
 	async startInterval() {
 		const marketIndexes = [0, 1, 2];
 		this.interval = setInterval(async () => {
-			await sleepMs(Math.random() * 1000); // Randomize for different grafana metrics
+			await sleepMs(Math.random() * 5000); // Randomize for different grafana metrics
 			const slot = await this.driftClient.connection.getSlot();
 			const direction =
 				Math.random() > 0.5 ? PositionDirection.LONG : PositionDirection.SHORT;
@@ -57,17 +57,19 @@ export class SwiftTaker {
 			const highPrice = oracleInfo.price.muln(101).divn(100);
 			const lowPrice = oracleInfo.price;
 
-			const tradeSizeDollars = sampleBoundedNormal(
-				30_000,
-				20_000,
-				100,
-				200_000
-			);
+			const tradeSizeDollars = sampleTradeSizeDollars();
 			const tradeSize = new BN(tradeSizeDollars)
 				.mul(QUOTE_PRECISION)
 				.mul(PRICE_PRECISION)
 				.mul(BASE_PRECISION.div(PRICE_PRECISION))
 				.div(oracleInfo.price);
+
+			const perpMarketAccount =
+				this.driftClient.getPerpMarketAccount(marketIndex);
+			if (!perpMarketAccount) {
+				console.error(`Perp market ${marketIndex} not found`);
+				return;
+			}
 
 			const marketOrderParams = getMarketOrderParams({
 				marketIndex,
@@ -75,7 +77,7 @@ export class SwiftTaker {
 				direction,
 				baseAssetAmount: floorBNToNearest(
 					tradeSize,
-					this.driftClient.getPerpMarketAccount(marketIndex)!.amm.orderStepSize
+					perpMarketAccount.amm.orderStepSize
 				),
 				auctionStartPrice: isVariant(direction, 'long') ? lowPrice : highPrice,
 				auctionEndPrice: isVariant(direction, 'long') ? highPrice : lowPrice,
@@ -141,24 +143,19 @@ export class SwiftTaker {
 	}
 }
 
-function sampleBoundedNormal(
-	mean: number,
-	stdDev: number,
-	min: number,
-	max: number
-): number {
-	const boxMuller = (): number => {
-		const u1 = Math.random();
-		const u2 = Math.random();
-		return Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
-	};
+function sampleTradeSizeDollars(): number {
+	const random = Math.random();
 
-	let sample: number;
-	do {
-		sample = boxMuller() * stdDev + mean;
-	} while (sample < min || sample > max);
-
-	return sample;
+	if (random < 0.6) {
+		// 60% small trades: $100 - $5,000
+		return 100 + Math.random() * 10_000;
+	} else if (random < 0.85) {
+		// 25% medium trades: $5,000 - $20,000
+		return 10_000 + Math.random() * 30_000;
+	} else {
+		// 15% large trades: $20,000 - $70,000
+		return 30_000 + Math.random() * 70_000;
+	}
 }
 
 function floorBNToNearest(value: BN, roundTo: BN): BN {
