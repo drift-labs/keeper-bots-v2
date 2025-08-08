@@ -1383,8 +1383,8 @@ export class FillerMultithreaded {
 		}
 
 		const marketIndex = nodeToFill.node.order.marketIndex;
-		const oraclePriceData =
-			this.driftClient.getOracleDataForPerpMarket(marketIndex);
+		const mmOraclePriceData =
+			this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
 
 		if (isOrderExpired(nodeToFill.node.order, Date.now() / 1000, true)) {
 			if (isOneOfVariant(nodeToFill.node.order.orderType, ['limit'])) {
@@ -1403,7 +1403,7 @@ export class FillerMultithreaded {
 				this.driftClient.getPerpMarketAccount(
 					nodeToFill.node.order.marketIndex
 				)!,
-				oraclePriceData,
+				mmOraclePriceData,
 				this.slotSubscriber.getSlot(),
 				Date.now() / 1000,
 				this.driftClient.getStateAccount().minPerpAuctionDuration
