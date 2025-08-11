@@ -26,6 +26,7 @@ import {
 	SlotSubscriber,
 	User,
 	PerpPosition,
+	MarketStatus,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -47,6 +48,7 @@ import {
 	SendTransactionError,
 	TransactionExpiredBlockheightExceededError,
 } from '@solana/web3.js';
+import { ENUM_UTILS } from '@drift/common';
 
 // =============================================================================
 // CONSTANTS
@@ -754,7 +756,14 @@ export class UserPnlSettlerBot implements Bot {
 				perpMarket.pausedOperations,
 				PerpOperation.SETTLE_PNL
 			);
-			if (settlePnlPaused) {
+
+			// cannot settle pnl in this state
+			const marketIsReduceOnly = ENUM_UTILS.match(
+				perpMarket.status,
+				MarketStatus.REDUCE_ONLY
+			);
+
+			if (settlePnlPaused || marketIsReduceOnly) {
 				logger.warn(
 					`${logPrefix} Settle PNL paused for market ${marketStr}, skipping settle PNL`
 				);
