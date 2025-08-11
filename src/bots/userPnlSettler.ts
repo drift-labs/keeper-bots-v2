@@ -198,12 +198,12 @@ export class UserPnlSettlerBot implements Bot {
 		if (this.runOnce) {
 			await this.trySettleNegativePnl();
 			await this.trySettleUsersWithNoPositions();
-            await this.trySettlePositivePnlForLowMargin();
+			await this.trySettlePositivePnlForLowMargin();
 		} else {
 			// Initial settlement
 			await this.trySettleNegativePnl();
 			await this.trySettleUsersWithNoPositions();
-            await this.trySettlePositivePnlForLowMargin();  
+			await this.trySettlePositivePnlForLowMargin();
 
 			// Set up intervals
 			this.intervalIds.push(

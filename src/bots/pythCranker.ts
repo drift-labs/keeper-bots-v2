@@ -386,7 +386,8 @@ export class PythCrankerBot implements Bot {
 		);
 
 		// Pair up the feed ids to fetch vaa and update
-		const feedIdPairs = chunks(feedIdsToUpdate, 2);
+		const feedIdPairs = chunks(feedIdsToUpdate, 1);
+
 		await Promise.all(
 			feedIdPairs.map(async (feedIds) => {
 				const vaa = await this.getVaaForPriceFeedIds(
@@ -445,6 +446,9 @@ export class PythCrankerBot implements Bot {
 							microLamports: priorityFees,
 						})
 					);
+
+					console.log(`feedId: ${feedIds[0]}, VAA size: ${vaa.length}`);
+
 					ixs.push(
 						...(await this.driftClient.getPostPythPullOracleUpdateAtomicIxs(
 							vaa,
