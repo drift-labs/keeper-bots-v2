@@ -24,6 +24,8 @@ import {
 	BN,
 	convertToBN,
 	PRICE_PRECISION,
+	getTriggerPrice,
+	useMedianTriggerPrice,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -582,11 +584,25 @@ export class TriggerBot implements Bot {
 				marketIndex
 			);
 
+			const freshestOraclePrice = offChainPrice
+				? offChainPrice
+				: oraclePriceData.price;
+			let triggerPrice = freshestOraclePrice;
+
+			if (isVariant(marketType, 'perp')) {
+				triggerPrice = getTriggerPrice(
+					market as PerpMarketAccount,
+					freshestOraclePrice,
+					new BN(Date.now() / 1000),
+					useMedianTriggerPrice(this.driftClient.getStateAccount())
+				);
+			}
+
 			const dlob = this.dlobSubscriber!.getDLOB();
 			const nodesToTrigger = dlob.findNodesToTrigger(
 				marketIndex,
 				this.slotSubscriber.getSlot(),
-				offChainPrice ? offChainPrice : oraclePriceData.price,
+				triggerPrice,
 				marketType,
 				this.driftClient.getStateAccount()
 			);
