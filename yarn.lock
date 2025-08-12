@@ -385,21 +385,21 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.19.3":
-  version "0.19.3"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.19.3.tgz#5e0b788ab947da597d9ee5b9c7764e9454a859dc"
-  integrity sha512-WCuMU5oqO+VgWhPtnlZP0/r1PtB9B5RZjkkRvKMA6o+KhAO0VZvs3J9hk+7qFFxovwz0Q7NrBOd9jdWV1VDOXg==
+"@drift-labs/jit-proxy@0.19.4":
+  version "0.19.4"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.19.4.tgz#a309d47a1252fef9fe0142c8fd997f84b2518214"
+  integrity sha512-lebe5x72ld2jFGZRokaBrlFq7e3q6P2TdYV6bonL4M2q1LmZXXniqisk8Mfu8ZM1SuwkGxfytrOwPtooIeqSlQ==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.133.0-beta.1"
+    "@drift-labs/sdk" "2.134.0-beta.0"
     "@solana/web3.js" "1.98.0"
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.133.0-beta.1":
-  version "2.133.0-beta.1"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.133.0-beta.1.tgz#82f7b8903acff721972b1f2193db83e80d2a09d3"
-  integrity sha512-7Mi0+YkcVhTOjR1R0fcCmwLY4OY8MDkeagqFOMOidoGkQarfVowg3qqlOG6xIPegVCLrLYEg34Fajjee4EBt/Q==
+"@drift-labs/sdk@2.134.0-beta.0":
+  version "2.134.0-beta.0"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.134.0-beta.0.tgz#66d1083f662705bc568c5787673b1ff0b0a892ff"
+  integrity sha512-NKXSvJsqSajo5RVvdwU/f00dAiIScRyYsWw1Ny7K41vaFRJAuScZNzGPkHBNdZzDWCNaGZf6dHzr6+B8dM25UQ==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -459,11 +459,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-<<<<<<< HEAD
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-7ec0be94-70a6-4164-a8b9-29ac3aada71b-1754681175889/node_modules/@drift/protocol/sdk"
-=======
-    "@drift-labs/sdk" "file:../../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-5789a22e-068d-4bd3-ab81-3d2a9da3bc4b-1754905263020/node_modules/@drift/protocol/sdk"
->>>>>>> mainnet-beta
+    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-1ec272cf-bfb2-415d-9f12-773fc8f06e76-1754962894150/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
