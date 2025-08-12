@@ -205,7 +205,7 @@ export class UserPnlSettlerBot implements Bot {
 			// Initial settlement
 			await this.trySettleNegativePnl();
 			await this.trySettleUsersWithNoPositions();
-			await this.trySettlePositivePnlForLowMargin();
+			//await this.trySettlePositivePnlForLowMargin();
 
 			// Set up intervals
 			this.intervalIds.push(
@@ -521,15 +521,7 @@ export class UserPnlSettlerBot implements Bot {
 
 			// For negative PnL, check if user can be settled
 			if (userUnsettledPnl.gt(ZERO)) {
-				const canSettlePositivePnl = await this.canSettlePositivePnl(
-					user,
-					userUnsettledPnl,
-					perpMarketIdx,
-					spotMarketIdx
-				);
-				if (!canSettlePositivePnl) {
-					return { shouldSettle: false };
-				}
+				return { shouldSettle: false };
 			} else {
 				// only settle negative pnl if unsettled pnl is material
 				if (!userUnsettledPnl.abs().gte(this.minPnlToSettle.abs())) {
@@ -781,7 +773,9 @@ export class UserPnlSettlerBot implements Bot {
 			logger.info(
 				`${logPrefix} Settling ${sortedParams.length} users in ${Math.ceil(
 					sortedParams.length / SETTLE_USER_CHUNKS
-				)} chunks for market ${marketIndex}`
+				)} chunks for market ${marketIndex} with respective PnLs: ${sortedParams
+					.map((p) => p.pnl)
+					.join(', ')}`
 			);
 
 			await this.executeSettlementForMarket(
