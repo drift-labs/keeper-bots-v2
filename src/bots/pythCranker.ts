@@ -25,6 +25,7 @@ import {
 	PerpMarkets,
 	PRICE_PRECISION,
 	PriorityFeeSubscriber,
+	SlotSubscriber,
 	SpotMarkets,
 	TxSigAndSlot,
 } from '@drift-labs/sdk';
@@ -38,6 +39,7 @@ import { convertPythPrice } from '@drift-labs/sdk';
 import { getFeedIdUint8Array, trimFeedId } from '@drift-labs/sdk';
 import { chunks, shuffle, simulateAndGetTxWithCUs, sleepMs } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
+import { TxRecorder } from './common/txRecorder';
 
 setGlobalDispatcher(
 	new Agent({
@@ -82,10 +84,14 @@ export class PythCrankerBot implements Bot {
 	private slotStalenessThresholdRestart: number = 300;
 	private txSuccessRateThreshold: number = 0.5;
 
+	// Metrics
+	private txRecorder: TxRecorder;
+
 	constructor(
 		private globalConfig: GlobalConfig,
 		private crankConfigs: PythCrankerBotConfig,
 		private driftClient: DriftClient,
+		private slotSubscriber: SlotSubscriber,
 		private priorityFeeSubscriber?: PriorityFeeSubscriber,
 		private bundleSender?: BundleSender,
 		private lookupTableAccounts: AddressLookupTableAccount[] = []
@@ -120,6 +126,8 @@ export class PythCrankerBot implements Bot {
 		this.txSuccessRateThreshold = crankConfigs.txSuccessRateThreshold;
 		this.slotStalenessThresholdRestart =
 			crankConfigs.slotStalenessThresholdRestart;
+			
+		this.txRecorder = new TxRecorder(this.name, crankConfigs.metricsPort);
 	}
 
 	async init(): Promise<void> {
@@ -308,7 +316,7 @@ export class PythCrankerBot implements Bot {
 			)
 		).flat();
 
-		const latestSlot = await this.driftClient.connection.getSlot();
+		const latestSlot = this.slotSubscriber.getSlot();
 		let numFeedsSignalingRestart = 0;
 		const feedIdsToUpdate: FeedIdToCrankInfo[] = [];
 		let considerEarlyUpdate = false;
@@ -465,10 +473,17 @@ export class PythCrankerBot implements Bot {
 							doSimulation: true,
 							recentBlockhash: await this.getBlockhashForTx(),
 						});
+
 						const startTime = Date.now();
+						const sendSlot = this.slotSubscriber.getSlot();
+
 						this.driftClient
 							.sendTransaction(simResult.tx)
 							.then((txSigAndSlot: TxSigAndSlot) => {
+								this.txRecorder.send(
+									Date.now() - startTime,
+									txSigAndSlot.slot - sendSlot
+								);
 								logger.info(
 									`Posted multi pyth pull oracle for ${feedIds.map(
 										(feedId) => feedId.baseSymbol
