@@ -543,14 +543,15 @@ export class MakerBidAskTwapCrank implements Bot {
 			let txsToBundle: VersionedTransaction[] = [];
 
 			for (const mi of crankMarkets) {
-				const oraclePriceData = this.driftClient.getOracleDataForPerpMarket(mi);
+				const mmOraclePriceData =
+					this.driftClient.getMMOracleDataForPerpMarket(mi);
 
 				const bidMakers = this.dlob!.getBestMakers({
 					marketIndex: mi,
 					marketType: MarketType.PERP,
 					direction: PositionDirection.LONG,
 					slot: this.latestDlobSlot!,
-					oraclePriceData,
+					oraclePriceData: mmOraclePriceData,
 					numMakers: NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK,
 				});
 
@@ -559,7 +560,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					marketType: MarketType.PERP,
 					direction: PositionDirection.SHORT,
 					slot: this.latestDlobSlot!,
-					oraclePriceData,
+					oraclePriceData: mmOraclePriceData,
 					numMakers: NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK,
 				});
 				logger.info(
