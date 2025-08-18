@@ -489,7 +489,9 @@ export class PythCrankerBot implements Bot {
 										(feedId) => feedId.baseSymbol
 									)} update atomic tx: ${txSigAndSlot.txSig}, took ${
 										Date.now() - startTime
-									}ms, landed slot: ${txSigAndSlot.slot}, sent slot: ${sendSlot}`
+									}ms, landed slot: ${
+										txSigAndSlot.slot
+									}, sent slot: ${sendSlot}`
 								);
 							})
 							.catch((e) => {
