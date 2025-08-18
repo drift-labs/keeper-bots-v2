@@ -179,6 +179,7 @@ export class PythLazerSubscriber {
 					return priceMessage;
 				}
 			}
+			console.log(`pythLazer price undefined`);
 			return undefined;
 		}
 		return this.feedIdChunkToPriceMessage.get(this.hash(feedIds));

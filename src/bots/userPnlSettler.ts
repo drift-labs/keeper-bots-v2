@@ -26,6 +26,7 @@ import {
 	SlotSubscriber,
 	User,
 	PerpPosition,
+	MarketStatus,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -47,6 +48,7 @@ import {
 	SendTransactionError,
 	TransactionExpiredBlockheightExceededError,
 } from '@solana/web3.js';
+import { ENUM_UTILS } from '@drift/common';
 
 // =============================================================================
 // CONSTANTS
@@ -203,7 +205,7 @@ export class UserPnlSettlerBot implements Bot {
 			// Initial settlement
 			await this.trySettleNegativePnl();
 			await this.trySettleUsersWithNoPositions();
-			await this.trySettlePositivePnlForLowMargin();
+			//await this.trySettlePositivePnlForLowMargin();
 
 			// Set up intervals
 			this.intervalIds.push(
@@ -519,15 +521,7 @@ export class UserPnlSettlerBot implements Bot {
 
 			// For negative PnL, check if user can be settled
 			if (userUnsettledPnl.gt(ZERO)) {
-				const canSettlePositivePnl = await this.canSettlePositivePnl(
-					user,
-					userUnsettledPnl,
-					perpMarketIdx,
-					spotMarketIdx
-				);
-				if (!canSettlePositivePnl) {
-					return { shouldSettle: false };
-				}
+				return { shouldSettle: false };
 			} else {
 				// only settle negative pnl if unsettled pnl is material
 				if (!userUnsettledPnl.abs().gte(this.minPnlToSettle.abs())) {
@@ -754,7 +748,14 @@ export class UserPnlSettlerBot implements Bot {
 				perpMarket.pausedOperations,
 				PerpOperation.SETTLE_PNL
 			);
-			if (settlePnlPaused) {
+
+			// cannot settle pnl in this state
+			const marketIsReduceOnly = ENUM_UTILS.match(
+				perpMarket.status,
+				MarketStatus.REDUCE_ONLY
+			);
+
+			if (settlePnlPaused || marketIsReduceOnly) {
 				logger.warn(
 					`${logPrefix} Settle PNL paused for market ${marketStr}, skipping settle PNL`
 				);
@@ -772,7 +773,9 @@ export class UserPnlSettlerBot implements Bot {
 			logger.info(
 				`${logPrefix} Settling ${sortedParams.length} users in ${Math.ceil(
 					sortedParams.length / SETTLE_USER_CHUNKS
-				)} chunks for market ${marketIndex}`
+				)} chunks for market ${marketIndex} with respective PnLs: ${sortedParams
+					.map((p) => p.pnl)
+					.join(', ')}`
 			);
 
 			await this.executeSettlementForMarket(

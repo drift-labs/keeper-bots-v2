@@ -1645,6 +1645,11 @@ export class FillerMultithreaded {
 					logger.error(`Error simulating tx: ${error}`);
 					return;
 				}
+				if (simResult.simError) {
+					logger.error(
+						`Error simulating tx result: ${simResult.simError.toString()}`
+					);
+				}
 
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
 					type: 'multiMakerFill',
@@ -1932,6 +1937,10 @@ export class FillerMultithreaded {
 		);
 
 		if (simResult.simError) {
+			for (const ix of pythIxs) {
+				console.log('pyth ix');
+				console.log(`pyth ixs: ${JSON.stringify(ix)}`);
+			}
 			logger.error(
 				`simError: ${JSON.stringify(
 					simResult.simError
