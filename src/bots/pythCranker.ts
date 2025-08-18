@@ -126,7 +126,7 @@ export class PythCrankerBot implements Bot {
 		this.txSuccessRateThreshold = crankConfigs.txSuccessRateThreshold;
 		this.slotStalenessThresholdRestart =
 			crankConfigs.slotStalenessThresholdRestart;
-			
+
 		this.txRecorder = new TxRecorder(this.name, crankConfigs.metricsPort);
 	}
 
@@ -489,7 +489,9 @@ export class PythCrankerBot implements Bot {
 										(feedId) => feedId.baseSymbol
 									)} update atomic tx: ${txSigAndSlot.txSig}, took ${
 										Date.now() - startTime
-									}ms`
+									}ms, landed slot: ${
+										txSigAndSlot.slot
+									}, sent slot: ${sendSlot}`
 								);
 							})
 							.catch((e) => {
