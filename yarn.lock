@@ -385,21 +385,21 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.19.11":
-  version "0.19.11"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.19.11.tgz#e69d260a07252dbfff8ffdae4f97cfcdd2e2709b"
-  integrity sha512-Fk6UyGqH/FkDHZLT15gIoyl71aT84JtOhvb6U/20VRmZRUDevDqHlu6Q2DH6yVb+1xKoEVtV+n4iEKCYQ73bQA==
+"@drift-labs/jit-proxy@0.19.12":
+  version "0.19.12"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.19.12.tgz#48e31767e26f623eb5808925d6272c359c83997f"
+  integrity sha512-70r8uzNGHU/YicEYoxwOe4SKIo0zV9hI9JyHuHZYklrc7By9jSz05ooYSbX17xHW76i42zkmt59z0Ts52Ppfog==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.135.0-beta.0"
+    "@drift-labs/sdk" "2.135.0-beta.1"
     "@solana/web3.js" "1.98.0"
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.135.0-beta.0":
-  version "2.135.0-beta.0"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.135.0-beta.0.tgz#67f52c563f0f1f842c7e09e8ac5a6774e2e220ad"
-  integrity sha512-psuuYwACnutGElxlA1thzPEQNvnmPEVgbcf9EnN8ybmJGACnNqRMsAqWmuGeDUKAFpxGKywjsl3aiy4SimMIDg==
+"@drift-labs/sdk@2.135.0-beta.1":
+  version "2.135.0-beta.1"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.135.0-beta.1.tgz#691ab0535be8f258edf45b88d86285ae68ed423c"
+  integrity sha512-GTvCkzPVW5H9Kh/X2TgkcubnE+FkdBeIJfN6ccpkYrKZJN1lNDMD8W1d2bE4xeC0Dx4qo8w0XhlnCXcO2XOD9Q==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -426,6 +426,7 @@
     tweetnacl-util "0.15.1"
     uuid "8.3.2"
     yargs "17.7.2"
+    zod "4.0.17"
     zstddec "0.1.0"
 
 "@drift-labs/sdk@file:drift-common/protocol/sdk":
@@ -459,7 +460,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-75424082-a158-4e43-8c0b-6fc4b298583b-1755128074035/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-9b7835a7-7016-408a-a2bd-eaae35a52569-1755501929453/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
@@ -7011,6 +7012,11 @@ zod@4.0.0-beta.20250505T195954:
   integrity sha512-iB8WvxkobVIXMARvQu20fKvbS7mUTiYRpcD8OQV1xjRhxO0EEpYIRJBk6yfBzHAHEdOSDh3SxDITr5Eajr2vtg==
   dependencies:
     "@zod/core" "0.11.6"
+
+zod@4.0.17:
+  version "4.0.17"
+  resolved "https://registry.yarnpkg.com/zod/-/zod-4.0.17.tgz#95931170715f73f7426c385c237b7477750d6c8d"
+  integrity sha512-1PHjlYRevNxxdy2JZ8JcNAw7rX8V9P1AKkP+x/xZfxB0K5FYfuV+Ug6P/6NVSR2jHQ+FzDDoDHS04nYUsOIyLQ==
 
 zstddec@0.1.0:
   version "0.1.0"
