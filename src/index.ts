@@ -564,6 +564,7 @@ const runBot = async () => {
 				config.global,
 				config.botConfigs!.pythCranker!,
 				driftClient,
+				slotSubscriber,
 				priorityFeeSubscriber,
 				bundleSender,
 				[]
