@@ -80,6 +80,7 @@ import { SwitchboardCrankerBot } from './bots/switchboardCranker';
 import { PythLazerCrankerBot } from './bots/pythLazerCranker';
 import { JitMaker } from './bots/jitMaker';
 import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
+import { JetProxyTxSender } from './bots/common/jetTxSender';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -238,6 +239,7 @@ setLogLevel(config.global.debug ? 'debug' : 'info');
 const endpoint = config.global.endpoint!;
 const wsEndpoint = config.global.wsEndpoint;
 const heliusEndpoint = config.global.heliusEndpoint;
+const jetTxEndpoint = config.global.jetTxEndpoint;
 logger.info(`RPC endpoint: ${endpoint}`);
 logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`Helius endpoint:  ${heliusEndpoint}`);
@@ -352,6 +354,29 @@ const runBot = async () => {
 	} else if (txSenderType === 'while-valid') {
 		txSender = new WhileValidTxSender({
 			connection: sendTxConnection,
+			wallet,
+			opts,
+			retrySleep: 2000,
+			additionalConnections,
+			confirmationStrategy,
+			additionalTxSenderCallbacks: [
+				(tx) => {
+					console.log(tx);
+				},
+			],
+			trackTxLandRate: config.global.trackTxLandRate,
+			throwOnTimeoutError: false,
+		});
+	} else if (txSenderType === 'jet') {
+		const submitConnection = new Connection(jetTxEndpoint ?? endpoint, {
+			wsEndpoint: wsEndpoint,
+			commitment: stateCommitment,
+			disableRetryOnRateLimit: true,
+		});
+
+		txSender = new JetProxyTxSender({
+			connection: sendTxConnection,
+			submitConnection,
 			wallet,
 			opts,
 			retrySleep: 2000,
