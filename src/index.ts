@@ -359,11 +359,6 @@ const runBot = async () => {
 			retrySleep: 2000,
 			additionalConnections,
 			confirmationStrategy,
-			additionalTxSenderCallbacks: [
-				(tx) => {
-					console.log(tx);
-				},
-			],
 			trackTxLandRate: config.global.trackTxLandRate,
 			throwOnTimeoutError: false,
 		});
