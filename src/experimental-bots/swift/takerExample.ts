@@ -53,9 +53,14 @@ export class SwiftTaker {
 				marketIndexes[Math.floor(Math.random() * marketIndexes.length)];
 
 			const oracleInfo =
-				this.driftClient.getOracleDataForPerpMarket(marketIndex);
-			const highPrice = oracleInfo.price.muln(101).divn(100);
-			const lowPrice = oracleInfo.price;
+				this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
+			const EPS_BPS = 100; // 1%
+			const plusBps = (p: BN, bps: number) => p.muln(10_000 + bps).divn(10_000);
+			const minusBps = (p: BN, bps: number) =>
+				p.muln(10_000 - bps).divn(10_000);
+
+			const highPrice = plusBps(oracleInfo.price, EPS_BPS);
+			const lowPrice = minusBps(oracleInfo.price, EPS_BPS);
 
 			const tradeSizeDollars = sampleTradeSizeDollars();
 			const tradeSize = new BN(tradeSizeDollars)
