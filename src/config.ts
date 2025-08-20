@@ -230,11 +230,12 @@ export interface GlobalConfig {
 	onlySendDuringJitoLeader?: boolean;
 
 	txRetryTimeoutMs?: number;
-	txSenderType?: 'fast' | 'retry' | 'while-valid';
+	txSenderType?: 'fast' | 'retry' | 'while-valid' | 'jet';
 	txSenderConfirmationStrategy: ConfirmationStrategy;
 	txSkipPreflight?: boolean;
 	txMaxRetries?: number;
 	trackTxLandRate?: boolean;
+	jetTxEndpoint?: string;
 
 	rebalanceFiller?: boolean;
 

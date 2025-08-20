@@ -962,7 +962,7 @@ export class LiquidatorBot implements Bot {
 			return undefined;
 		}
 
-		const oracle = this.driftClient.getOracleDataForPerpMarket(
+		const oracle = this.driftClient.getMMOracleDataForPerpMarket(
 			position.marketIndex
 		);
 		const direction = findDirectionToClose(position);

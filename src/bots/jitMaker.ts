@@ -12,7 +12,6 @@ import {
 	calculateBidAskPrice,
 	getVariant,
 	isVariant,
-	calculateAMMBidAskPrice,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 import { logger } from '../logger';
@@ -253,8 +252,8 @@ export class JitMaker implements Bot {
 
 		const driftUser = this.driftClient.getUser(subId);
 		const perpMarketAccount = this.driftClient.getPerpMarketAccount(perpIdx)!;
-		const oraclePriceData =
-			this.driftClient.getOracleDataForPerpMarket(perpIdx);
+		const mmOraclePriceData =
+			this.driftClient.getMMOracleDataForPerpMarket(perpIdx);
 
 		const numMarketsForSubaccount = this.subAccountIds.filter(
 			(num) => num === subId
@@ -291,7 +290,7 @@ export class JitMaker implements Bot {
 			if (
 				isMarketVolatile(
 					perpMarketAccount,
-					oraclePriceData,
+					mmOraclePriceData,
 					0.015 // 150 bps
 				)
 			) {
@@ -312,16 +311,16 @@ export class JitMaker implements Bot {
 			perpMarketAccount.marketIndex,
 			slot,
 			MarketType.PERP,
-			oraclePriceData
+			mmOraclePriceData
 		);
 		const bestDLOBAsk = dlob.getBestAsk(
 			perpMarketAccount.marketIndex,
 			slot,
 			MarketType.PERP,
-			oraclePriceData
+			mmOraclePriceData
 		);
 
-		const [ammBid, ammAsk] = calculateAMMBidAskPrice(
+		const [ammBid, ammAsk] = calculateBidAskPrice(
 			perpMarketAccount.amm,
 			this.driftClient.getMMOracleDataForPerpMarket(perpIdx),
 			true

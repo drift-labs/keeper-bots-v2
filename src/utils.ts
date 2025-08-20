@@ -48,6 +48,7 @@ import {
 	isFallbackAvailableLiquiditySource,
 	calculateBaseAssetAmountForAmmToFulfill,
 	isOrderExpired,
+	MMOraclePriceData,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -251,12 +252,14 @@ export async function waitForAllSubscribesToFinish(
 	}
 }
 
-export function getBestLimitBidExcludePubKey(
+export function getBestLimitBidExcludePubKey<T extends MarketType>(
 	dlob: DLOB,
 	marketIndex: number,
-	marketType: MarketType,
+	marketType: T,
 	slot: number,
-	oraclePriceData: OraclePriceData,
+	oraclePriceData: T extends { spot: unknown }
+		? OraclePriceData
+		: MMOraclePriceData,
 	excludedPubKey: string,
 	excludedUserAccountsAndOrder?: [string, number][]
 ): DLOBNode | undefined {
@@ -286,12 +289,14 @@ export function getBestLimitBidExcludePubKey(
 	return undefined;
 }
 
-export function getBestLimitAskExcludePubKey(
+export function getBestLimitAskExcludePubKey<T extends MarketType>(
 	dlob: DLOB,
 	marketIndex: number,
-	marketType: MarketType,
+	marketType: T,
 	slot: number,
-	oraclePriceData: OraclePriceData,
+	oraclePriceData: T extends { spot: unknown }
+		? OraclePriceData
+		: MMOraclePriceData,
 	excludedPubKey: string,
 	excludedUserAccountsAndOrder?: [string, number][]
 ): DLOBNode | undefined {
@@ -1581,7 +1586,7 @@ export function isSolLstToken(spotMarketIndex: number): boolean {
 export function isFillableByVAMMDetails(
 	order: Order,
 	market: PerpMarketAccount,
-	oraclePriceData: OraclePriceData,
+	mmOraclePriceData: MMOraclePriceData,
 	slot: number,
 	ts: number,
 	minAuctionDuration: number
@@ -1601,7 +1606,7 @@ export function isFillableByVAMMDetails(
 		calculateBaseAssetAmountForAmmToFulfill(
 			order,
 			market,
-			oraclePriceData,
+			mmOraclePriceData,
 			slot
 		);
 	const minOrderSize = market.amm.minOrderSize;
