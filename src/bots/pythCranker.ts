@@ -19,7 +19,6 @@ import {
 	getPythPullOraclePublicKey,
 	getVariant,
 	isOneOfVariant,
-	isVariant,
 	ONE,
 	OracleClient,
 	OracleSource,
@@ -176,7 +175,7 @@ export class PythCrankerBot implements Bot {
 				logger.warn(`No perp market for market ${marketConfig.symbol}`);
 				continue;
 			}
-			if (isVariant(perpMarket.status, 'delisted')) {
+			if (isOneOfVariant(perpMarket.status, ['delisted', 'settlement'])) {
 				logger.warn(`Skipping perp market ${marketConfig.symbol} is delisted`);
 				continue;
 			}
