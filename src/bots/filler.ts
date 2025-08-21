@@ -791,8 +791,9 @@ export class FillerBot extends TxThreaded implements Bot {
 		const mmOraclePriceData =
 			this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
 
-		const vAsk = calculateAskPrice(market, mmOraclePriceData);
-		const vBid = calculateBidPrice(market, mmOraclePriceData);
+		const slot = new BN(this.slotSubscriber.getSlot());
+		const vAsk = calculateAskPrice(market, mmOraclePriceData, slot);
+		const vBid = calculateBidPrice(market, mmOraclePriceData, slot);
 
 		const fillSlot = this.getMaxSlot();
 		const nodesToTrigger = this.findTriggerableNodesWithMakers(

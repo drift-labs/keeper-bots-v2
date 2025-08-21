@@ -339,8 +339,16 @@ class DLOBBuilder {
 					this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
 				oraclePriceData =
 					this.driftClient.getOracleDataForPerpMarket(marketIndex);
-				fallbackBid = calculateBidPrice(market, mmOraclePriceData);
-				fallbackAsk = calculateAskPrice(market, mmOraclePriceData);
+				fallbackBid = calculateBidPrice(
+					market,
+					mmOraclePriceData,
+					new BN(this.slotSubscriber.getSlot())
+				);
+				fallbackAsk = calculateAskPrice(
+					market,
+					mmOraclePriceData,
+					new BN(this.slotSubscriber.getSlot())
+				);
 			} else {
 				market = this.driftClient.getSpotMarketAccount(marketIndex);
 				if (!market) {
