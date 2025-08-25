@@ -98,9 +98,9 @@ export class SwiftPlacer {
 
 	async subscribeWs() {
 		/**
-	  Make sure that WS_DELEGATE_KEY referrs to a keypair for an empty wallet, and that it has been added to
-	  ws_delegates for an authority. see here:
-	  https://github.com/drift-labs/protocol-v2/blob/master/sdk/src/driftClient.ts#L1160-L1194
+		Make sure that WS_DELEGATE_KEY referrs to a keypair for an empty wallet, and that it has been added to
+		ws_delegates for an authority. see here:
+		https://github.com/drift-labs/protocol-v2/blob/master/sdk/src/driftClient.ts#L1160-L1194
 	*/
 		const keypair = process.env.WS_DELEGATE_KEY
 			? getWallet(process.env.WS_DELEGATE_KEY)[0]
@@ -155,6 +155,7 @@ export class SwiftPlacer {
 
 				if (message['order'] && this.driftClient.isSubscribed) {
 					const order = message['order'];
+					const preDepositTx: string | undefined = message['deposit'];
 					const signedMsgOrderParamsBufHex = Buffer.from(
 						order['order_message']
 					);
@@ -382,6 +383,22 @@ export class SwiftPlacer {
 						signedMessage.signedMsgOrderParams
 					);
 					logger.info(`${logPrefix}: placing order: ${orderStr}`);
+
+					if (preDepositTx) {
+						console.log('order with deposit: {deposit}');
+						const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
+						this.driftClient.txSender
+							.sendRawTransaction(preDepositTxRaw, {
+								skipPreflight: true,
+								maxRetries: 0,
+							})
+							.then((res) => {
+								logger.info(`sent deposit tx: ${res.txSig}@${res.slot}`);
+							})
+							.catch((err) => {
+								logger.warn(`failed deposit tx: ${err}`);
+							});
+					}
 
 					this.driftClient.txSender
 						.sendVersionedTransaction(resp.tx)
