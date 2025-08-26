@@ -3,6 +3,7 @@ import {
 	Connection,
 	SendTransactionError,
 } from '@solana/web3.js';
+import { logger } from '../../logger';
 import { WhileValidTxSender } from '@drift-labs/sdk';
 
 export class JetProxyTxSender extends WhileValidTxSender {
@@ -30,11 +31,23 @@ export class JetProxyTxSender extends WhileValidTxSender {
 		rawTransaction: Buffer | Uint8Array,
 		opts: ConfirmOptions
 	): Promise<string> {
+		const start = performance.now();
 		const attempts = this.submitConnections.map((connection) =>
-			connection.sendRawTransaction(rawTransaction, opts).catch((err) => {
-				console.error(`Failed to send transaction to ${connection}:`, err);
-				throw err;
-			})
+			connection
+				.sendRawTransaction(rawTransaction, opts)
+				.then((txSig) => {
+					logger.info(
+						`${connection.rpcEndpoint}: ${(
+							(performance.now() - start) /
+							1000
+						).toFixed(4)}s`
+					);
+					return txSig;
+				})
+				.catch((err) => {
+					console.error(`Failed to send transaction to ${connection}:`, err);
+					throw err;
+				})
 		);
 
 		try {
