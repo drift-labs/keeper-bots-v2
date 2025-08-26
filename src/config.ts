@@ -235,7 +235,7 @@ export interface GlobalConfig {
 	txSkipPreflight?: boolean;
 	txMaxRetries?: number;
 	trackTxLandRate?: boolean;
-	jetTxEndpoint?: string;
+	jetTxEndpoints?: string[];
 
 	rebalanceFiller?: boolean;
 

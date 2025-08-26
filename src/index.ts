@@ -239,7 +239,7 @@ setLogLevel(config.global.debug ? 'debug' : 'info');
 const endpoint = config.global.endpoint!;
 const wsEndpoint = config.global.wsEndpoint;
 const heliusEndpoint = config.global.heliusEndpoint;
-const jetTxEndpoint = config.global.jetTxEndpoint;
+const jetTxEndpoints = config.global.jetTxEndpoints;
 logger.info(`RPC endpoint: ${endpoint}`);
 logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`Helius endpoint:  ${heliusEndpoint}`);
@@ -363,15 +363,19 @@ const runBot = async () => {
 			throwOnTimeoutError: false,
 		});
 	} else if (txSenderType === 'jet') {
-		const submitConnection = new Connection(jetTxEndpoint ?? endpoint, {
-			wsEndpoint: wsEndpoint,
-			commitment: stateCommitment,
-			disableRetryOnRateLimit: true,
-		});
+		const endpoints = jetTxEndpoints ?? [endpoint];
+		const submitConnections = endpoints.map(
+			(ep) =>
+				new Connection(ep, {
+					wsEndpoint: wsEndpoint,
+					commitment: stateCommitment,
+					disableRetryOnRateLimit: true,
+				})
+		);
 
 		txSender = new JetProxyTxSender({
 			connection: sendTxConnection,
-			submitConnection,
+			submitConnections,
 			wallet,
 			opts,
 			retrySleep: 2000,

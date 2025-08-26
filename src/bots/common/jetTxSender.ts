@@ -6,22 +6,71 @@ import {
 import { WhileValidTxSender } from '@drift-labs/sdk';
 
 export class JetProxyTxSender extends WhileValidTxSender {
-	private submitConnection: Connection;
+	private submitConnections: Connection[];
 
 	constructor(
 		args: ConstructorParameters<typeof WhileValidTxSender>[0] & {
-			submitConnection?: Connection;
+			submitConnections?: Connection[];
 		}
 	) {
-		const { submitConnection, ...baseArgs } = args;
+		const { submitConnections, ...baseArgs } = args;
 
 		super(baseArgs);
 
-		if (submitConnection) {
-			this.submitConnection = submitConnection;
+		if (submitConnections && submitConnections.length > 0) {
+			this.submitConnections = submitConnections;
 		} else {
-			throw new Error('JetProxySender requires submitConnection');
+			throw new Error(
+				'JetProxySender requires submitConnections or submitConnection'
+			);
 		}
+	}
+
+	private async sendToSubmitConnections(
+		rawTransaction: Buffer | Uint8Array,
+		opts: ConfirmOptions
+	): Promise<string[]> {
+		const promises = this.submitConnections.map(async (connection) => {
+			try {
+				return await connection.sendRawTransaction(rawTransaction, opts);
+			} catch (error) {
+				console.error(
+					'Failed to send transaction to submit connection:',
+					error
+				);
+				throw error;
+			}
+		});
+
+		const results = await Promise.allSettled(promises);
+		const txids: string[] = [];
+
+		for (const result of results) {
+			if (result.status === 'fulfilled') {
+				txids.push(result.value);
+			}
+		}
+
+		if (txids.length === 0) {
+			throw new Error('Failed to send transaction to any submit connection');
+		}
+
+		return txids;
+	}
+
+	private async retrySubmitConnections(
+		rawTransaction: Buffer | Uint8Array,
+		opts: ConfirmOptions
+	): Promise<void> {
+		const promises = this.submitConnections.map(async (connection) => {
+			try {
+				await connection.sendRawTransaction(rawTransaction, opts);
+			} catch (error) {
+				console.error('Retry failed for submit connection:', error);
+			}
+		});
+
+		Promise.allSettled(promises);
 	}
 
 	async sendRawTransaction(
@@ -30,12 +79,10 @@ export class JetProxyTxSender extends WhileValidTxSender {
 	) {
 		const startTime = this.getTimestamp();
 
-		const txid = await this.submitConnection.sendRawTransaction(
-			rawTransaction,
-			opts
-		);
+		const txids = await this.sendToSubmitConnections(rawTransaction, opts);
+		const primaryTxid = txids[0];
 
-		this.txSigCache?.set(txid, false);
+		this.txSigCache?.set(primaryTxid, false);
 		this.sendToAdditionalConnections(rawTransaction, opts);
 
 		let done = false;
@@ -52,26 +99,29 @@ export class JetProxyTxSender extends WhileValidTxSender {
 					setTimeout(resolve, this.retrySleep);
 				});
 				if (!done) {
-					this.submitConnection
-						.sendRawTransaction(rawTransaction, opts)
-						.catch((e) => {
-							console.error(e);
-							stopWaiting();
-						});
-					this.sendToAdditionalConnections(rawTransaction, opts);
+					try {
+						await this.retrySubmitConnections(rawTransaction, opts);
+						this.sendToAdditionalConnections(rawTransaction, opts);
+					} catch (e) {
+						console.error(e);
+						stopWaiting();
+					}
 				}
 			}
 		})();
 
 		let slot: number;
 		try {
-			const result = await this.confirmTransaction(txid, opts.commitment);
+			const result = await this.confirmTransaction(
+				primaryTxid,
+				opts.commitment
+			);
 
-			this.txSigCache?.set(txid, true);
-			await this.checkConfirmationResultForError(txid, result?.value);
+			this.txSigCache?.set(primaryTxid, true);
+			await this.checkConfirmationResultForError(primaryTxid, result?.value);
 
 			if (result?.value?.err && this.throwOnTransactionError) {
-				throw new SendTransactionError(`Transaction Failed`, [txid]);
+				throw new SendTransactionError(`Transaction Failed`, [primaryTxid]);
 			}
 
 			slot = result?.context?.slot;
@@ -79,6 +129,6 @@ export class JetProxyTxSender extends WhileValidTxSender {
 			stopWaiting();
 		}
 
-		return { txSig: txid, slot };
+		return { txSig: primaryTxid, slot };
 	}
 }
