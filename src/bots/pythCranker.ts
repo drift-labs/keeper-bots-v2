@@ -44,6 +44,9 @@ import { TxRecorder } from './common/txRecorder';
 setGlobalDispatcher(
 	new Agent({
 		connections: 200,
+		keepAliveTimeout: 30_000,
+		keepAliveMaxTimeout: 60_000,
+		pipelining: 10,
 	})
 );
 
