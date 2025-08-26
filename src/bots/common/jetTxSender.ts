@@ -51,10 +51,9 @@ export class JetProxyTxSender extends WhileValidTxSender {
 	) {
 		const startTime = this.getTimestamp();
 
-		const txids = await this.sendToSubmitConnections(rawTransaction, opts);
-		const primaryTxid = txids[0];
+		const txid = await this.sendToSubmitConnections(rawTransaction, opts);
 
-		this.txSigCache?.set(primaryTxid, false);
+		this.txSigCache?.set(txid, false);
 		this.sendToAdditionalConnections(rawTransaction, opts);
 
 		let done = false;
@@ -84,16 +83,13 @@ export class JetProxyTxSender extends WhileValidTxSender {
 
 		let slot: number;
 		try {
-			const result = await this.confirmTransaction(
-				primaryTxid,
-				opts.commitment
-			);
+			const result = await this.confirmTransaction(txid, opts.commitment);
 
-			this.txSigCache?.set(primaryTxid, true);
-			await this.checkConfirmationResultForError(primaryTxid, result?.value);
+			this.txSigCache?.set(txid, true);
+			await this.checkConfirmationResultForError(txid, result?.value);
 
 			if (result?.value?.err && this.throwOnTransactionError) {
-				throw new SendTransactionError(`Transaction Failed`, [primaryTxid]);
+				throw new SendTransactionError(`Transaction Failed`, [txid]);
 			}
 
 			slot = result?.context?.slot;
@@ -101,6 +97,6 @@ export class JetProxyTxSender extends WhileValidTxSender {
 			stopWaiting();
 		}
 
-		return { txSig: primaryTxid, slot };
+		return { txSig: txid, slot };
 	}
 }
