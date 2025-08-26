@@ -29,48 +29,20 @@ export class JetProxyTxSender extends WhileValidTxSender {
 	private async sendToSubmitConnections(
 		rawTransaction: Buffer | Uint8Array,
 		opts: ConfirmOptions
-	): Promise<string[]> {
-		const promises = this.submitConnections.map(async (connection) => {
-			try {
-				return await connection.sendRawTransaction(rawTransaction, opts);
-			} catch (error) {
-				console.error(
-					'Failed to send transaction to submit connection:',
-					error
-				);
-				throw error;
-			}
-		});
+	): Promise<string> {
+		const attempts = this.submitConnections.map((connection) =>
+			connection.sendRawTransaction(rawTransaction, opts).catch((err) => {
+				console.error(`Failed to send transaction to ${connection}:`, err);
+				throw err;
+			})
+		);
 
-		const results = await Promise.allSettled(promises);
-		const txids: string[] = [];
-
-		for (const result of results) {
-			if (result.status === 'fulfilled') {
-				txids.push(result.value);
-			}
-		}
-
-		if (txids.length === 0) {
+		try {
+			const firstSig = await Promise.any(attempts);
+			return firstSig;
+		} catch {
 			throw new Error('Failed to send transaction to any submit connection');
 		}
-
-		return txids;
-	}
-
-	private async retrySubmitConnections(
-		rawTransaction: Buffer | Uint8Array,
-		opts: ConfirmOptions
-	): Promise<void> {
-		const promises = this.submitConnections.map(async (connection) => {
-			try {
-				await connection.sendRawTransaction(rawTransaction, opts);
-			} catch (error) {
-				console.error('Retry failed for submit connection:', error);
-			}
-		});
-
-		Promise.allSettled(promises);
 	}
 
 	async sendRawTransaction(
@@ -100,7 +72,7 @@ export class JetProxyTxSender extends WhileValidTxSender {
 				});
 				if (!done) {
 					try {
-						await this.retrySubmitConnections(rawTransaction, opts);
+						await this.sendToSubmitConnections(rawTransaction, opts);
 						this.sendToAdditionalConnections(rawTransaction, opts);
 					} catch (e) {
 						console.error(e);
