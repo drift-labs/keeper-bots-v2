@@ -239,6 +239,7 @@ const agent = new Agent({
 	connections: 200,
 	allowH2: true,
 	keepAliveTimeout: 60_000,
+	pipelining: 10,
 });
 
 setGlobalDispatcher(agent);
