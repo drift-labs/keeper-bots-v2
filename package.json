@@ -26,6 +26,7 @@
 		"async-mutex": "0.3.2",
 		"aws-sdk": "2.1511.0",
 		"axios": "1.7.7",
+		"cacheable-lookup": "6",
 		"commander": "9.5.0",
 		"dotenv": "10.0.0",
 		"jito-ts": "4.1.1",

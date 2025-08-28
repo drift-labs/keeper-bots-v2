@@ -82,6 +82,7 @@ import { JitMaker } from './bots/jitMaker';
 import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
 import { JetProxyTxSender } from './bots/common/jetTxSender';
 import { Agent, setGlobalDispatcher } from 'undici';
+import CacheableLookup from 'cacheable-lookup';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -235,11 +236,15 @@ logger.info(
 
 // @ts-ignore
 const sdkConfig = initialize({ env: config.global.driftEnv });
+const cacheable = new CacheableLookup();
 const agent = new Agent({
 	connections: 200,
 	allowH2: true,
 	keepAliveTimeout: 60_000,
-	pipelining: 10,
+	connect: {
+		//@ts-ignore
+		lookup: cacheable.lookup,
+	},
 });
 
 setGlobalDispatcher(agent);
