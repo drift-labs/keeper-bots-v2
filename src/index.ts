@@ -81,6 +81,7 @@ import { PythLazerCrankerBot } from './bots/pythLazerCranker';
 import { JitMaker } from './bots/jitMaker';
 import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
 import { JetProxyTxSender } from './bots/common/jetTxSender';
+import { Agent, setGlobalDispatcher } from 'undici';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -234,6 +235,13 @@ logger.info(
 
 // @ts-ignore
 const sdkConfig = initialize({ env: config.global.driftEnv });
+const agent = new Agent({
+	connections: 200,
+	allowH2: true,
+	keepAliveTimeout: 60_000,
+});
+
+setGlobalDispatcher(agent);
 setLogLevel(config.global.debug ? 'debug' : 'info');
 
 const endpoint = config.global.endpoint!;

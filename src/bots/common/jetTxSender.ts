@@ -37,7 +37,7 @@ export class JetProxyTxSender extends WhileValidTxSender {
 				.sendRawTransaction(rawTransaction, opts)
 				.then((txSig) => {
 					logger.info(
-						`${connection.rpcEndpoint}: ${(
+						`${connection.rpcEndpoint}: ${txSig} ${(
 							(performance.now() - start) /
 							1000
 						).toFixed(4)}s`
