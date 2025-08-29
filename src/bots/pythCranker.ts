@@ -130,7 +130,12 @@ export class PythCrankerBot implements Bot {
 		this.slotStalenessThresholdRestart =
 			crankConfigs.slotStalenessThresholdRestart;
 
-		this.txRecorder = new TxRecorder(this.name, crankConfigs.metricsPort);
+		this.txRecorder = new TxRecorder(
+			this.name,
+			crankConfigs.metricsPort,
+			false,
+			20_000
+		);
 	}
 
 	async init(): Promise<void> {
@@ -487,16 +492,14 @@ export class PythCrankerBot implements Bot {
 						this.driftClient
 							.sendTransaction(simResult.tx)
 							.then((txSigAndSlot: TxSigAndSlot) => {
-								this.txRecorder.send(
-									Date.now() - startTime,
-									txSigAndSlot.slot - sendSlot
-								);
+								const duration = Date.now() - startTime;
+								this.txRecorder.send(duration, txSigAndSlot.slot - sendSlot);
 								logger.info(
 									`Posted multi pyth pull oracle for ${feedIds.map(
 										(feedId) => feedId.baseSymbol
-									)} update atomic tx: ${txSigAndSlot.txSig}, took ${
-										Date.now() - startTime
-									}ms, landed slot: ${
+									)} update atomic tx: ${
+										txSigAndSlot.txSig
+									}, took ${duration}ms, landed slot: ${
 										txSigAndSlot.slot
 									}, sent slot: ${sendSlot}`
 								);
@@ -534,6 +537,11 @@ export class PythCrankerBot implements Bot {
 	}
 
 	async healthCheck(): Promise<boolean> {
+		const txRecorderHealthy = this.txRecorder.isHealthy();
+		if (!txRecorderHealthy) {
+			logger.warn(`${this.name} bot tx recorder is unhealthy`);
+		}
+		this.health = txRecorderHealthy;
 		return this.health;
 	}
 }
