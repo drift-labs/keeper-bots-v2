@@ -9,7 +9,7 @@
 		"@drift-labs/sdk": "2.136.0-beta.6",
 		"@drift/common": "file:./drift-common/common-ts",
 		"@opentelemetry/api": "1.7.0",
-		"@opentelemetry/auto-instrumentations-node": "0.31.2",
+		"@opentelemetry/auto-instrumentations-node": "^0.62.1",
 		"@opentelemetry/exporter-prometheus": "0.31.0",
 		"@opentelemetry/sdk-node": "0.31.0",
 		"@project-serum/anchor": "0.19.1-beta.1",
