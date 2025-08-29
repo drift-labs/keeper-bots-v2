@@ -6,7 +6,9 @@ import {
 	ExplicitBucketHistogramAggregation,
 	InstrumentType,
 } from '@opentelemetry/sdk-metrics-base';
-import type { Histogram } from '@opentelemetry/api-metrics';
+import { metrics, type Histogram } from '@opentelemetry/api';
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { registerInstrumentations } from '@opentelemetry/instrumentation';
 
 export class TxRecorder {
 	private txLatency?: Histogram;
@@ -53,7 +55,15 @@ export class TxRecorder {
 
 		provider.addMetricReader(exporter);
 
-		const meter = provider.getMeter(botName);
+		metrics.setGlobalMeterProvider(provider);
+
+		registerInstrumentations({
+			meterProvider: provider,
+			instrumentations: [getNodeAutoInstrumentations()],
+		});
+
+		const meter = metrics.getMeter(botName);
+
 		this.attrs = { bot_name: botName };
 		this.txLatency = meter.createHistogram('tx_confirmation_latency', {
 			unit: 'ms',
