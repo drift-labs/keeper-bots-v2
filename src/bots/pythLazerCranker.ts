@@ -30,6 +30,7 @@ import {
 	PythLazerSubscriber,
 } from '../pythLazerSubscriber';
 import { Channel } from '@pythnetwork/pyth-lazer-sdk';
+import { TxRecorder } from './common/txRecorder';
 
 setGlobalDispatcher(
 	new Agent({
@@ -50,6 +51,8 @@ export class PythLazerCrankerBot implements Bot {
 
 	private blockhashSubscriber: BlockhashSubscriber;
 	private health: boolean = true;
+	// Metrics
+	private txRecorder: TxRecorder;
 
 	constructor(
 		private globalConfig: GlobalConfig,
@@ -150,6 +153,13 @@ export class PythLazerCrankerBot implements Bot {
 		this.blockhashSubscriber = new BlockhashSubscriber({
 			connection: driftClient.connection,
 		});
+
+		this.txRecorder = new TxRecorder(
+			this.name,
+			crankConfigs.metricsPort,
+			false,
+			20_000
+		);
 	}
 
 	async init(): Promise<void> {
@@ -257,10 +267,10 @@ export class PythLazerCrankerBot implements Bot {
 				this.driftClient
 					.sendTransaction(simResult.tx)
 					.then((txSigAndSlot: TxSigAndSlot) => {
+						const duration = Date.now() - startTime;
+						this.txRecorder.send(duration);
 						logger.info(
-							`Posted pyth lazer oracles for ${feedIds} update atomic tx: ${
-								txSigAndSlot.txSig
-							}, took ${Date.now() - startTime}ms`
+							`Posted pyth lazer oracles for ${feedIds} update atomic tx: ${txSigAndSlot.txSig}, took ${duration}ms, skippedSim: false`
 						);
 					})
 					.catch((e) => {
@@ -277,10 +287,10 @@ export class PythLazerCrankerBot implements Bot {
 				this.driftClient
 					.sendTransaction(tx)
 					.then((txSigAndSlot: TxSigAndSlot) => {
+						const duration = Date.now() - startTime;
+						this.txRecorder.send(duration);
 						logger.info(
-							`Posted pyth lazer oracles for ${feedIds} update atomic tx: ${
-								txSigAndSlot.txSig
-							}, took ${Date.now() - startTime}ms`
+							`Posted pyth lazer oracles for ${feedIds} update atomic tx: ${txSigAndSlot.txSig}, took ${duration}ms, skippedSim: true`
 						);
 					})
 					.catch((e) => {
@@ -291,6 +301,11 @@ export class PythLazerCrankerBot implements Bot {
 	}
 
 	async healthCheck(): Promise<boolean> {
+		const txRecorderHealthy = this.txRecorder.isHealthy();
+		if (!txRecorderHealthy) {
+			logger.warn(`${this.name} bot tx recorder is unhealthy`);
+		}
+		this.health = txRecorderHealthy;
 		return this.health;
 	}
 }

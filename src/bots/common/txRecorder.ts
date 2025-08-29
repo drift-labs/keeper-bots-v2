@@ -6,16 +6,28 @@ import {
 	ExplicitBucketHistogramAggregation,
 	InstrumentType,
 } from '@opentelemetry/sdk-metrics-base';
-import { metrics, type Histogram } from '@opentelemetry/api';
+import { metrics, ObservableGauge, type Histogram } from '@opentelemetry/api';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
 
 export class TxRecorder {
 	private txLatency?: Histogram;
 	private slotLatency?: Histogram;
+	private txLatencyEma?: ObservableGauge;
 	private attrs: Record<string, string> = {};
+	private movingAvgLatencyMs?: number;
+	private emaAlpha: number = 0.1;
+	private healthThresholdMs: number = 20000;
 
-	constructor(botName: string, port?: number, disabled?: boolean) {
+	constructor(
+		botName: string,
+		port?: number,
+		disabled?: boolean,
+		thresholdMs = 20000
+	) {
+		// set health threshold regardless of metrics being enabled
+		this.healthThresholdMs = thresholdMs;
+
 		if (disabled || !port) {
 			logger.info(`metrics disabled for bot ${botName}`);
 			return;
@@ -71,10 +83,30 @@ export class TxRecorder {
 		this.slotLatency = meter.createHistogram('tx_slot_latency', {
 			unit: 'slots',
 		});
+		this.txLatencyEma = meter.createObservableGauge('tx_latency_ema', {
+			unit: 'ms',
+		});
+		this.txLatencyEma.addCallback((result) => {
+			result.observe(this.movingAvgLatencyMs ?? 0, this.attrs);
+		});
 	}
 
 	send(latencyMs: number, slotDelta = 0) {
 		this.txLatency?.record(latencyMs, this.attrs);
 		this.slotLatency?.record(Math.max(0, slotDelta), this.attrs);
+
+		// update exponential moving average of tx latency
+		if (this.movingAvgLatencyMs === undefined) {
+			this.movingAvgLatencyMs = latencyMs;
+		} else {
+			this.movingAvgLatencyMs =
+				this.emaAlpha * latencyMs +
+				(1 - this.emaAlpha) * this.movingAvgLatencyMs;
+		}
+	}
+
+	isHealthy(): boolean {
+		if (this.movingAvgLatencyMs === undefined) return true;
+		return this.movingAvgLatencyMs <= this.healthThresholdMs;
 	}
 }
