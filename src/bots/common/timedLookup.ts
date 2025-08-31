@@ -21,7 +21,7 @@ export function timedCacheableLookup(
 	// Use cacheable lookup instead of direct dns.lookup
 	//@ts-ignore
 	cacheable.lookup(hostname, options, (err, address, family) => {
-		console.log(`Cached Lookup: ${hostname}: ${hrtimeMs() - start}ms`);
+		console.debug(`Cached Lookup: ${hostname}: ${hrtimeMs() - start}ms`);
 		callback(err, address, family);
 	});
 }
