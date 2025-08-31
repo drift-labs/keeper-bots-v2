@@ -61,6 +61,8 @@ const TX_LAND_RATE_THRESHOLD = process.env.TX_LAND_RATE_THRESHOLD
 const NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK = 2;
 const TX_PER_JITO_BUNDLE = 3;
 
+const CONCURRENCY_LIMIT = 10;
+
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
 	if (e.message.includes('Blockhash not found')) {
@@ -267,6 +269,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		);
 
 		let driftMarkets: DriftMarketInfo[] = [];
+		console.log('1.crank ints');
 		({ crankIntervals: this.crankIntervalToMarketIds, driftMarkets } =
 			buildCrankIntervalToMarketIds(
 				this.driftClient,
@@ -445,9 +448,9 @@ export class MakerBidAskTwapCrank implements Bot {
 			return;
 		}
 
-		logger.info(
-			`[${this.name}] estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
-		);
+		// logger.info(
+		// 	`[${this.name}] estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
+		// );
 
 		if (simResult.simError !== null) {
 			logger.error(
@@ -542,7 +545,13 @@ export class MakerBidAskTwapCrank implements Bot {
 
 			let txsToBundle: VersionedTransaction[] = [];
 
-			for (const mi of crankMarkets) {
+			const useJitoGlobal = this.sendThroughJito();
+
+			const processMarket = async (
+				mi: number,
+				forceUseJito: boolean,
+				addTipIx: boolean
+			): Promise<{ jitoTx?: VersionedTransaction; restartSignal: boolean }> => {
 				const mmOraclePriceData =
 					this.driftClient.getMMOracleDataForPerpMarket(mi);
 
@@ -601,8 +610,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				}
 
 				// add priority fees if not using jito
-				const useJito = this.sendThroughJito();
-				if (!useJito) {
+				if (!forceUseJito) {
 					const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
 						'perp',
 						mi
@@ -673,11 +681,10 @@ export class MakerBidAskTwapCrank implements Bot {
 					ixs.push(updatePrelaunchOracleIx);
 				}
 
-				if (useJito) {
+				if (forceUseJito) {
 					// first tx in bundle pays the tip
-					const isFirstTxInBundle = txsToBundle.length === 0;
 					const jitoSigners = [this.driftClient.wallet.payer];
-					if (isFirstTxInBundle) {
+					if (addTipIx) {
 						ixs.push(this.bundleSender!.getTipIx());
 					}
 					const txToSend = await this.buildTransaction(
@@ -688,9 +695,10 @@ export class MakerBidAskTwapCrank implements Bot {
 					if (txToSend) {
 						// @ts-ignore;
 						txToSend.sign(jitoSigners);
-						txsToBundle.push(txToSend);
+						return { jitoTx: txToSend, restartSignal: false };
 					} else {
 						logger.error(`[${this.name}] failed to build tx for market: ${mi}`);
+						return { restartSignal: false };
 					}
 				} else {
 					const txToSend = await this.buildTransaction(
@@ -706,19 +714,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				}
 				// logger.info(`[${this.name}] sent tx for market: ${mi}`);
 
-				if (useJito && txsToBundle.length >= TX_PER_JITO_BUNDLE) {
-					logger.info(
-						`[${this.name}] sending ${txsToBundle.length} txs to jito`
-					);
-					await this.bundleSender!.sendTransactions(
-						txsToBundle,
-						undefined,
-						undefined,
-						false
-					);
-					txsToBundle = [];
-				}
-
+				let restartSignal = false;
 				// Check if this change caused the pyth price to update
 				// TODO: move into own loop
 				if (
@@ -734,15 +730,62 @@ export class MakerBidAskTwapCrank implements Bot {
 						),
 						this.driftClient.connection.getSlot(),
 					]);
-					if (!data) continue;
-					const pythData =
-						this.pythPullOracleClient.getOraclePriceDataFromBuffer(data.data);
-					const slotDelay = currentSlot - pythData.slot.toNumber();
-					if (slotDelay > SLOT_STALENESS_THRESHOLD_RESTART) {
+					if (data) {
+						const pythData =
+							this.pythPullOracleClient.getOraclePriceDataFromBuffer(data.data);
+						const slotDelay = currentSlot - pythData.slot.toNumber();
+						if (slotDelay > SLOT_STALENESS_THRESHOLD_RESTART) {
+							logger.info(
+								`[${this.name}] oracle slot stale for market: ${mi}, slot delay: ${slotDelay}`
+							);
+							restartSignal = true;
+						}
+					}
+				}
+
+				return { restartSignal };
+			};
+
+			if (useJitoGlobal) {
+				for (const mi of crankMarkets) {
+					const { jitoTx, restartSignal } = await processMarket(
+						mi,
+						true,
+						txsToBundle.length === 0
+					);
+					if (restartSignal) numFeedsSignalingRestart++;
+					if (jitoTx) txsToBundle.push(jitoTx);
+
+					if (txsToBundle.length >= TX_PER_JITO_BUNDLE) {
 						logger.info(
-							`[${this.name}] oracle slot stale for market: ${mi}, slot delay: ${slotDelay}`
+							`[${this.name}] sending ${txsToBundle.length} txs to jito`
 						);
-						numFeedsSignalingRestart++;
+						await this.bundleSender!.sendTransactions(
+							txsToBundle,
+							undefined,
+							undefined,
+							false
+						);
+						txsToBundle = [];
+					}
+				}
+			} else {
+				for (let idx = 0; idx < crankMarkets.length; idx += CONCURRENCY_LIMIT) {
+					const batch = crankMarkets.slice(idx, idx + CONCURRENCY_LIMIT);
+					const results = await Promise.allSettled(
+						batch.map((mi) => processMarket(mi, false, false))
+					);
+					for (const res of results) {
+						if (res.status === 'fulfilled') {
+							const value = res.value;
+							if (value.restartSignal) {
+								numFeedsSignalingRestart++;
+							}
+						} else {
+							logger.error(
+								`[${this.name}] error processing market in batch: ${res.reason}`
+							);
+						}
 					}
 				}
 			}
