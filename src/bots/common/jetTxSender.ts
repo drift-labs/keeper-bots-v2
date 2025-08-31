@@ -1,8 +1,4 @@
-import {
-	ConfirmOptions,
-	Connection,
-	SendTransactionError,
-} from '@solana/web3.js';
+import { ConfirmOptions, Connection } from '@solana/web3.js';
 import { logger } from '../../logger';
 import { WhileValidTxSender } from '@drift-labs/sdk';
 

@@ -902,6 +902,7 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'markTwapCrank')) {
 		needPythPriceSubscriber = true;
+		needBlockhashSubscriber = true;
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
 		needDriftStateWatcher = true;
@@ -914,6 +915,7 @@ const runBot = async () => {
 				config.botConfigs!.markTwapCrank!,
 				config.global,
 				config.global.runOnce ?? false,
+				blockhashSubscriber,
 				pythPriceSubscriber,
 				[],
 				bundleSender

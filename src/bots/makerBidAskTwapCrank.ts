@@ -13,6 +13,7 @@ import {
 	isOneOfVariant,
 	getVariant,
 	PerpMarkets,
+	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -50,6 +51,8 @@ const MIN_PRIORITY_FEE = 10_000;
 const MAX_PRIORITY_FEE = process.env.MAX_PRIORITY_FEE
 	? parseInt(process.env.MAX_PRIORITY_FEE) || 500_000
 	: 500_000;
+
+const CACHED_BLOCKHASH_OFFSET = 5;
 
 const SLOT_STALENESS_THRESHOLD_RESTART = process.env
 	.SLOT_STALENESS_THRESHOLD_RESTART
@@ -209,6 +212,7 @@ export class MakerBidAskTwapCrank implements Bot {
 	private pythPullOracleClient: PythPullClient;
 	private pythHealthy: boolean = true;
 	private lookupTableAccounts: AddressLookupTableAccount[];
+	private blockhashSubscriber: BlockhashSubscriber;
 
 	private bundleSender?: BundleSender;
 	private crankIntervalToMarketIndicies?: { [key: number]: number[] };
@@ -220,6 +224,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		config: MakerBidAskTwapCrankConfig,
 		globalConfig: GlobalConfig,
 		runOnce: boolean,
+		blockhashSubscriber: BlockhashSubscriber,
 		pythPriceSubscriber?: PythPriceFeedSubscriber,
 		lookupTableAccounts: AddressLookupTableAccount[] = [],
 		bundleSender?: BundleSender
@@ -236,6 +241,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.pythPullOracleClient = new PythPullClient(this.driftClient.connection);
 		this.bundleSender = bundleSender;
 		this.crankIntervalToMarketIndicies = config.crankIntervalToMarketIndicies;
+		this.blockhashSubscriber = blockhashSubscriber;
 
 		// Pyth lazer: remember to remove devnet guard
 		if (!this.globalConfig.lazerEndpoints || !this.globalConfig.lazerToken) {
@@ -428,8 +434,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		ixs: TransactionInstruction[],
 		doSimulation = true
 	): Promise<VersionedTransaction | undefined> {
-		const recentBlockhash =
-			await this.driftClient.connection.getLatestBlockhash('confirmed');
+		const recentBlockhash = await this.getBlockhashForTx();
 
 		let simResult: SimulateAndGetTxWithCUsResponse | undefined;
 		try {
@@ -441,7 +446,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				cuLimitMultiplier: CU_EST_MULTIPLIER,
 				minCuLimit: TWAP_CRANK_MIN_CU,
 				doSimulation,
-				recentBlockhash: recentBlockhash.blockhash,
+				recentBlockhash,
 			});
 		} catch (error) {
 			logger.error(`[${this.name}] simulating tx: ${error}`);
@@ -467,6 +472,21 @@ export class MakerBidAskTwapCrank implements Bot {
 		} else {
 			return simResult.tx;
 		}
+	}
+
+	private async getBlockhashForTx(): Promise<string> {
+		const cachedBlockhash = this.blockhashSubscriber.getLatestBlockhash(
+			CACHED_BLOCKHASH_OFFSET
+		);
+		if (cachedBlockhash) {
+			return cachedBlockhash.blockhash as string;
+		}
+
+		const recentBlockhash =
+			await this.driftClient.connection.getLatestBlockhash({
+				commitment: 'confirmed',
+			});
+		return recentBlockhash.blockhash;
 	}
 
 	private async getPythIxsFromTwapCrankInfo(
