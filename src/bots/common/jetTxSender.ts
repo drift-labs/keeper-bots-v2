@@ -102,7 +102,7 @@ export class JetProxyTxSender extends WhileValidTxSender {
 			await this.checkConfirmationResultForError(txid, result?.value);
 
 			if (result?.value?.err && this.throwOnTransactionError) {
-				throw new SendTransactionError(`Transaction Failed`, [txid]);
+				throw new Error(`Transaction Failed: ${txid}`);
 			}
 
 			slot = result?.context?.slot;
