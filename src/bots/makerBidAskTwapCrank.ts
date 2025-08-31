@@ -66,6 +66,19 @@ const TX_PER_JITO_BUNDLE = 3;
 
 const CONCURRENCY_LIMIT = 10;
 
+// Timeouts and watchdog thresholds
+const SIM_TIMEOUT_MS = 10_000;
+const TX_SEND_TIMEOUT_MS = 20_000;
+const BUNDLE_SEND_TIMEOUT_MS = 15_000;
+const RPC_TIMEOUT_MS = 10_000;
+const STUCK_INTERVAL_MULTIPLIER = 4; // consider stuck if run time > 4x interval
+
+function getStuckThresholdMs(intervalGroup: number): number {
+	// Fallback for DEFAULT_INTERVAL_GROUP or small intervals
+	const base = intervalGroup > 0 ? intervalGroup : 30_000;
+	return Math.max(base * STUCK_INTERVAL_MULTIPLIER, 60_000);
+}
+
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
 	if (e.message.includes('Blockhash not found')) {
@@ -99,6 +112,11 @@ export async function sendVersionedTransaction(
 			driftClient.provider.connection.sendRawTransaction(rawTransaction, opts),
 			timeoutMs
 		);
+		if (txid === null) {
+			logger.warn(
+				`[sendVersionedTransaction] sendRawTransaction timed out after ${timeoutMs}ms`
+			);
+		}
 	} catch (e) {
 		console.error(e);
 		throw e;
@@ -193,6 +211,7 @@ export class MakerBidAskTwapCrank implements Bot {
 
 	private crankIntervalToMarketIds?: { [key: number]: number[] }; // Object from number to array of numbers
 	private crankIntervalInProgress?: { [key: number]: boolean };
+	private crankIntervalStartTime?: { [key: number]: number };
 	private allCrankIntervalGroups?: number[];
 	private maxIntervalGroup?: number; // tracks the max interval group for health checking
 
@@ -290,6 +309,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		);
 
 		this.crankIntervalInProgress = {};
+		this.crankIntervalStartTime = {};
 		if (this.crankIntervalToMarketIds) {
 			this.allCrankIntervalGroups = Object.keys(
 				this.crankIntervalToMarketIds
@@ -299,9 +319,11 @@ export class MakerBidAskTwapCrank implements Bot {
 
 			for (const intervalGroup of this.allCrankIntervalGroups!) {
 				this.crankIntervalInProgress[intervalGroup] = false;
+				this.crankIntervalStartTime[intervalGroup] = 0;
 			}
 		} else {
 			this.crankIntervalInProgress[DEFAULT_INTERVAL_GROUP] = false;
+			this.crankIntervalStartTime[DEFAULT_INTERVAL_GROUP] = 0;
 		}
 
 		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
@@ -349,7 +371,18 @@ export class MakerBidAskTwapCrank implements Bot {
 	private async initDlob() {
 		try {
 			this.latestDlobSlot = this.slotSubscriber.currentSlot;
-			this.dlob = await this.userMap!.getDLOB(this.slotSubscriber.currentSlot);
+			const dlob = await promiseTimeout(
+				this.userMap!.getDLOB(this.slotSubscriber.currentSlot),
+				RPC_TIMEOUT_MS
+			);
+			if (dlob) {
+				this.dlob = dlob;
+			} else {
+				this.dlob = undefined;
+				logger.warn(
+					`[${this.name}] getDLOB timed out after ${RPC_TIMEOUT_MS}ms`
+				);
+			}
 		} catch (e) {
 			logger.error(`[${this.name}] Error loading dlob: ${e}`);
 		}
@@ -386,22 +419,27 @@ export class MakerBidAskTwapCrank implements Bot {
 	): Promise<void> {
 		try {
 			const sendTxStart = Date.now();
-			const txSig = await this.driftClient.txSender.sendVersionedTransaction(
-				tx,
-				[],
-				{
+			const txSig = await promiseTimeout(
+				this.driftClient.txSender.sendVersionedTransaction(tx, [], {
 					...this.driftClient.opts,
-				}
+				}),
+				TX_SEND_TIMEOUT_MS
 			);
-			logger.info(
-				`[${
-					this.name
-				}] makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
-					Date.now() - sendTxStart
-				}ms tx: https://solana.fm/tx/${txSig.txSig}, txSig: ${
-					txSig.txSig
-				}, slot: ${txSig.slot}`
-			);
+			if (txSig) {
+				logger.info(
+					`[${
+						this.name
+					}] makerBidAskTwapCrank sent tx for market: ${marketIndex} in ${
+						Date.now() - sendTxStart
+					}ms tx: https://solana.fm/tx/${txSig.txSig}, txSig: ${
+						txSig.txSig
+					}, slot: ${txSig.slot}`
+				);
+			} else {
+				logger.warn(
+					`[${this.name}] sendVersionedTransaction timed out after ${TX_SEND_TIMEOUT_MS}ms (market: ${marketIndex})`
+				);
+			}
 		} catch (err: any) {
 			logger.error(
 				`[${
@@ -436,38 +474,46 @@ export class MakerBidAskTwapCrank implements Bot {
 	): Promise<VersionedTransaction | undefined> {
 		const recentBlockhash = await this.getBlockhashForTx();
 
-		let simResult: SimulateAndGetTxWithCUsResponse | undefined;
+		let simResult: SimulateAndGetTxWithCUsResponse | undefined | null;
 		try {
-			simResult = await simulateAndGetTxWithCUs({
-				ixs,
-				connection: this.driftClient.connection,
-				payerPublicKey: this.driftClient.wallet.publicKey,
-				lookupTableAccounts: this.lookupTableAccounts,
-				cuLimitMultiplier: CU_EST_MULTIPLIER,
-				minCuLimit: TWAP_CRANK_MIN_CU,
-				doSimulation,
-				recentBlockhash,
-			});
+			simResult = await promiseTimeout(
+				simulateAndGetTxWithCUs({
+					ixs,
+					connection: this.driftClient.connection,
+					payerPublicKey: this.driftClient.wallet.publicKey,
+					lookupTableAccounts: this.lookupTableAccounts,
+					cuLimitMultiplier: CU_EST_MULTIPLIER,
+					minCuLimit: TWAP_CRANK_MIN_CU,
+					doSimulation,
+					recentBlockhash,
+				}),
+				SIM_TIMEOUT_MS
+			);
 		} catch (error) {
 			logger.error(`[${this.name}] simulating tx: ${error}`);
 			return;
 		}
 
-		// logger.info(
-		// 	`[${this.name}] estimated ${simResult.cuEstimate} CUs for market: ${marketIndex}`
-		// );
-
-		if (simResult.simError !== null) {
+		if (!simResult || simResult.simError !== null) {
+			if (!simResult) {
+				logger.warn(
+					`[${this.name}] simulateAndGetTxWithCUs timed out after ${SIM_TIMEOUT_MS}ms (market: ${marketIndex})`
+				);
+			}
 			logger.error(
 				`[${this.name}] Sim error (market: ${marketIndex}): ${JSON.stringify(
-					simResult.simError
-				)}\n${simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''}`
+					simResult ? simResult.simError : 'timeout'
+				)}\n${
+					simResult && simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+				}`
 			);
-			handleSimResultError(
-				simResult,
-				[],
-				`[${this.name}] (market: ${marketIndex})`
-			);
+			if (simResult) {
+				handleSimResultError(
+					simResult,
+					[],
+					`[${this.name}] (market: ${marketIndex})`
+				);
+			}
 			return;
 		} else {
 			return simResult.tx;
@@ -547,16 +593,28 @@ export class MakerBidAskTwapCrank implements Bot {
 
 		const intervalInProgress = this.crankIntervalInProgress![intervalGroup]!;
 		if (intervalInProgress) {
-			logger.info(
-				`[${this.name}] Interval ${intervalGroup} already in progress, skipping`
-			);
-			return;
+			const startTime = this.crankIntervalStartTime![intervalGroup] || 0;
+			const elapsed = Date.now() - startTime;
+			const threshold = getStuckThresholdMs(intervalGroup);
+			if (startTime > 0 && elapsed > threshold) {
+				logger.warn(
+					`[${this.name}] Interval ${intervalGroup} appears stuck for ${elapsed}ms (> ${threshold}ms). Forcing reset.`
+				);
+				this.crankIntervalInProgress![intervalGroup] = false;
+				this.crankIntervalStartTime![intervalGroup] = 0;
+			} else {
+				logger.info(
+					`[${this.name}] Interval ${intervalGroup} already in progress, skipping`
+				);
+				return;
+			}
 		}
 
 		const start = Date.now();
 		let numFeedsSignalingRestart = 0;
 		try {
 			this.crankIntervalInProgress![intervalGroup] = true;
+			this.crankIntervalStartTime![intervalGroup] = Date.now();
 			await this.initDlob();
 
 			logger.info(
@@ -744,22 +802,34 @@ export class MakerBidAskTwapCrank implements Bot {
 						['pythPull', 'pyth1KPull', 'pyth1MPull', 'pythStableCoinPull']
 					)
 				) {
-					const [data, currentSlot] = await Promise.all([
-						this.driftClient.connection.getAccountInfo(
-							this.driftClient.getPerpMarketAccount(mi)!.amm.oracle
-						),
-						this.driftClient.connection.getSlot(),
-					]);
-					if (data) {
-						const pythData =
-							this.pythPullOracleClient.getOraclePriceDataFromBuffer(data.data);
-						const slotDelay = currentSlot - pythData.slot.toNumber();
-						if (slotDelay > SLOT_STALENESS_THRESHOLD_RESTART) {
-							logger.info(
-								`[${this.name}] oracle slot stale for market: ${mi}, slot delay: ${slotDelay}`
-							);
-							restartSignal = true;
+					const tuple = await promiseTimeout(
+						Promise.all([
+							this.driftClient.connection.getAccountInfo(
+								this.driftClient.getPerpMarketAccount(mi)!.amm.oracle
+							),
+							this.driftClient.connection.getSlot(),
+						]),
+						RPC_TIMEOUT_MS
+					);
+					if (tuple) {
+						const [data, currentSlot] = tuple;
+						if (data) {
+							const pythData =
+								this.pythPullOracleClient.getOraclePriceDataFromBuffer(
+									data.data
+								);
+							const slotDelay = currentSlot - pythData.slot.toNumber();
+							if (slotDelay > SLOT_STALENESS_THRESHOLD_RESTART) {
+								logger.info(
+									`[${this.name}] oracle slot stale for market: ${mi}, slot delay: ${slotDelay}`
+								);
+								restartSignal = true;
+							}
 						}
+					} else {
+						logger.warn(
+							`[${this.name}] getAccountInfo/getSlot timed out after ${RPC_TIMEOUT_MS}ms (market: ${mi})`
+						);
 					}
 				}
 
@@ -780,12 +850,20 @@ export class MakerBidAskTwapCrank implements Bot {
 						logger.info(
 							`[${this.name}] sending ${txsToBundle.length} txs to jito`
 						);
-						await this.bundleSender!.sendTransactions(
-							txsToBundle,
-							undefined,
-							undefined,
-							false
+						const bundleChunkResult = await promiseTimeout(
+							this.bundleSender!.sendTransactions(
+								txsToBundle,
+								undefined,
+								undefined,
+								false
+							),
+							BUNDLE_SEND_TIMEOUT_MS
 						);
+						if (bundleChunkResult === null) {
+							logger.warn(
+								`[${this.name}] bundleSender.sendTransactions timed out after ${BUNDLE_SEND_TIMEOUT_MS}ms (chunk, ${txsToBundle.length} txs)`
+							);
+						}
 						txsToBundle = [];
 					}
 				}
@@ -817,12 +895,20 @@ export class MakerBidAskTwapCrank implements Bot {
 				logger.info(
 					`[${this.name}] sending remaining ${txsToBundle.length} txs to jito`
 				);
-				await this.bundleSender!.sendTransactions(
-					txsToBundle,
-					undefined,
-					undefined,
-					false
+				const bundleResult = await promiseTimeout(
+					this.bundleSender!.sendTransactions(
+						txsToBundle,
+						undefined,
+						undefined,
+						false
+					),
+					BUNDLE_SEND_TIMEOUT_MS
 				);
+				if (bundleResult === null) {
+					logger.warn(
+						`[${this.name}] bundleSender.sendTransactions timed out after ${BUNDLE_SEND_TIMEOUT_MS}ms (final flush, ${txsToBundle.length} txs)`
+					);
+				}
 			}
 		} catch (e) {
 			console.error(e);
@@ -835,6 +921,7 @@ export class MakerBidAskTwapCrank implements Bot {
 			}
 		} finally {
 			this.crankIntervalInProgress![intervalGroup] = false;
+			this.crankIntervalStartTime![intervalGroup] = 0;
 			logger.info(
 				`[${
 					this.name
