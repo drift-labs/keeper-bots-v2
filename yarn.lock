@@ -385,21 +385,21 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.20.15":
-  version "0.20.15"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.20.15.tgz#4237e25e78fe0f551c850d558a88f7686e293699"
-  integrity sha512-HmaKq6U45gteGHmMLm1MYXlxYCGTOqjNyTiw3q8ZQ83RC4Fwq+uQ5DfFAv1mwAcFP4wrT8rujDay2hQwdqFb7w==
+"@drift-labs/jit-proxy@0.20.16":
+  version "0.20.16"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.20.16.tgz#5ce5348447249827db2ea797b3fad8dcd22d6682"
+  integrity sha512-z2aUqjLgDmoIFNcIi7ri/bWkZ/hLqlQppvIP0F7UTatbJO1AmlBReESp3p0XpVlwTj18WeyFk3CmO20qQVJYpg==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.136.0-beta.6"
+    "@drift-labs/sdk" "2.136.0-beta.7"
     "@solana/web3.js" "1.98.0"
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.136.0-beta.6":
-  version "2.136.0-beta.6"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.136.0-beta.6.tgz#d05488c1a312928a719bad3b19d37b31ac03292f"
-  integrity sha512-tXnBpmldODxDVJds7XEbn1BJgLf+uSyFJk8SP/RjAmpVtV3psIu1p3fTBeX8RODJIXg+6IHhxXFfXhJC6NklOQ==
+"@drift-labs/sdk@2.136.0-beta.7":
+  version "2.136.0-beta.7"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.136.0-beta.7.tgz#921f6ba974eab4c93e0955c0682191cd603a3a4c"
+  integrity sha512-NlVccXA/o1Et8ElCSiz/dTKjzl9Yr6rotLNwTeTyOPulFPAApU4rDW8a+meVIm1WvsNNnTkLuG41mzsaMjVUjQ==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -460,7 +460,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-2cffe888-e01c-488d-b7c9-552ef00ad0f3-1756490899708/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-771b3b3a-4fc1-4215-b488-8bfde67b190e-1756813479608/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
