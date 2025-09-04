@@ -64,7 +64,7 @@ const TX_LAND_RATE_THRESHOLD = process.env.TX_LAND_RATE_THRESHOLD
 const NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK = 2;
 const TX_PER_JITO_BUNDLE = 3;
 
-const CONCURRENCY_LIMIT = 5;
+const CONCURRENCY_LIMIT = 3;
 
 // Timeouts and watchdog thresholds
 const SIM_TIMEOUT_MS = 10_000;
