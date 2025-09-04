@@ -64,7 +64,7 @@ const TX_LAND_RATE_THRESHOLD = process.env.TX_LAND_RATE_THRESHOLD
 const NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK = 2;
 const TX_PER_JITO_BUNDLE = 3;
 
-const CONCURRENCY_LIMIT = 10;
+const CONCURRENCY_LIMIT = 5;
 
 // Timeouts and watchdog thresholds
 const SIM_TIMEOUT_MS = 10_000;
@@ -78,6 +78,10 @@ function getStuckThresholdMs(intervalGroup: number): number {
 	const base = intervalGroup > 0 ? intervalGroup : 30_000;
 	return Math.max(base * STUCK_INTERVAL_MULTIPLIER, 60_000);
 }
+
+const TX_SEND_TIMEOUT_THRESHOLD = process.env.TX_SEND_TIMEOUT_THRESHOLD
+	? parseInt(process.env.TX_SEND_TIMEOUT_THRESHOLD) || 10
+	: 10;
 
 function isCriticalError(e: Error): boolean {
 	// retrying on this error is standard
@@ -232,6 +236,8 @@ export class MakerBidAskTwapCrank implements Bot {
 	private pythHealthy: boolean = true;
 	private lookupTableAccounts: AddressLookupTableAccount[];
 	private blockhashSubscriber: BlockhashSubscriber;
+	private txSendTimeoutCount: number = 0;
+	private txSendHealthy: boolean = true;
 
 	private bundleSender?: BundleSender;
 	private crankIntervalToMarketIndicies?: { [key: number]: number[] };
@@ -341,6 +347,10 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.intervalIds = [];
 
 		await this.userMap?.unsubscribe();
+
+		// Reset tx timeout tracking and health on reset
+		this.txSendTimeoutCount = 0;
+		this.txSendHealthy = true;
 	}
 
 	public async startIntervalLoop(_intervalMs?: number): Promise<void> {
@@ -365,7 +375,7 @@ export class MakerBidAskTwapCrank implements Bot {
 			healthy =
 				this.watchdogTimerLastPatTime > Date.now() - 5 * this.maxIntervalGroup!;
 		});
-		return healthy && this.pythHealthy;
+		return healthy && this.pythHealthy && this.txSendHealthy;
 	}
 
 	private async initDlob() {
@@ -435,10 +445,20 @@ export class MakerBidAskTwapCrank implements Bot {
 						txSig.txSig
 					}, slot: ${txSig.slot}`
 				);
+				this.txSendTimeoutCount = Math.max(0, this.txSendTimeoutCount - 1);
 			} else {
 				logger.warn(
 					`[${this.name}] sendVersionedTransaction timed out after ${TX_SEND_TIMEOUT_MS}ms (market: ${marketIndex})`
 				);
+				this.txSendTimeoutCount += 1;
+				if (this.txSendTimeoutCount >= TX_SEND_TIMEOUT_THRESHOLD) {
+					if (this.txSendHealthy) {
+						logger.error(
+							`[${this.name}] observed ${this.txSendTimeoutCount} send timeouts (>= ${TX_SEND_TIMEOUT_THRESHOLD}). Marking bot unhealthy.`
+						);
+					}
+					this.txSendHealthy = false;
+				}
 			}
 		} catch (err: any) {
 			logger.error(
@@ -528,6 +548,7 @@ export class MakerBidAskTwapCrank implements Bot {
 			return cachedBlockhash.blockhash as string;
 		}
 
+		console.log('getting recent blockhash from rpc...');
 		const recentBlockhash =
 			await this.driftClient.connection.getLatestBlockhash({
 				commitment: 'confirmed',
