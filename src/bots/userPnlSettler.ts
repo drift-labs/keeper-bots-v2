@@ -21,12 +21,12 @@ import {
 	QUOTE_SPOT_MARKET_INDEX,
 	isOperationPaused,
 	PerpOperation,
-	PriorityFeeSubscriberMap,
 	DriftMarketInfo,
 	SlotSubscriber,
 	User,
 	PerpPosition,
 	MarketStatus,
+	PriorityFeeSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -37,7 +37,6 @@ import { webhookMessage } from '../webhook';
 import { GlobalConfig, UserPnlSettlerConfig } from '../config';
 import {
 	decodeName,
-	getDriftPriorityFeeEndpoint,
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
 	sleepMs,
@@ -101,7 +100,7 @@ export class UserPnlSettlerBot implements Bot {
 	private globalConfig: GlobalConfig;
 	private lookupTableAccounts?: AddressLookupTableAccount[];
 	private userMap: UserMap;
-	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
+	private priorityFeeSubscriber?: PriorityFeeSubscriber;
 
 	// =============================================================================
 	// CONFIGURATION
@@ -127,6 +126,7 @@ export class UserPnlSettlerBot implements Bot {
 	constructor(
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
+		priorityFeeSubscriber: PriorityFeeSubscriber,
 		config: UserPnlSettlerConfig,
 		globalConfig: GlobalConfig
 	) {
@@ -164,14 +164,8 @@ export class UserPnlSettlerBot implements Bot {
 				marketIndex: perpMarket.marketIndex,
 			});
 		}
-		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
-			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
-				this.globalConfig.driftEnv!
-			),
-			driftMarkets,
-			frequencyMs: 10_000,
-		});
-		await this.priorityFeeSubscriberMap!.subscribe();
+
+		await this.priorityFeeSubscriber!.subscribe();
 		await this.driftClient.subscribe();
 
 		await this.userMap.subscribe();
@@ -187,7 +181,7 @@ export class UserPnlSettlerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		await this.priorityFeeSubscriberMap!.unsubscribe();
+		await this.priorityFeeSubscriber!.unsubscribe();
 		await this.userMap?.unsubscribe();
 	}
 
@@ -995,13 +989,10 @@ export class UserPnlSettlerBot implements Bot {
 
 		let success = false;
 		try {
-			const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
-				'perp',
-				marketIndex
-			);
+			const pfs = this.priorityFeeSubscriber!.getAvgStrategyResult();
 			let microLamports = 10_000;
-			if (pfs && pfs.medium) {
-				microLamports = Math.floor(pfs.medium);
+			if (pfs) {
+				microLamports = Math.floor(pfs);
 			}
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({

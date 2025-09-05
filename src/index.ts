@@ -852,6 +852,7 @@ const runBot = async () => {
 			new UserPnlSettlerBot(
 				driftClient,
 				slotSubscriber,
+				priorityFeeSubscriber,
 				config.botConfigs!.userPnlSettler!,
 				config.global
 			)

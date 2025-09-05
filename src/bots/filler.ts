@@ -355,10 +355,6 @@ export class FillerBot extends TxThreaded implements Bot {
 		);
 
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
-		this.priorityFeeSubscriber.updateAddresses([
-			new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC
-			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
-		]);
 		this.blockhashSubscriber = blockhashSubscriber;
 
 		this.expiredNodesSet = new LRUCache<string, boolean>({
