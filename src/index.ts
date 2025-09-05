@@ -238,7 +238,7 @@ logger.info(
 const sdkConfig = initialize({ env: config.global.driftEnv });
 const agent = new Agent({
 	connections: 200,
-	allowH2: true,
+	allowH2: false,
 	keepAliveTimeout: 60_000,
 	connect: { lookup: timedCacheableLookup },
 });
