@@ -52,7 +52,6 @@ import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { IFRevenueSettlerBot } from './bots/ifRevenueSettler';
 import { UserPnlSettlerBot } from './bots/userPnlSettler';
-import { UserLpSettlerBot } from './bots/userLpSettler';
 import { UserIdleFlipperBot } from './bots/userIdleFlipper';
 import {
 	getOrCreateAssociatedTokenAccount,
@@ -855,14 +854,6 @@ const runBot = async () => {
 				config.botConfigs!.userPnlSettler!,
 				config.global
 			)
-		);
-	}
-
-	if (configHasBot(config, 'userLpSettler')) {
-		needDriftStateWatcher = true;
-		needPriorityFeeSubscriber = true;
-		bots.push(
-			new UserLpSettlerBot(driftClient, config.botConfigs!.userLpSettler!)
 		);
 	}
 

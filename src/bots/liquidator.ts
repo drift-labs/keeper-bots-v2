@@ -2666,12 +2666,8 @@ export class LiquidatorBot implements Bot {
 						}
 					}
 
-					const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
-						user.getPerpPositionWithLPSettle(
-							liquidateePosition.marketIndex,
-							liquidateePosition
-						)[0]
-					);
+					const baseAmountToLiquidate =
+						this.calculateBaseAmountToLiquidate(liquidateePosition);
 
 					const subAccountToLiqPerp = this.getSubAccountIdToLiquidatePerp(
 						liquidateePosition.marketIndex

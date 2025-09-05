@@ -162,7 +162,6 @@ export type BotConfigMap = {
 	ifRevenueSettler?: BaseBotConfig;
 	fundingRateUpdater?: BaseBotConfig;
 	userPnlSettler?: UserPnlSettlerConfig;
-	userLpSettler?: BaseBotConfig;
 	userIdleFlipper?: BaseBotConfig;
 	markTwapCrank?: MakerBidAskTwapCrankConfig;
 	pythCranker?: PythCrankerBotConfig;
@@ -510,15 +509,6 @@ export function loadConfigFromOpts(opts: any): Config {
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
 			settlePnlThresholdUsdc: Number(opts.settlePnlThresholdUsdc) ?? 10,
 			maxUsersToConsider: Number(opts.maxUsersToConsider) ?? 50,
-		};
-	}
-	if (opts.userLpSettler) {
-		config.enabledBots.push('userLpSettler');
-		config.botConfigs!.userLpSettler = {
-			dryRun: opts.dryRun ?? false,
-			botId: process.env.BOT_ID ?? 'userLpSettler',
-			metricsPort: 9464,
-			runOnce: opts.runOnce ?? false,
 		};
 	}
 	if (opts.userIdleFlipper) {
