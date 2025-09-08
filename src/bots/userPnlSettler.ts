@@ -461,18 +461,10 @@ export class UserPnlSettlerBot implements Bot {
 				const oraclePriceData =
 					this.driftClient.getOracleDataForPerpMarket(perpMarketIdx);
 
-				let settleePositionWithLp = settleePosition;
-				if (!settleePosition.lpShares.eq(ZERO)) {
-					settleePositionWithLp = user.getPerpPositionWithLPSettle(
-						perpMarketIdx,
-						settleePosition
-					)[0];
-				}
-
 				const userUnsettledPnl = calculateClaimablePnl(
 					perpMarket,
 					spotMarket,
-					settleePositionWithLp,
+					settleePosition,
 					oraclePriceData
 				);
 
@@ -572,17 +564,9 @@ export class UserPnlSettlerBot implements Bot {
 			PerpOperation.SETTLE_PNL_WITH_POSITION
 		);
 
-		let settleePositionWithLp = settleePosition;
-		if (!settleePosition.lpShares.eq(ZERO)) {
-			settleePositionWithLp = user.getPerpPositionWithLPSettle(
-				perpMarketIdx,
-				settleePosition
-			)[0];
-		}
-
 		if (
 			settlePnlWithPositionPaused &&
-			!settleePositionWithLp.baseAssetAmount.eq(ZERO)
+			!settleePosition.baseAssetAmount.eq(ZERO)
 		) {
 			return { shouldSettle: false };
 		}
@@ -601,21 +585,9 @@ export class UserPnlSettlerBot implements Bot {
 		const userUnsettledPnl = calculateClaimablePnl(
 			perpMarket,
 			spotMarket,
-			settleePositionWithLp,
+			settleePosition,
 			oraclePriceData
 		);
-
-		// Check LP settlement conditions
-		const shouldSettleLp = await this.shouldSettleLpPosition(
-			settleePosition,
-			perpMarket,
-			nowTs,
-			{ marketAccount: perpMarket, oraclePriceData }
-		);
-
-		if (settleePositionWithLp.lpShares.gt(ZERO) && !shouldSettleLp) {
-			return { shouldSettle: false };
-		}
 
 		// Apply PnL filtering based on options
 		if (options.positiveOnly) {
@@ -634,11 +606,10 @@ export class UserPnlSettlerBot implements Bot {
 			}
 		} else {
 			// For negative PnL settlement, apply existing logic
-			const hasZeroPnlAndNoLp =
-				userUnsettledPnl.eq(ZERO) && settleePositionWithLp.lpShares.eq(ZERO);
+			const hasZeroPnl = userUnsettledPnl.eq(ZERO);
 
 			// Skip users with zero PnL and no LP shares - these don't need settlement
-			if (hasZeroPnlAndNoLp) {
+			if (hasZeroPnl) {
 				return { shouldSettle: false };
 			}
 
