@@ -142,6 +142,7 @@ export class UserPnlSettlerBot implements Bot {
 
 		this.driftClient = driftClient;
 		this.slotSubscriber = slotSubscriber;
+		this.priorityFeeSubscriber = priorityFeeSubscriber;
 		this.userMap = new UserMap({
 			driftClient: this.driftClient,
 			subscriptionConfig: {
