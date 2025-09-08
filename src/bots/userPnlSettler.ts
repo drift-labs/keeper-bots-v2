@@ -21,12 +21,12 @@ import {
 	QUOTE_SPOT_MARKET_INDEX,
 	isOperationPaused,
 	PerpOperation,
-	PriorityFeeSubscriberMap,
 	DriftMarketInfo,
 	SlotSubscriber,
 	User,
 	PerpPosition,
 	MarketStatus,
+	PriorityFeeSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -37,7 +37,6 @@ import { webhookMessage } from '../webhook';
 import { GlobalConfig, UserPnlSettlerConfig } from '../config';
 import {
 	decodeName,
-	getDriftPriorityFeeEndpoint,
 	handleSimResultError,
 	simulateAndGetTxWithCUs,
 	sleepMs,
@@ -101,7 +100,7 @@ export class UserPnlSettlerBot implements Bot {
 	private globalConfig: GlobalConfig;
 	private lookupTableAccounts?: AddressLookupTableAccount[];
 	private userMap: UserMap;
-	private priorityFeeSubscriberMap?: PriorityFeeSubscriberMap;
+	private priorityFeeSubscriber?: PriorityFeeSubscriber;
 
 	// =============================================================================
 	// CONFIGURATION
@@ -127,6 +126,7 @@ export class UserPnlSettlerBot implements Bot {
 	constructor(
 		driftClient: DriftClient,
 		slotSubscriber: SlotSubscriber,
+		priorityFeeSubscriber: PriorityFeeSubscriber,
 		config: UserPnlSettlerConfig,
 		globalConfig: GlobalConfig
 	) {
@@ -164,14 +164,8 @@ export class UserPnlSettlerBot implements Bot {
 				marketIndex: perpMarket.marketIndex,
 			});
 		}
-		this.priorityFeeSubscriberMap = new PriorityFeeSubscriberMap({
-			driftPriorityFeeEndpoint: getDriftPriorityFeeEndpoint(
-				this.globalConfig.driftEnv!
-			),
-			driftMarkets,
-			frequencyMs: 10_000,
-		});
-		await this.priorityFeeSubscriberMap!.subscribe();
+
+		await this.priorityFeeSubscriber!.subscribe();
 		await this.driftClient.subscribe();
 
 		await this.userMap.subscribe();
@@ -187,7 +181,7 @@ export class UserPnlSettlerBot implements Bot {
 		}
 		this.intervalIds = [];
 
-		await this.priorityFeeSubscriberMap!.unsubscribe();
+		await this.priorityFeeSubscriber!.unsubscribe();
 		await this.userMap?.unsubscribe();
 	}
 
@@ -467,18 +461,10 @@ export class UserPnlSettlerBot implements Bot {
 				const oraclePriceData =
 					this.driftClient.getOracleDataForPerpMarket(perpMarketIdx);
 
-				let settleePositionWithLp = settleePosition;
-				if (!settleePosition.lpShares.eq(ZERO)) {
-					settleePositionWithLp = user.getPerpPositionWithLPSettle(
-						perpMarketIdx,
-						settleePosition
-					)[0];
-				}
-
 				const userUnsettledPnl = calculateClaimablePnl(
 					perpMarket,
 					spotMarket,
-					settleePositionWithLp,
+					settleePosition,
 					oraclePriceData
 				);
 
@@ -578,17 +564,9 @@ export class UserPnlSettlerBot implements Bot {
 			PerpOperation.SETTLE_PNL_WITH_POSITION
 		);
 
-		let settleePositionWithLp = settleePosition;
-		if (!settleePosition.lpShares.eq(ZERO)) {
-			settleePositionWithLp = user.getPerpPositionWithLPSettle(
-				perpMarketIdx,
-				settleePosition
-			)[0];
-		}
-
 		if (
 			settlePnlWithPositionPaused &&
-			!settleePositionWithLp.baseAssetAmount.eq(ZERO)
+			!settleePosition.baseAssetAmount.eq(ZERO)
 		) {
 			return { shouldSettle: false };
 		}
@@ -607,21 +585,9 @@ export class UserPnlSettlerBot implements Bot {
 		const userUnsettledPnl = calculateClaimablePnl(
 			perpMarket,
 			spotMarket,
-			settleePositionWithLp,
+			settleePosition,
 			oraclePriceData
 		);
-
-		// Check LP settlement conditions
-		const shouldSettleLp = await this.shouldSettleLpPosition(
-			settleePosition,
-			perpMarket,
-			nowTs,
-			{ marketAccount: perpMarket, oraclePriceData }
-		);
-
-		if (settleePositionWithLp.lpShares.gt(ZERO) && !shouldSettleLp) {
-			return { shouldSettle: false };
-		}
 
 		// Apply PnL filtering based on options
 		if (options.positiveOnly) {
@@ -640,11 +606,10 @@ export class UserPnlSettlerBot implements Bot {
 			}
 		} else {
 			// For negative PnL settlement, apply existing logic
-			const hasZeroPnlAndNoLp =
-				userUnsettledPnl.eq(ZERO) && settleePositionWithLp.lpShares.eq(ZERO);
+			const hasZeroPnl = userUnsettledPnl.eq(ZERO);
 
 			// Skip users with zero PnL and no LP shares - these don't need settlement
-			if (hasZeroPnlAndNoLp) {
+			if (hasZeroPnl) {
 				return { shouldSettle: false };
 			}
 
@@ -995,13 +960,10 @@ export class UserPnlSettlerBot implements Bot {
 
 		let success = false;
 		try {
-			const pfs = this.priorityFeeSubscriberMap!.getPriorityFees(
-				'perp',
-				marketIndex
-			);
+			const pfs = this.priorityFeeSubscriber!.getAvgStrategyResult();
 			let microLamports = 10_000;
-			if (pfs && pfs.medium) {
-				microLamports = Math.floor(pfs.medium);
+			if (pfs) {
+				microLamports = Math.floor(pfs);
 			}
 			const ixs = [
 				ComputeBudgetProgram.setComputeUnitLimit({
