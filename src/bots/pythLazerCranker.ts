@@ -7,7 +7,6 @@ import {
 	DevnetPerpMarkets,
 	DevnetSpotMarkets,
 	DriftClient,
-	getPythLazerOraclePublicKey,
 	getVariant,
 	MainnetPerpMarkets,
 	MainnetSpotMarkets,
@@ -170,15 +169,6 @@ export class PythLazerCrankerBot implements Bot {
 		);
 
 		await this.pythLazerClient.subscribe();
-
-		this.priorityFeeSubscriber?.updateAddresses(
-			this.pythLazerClient.allSubscribedIds.map((feedId) =>
-				getPythLazerOraclePublicKey(
-					this.driftClient.program.programId,
-					Number(feedId)
-				)
-			)
-		);
 	}
 
 	async reset(): Promise<void> {
