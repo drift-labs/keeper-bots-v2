@@ -58,9 +58,17 @@ const SLEEP_MS = 500;
 const CU_EST_MULTIPLIER = 1.25;
 
 const FILTER_FOR_MARKET = undefined; // undefined;
-const EMPTY_USER_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-const POSITIVE_PNL_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
-const ALL_NEGATIVE_PNL_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+// Calculate milliseconds until next hour's 1st minute, then every hour after that
+const getMillisecondsUntilNextHourFirstMinute = () => {
+	const now = new Date();
+	const nextHour = new Date(now);
+	nextHour.setHours(now.getHours() + 1, 1, 0, 0); // Next hour, 1st minute, 0 seconds, 0 ms
+	return nextHour.getTime() - now.getTime();
+};
+
+const EMPTY_USER_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour (after initial delay)
+const POSITIVE_PNL_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour (after initial delay)
+const ALL_NEGATIVE_PNL_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour (after initial delay)
 const MIN_MARGIN_RATIO_FOR_POSITIVE_PNL = 0.1; // 10% of account value
 
 const errorCodesToSuppress = [
@@ -115,6 +123,7 @@ export class UserPnlSettlerBot implements Bot {
 	// =============================================================================
 
 	private intervalIds: Array<NodeJS.Timer> = [];
+	private timeoutIds: Array<NodeJS.Timeout> = [];
 	private inProgress = false;
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
@@ -182,6 +191,11 @@ export class UserPnlSettlerBot implements Bot {
 		}
 		this.intervalIds = [];
 
+		for (const timeoutId of this.timeoutIds) {
+			clearTimeout(timeoutId);
+		}
+		this.timeoutIds = [];
+
 		await this.priorityFeeSubscriber!.unsubscribe();
 		await this.userMap?.unsubscribe();
 	}
@@ -205,26 +219,54 @@ export class UserPnlSettlerBot implements Bot {
 			this.intervalIds.push(
 				setInterval(this.trySettleNegativePnl.bind(this), negativeInterval)
 			);
-			// Comprehensive negative PnL settlement every hour
-			this.intervalIds.push(
-				setInterval(
-					this.trySettleAllNegativePnl.bind(this),
-					ALL_NEGATIVE_PNL_SETTLE_INTERVAL_MS
-				)
+
+			// Calculate delay until next hour's 1st minute for hourly tasks
+			const delayUntilNextHourFirstMinute =
+				getMillisecondsUntilNextHourFirstMinute();
+			const nextRunTime = new Date(Date.now() + delayUntilNextHourFirstMinute);
+			logger.info(
+				`Hourly settlement tasks will start at ${nextRunTime.toISOString()} (in ${Math.round(
+					delayUntilNextHourFirstMinute / 1000
+				)}s)`
 			);
-			// Users with no positions every hour
-			this.intervalIds.push(
-				setInterval(
-					this.trySettleUsersWithNoPositions.bind(this),
-					EMPTY_USER_SETTLE_INTERVAL_MS
-				)
+
+			// Comprehensive negative PnL settlement - start at next hour's 1st minute, then every hour
+			this.timeoutIds.push(
+				setTimeout(() => {
+					this.trySettleAllNegativePnl();
+					this.intervalIds.push(
+						setInterval(
+							this.trySettleAllNegativePnl.bind(this),
+							ALL_NEGATIVE_PNL_SETTLE_INTERVAL_MS
+						)
+					);
+				}, delayUntilNextHourFirstMinute)
 			);
-			// Positive PnL settlement for low margin users every hour
-			this.intervalIds.push(
-				setInterval(
-					this.trySettlePositivePnlForLowMargin.bind(this),
-					POSITIVE_PNL_SETTLE_INTERVAL_MS
-				)
+
+			// Users with no positions - start at next hour's 1st minute, then every hour
+			this.timeoutIds.push(
+				setTimeout(() => {
+					this.trySettleUsersWithNoPositions();
+					this.intervalIds.push(
+						setInterval(
+							this.trySettleUsersWithNoPositions.bind(this),
+							EMPTY_USER_SETTLE_INTERVAL_MS
+						)
+					);
+				}, delayUntilNextHourFirstMinute)
+			);
+
+			// Positive PnL settlement for low margin users - start at next hour's 1st minute, then every hour
+			this.timeoutIds.push(
+				setTimeout(() => {
+					this.trySettlePositivePnlForLowMargin();
+					this.intervalIds.push(
+						setInterval(
+							this.trySettlePositivePnlForLowMargin.bind(this),
+							POSITIVE_PNL_SETTLE_INTERVAL_MS
+						)
+					);
+				}, delayUntilNextHourFirstMinute)
 			);
 		}
 	}
