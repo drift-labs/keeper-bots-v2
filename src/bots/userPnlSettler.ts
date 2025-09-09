@@ -58,13 +58,6 @@ const SLEEP_MS = 500;
 const CU_EST_MULTIPLIER = 1.25;
 
 const FILTER_FOR_MARKET = undefined; // undefined;
-// Calculate milliseconds until next hour's 1st minute, then every hour after that
-const getMillisecondsUntilNextHourFirstMinute = () => {
-	const now = new Date();
-	const nextHour = new Date(now);
-	nextHour.setHours(now.getHours() + 1, 1, 0, 0); // Next hour, 1st minute, 0 seconds, 0 ms
-	return nextHour.getTime() - now.getTime();
-};
 
 const EMPTY_USER_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour (after initial delay)
 const POSITIVE_PNL_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour (after initial delay)
@@ -222,7 +215,7 @@ export class UserPnlSettlerBot implements Bot {
 
 			// Calculate delay until next hour's 1st minute for hourly tasks
 			const delayUntilNextHourFirstMinute =
-				getMillisecondsUntilNextHourFirstMinute();
+				this.getMillisecondsUntilNextHourFirstMinute();
 			const nextRunTime = new Date(Date.now() + delayUntilNextHourFirstMinute);
 			logger.info(
 				`Hourly settlement tasks will start at ${nextRunTime.toISOString()} (in ${Math.round(
@@ -1115,6 +1108,13 @@ export class UserPnlSettlerBot implements Bot {
 	// =============================================================================
 	// UTILITY METHODS
 	// =============================================================================
+
+	private getMillisecondsUntilNextHourFirstMinute(): number {
+		const now = new Date();
+		const nextHour = new Date(now);
+		nextHour.setHours(now.getHours() + 1, 1, 0, 0); // Next hour, 1st minute, 0 seconds, 0 ms
+		return nextHour.getTime() - now.getTime();
+	}
 
 	private async updateWatchdogTimer() {
 		await this.watchdogTimerMutex.runExclusive(async () => {
