@@ -377,21 +377,21 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.20.19":
-  version "0.20.19"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.20.19.tgz#f9bf64623ab42edcfa73738fa99a3f5bffb29f87"
-  integrity sha512-nME7qEbqDS6h3htUU+sx0HxFTwb6DbeeLRhamvlqnaI93TXNh8b4wCIkHrGZPi4SC3NrWZfK9mGmwTD/XTZnSg==
+"@drift-labs/jit-proxy@0.20.20":
+  version "0.20.20"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.20.20.tgz#3bd12bac3ac2a23a79d49893497e45bae49ad4bf"
+  integrity sha512-+QX+QF1Q22A8UNwq8JJiHYAm7lQfYGO8T5i3WJhAm4s3OMExBjvgwo6uVgM9k/9RpF7DS4o6G91IOqWEucU71A==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.137.0-beta.2"
+    "@drift-labs/sdk" "2.137.0-beta.3"
     "@solana/web3.js" "1.98.0"
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.137.0-beta.2":
-  version "2.137.0-beta.2"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.137.0-beta.2.tgz#7c7cdf0f1e444cda8eed6714c60caf9f25ca9597"
-  integrity sha512-rXdNC1acIA70G9RSoEnO86RD4YevwYGrd3XaUWTLAEmUq1URyrVnf2xMkeuWFTNVXD3Al2lKCkTPC1wA+fid5g==
+"@drift-labs/sdk@2.137.0-beta.3":
+  version "2.137.0-beta.3"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.137.0-beta.3.tgz#fc065231e42ddc75a96471e791bb008d8e03100d"
+  integrity sha512-vq1hcanuNJqTbGk7g7HWgiVm8JSAmhiTdnyin5JWEdPZt9sLcpCK085qrAy0940XRQJQ8JGpJQpibqoEAYanNw==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -452,7 +452,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-ac48ee53-b562-4811-b117-0ee3e3c7aff7-1757397080775/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-b3e90d7e-14df-4722-9389-4d3d3535c739-1757470028308/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
