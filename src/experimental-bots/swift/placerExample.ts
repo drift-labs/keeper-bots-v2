@@ -244,17 +244,28 @@ export class SwiftPlacer {
 					);
 
 					const isOrderLong = isVariant(signedMsgOrderParams.direction, 'long');
-					const result = await axios.get(
-						`${this.baseDlobUrl}/topMakers?marketType=perp&marketIndex=${
-							signedMsgOrderParams.marketIndex
-						}&side=${isOrderLong ? 'ask' : 'bid'}&limit=2`
-					);
-					if (result.status !== 200) {
-						console.error('Failed to get top makers');
+					let topMakers: string[] = [];
+					try {
+						const response = await axios.get(
+							`${this.baseDlobUrl}/topMakers?marketType=perp&marketIndex=${
+								signedMsgOrderParams.marketIndex
+							}&side=${isOrderLong ? 'ask' : 'bid'}&limit=2`,
+							{
+								timeout: 2_000,
+								validateStatus: () => true,
+							}
+						);
+						if (response.status !== 200 || !Array.isArray(response.data)) {
+							logger.warn(
+								`Failed to get top makers; status=${response.status}`
+							);
+							return;
+						}
+						topMakers = response.data as string[];
+					} catch (e: any) {
+						logger.warn(`Error fetching top makers: ${e?.message ?? e}`);
 						return;
 					}
-
-					const topMakers = result.data as string[];
 
 					const orderSlot = Math.min(
 						signedMessage.slot.toNumber(),
