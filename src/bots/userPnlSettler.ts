@@ -11,7 +11,6 @@ import {
 	ZERO,
 	calculateNetUserPnlImbalance,
 	convertToNumber,
-	isVariant,
 	TxSigAndSlot,
 	timeRemainingUntilUpdate,
 	getTokenAmount,
@@ -416,18 +415,11 @@ export class UserPnlSettlerBot implements Bot {
 				}
 			}
 
-			const isUsdcBorrow =
-				userAccount.spotPositions[0] &&
-				isVariant(userAccount.spotPositions[0].balanceType, 'borrow');
-			const usdcAmount = user.getTokenAmount(QUOTE_SPOT_MARKET_INDEX);
-
 			for (const settleePosition of user.getActivePerpPositions()) {
 				const settlementDecision = await this.shouldSettleUserPosition(
 					user,
 					settleePosition,
 					nowTs,
-					isUsdcBorrow,
-					usdcAmount,
 					options
 				);
 
@@ -472,11 +464,6 @@ export class UserPnlSettlerBot implements Bot {
 				continue;
 			}
 
-			const isUsdcBorrow =
-				userAccount.spotPositions[0] &&
-				isVariant(userAccount.spotPositions[0].balanceType, 'borrow');
-			const usdcAmount = user.getTokenAmount(QUOTE_SPOT_MARKET_INDEX);
-
 			const activePerpPositions = user.getActivePerpPositions();
 
 			for (const settleePosition of activePerpPositions) {
@@ -513,8 +500,6 @@ export class UserPnlSettlerBot implements Bot {
 					user,
 					settleePosition,
 					nowTs,
-					isUsdcBorrow,
-					usdcAmount,
 					{ positiveOnly: false }
 				);
 
@@ -553,7 +538,7 @@ export class UserPnlSettlerBot implements Bot {
 						sortedCandidates.length
 					} users with PnLs: [${sortedCandidates
 						.map((u) => `$${u.pnl.toFixed(2)}`)
-						.join(', ')}]`
+						.join(', ')}] in market ${marketIndex}`
 				);
 
 				usersToSettleMap.set(marketIndex, sortedCandidates);
@@ -567,8 +552,6 @@ export class UserPnlSettlerBot implements Bot {
 		user: User,
 		settleePosition: PerpPosition,
 		nowTs: number,
-		isUsdcBorrow: boolean,
-		usdcAmount: BN,
 		options: { positiveOnly: boolean; requireLowMargin?: boolean }
 	): Promise<{ shouldSettle: boolean; pnl?: number }> {
 		const userAccKeyStr = user.getUserAccountPublicKey().toBase58();
@@ -649,23 +632,12 @@ export class UserPnlSettlerBot implements Bot {
 				return { shouldSettle: false };
 			}
 
-			// if user has usdc borrow, only settle if magnitude of pnl is material ($10 and 1% of borrow)
+			// skip if positive orbelow minPnlToSettle
 			if (
-				isUsdcBorrow &&
-				(userUnsettledPnl.abs().lt(this.minPnlToSettle.abs()) ||
-					userUnsettledPnl.abs().lt(usdcAmount.abs().div(new BN(100))))
+				userUnsettledPnl.abs().lt(this.minPnlToSettle.abs()) ||
+				userUnsettledPnl.gt(ZERO)
 			) {
 				return { shouldSettle: false };
-			}
-
-			// For negative PnL, check if user can be settled
-			if (userUnsettledPnl.gt(ZERO)) {
-				return { shouldSettle: false };
-			} else {
-				// only settle negative pnl if unsettled pnl is material
-				if (!userUnsettledPnl.abs().gte(this.minPnlToSettle.abs())) {
-					return { shouldSettle: false };
-				}
 			}
 		}
 
