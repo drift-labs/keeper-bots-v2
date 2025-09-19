@@ -4,7 +4,6 @@ import {
 	UserAccount,
 	PublicKey,
 	PerpMarketAccount,
-	OraclePriceData,
 	calculateClaimablePnl,
 	QUOTE_PRECISION,
 	UserMap,
@@ -12,20 +11,21 @@ import {
 	calculateNetUserPnlImbalance,
 	convertToNumber,
 	TxSigAndSlot,
-	timeRemainingUntilUpdate,
 	getTokenAmount,
 	SpotBalanceType,
 	calculateNetUserPnl,
-	BASE_PRECISION,
 	QUOTE_SPOT_MARKET_INDEX,
 	isOperationPaused,
 	PerpOperation,
 	DriftMarketInfo,
-	SlotSubscriber,
 	User,
 	PerpPosition,
 	MarketStatus,
 	PriorityFeeSubscriber,
+	isOneOfVariant,
+	getVariant,
+	calculateUnsettledFundingPnl,
+	BlockhashSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -45,6 +45,7 @@ import {
 	ComputeBudgetProgram,
 	SendTransactionError,
 	TransactionExpiredBlockheightExceededError,
+	TransactionInstruction,
 } from '@solana/web3.js';
 import { ENUM_UTILS } from '@drift/common';
 
@@ -53,6 +54,7 @@ import { ENUM_UTILS } from '@drift/common';
 // =============================================================================
 
 const SETTLE_USER_CHUNKS = 4;
+const SETTLE_FUNDING_USER_CHUNKS = 10;
 const SLEEP_MS = 500;
 const CU_EST_MULTIPLIER = 1.25;
 
@@ -61,6 +63,7 @@ const FILTER_FOR_MARKET = undefined; // undefined;
 const EMPTY_USER_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour (after initial delay)
 const POSITIVE_PNL_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour (after initial delay)
 const ALL_NEGATIVE_PNL_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour (after initial delay)
+const FUNDING_SETTLE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour (after initial delay)
 const MIN_MARGIN_RATIO_FOR_POSITIVE_PNL = 0.1; // 10% of account value
 
 const errorCodesToSuppress = [
@@ -81,6 +84,11 @@ interface UserToSettle {
 	pnl: number;
 }
 
+type IxsBuilder = (
+	users: UserToSettle[],
+	marketIndex: number
+) => Promise<TransactionInstruction[]>;
+
 // =============================================================================
 // MAIN CLASS
 // =============================================================================
@@ -96,7 +104,7 @@ export class UserPnlSettlerBot implements Bot {
 	// =============================================================================
 
 	private driftClient: DriftClient;
-	private slotSubscriber: SlotSubscriber;
+	private blockhashSubscriber: BlockhashSubscriber;
 	private globalConfig: GlobalConfig;
 	private lookupTableAccounts?: AddressLookupTableAccount[];
 	private userMap: UserMap;
@@ -116,7 +124,6 @@ export class UserPnlSettlerBot implements Bot {
 
 	private intervalIds: Array<NodeJS.Timer> = [];
 	private timeoutIds: Array<NodeJS.Timeout> = [];
-	private inProgress = false;
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
 
@@ -126,7 +133,6 @@ export class UserPnlSettlerBot implements Bot {
 
 	constructor(
 		driftClient: DriftClient,
-		slotSubscriber: SlotSubscriber,
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		config: UserPnlSettlerConfig,
 		globalConfig: GlobalConfig
@@ -142,8 +148,10 @@ export class UserPnlSettlerBot implements Bot {
 		this.globalConfig = globalConfig;
 
 		this.driftClient = driftClient;
-		this.slotSubscriber = slotSubscriber;
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
+		this.blockhashSubscriber = new BlockhashSubscriber({
+			connection: driftClient.connection,
+		});
 		this.userMap = new UserMap({
 			driftClient: this.driftClient,
 			subscriptionConfig: {
@@ -169,6 +177,7 @@ export class UserPnlSettlerBot implements Bot {
 
 		await this.priorityFeeSubscriber!.subscribe();
 		await this.driftClient.subscribe();
+		await this.blockhashSubscriber.subscribe();
 
 		await this.userMap.subscribe();
 		this.lookupTableAccounts =
@@ -190,6 +199,7 @@ export class UserPnlSettlerBot implements Bot {
 
 		await this.priorityFeeSubscriber!.unsubscribe();
 		await this.userMap?.unsubscribe();
+		await this.blockhashSubscriber.unsubscribe();
 	}
 
 	public async startIntervalLoop(intervalMs?: number): Promise<void> {
@@ -202,6 +212,7 @@ export class UserPnlSettlerBot implements Bot {
 			await this.trySettleAllNegativePnl();
 			await this.trySettleUsersWithNoPositions();
 			await this.trySettlePositivePnlForLowMargin();
+			await this.trySettleFundingForMarketThenUsers();
 		} else {
 			// Initial settlement on startup - only settle negative PnL
 			await this.trySettleNegativePnl();
@@ -260,6 +271,19 @@ export class UserPnlSettlerBot implements Bot {
 					);
 				}, delayUntilNextHourFirstMinute)
 			);
+
+			// Funding settlement for markets and users - start at next hour's 1st minute, then every hour
+			this.timeoutIds.push(
+				setTimeout(() => {
+					this.trySettleFundingForMarketThenUsers();
+					this.intervalIds.push(
+						setInterval(
+							this.trySettleFundingForMarketThenUsers.bind(this),
+							FUNDING_SETTLE_INTERVAL_MS
+						)
+					);
+				}, delayUntilNextHourFirstMinute)
+			);
 		}
 	}
 
@@ -277,19 +301,13 @@ export class UserPnlSettlerBot implements Bot {
 	// =============================================================================
 
 	private async trySettleNegativePnl() {
-		if (this.inProgress) {
-			logger.info(`Settle PnLs already in progress, skipping...`);
-			return;
-		}
 		const start = Date.now();
 		try {
-			this.inProgress = true;
 			logger.info('Starting top 10 negative PnL settlement...');
 			await this.settleLargestNegativePnl();
 		} catch (err) {
 			this.handleSettlementError(err, 'trySettleNegativePnl');
 		} finally {
-			this.inProgress = false;
 			logger.info(
 				`Top 10 negative PnL settlement finished in ${Date.now() - start}ms`
 			);
@@ -298,21 +316,13 @@ export class UserPnlSettlerBot implements Bot {
 	}
 
 	private async trySettlePositivePnlForLowMargin() {
-		if (this.inProgress) {
-			logger.info(
-				`Settle PnLs already in progress, skipping positive PnL settlement...`
-			);
-			return;
-		}
 		const start = Date.now();
 		try {
-			this.inProgress = true;
 			logger.info('Starting positive PnL settlement for low margin users...');
 			await this.settlePnl({ positiveOnly: true, requireLowMargin: true });
 		} catch (err) {
 			this.handleSettlementError(err, 'trySettlePositivePnlForLowMargin');
 		} finally {
-			this.inProgress = false;
 			logger.info(
 				`Settle positive PNLs for low margin finished in ${
 					Date.now() - start
@@ -323,21 +333,13 @@ export class UserPnlSettlerBot implements Bot {
 	}
 
 	private async trySettleAllNegativePnl() {
-		if (this.inProgress) {
-			logger.info(
-				`Settle PnLs already in progress, skipping comprehensive negative PnL settlement...`
-			);
-			return;
-		}
 		const start = Date.now();
 		try {
-			this.inProgress = true;
 			logger.info('Starting comprehensive negative PnL settlement...');
 			await this.settlePnl({ positiveOnly: false });
 		} catch (err) {
 			this.handleSettlementError(err, 'trySettleAllNegativePnl');
 		} finally {
-			this.inProgress = false;
 			logger.info(
 				`Settle all negative PNLs finished in ${Date.now() - start}ms`
 			);
@@ -360,6 +362,186 @@ export class UserPnlSettlerBot implements Bot {
 			);
 		} catch (err) {
 			this.handleSettlementError(err, 'trySettleUsersWithNoPositions');
+		}
+	}
+
+	private async trySettleFundingForMarketThenUsers() {
+		try {
+			await this.trySettleFundingForMarkets();
+			await this.trySettleFundingForUsers();
+		} catch (err) {
+			this.handleSettlementError(err, 'trySettleFundingForMarketThenUsers');
+		}
+	}
+
+	private async trySettleFundingForMarkets() {
+		const logPrefix = '[trySettleFundingForMarkets]';
+		try {
+			const perpMarketAndOracleData: {
+				[marketIndex: number]: {
+					marketAccount: PerpMarketAccount;
+				};
+			} = {};
+
+			for (const marketAccount of this.driftClient.getPerpMarketAccounts()) {
+				perpMarketAndOracleData[marketAccount.marketIndex] = {
+					marketAccount,
+				};
+			}
+
+			for (const marketAccount of this.driftClient.getPerpMarketAccounts()) {
+				const perpMarket =
+					perpMarketAndOracleData[marketAccount.marketIndex].marketAccount;
+				if (isOneOfVariant(perpMarket.status, ['initialized'])) {
+					logger.info(
+						`${logPrefix} Skipping perp market ${
+							perpMarket.marketIndex
+						} because market status = ${getVariant(perpMarket.status)}`
+					);
+					continue;
+				}
+
+				const fundingPaused = isOperationPaused(
+					perpMarket.pausedOperations,
+					PerpOperation.UPDATE_FUNDING
+				);
+				if (fundingPaused) {
+					const marketStr = decodeName(perpMarket.name);
+					logger.warn(
+						`${logPrefix} Update funding paused for market: ${perpMarket.marketIndex} ${marketStr}, skipping`
+					);
+					continue;
+				}
+
+				if (perpMarket.amm.fundingPeriod.eq(ZERO)) {
+					continue;
+				}
+				const currentTs = Date.now() / 1000;
+
+				const timeRemainingTilUpdate = this.getTimeUntilNextFundingUpdate(
+					currentTs,
+					perpMarket.amm.lastFundingRateTs.toNumber(),
+					perpMarket.amm.fundingPeriod.toNumber()
+				);
+				logger.info(
+					`${logPrefix} Perp market ${perpMarket.marketIndex} timeRemainingTilUpdate=${timeRemainingTilUpdate}`
+				);
+				if ((timeRemainingTilUpdate as number) <= 0) {
+					logger.info(
+						`${logPrefix} Perp market ${
+							perpMarket.marketIndex
+						} lastFundingRateTs: ${perpMarket.amm.lastFundingRateTs.toString()}, fundingPeriod: ${perpMarket.amm.fundingPeriod.toString()}, lastFunding+Period: ${perpMarket.amm.lastFundingRateTs
+							.add(perpMarket.amm.fundingPeriod)
+							.toString()} vs. currTs: ${currentTs.toString()}`
+					);
+					try {
+						const pfs = this.priorityFeeSubscriber!.getAvgStrategyResult();
+						let microLamports = 10_000;
+						if (pfs) {
+							microLamports = Math.floor(pfs);
+						}
+
+						const ixs = [
+							ComputeBudgetProgram.setComputeUnitLimit({
+								units: 1_400_000, // simulateAndGetTxWithCUs will overwrite
+							}),
+							ComputeBudgetProgram.setComputeUnitPrice({
+								microLamports,
+							}),
+						];
+
+						if (
+							isOneOfVariant(perpMarket.amm.oracleSource, [
+								'switchboardOnDemand',
+							])
+						) {
+							const crankIx =
+								await this.driftClient.getPostSwitchboardOnDemandUpdateAtomicIx(
+									perpMarket.amm.oracle
+								);
+							if (crankIx) {
+								ixs.push(crankIx);
+							}
+						}
+
+						ixs.push(
+							await this.driftClient.getUpdateFundingRateIx(
+								perpMarket.marketIndex,
+								perpMarket.amm.oracle
+							)
+						);
+
+						const recentBlockhash =
+							this.blockhashSubscriber.getLatestBlockhash(5);
+						if (!recentBlockhash) {
+							logger.error(
+								`${logPrefix} No recent blockhash found for market: ${perpMarket.marketIndex}`
+							);
+							throw new Error('No recent blockhash found');
+						}
+						const simResult = await simulateAndGetTxWithCUs({
+							ixs,
+							connection: this.driftClient.connection,
+							payerPublicKey: this.driftClient.wallet.publicKey,
+							lookupTableAccounts: this.lookupTableAccounts!,
+							cuLimitMultiplier: CU_EST_MULTIPLIER,
+							doSimulation: true,
+							recentBlockhash: recentBlockhash?.blockhash,
+						});
+						logger.info(
+							`${logPrefix} UpdateFundingRate estimated ${simResult.cuEstimate} CUs for market: ${perpMarket.marketIndex}`
+						);
+
+						if (simResult.simError !== null) {
+							logger.error(
+								`${logPrefix} Sim error on market: ${
+									perpMarket.marketIndex
+								}, ${JSON.stringify(simResult.simError)}\n${
+									simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+								}`
+							);
+							handleSimResultError(
+								simResult,
+								errorCodesToSuppress,
+								`(updateFundingRate)`
+							);
+							continue;
+						}
+
+						const sendTxStart = Date.now();
+						const txSig =
+							await this.driftClient.txSender.sendVersionedTransaction(
+								simResult.tx,
+								[],
+								this.driftClient.opts
+							);
+						logger.info(
+							`${logPrefix} UpdateFundingRate for market: ${
+								perpMarket.marketIndex
+							}, tx sent in ${
+								Date.now() - sendTxStart
+							}ms: https://solana.fm/tx/${txSig.txSig}`
+						);
+					} catch (err) {
+						this.handleSettlementError(err, 'trySettleFundingForMarkets.send');
+					}
+				}
+			}
+		} catch (err) {
+			this.handleSettlementError(err, 'trySettleFundingForMarkets');
+		}
+	}
+
+	private async trySettleFundingForUsers() {
+		const logPrefix = '[trySettleFundingForUsers]';
+		try {
+			const usersToSettle = await this.findUsersWithUnsettledFunding();
+			logger.info(
+				`${logPrefix} Found ${usersToSettle.length} users with unsettled funding`
+			);
+			await this.processUserFundingSettlements(usersToSettle, logPrefix);
+		} catch (err) {
+			this.handleSettlementError(err, 'trySettleFundingForUsers');
 		}
 	}
 
@@ -647,44 +829,6 @@ export class UserPnlSettlerBot implements Bot {
 		};
 	}
 
-	private async shouldSettleLpPosition(
-		settleePosition: any,
-		perpMarket: PerpMarketAccount,
-		nowTs: number,
-		perpMarketData: {
-			marketAccount: PerpMarketAccount;
-			oraclePriceData: OraclePriceData;
-		}
-	): Promise<boolean> {
-		const twoPctOfOpenInterestBase = BN.min(
-			perpMarket.amm.baseAssetAmountLong,
-			perpMarket.amm.baseAssetAmountShort.abs()
-		).div(new BN(50));
-
-		const fiveHundredNotionalBase = QUOTE_PRECISION.mul(new BN(500))
-			.mul(BASE_PRECISION)
-			.div(perpMarket.amm.historicalOracleData.lastOraclePriceTwap5Min);
-
-		const largeUnsettledLP =
-			perpMarket.amm.baseAssetAmountWithUnsettledLp
-				.abs()
-				.gt(twoPctOfOpenInterestBase) &&
-			perpMarket.amm.baseAssetAmountWithUnsettledLp
-				.abs()
-				.gt(fiveHundredNotionalBase);
-
-		const timeToFundingUpdate = timeRemainingUntilUpdate(
-			new BN(nowTs ?? Date.now() / 1000),
-			perpMarketData.marketAccount.amm.lastFundingRateTs,
-			perpMarketData.marketAccount.amm.fundingPeriod
-		);
-
-		return (
-			settleePosition.lpShares.gt(ZERO) &&
-			(timeToFundingUpdate.ltn(15 * 60) || largeUnsettledLP)
-		);
-	}
-
 	private async canSettlePositivePnl(
 		user: any,
 		userUnsettledPnl: BN,
@@ -839,6 +983,29 @@ export class UserPnlSettlerBot implements Bot {
 		return usersToSettleMap;
 	}
 
+	private async findUsersWithUnsettledFunding(): Promise<UserToSettle[]> {
+		const usersToSettle: UserToSettle[] = [];
+		for (const user of this.userMap!.values()) {
+			const perpPositions = user.getActivePerpPositions();
+			for (const perpPosition of perpPositions) {
+				const unsettledFunding = calculateUnsettledFundingPnl(
+					this.driftClient.getPerpMarketAccount(perpPosition.marketIndex)!,
+					perpPosition
+				);
+				if (!unsettledFunding.eq(ZERO)) {
+					usersToSettle.push({
+						settleeUserAccountPublicKey: user.getUserAccountPublicKey(),
+						settleeUserAccount: user.getUserAccount(),
+						pnl: 0,
+					});
+					break;
+				}
+			}
+		}
+
+		return usersToSettle;
+	}
+
 	private async processUserSettlements(
 		usersToSettleMap: Map<number, UserToSettle[]>,
 		logPrefix = ''
@@ -899,15 +1066,70 @@ export class UserPnlSettlerBot implements Bot {
 		}
 	}
 
+	private async processUserFundingSettlements(
+		usersToSettle: UserToSettle[],
+		logPrefix = ''
+	) {
+		if (usersToSettle.length === 0) {
+			logger.info(`${logPrefix} No users to settle funding for`);
+			return;
+		}
+
+		const allTxPromises = [];
+		const fundingIxsBuilder: IxsBuilder = async (users, _marketIndex) => {
+			const ixs: TransactionInstruction[] = [];
+			for (const u of users) {
+				ixs.push(
+					await this.driftClient.getSettleFundingPaymentIx(
+						u.settleeUserAccountPublicKey
+					)
+				);
+			}
+			return ixs;
+		};
+
+		for (let i = 0; i < usersToSettle.length; i += SETTLE_FUNDING_USER_CHUNKS) {
+			const usersChunk = usersToSettle.slice(i, i + SETTLE_FUNDING_USER_CHUNKS);
+			allTxPromises.push(
+				this.trySendTxForChunk(
+					-1,
+					usersChunk,
+					fundingIxsBuilder,
+					'(settleFunding)'
+				)
+			);
+		}
+
+		logger.info(
+			`${logPrefix} Waiting for ${allTxPromises.length} funding txs to settle...`
+		);
+		const settleStart = Date.now();
+		await Promise.all(allTxPromises);
+		logger.info(
+			`${logPrefix} Settled funding for ${usersToSettle.length} users in ${
+				Date.now() - settleStart
+			}ms`
+		);
+	}
+
 	private async executeSettlementForMarket(
 		marketIndex: number,
 		users: UserToSettle[],
 		logPrefix = ''
 	) {
 		const allTxPromises = [];
+		const pnlIxsBuilder: IxsBuilder = async (usersArg, marketIdx) =>
+			this.driftClient.getSettlePNLsIxs(usersArg, [marketIdx]);
 		for (let i = 0; i < users.length; i += SETTLE_USER_CHUNKS) {
 			const usersChunk = users.slice(i, i + SETTLE_USER_CHUNKS);
-			allTxPromises.push(this.trySendTxForChunk(marketIndex, usersChunk));
+			allTxPromises.push(
+				this.trySendTxForChunk(
+					marketIndex,
+					usersChunk,
+					pnlIxsBuilder,
+					'(settlePnL)'
+				)
+			);
 		}
 
 		logger.info(
@@ -928,9 +1150,16 @@ export class UserPnlSettlerBot implements Bot {
 
 	async trySendTxForChunk(
 		marketIndex: number,
-		users: UserToSettle[]
+		users: UserToSettle[],
+		buildIxs?: IxsBuilder,
+		simLabel = '(settlePnL)'
 	): Promise<void> {
-		const success = await this.sendTxForChunk(marketIndex, users);
+		const success = await this.sendTxForChunk(
+			marketIndex,
+			users,
+			buildIxs,
+			simLabel
+		);
 		if (!success) {
 			const slice = Math.floor(users.length / 2);
 			if (slice < 1) {
@@ -950,17 +1179,19 @@ export class UserPnlSettlerBot implements Bot {
 			);
 
 			await sleepMs(SLEEP_MS);
-			await this.sendTxForChunk(marketIndex, slice0);
+			await this.sendTxForChunk(marketIndex, slice0, buildIxs, simLabel);
 
 			await sleepMs(SLEEP_MS);
-			await this.sendTxForChunk(marketIndex, slice1);
+			await this.sendTxForChunk(marketIndex, slice1, buildIxs, simLabel);
 		}
 		await sleepMs(SLEEP_MS);
 	}
 
 	async sendTxForChunk(
 		marketIndex: number,
-		users: UserToSettle[]
+		users: UserToSettle[],
+		buildIxs?: IxsBuilder,
+		simLabel = '(settlePnL)'
 	): Promise<boolean> {
 		if (users.length == 0) {
 			return true;
@@ -982,12 +1213,13 @@ export class UserPnlSettlerBot implements Bot {
 				}),
 			];
 			try {
-				ixs.push(
-					...(await this.driftClient.getSettlePNLsIxs(users, [marketIndex]))
-				);
+				const extraIxs = buildIxs
+					? await buildIxs(users, marketIndex)
+					: await this.driftClient.getSettlePNLsIxs(users, [marketIndex]);
+				ixs.push(...extraIxs);
 			} catch (error) {
 				logger.error(
-					`Failed to get SettlePNLsIxs for users in market ${marketIndex}:`
+					`Failed to build ixs ${simLabel} for market ${marketIndex}:`
 				);
 				logger.error(`Error: ${error}`);
 				logger.error(
@@ -998,8 +1230,15 @@ export class UserPnlSettlerBot implements Bot {
 				throw error;
 			}
 
-			const recentBlockhash =
-				await this.driftClient.connection.getLatestBlockhash('confirmed');
+			const recentBlockhash = this.blockhashSubscriber.getLatestBlockhash(5);
+			if (!recentBlockhash) {
+				logger.error(
+					`${simLabel} No recent blockhash found for users: ${users
+						.map((u) => u.settleeUserAccountPublicKey.toBase58())
+						.join(', ')}`
+				);
+				throw new Error('No recent blockhash found');
+			}
 			const simResult = await simulateAndGetTxWithCUs({
 				ixs,
 				connection: this.driftClient.connection,
@@ -1017,11 +1256,11 @@ export class UserPnlSettlerBot implements Bot {
 						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
 					}`
 				);
-				handleSimResultError(simResult, errorCodesToSuppress, `(settlePnL)`);
+				handleSimResultError(simResult, errorCodesToSuppress, simLabel);
 				success = false;
 			} else {
 				logger.info(
-					`[sendTxForChunk] Settle Pnl estimated ${
+					`[sendTxForChunk] ${simLabel} estimated ${
 						simResult.cuEstimate
 					} CUs for ${ixs.length} ixs, ${users.length} users (${users
 						.map((u) => u.settleeUserAccountPublicKey.toBase58())
@@ -1042,7 +1281,8 @@ export class UserPnlSettlerBot implements Bot {
 					users.map(
 						({ settleeUserAccountPublicKey }) => settleeUserAccountPublicKey
 					),
-					sendTxDuration
+					sendTxDuration,
+					simLabel
 				);
 			}
 		} catch (err) {
@@ -1058,7 +1298,12 @@ export class UserPnlSettlerBot implements Bot {
 				logger.info(
 					`Blockheight exceeded error, retrying with same set of users (${users.length} users on market ${marketIndex})`
 				);
-				success = await this.sendTxForChunk(marketIndex, users);
+				success = await this.sendTxForChunk(
+					marketIndex,
+					users,
+					buildIxs,
+					simLabel
+				);
 			} else if (err instanceof Error) {
 				const errorCode = getErrorCode(err) ?? 0;
 				if (!errorCodesToSuppress.includes(errorCode) && users.length === 1) {
@@ -1086,6 +1331,41 @@ export class UserPnlSettlerBot implements Bot {
 		const nextHour = new Date(now);
 		nextHour.setHours(now.getHours() + 1, 1, 0, 0); // Next hour, 1st minute, 0 seconds, 0 ms
 		return nextHour.getTime() - now.getTime();
+	}
+
+	private getTimeUntilNextFundingUpdate(
+		now: number,
+		lastUpdateTs: number,
+		updatePeriod: number
+	): number | Error {
+		const timeSinceLastUpdate = now - lastUpdateTs;
+
+		if (timeSinceLastUpdate < 0) {
+			return new Error('Invalid arguments');
+		}
+
+		let nextUpdateWait = updatePeriod;
+		if (updatePeriod > 1) {
+			const lastUpdateDelay = lastUpdateTs % updatePeriod;
+			if (lastUpdateDelay !== 0) {
+				const maxDelayForNextPeriod = updatePeriod / 3;
+				const twoFundingPeriods = updatePeriod * 2;
+
+				if (lastUpdateDelay > maxDelayForNextPeriod) {
+					// too late for on the hour next period, delay to following period
+					nextUpdateWait = twoFundingPeriods - lastUpdateDelay;
+				} else {
+					// allow update on the hour
+					nextUpdateWait = updatePeriod - lastUpdateDelay;
+				}
+
+				if (nextUpdateWait > twoFundingPeriods) {
+					nextUpdateWait -= updatePeriod;
+				}
+			}
+		}
+
+		return Math.max(nextUpdateWait - timeSinceLastUpdate, 0);
 	}
 
 	private async updateWatchdogTimer() {
@@ -1125,7 +1405,8 @@ export class UserPnlSettlerBot implements Bot {
 		txSigAndSlot: TxSigAndSlot,
 		marketIndex: number,
 		userAccountPublicKeys: Array<PublicKey>,
-		sendTxDuration: number
+		sendTxDuration: number,
+		label?: string
 	) {
 		const txSig = txSigAndSlot.txSig;
 		let userStr = '';
@@ -1134,8 +1415,15 @@ export class UserPnlSettlerBot implements Bot {
 			userStr += `${userAccountPublicKey.toBase58()}, `;
 			countUsers++;
 		}
-		logger.info(
-			`Settled pnl in market ${marketIndex}. For ${countUsers} users: ${userStr}. Took: ${sendTxDuration}ms. https://solana.fm/tx/${txSig}`
-		);
+		const isFunding = label === '(settleFunding)';
+		if (isFunding) {
+			logger.info(
+				`Settled funding for ${countUsers} users: ${userStr}. Took: ${sendTxDuration}ms. https://solana.fm/tx/${txSig}`
+			);
+		} else {
+			logger.info(
+				`Settled pnl in market ${marketIndex}. For ${countUsers} users: ${userStr}. Took: ${sendTxDuration}ms. https://solana.fm/tx/${txSig}`
+			);
+		}
 	}
 }
