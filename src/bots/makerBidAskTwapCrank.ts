@@ -531,7 +531,9 @@ export class MakerBidAskTwapCrank implements Bot {
 				handleSimResultError(
 					simResult,
 					[],
-					`[${this.name}] (market: ${marketIndex})`
+					`[${this.name}] (market: ${marketIndex})`,
+					false,
+					'bid or ask twap unchanged from small ts delta update'
 				);
 			}
 			return;
