@@ -377,21 +377,21 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.21.11":
-  version "0.21.11"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.11.tgz#27dc3f3aae998bbefd5771424e6ceadda9ec7cec"
-  integrity sha512-Z1uUK3EmHmbXoEVrhlNuade48bh4MR/XUMDabZwiJx3NQ4hHf9N0wR+2rIdlRh+eSVuCYFBwYPkV3ObwJ7aGCw==
+"@drift-labs/jit-proxy@0.21.13":
+  version "0.21.13"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.13.tgz#064b0ca19c944cead545ac2746749b3c74e0b353"
+  integrity sha512-o1M1voPC5TScA2hiKBsf1bYNVLpCTFoHIDRZqxCAvnYNZmqetG+TieFjXGbe2jyEMR7v6op7s30xQEQDsW4eEA==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.139.0-beta.1"
+    "@drift-labs/sdk" "2.139.0-beta.3"
     "@solana/web3.js" "1.98.0"
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.139.0-beta.1":
-  version "2.139.0-beta.1"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.139.0-beta.1.tgz#7649ce4d971b7bef74048787d94f6563bf20e12d"
-  integrity sha512-Ft5DzbhKIzFz2J0H+VokNQCNXdvQ8dCVPE90m/JXMQQG5WSfwBqCV82ofR0JssFjQ8w5b6qTuRKJAW7zAVP6Hg==
+"@drift-labs/sdk@2.139.0-beta.3":
+  version "2.139.0-beta.3"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.139.0-beta.3.tgz#0730287bde6e794c2a4eaa5acd1934465124079c"
+  integrity sha512-zEfSgG+QockYicWcy6b75VVxLmn4iy8ks80kBMh3GZt8TthTulcBpw4Le/crW90qqEK32mEXpp/Ihf3yGbnnMg==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -409,6 +409,7 @@
     "@triton-one/yellowstone-grpc" "1.3.0"
     anchor-bankrun "0.3.0"
     gill "^0.10.2"
+    helius-laserstream "0.1.8"
     nanoid "3.3.4"
     node-cache "5.1.2"
     rpc-websockets "7.5.1"
@@ -452,7 +453,7 @@
 "@drift/common@file:./drift-common/common-ts":
   version "1.0.0"
   dependencies:
-    "@drift-labs/sdk" "file:../../../.cache/yarn/v6/npm-@drift-common-1.0.0-8775e019-04b6-41fa-9f98-9864aaa16f79-1758576037430/node_modules/@drift/protocol/sdk"
+    "@drift-labs/sdk" "file:../../Library/Caches/Yarn/v6/npm-@drift-common-1.0.0-2a9b9b32-4816-42b8-bd5f-b725e7e06a8c-1758647394602/node_modules/@drift/protocol/sdk"
     "@jest/globals" "29.3.1"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
@@ -2985,6 +2986,13 @@
     pg-protocol "*"
     pg-types "^2.2.0"
 
+"@types/protobufjs@^6.0.0":
+  version "6.0.0"
+  resolved "https://registry.yarnpkg.com/@types/protobufjs/-/protobufjs-6.0.0.tgz#aeabb43f9507bb19c8adfb479584c151082353e4"
+  integrity sha512-A27RDExpAf3rdDjIrHKiJK6x8kqqJ4CmoChwtipfhVAn1p7+wviQFFP7dppn8FslSbHtQeVPvi8wNKkDjSYjHw==
+  dependencies:
+    protobufjs "*"
+
 "@types/retry@0.12.0":
   version "0.12.0"
   resolved "https://registry.yarnpkg.com/@types/retry/-/retry-0.12.0.tgz#2b35eccfcee7d38cd72ad99232fbd58bffb3c84d"
@@ -4633,6 +4641,51 @@ he@1.2.0:
   resolved "https://registry.yarnpkg.com/he/-/he-1.2.0.tgz#84ae65fa7eafb165fddb61566ae14baf05664f0f"
   integrity sha512-F/1DnUGPopORZi0ni+CvrCgHQ5FyEAHRLSApuYWMmrbSwoN2Mn/7k+Gl38gJnR7yyDZk6WLXwiGod1JOWNDKGw==
 
+helius-laserstream-darwin-arm64@0.1.8:
+  version "0.1.8"
+  resolved "https://registry.yarnpkg.com/helius-laserstream-darwin-arm64/-/helius-laserstream-darwin-arm64-0.1.8.tgz#d78ad15e6cd16dc9379a9a365f9fcb3f958e6c01"
+  integrity sha512-p/K2Mi3wZnMxEYSLCvu858VyMvtJFonhdF8cLaMcszFv04WWdsK+hINNZpVRfakypvDfDPbMudEhL1Q9USD5+w==
+
+helius-laserstream-darwin-x64@0.1.8:
+  version "0.1.8"
+  resolved "https://registry.yarnpkg.com/helius-laserstream-darwin-x64/-/helius-laserstream-darwin-x64-0.1.8.tgz#e57bc8f03135fd3b5c01a5aebd7b87c42129da50"
+  integrity sha512-Hd5irFyfOqQZLdoj5a+OV7vML2YfySSBuKlOwtisMHkUuIXZ4NpAexslDmK7iP5VWRI+lOv9X/tA7BhxW7RGSQ==
+
+helius-laserstream-linux-arm64-gnu@0.1.8:
+  version "0.1.8"
+  resolved "https://registry.yarnpkg.com/helius-laserstream-linux-arm64-gnu/-/helius-laserstream-linux-arm64-gnu-0.1.8.tgz#1b3c8440804d143f650166842620fc334f9c319b"
+  integrity sha512-PlPm1dvOvTGBL1nuzK98Xe40BJq1JWNREXlBHKDVA/B+KCGQnIMJ1s6e1MevSvFE7SOix5i1BxhYIxGioK2GMg==
+
+helius-laserstream-linux-arm64-musl@0.1.8:
+  version "0.1.8"
+  resolved "https://registry.yarnpkg.com/helius-laserstream-linux-arm64-musl/-/helius-laserstream-linux-arm64-musl-0.1.8.tgz#28e0645bebc3253d2a136cf0bd13f8cb5256f47b"
+  integrity sha512-LFadfMRuTd1zo6RZqLTgHQapo3gJYioS7wFMWFoBOFulG0BpAqHEDNobkxx0002QArw+zX29MQ/5OaOCf8kKTA==
+
+helius-laserstream-linux-x64-gnu@0.1.8:
+  version "0.1.8"
+  resolved "https://registry.yarnpkg.com/helius-laserstream-linux-x64-gnu/-/helius-laserstream-linux-x64-gnu-0.1.8.tgz#e59990ca0bcdc27e46f71a8fc2c18fddbe6f07e3"
+  integrity sha512-IZWK/OQIe0647QqfYikLb1DFK+nYtXLJiMcpj24qnNVWBOtMXmPc1hL6ebazdEiaKt7fxNd5IiM1RqeaqZAZMw==
+
+helius-laserstream-linux-x64-musl@0.1.8:
+  version "0.1.8"
+  resolved "https://registry.yarnpkg.com/helius-laserstream-linux-x64-musl/-/helius-laserstream-linux-x64-musl-0.1.8.tgz#42aa0919ef266c40f50ac74d6f9d871d4e2e7c9c"
+  integrity sha512-riTS6VgxDae1fHOJ2XC/o/v1OZRbEv/3rcoa3NlAOnooDKp5HDgD0zJTcImjQHpYWwGaejx1oX/Ht53lxNoijw==
+
+helius-laserstream@0.1.8:
+  version "0.1.8"
+  resolved "https://registry.yarnpkg.com/helius-laserstream/-/helius-laserstream-0.1.8.tgz#6ee5e0bc9fe2560c03a0d2c9079b9f875c3e6bb7"
+  integrity sha512-jXQkwQRWiowbVPGQrGacOkI5shKPhrEixCu93OpoMtL5fs9mnhtD7XKMPi8CX0W8gsqsJjwR4NlaR+EflyANbQ==
+  dependencies:
+    "@types/protobufjs" "^6.0.0"
+    protobufjs "^7.5.3"
+  optionalDependencies:
+    helius-laserstream-darwin-arm64 "0.1.8"
+    helius-laserstream-darwin-x64 "0.1.8"
+    helius-laserstream-linux-arm64-gnu "0.1.8"
+    helius-laserstream-linux-arm64-musl "0.1.8"
+    helius-laserstream-linux-x64-gnu "0.1.8"
+    helius-laserstream-linux-x64-musl "0.1.8"
+
 https-proxy-agent@^7.0.1:
   version "7.0.6"
   resolved "https://registry.yarnpkg.com/https-proxy-agent/-/https-proxy-agent-7.0.6.tgz#da8dfeac7da130b05c2ba4b59c9b6cd66611a6b9"
@@ -5683,7 +5736,7 @@ progress@^2.0.0:
   resolved "https://registry.yarnpkg.com/progress/-/progress-2.0.3.tgz#7e8cf8d8f5b8f239c1bc68beb4eb78567d572ef8"
   integrity sha512-7PiHtLll5LdnKIMw100I+8xJXR5gW2QwWYkT6iJva0bXitZKa/XMrSbdmg3r2Xnaidz9Qumd0VPaMrZlF9V9sA==
 
-protobufjs@^7.2.5, protobufjs@^7.2.6, protobufjs@^7.3.0, protobufjs@^7.4.0:
+protobufjs@*, protobufjs@^7.2.5, protobufjs@^7.2.6, protobufjs@^7.3.0, protobufjs@^7.4.0, protobufjs@^7.5.3:
   version "7.5.4"
   resolved "https://registry.yarnpkg.com/protobufjs/-/protobufjs-7.5.4.tgz#885d31fe9c4b37f25d1bb600da30b1c5b37d286a"
   integrity sha512-CvexbZtbov6jW2eXAvLukXjXUW1TzFaivC46BpWc/3BpcCysb5Vffu+B3XHMm8lVEuy2Mm4XGex8hBSg1yapPg==
