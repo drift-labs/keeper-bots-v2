@@ -121,6 +121,7 @@ export type PythCrankerBotConfig = BaseBotConfig & {
 		};
 	};
 	onlyCrankUsedOracles?: boolean;
+	overridePythIds?: string[];
 };
 
 export type PythLazerCrankerBotConfig = BaseBotConfig & {

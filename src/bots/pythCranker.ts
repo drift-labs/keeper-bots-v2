@@ -78,9 +78,8 @@ export class PythCrankerBot implements Bot {
 
 	public name: string;
 	public dryRun: boolean;
-	private intervalMs: number;
 	private feedIdToPriceFeedMap: Map<string, PriceFeed> = new Map();
-	public defaultIntervalMs = 30_000;
+	public defaultIntervalMs: number;
 
 	private blockhashSubscriber: BlockhashSubscriber;
 	private health: boolean = true;
@@ -101,7 +100,7 @@ export class PythCrankerBot implements Bot {
 	) {
 		this.name = crankConfigs.botId;
 		this.dryRun = crankConfigs.dryRun;
-		this.intervalMs = crankConfigs.intervalMs;
+		this.defaultIntervalMs = crankConfigs.intervalMs ?? 30_000;
 		if (!globalConfig.hermesEndpoint) {
 			throw new Error('Missing hermesEndpoint in global config');
 		}
@@ -170,87 +169,125 @@ export class PythCrankerBot implements Bot {
 			}
 		);
 
-		for (const marketConfig of perpMarketConfigs) {
-			const feedId = marketConfig.pythFeedId;
-			if (!feedId) {
-				logger.warn(`No pyth feed id for market ${marketConfig.symbol}`);
-				continue;
-			}
-			const perpMarket = this.driftClient.getPerpMarketAccount(
-				marketConfig.marketIndex
-			);
-			if (!perpMarket) {
-				logger.warn(`No perp market for market ${marketConfig.symbol}`);
-				continue;
-			}
-			if (isOneOfVariant(perpMarket.status, ['delisted', 'settlement'])) {
-				logger.warn(`Skipping perp market ${marketConfig.symbol} is delisted`);
-				continue;
+		if (!this.crankConfigs.overridePythIds) {
+			for (const marketConfig of perpMarketConfigs) {
+				const feedId = marketConfig.pythFeedId;
+				if (!feedId) {
+					logger.warn(`No pyth feed id for market ${marketConfig.symbol}`);
+					continue;
+				}
+				const perpMarket = this.driftClient.getPerpMarketAccount(
+					marketConfig.marketIndex
+				);
+				if (!perpMarket) {
+					logger.warn(`No perp market for market ${marketConfig.symbol}`);
+					continue;
+				}
+				if (isOneOfVariant(perpMarket.status, ['delisted', 'settlement'])) {
+					logger.warn(
+						`Skipping perp market ${marketConfig.symbol} is delisted`
+					);
+					continue;
+				}
+
+				const updateConfigs = updateDefault;
+				const earlyUpdateConfigs = earlyUpdateDefault;
+				if (isOneOfVariant(perpMarket.contractTier, ['a', 'b'])) {
+					updateConfigs.timeDiffMs = 15_000;
+					earlyUpdateConfigs.timeDiffMs = 10_000;
+				}
+				const pubkey = getPythPullOraclePublicKey(
+					this.driftClient.program.programId,
+					getFeedIdUint8Array(feedId)
+				);
+
+				this.feedIdsToCrank.push({
+					baseSymbol: marketConfig.baseAssetSymbol.toUpperCase(),
+					feedId,
+					updateConfig:
+						this.crankConfigs?.updateConfigs?.[feedId]?.update ?? updateConfigs,
+					earlyUpdateConfig:
+						this.crankConfigs?.updateConfigs?.[feedId]?.earlyUpdate ??
+						earlyUpdateConfigs,
+					accountAddress: pubkey,
+				});
 			}
 
-			const updateConfigs = updateDefault;
-			const earlyUpdateConfigs = earlyUpdateDefault;
-			if (isOneOfVariant(perpMarket.contractTier, ['a', 'b'])) {
-				updateConfigs.timeDiffMs = 15_000;
-				earlyUpdateConfigs.timeDiffMs = 10_000;
-			}
-			const pubkey = getPythPullOraclePublicKey(
-				this.driftClient.program.programId,
-				getFeedIdUint8Array(feedId)
-			);
+			for (const marketConfig of spotMarketConfigs) {
+				if (
+					this.feedIdsToCrank.findIndex(
+						(feedId) => feedId.baseSymbol === marketConfig.symbol
+					) !== -1
+				)
+					continue;
 
-			this.feedIdsToCrank.push({
-				baseSymbol: marketConfig.baseAssetSymbol.toUpperCase(),
-				feedId,
-				updateConfig:
-					this.crankConfigs?.updateConfigs?.[feedId]?.update ?? updateConfigs,
-				earlyUpdateConfig:
-					this.crankConfigs?.updateConfigs?.[feedId]?.earlyUpdate ??
-					earlyUpdateConfigs,
-				accountAddress: pubkey,
-			});
-		}
-
-		for (const marketConfig of spotMarketConfigs) {
-			if (
-				this.feedIdsToCrank.findIndex(
-					(feedId) => feedId.baseSymbol === marketConfig.symbol
-				) !== -1
-			)
-				continue;
-
-			const feedId = marketConfig.pythFeedId;
-			if (!feedId) {
-				logger.warn(`No pyth feed id for market ${marketConfig.symbol}`);
-				continue;
+				const feedId = marketConfig.pythFeedId;
+				if (!feedId) {
+					logger.warn(`No pyth feed id for market ${marketConfig.symbol}`);
+					continue;
+				}
+				const updateConfigs = updateDefault;
+				const earlyUpdateConfigs = earlyUpdateDefault;
+				if (
+					isOneOfVariant(marketConfig.oracleSource, [
+						'pythPullStableCoin',
+						'pythStableCoin',
+					])
+				) {
+					updateConfigs.timeDiffMs = 15_000;
+					updateConfigs.priceDiffPct = 0.1;
+					earlyUpdateConfigs.timeDiffMs = 10_000;
+					earlyUpdateConfigs.priceDiffPct = 0.05;
+				}
+				const pubkey = getPythPullOraclePublicKey(
+					this.driftClient.program.programId,
+					getFeedIdUint8Array(feedId)
+				);
+				this.feedIdsToCrank.push({
+					baseSymbol: marketConfig.symbol.toUpperCase(),
+					feedId,
+					updateConfig:
+						this.crankConfigs?.updateConfigs?.[feedId]?.update ?? updateConfigs,
+					earlyUpdateConfig:
+						this.crankConfigs?.updateConfigs?.[feedId]?.earlyUpdate ??
+						earlyUpdateConfigs,
+					accountAddress: pubkey,
+				});
 			}
-			const updateConfigs = updateDefault;
-			const earlyUpdateConfigs = earlyUpdateDefault;
-			if (
-				isOneOfVariant(marketConfig.oracleSource, [
-					'pythPullStableCoin',
-					'pythStableCoin',
-				])
-			) {
-				updateConfigs.timeDiffMs = 15_000;
-				updateConfigs.priceDiffPct = 0.1;
-				earlyUpdateConfigs.timeDiffMs = 10_000;
-				earlyUpdateConfigs.priceDiffPct = 0.05;
+		} else {
+			for (const feedId of this.crankConfigs.overridePythIds) {
+				const marketConfig = perpMarketConfigs.find(
+					(market) => market.pythFeedId === feedId
+				);
+				const spotMarketConfig = spotMarketConfigs.find(
+					(market) => market.pythFeedId === feedId
+				);
+				if (!marketConfig && !spotMarketConfig) {
+					logger.warn(`No market config found for feed id ${feedId}`);
+					continue;
+				}
+
+				const baseSymbol = marketConfig
+					? marketConfig.baseAssetSymbol.toUpperCase()
+					: spotMarketConfig!.symbol.toUpperCase();
+
+				const marketConfigToUse = marketConfig
+					? marketConfig
+					: spotMarketConfig;
+
+				const updateConfigs = updateDefault;
+				const earlyUpdateConfigs = earlyUpdateDefault;
+				this.feedIdsToCrank.push({
+					baseSymbol: baseSymbol,
+					feedId,
+					updateConfig:
+						this.crankConfigs?.updateConfigs?.[feedId]?.update ?? updateConfigs,
+					earlyUpdateConfig:
+						this.crankConfigs?.updateConfigs?.[feedId]?.earlyUpdate ??
+						earlyUpdateConfigs,
+					accountAddress: marketConfigToUse!.oracle,
+				});
 			}
-			const pubkey = getPythPullOraclePublicKey(
-				this.driftClient.program.programId,
-				getFeedIdUint8Array(feedId)
-			);
-			this.feedIdsToCrank.push({
-				baseSymbol: marketConfig.symbol.toUpperCase(),
-				feedId,
-				updateConfig:
-					this.crankConfigs?.updateConfigs?.[feedId]?.update ?? updateConfigs,
-				earlyUpdateConfig:
-					this.crankConfigs?.updateConfigs?.[feedId]?.earlyUpdate ??
-					earlyUpdateConfigs,
-				accountAddress: pubkey,
-			});
 		}
 
 		await this.priceServiceConnection.subscribePriceFeedUpdates(
@@ -271,7 +308,7 @@ export class PythCrankerBot implements Bot {
 		);
 	}
 
-	async startIntervalLoop(intervalMs = this.intervalMs): Promise<void> {
+	async startIntervalLoop(intervalMs: number | undefined): Promise<void> {
 		logger.info(`Starting ${this.name} bot with interval ${intervalMs} ms`);
 		await sleepMs(5000);
 		await this.runCrankLoop();
@@ -462,8 +499,6 @@ export class PythCrankerBot implements Bot {
 							microLamports: priorityFees,
 						})
 					);
-
-					console.log(`feedId: ${feedIds[0]}, VAA size: ${vaa.length}`);
 
 					ixs.push(
 						...(await this.driftClient.getPostPythPullOracleUpdateAtomicIxs(
