@@ -13,7 +13,8 @@ const commonConfig = {
     format: 'cjs',
     external: [
         'bigint-buffer',
-        '@triton-one/yellowstone-grpc'
+        '@triton-one/yellowstone-grpc',
+        'helius-laserstream',
     ]
 };
 
