@@ -239,7 +239,9 @@ export class SwiftMaker {
 									? PositionDirection.SHORT
 									: PositionDirection.LONG,
 								baseAssetAmount: signedMsgOrderParams.baseAssetAmount.divn(2),
-								price: signedMsgOrderParams.auctionEndPrice!,
+								price: signedMsgOrderParams
+									.auctionStartPrice!.add(signedMsgOrderParams.auctionEndPrice!)
+									.divn(2),
 								postOnly: PostOnlyParams.MUST_POST_ONLY,
 								bitFlags: OrderParamsBitFlag.ImmediateOrCancel,
 							}),
