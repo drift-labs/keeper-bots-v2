@@ -216,71 +216,83 @@ export class SwiftMaker {
 						)
 					);
 
-					const ixs =
-						await this.driftClient.getPlaceAndMakeSignedMsgPerpOrderIxs(
-							{
-								orderParams: signedMsgOrderParamsBufHex,
-								signature: Buffer.from(order['order_signature'], 'base64'),
-							},
-							decodeUTF8(order['uuid']),
-							{
-								taker: takerUserPubkey,
-								takerUserAccount,
-								takerStats: getUserStatsAccountPublicKey(
-									this.driftClient.program.programId,
-									takerUserAccount.authority
-								),
-								signingAuthority,
-							},
-							getLimitOrderParams({
-								marketType: MarketType.PERP,
-								marketIndex: signedMsgOrderParams.marketIndex,
-								direction: isOrderLong
-									? PositionDirection.SHORT
-									: PositionDirection.LONG,
-								baseAssetAmount: signedMsgOrderParams.baseAssetAmount.divn(2),
-								price: signedMsgOrderParams
-									.auctionStartPrice!.add(signedMsgOrderParams.auctionEndPrice!)
-									.divn(2),
-								postOnly: PostOnlyParams.MUST_POST_ONLY,
-								bitFlags: OrderParamsBitFlag.ImmediateOrCancel,
-							}),
-							undefined,
-							undefined,
-							computeBudgetIxs
-						);
+					const timeUntilAuction55 =
+						(signedMsgOrderParams.auctionDuration ?? 0) * 0.55 * 400;
 
-					if (this.dryRun) {
-						console.log(Date.now() - order['ts']);
-						return;
+					if (timeUntilAuction55 > 0) {
+						setTimeout(async () => {
+							const ixs =
+								await this.driftClient.getPlaceAndMakeSignedMsgPerpOrderIxs(
+									{
+										orderParams: signedMsgOrderParamsBufHex,
+										signature: Buffer.from(order['order_signature'], 'base64'),
+									},
+									decodeUTF8(order['uuid']),
+									{
+										taker: takerUserPubkey,
+										takerUserAccount,
+										takerStats: getUserStatsAccountPublicKey(
+											this.driftClient.program.programId,
+											takerUserAccount.authority
+										),
+										signingAuthority,
+									},
+									getLimitOrderParams({
+										marketType: MarketType.PERP,
+										marketIndex: signedMsgOrderParams.marketIndex,
+										direction: isOrderLong
+											? PositionDirection.SHORT
+											: PositionDirection.LONG,
+										baseAssetAmount:
+											signedMsgOrderParams.baseAssetAmount.divn(2),
+										price: signedMsgOrderParams
+											.auctionStartPrice!.add(
+												signedMsgOrderParams.auctionEndPrice!
+											)
+											.divn(2),
+										postOnly: PostOnlyParams.MUST_POST_ONLY,
+										bitFlags: OrderParamsBitFlag.ImmediateOrCancel,
+									}),
+									undefined,
+									undefined,
+									computeBudgetIxs
+								);
+
+							if (this.dryRun) {
+								console.log(Date.now() - order['ts']);
+								return;
+							}
+
+							const resp = await simulateAndGetTxWithCUs({
+								connection: this.driftClient.connection,
+								payerPublicKey: this.driftClient.wallet.payer!.publicKey,
+								ixs: [...computeBudgetIxs, ...ixs],
+								cuLimitMultiplier: 1.5,
+								lookupTableAccounts:
+									await this.driftClient.fetchAllLookupTableAccounts(),
+								doSimulation: true,
+							});
+							if (resp.simError) {
+								console.log(resp.simTxLogs);
+								return;
+							}
+
+							this.driftClient.txSender
+								.sendVersionedTransaction(resp.tx)
+								.then((response) => {
+									console.log(
+										`Sent tx slot: ${
+											response.slot
+										}, tx: https://solscan.io/tx/${response.txSig}?cluster=${
+											this.isMainnet ? 'mainnet-beta' : 'devnet'
+										}`
+									);
+								})
+								.catch((error) => {
+									console.log(error);
+								});
+						}, timeUntilAuction55);
 					}
-
-					const resp = await simulateAndGetTxWithCUs({
-						connection: this.driftClient.connection,
-						payerPublicKey: this.driftClient.wallet.payer!.publicKey,
-						ixs: [...computeBudgetIxs, ...ixs],
-						cuLimitMultiplier: 1.5,
-						lookupTableAccounts:
-							await this.driftClient.fetchAllLookupTableAccounts(),
-						doSimulation: true,
-					});
-					if (resp.simError) {
-						console.log(resp.simTxLogs);
-						return;
-					}
-
-					this.driftClient.txSender
-						.sendVersionedTransaction(resp.tx)
-						.then((response) => {
-							console.log(
-								`Sent tx slot: ${response.slot}, tx: https://solscan.io/tx/${
-									response.txSig
-								}?cluster=${this.isMainnet ? 'mainnet-beta' : 'devnet'}`
-							);
-						})
-						.catch((error) => {
-							console.log(error);
-						});
 				}
 			});
 
