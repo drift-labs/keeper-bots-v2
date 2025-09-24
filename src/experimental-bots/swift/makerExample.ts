@@ -34,16 +34,17 @@ export class SwiftMaker {
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
 	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
 	private readonly heartbeatIntervalMs = 80_000;
+	private isMainnet: boolean;
 	constructor(
 		private driftClient: DriftClient,
 		private userMap: UserMap,
 		runtimeSpec: RuntimeSpec,
 		private dryRun?: boolean
 	) {
-		this.signedMsgUrl =
-			runtimeSpec.driftEnv === 'mainnet-beta'
-				? 'wss://swift.drift.trade/ws'
-				: 'wss://master.swift.drift.trade/ws';
+		this.isMainnet = runtimeSpec.driftEnv === 'mainnet-beta';
+		this.signedMsgUrl = this.isMainnet
+			? 'wss://swift.drift.trade/ws'
+			: 'wss://master.swift.drift.trade/ws';
 
 		const perpMarketsToWatchForFees = [0, 1, 2, 3, 4, 5].map((x) => {
 			return { marketType: 'perp', marketIndex: x };
@@ -238,11 +239,9 @@ export class SwiftMaker {
 									? PositionDirection.SHORT
 									: PositionDirection.LONG,
 								baseAssetAmount: signedMsgOrderParams.baseAssetAmount.divn(2),
-								price: isOrderLong
-									? signedMsgOrderParams.auctionStartPrice!.muln(99).divn(100)
-									: signedMsgOrderParams.auctionEndPrice!.muln(101).divn(100),
+								price: signedMsgOrderParams.auctionEndPrice!,
 								postOnly: PostOnlyParams.MUST_POST_ONLY,
-								bitFlags: OrderParamsBitFlag.ImmediateOrCancel
+								bitFlags: OrderParamsBitFlag.ImmediateOrCancel,
 							}),
 							undefined,
 							undefined,
@@ -271,7 +270,11 @@ export class SwiftMaker {
 					this.driftClient.txSender
 						.sendVersionedTransaction(resp.tx)
 						.then((response) => {
-							console.log(response);
+							console.log(
+								`Sent tx slot: ${response.slot}, tx: https://solscan.io/tx/${
+									response.txSig
+								}?cluster=${this.isMainnet ? 'mainnet-beta' : 'devnet'}`
+							);
 						})
 						.catch((error) => {
 							console.log(error);
