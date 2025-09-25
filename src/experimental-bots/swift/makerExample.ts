@@ -13,6 +13,7 @@ import {
 	SignedMsgOrderParamsDelegateMessage,
 	SignedMsgOrderParamsMessage,
 	UserMap,
+	ZERO,
 } from '@drift-labs/sdk';
 import { RuntimeSpec } from 'src/metrics';
 import WebSocket from 'ws';
@@ -35,6 +36,7 @@ export class SwiftMaker {
 	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
 	private readonly heartbeatIntervalMs = 80_000;
 	private isMainnet: boolean;
+	private pctIntoAuction: number;
 	constructor(
 		private driftClient: DriftClient,
 		private userMap: UserMap,
@@ -45,6 +47,11 @@ export class SwiftMaker {
 		this.signedMsgUrl = this.isMainnet
 			? 'wss://swift.drift.trade/ws'
 			: 'wss://master.swift.drift.trade/ws';
+
+		// Configure what percent into the auction to attempt the fill
+		const pctEnv = process.env.SWIFT_PCT_INTO_AUCTION;
+		const pct = pctEnv ? Number(pctEnv) : 0.55;
+		this.pctIntoAuction = Math.max(0, Math.min(1, isNaN(pct) ? 0.55 : pct));
 
 		const perpMarketsToWatchForFees = [0, 1, 2, 3, 4, 5].map((x) => {
 			return { marketType: 'perp', marketIndex: x };
@@ -216,11 +223,25 @@ export class SwiftMaker {
 						)
 					);
 
-					const timeUntilAuction55 =
-						(signedMsgOrderParams.auctionDuration ?? 0) * 0.55 * 400;
+					const timeUntilAuction =
+						(signedMsgOrderParams.auctionDuration ?? 0) * this.pctIntoAuction * 400;
 
-					if (timeUntilAuction55 > 0) {
+					if (timeUntilAuction > 0) {
 						setTimeout(async () => {
+							// Determine whether taker used oraclePriceOffset and compute target price at pct into auction
+							const isOracleOffset =
+								signedMsgOrderParams.oraclePriceOffset !== null ||
+								!signedMsgOrderParams.price.eq(ZERO);
+							let price = this.driftClient.getOracleDataForPerpMarket(
+								signedMsgOrderParams.marketIndex
+							).price;
+							if (signedMsgOrderParams.auctionDuration !== null) {
+								const offset = signedMsgOrderParams.auctionEndPrice!
+									.sub(signedMsgOrderParams.auctionStartPrice!)
+									.muln(this.pctIntoAuction * 10000)
+									.divn(10000);
+								price = signedMsgOrderParams.auctionStartPrice!.add(offset);
+							}
 							const ixs =
 								await this.driftClient.getPlaceAndMakeSignedMsgPerpOrderIxs(
 									{
@@ -245,11 +266,8 @@ export class SwiftMaker {
 											: PositionDirection.LONG,
 										baseAssetAmount:
 											signedMsgOrderParams.baseAssetAmount.divn(2),
-										price: signedMsgOrderParams
-											.auctionStartPrice!.add(
-												signedMsgOrderParams.auctionEndPrice!
-											)
-											.divn(2),
+										oraclePriceOffset: isOracleOffset ? price.toNumber() : null,
+										price: isOracleOffset ? ZERO : price,
 										postOnly: PostOnlyParams.MUST_POST_ONLY,
 										bitFlags: OrderParamsBitFlag.ImmediateOrCancel,
 									}),
@@ -291,7 +309,7 @@ export class SwiftMaker {
 								.catch((error) => {
 									console.log(error);
 								});
-						}, timeUntilAuction55);
+						}, timeUntilAuction);
 					}
 				}
 			});
