@@ -224,7 +224,9 @@ export class SwiftMaker {
 					);
 
 					const timeUntilAuction =
-						(signedMsgOrderParams.auctionDuration ?? 0) * this.pctIntoAuction * 400;
+						(signedMsgOrderParams.auctionDuration ?? 0) *
+						this.pctIntoAuction *
+						400;
 
 					if (timeUntilAuction > 0) {
 						setTimeout(async () => {
@@ -236,8 +238,8 @@ export class SwiftMaker {
 								signedMsgOrderParams.marketIndex
 							).price;
 							if (signedMsgOrderParams.auctionDuration !== null) {
-								const offset = signedMsgOrderParams.auctionEndPrice!
-									.sub(signedMsgOrderParams.auctionStartPrice!)
+								const offset = signedMsgOrderParams
+									.auctionEndPrice!.sub(signedMsgOrderParams.auctionStartPrice!)
 									.muln(this.pctIntoAuction * 10000)
 									.divn(10000);
 								price = signedMsgOrderParams.auctionStartPrice!.add(offset);
