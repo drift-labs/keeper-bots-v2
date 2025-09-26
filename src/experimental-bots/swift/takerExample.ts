@@ -54,7 +54,7 @@ export class SwiftTaker {
 
 			const oracleInfo =
 				this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
-			const EPS_BPS = 100; // 1%
+			const EPS_BPS = 10; // 0.1%
 			const plusBps = (p: BN, bps: number) => p.muln(10_000 + bps).divn(10_000);
 			const minusBps = (p: BN, bps: number) =>
 				p.muln(10_000 - bps).divn(10_000);
