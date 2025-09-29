@@ -121,6 +121,7 @@ export type PythCrankerBotConfig = BaseBotConfig & {
 		};
 	};
 	onlyCrankUsedOracles?: boolean;
+	overridePythIds?: string[];
 };
 
 export type PythLazerCrankerBotConfig = BaseBotConfig & {
@@ -167,7 +168,6 @@ export type BotConfigMap = {
 	ifRevenueSettler?: BaseBotConfig;
 	fundingRateUpdater?: BaseBotConfig;
 	userPnlSettler?: UserPnlSettlerConfig;
-	userLpSettler?: BaseBotConfig;
 	userIdleFlipper?: BaseBotConfig;
 	markTwapCrank?: MakerBidAskTwapCrankConfig;
 	pythCranker?: PythCrankerBotConfig;
@@ -236,11 +236,12 @@ export interface GlobalConfig {
 	onlySendDuringJitoLeader?: boolean;
 
 	txRetryTimeoutMs?: number;
-	txSenderType?: 'fast' | 'retry' | 'while-valid';
+	txSenderType?: 'fast' | 'retry' | 'while-valid' | 'jet';
 	txSenderConfirmationStrategy: ConfirmationStrategy;
 	txSkipPreflight?: boolean;
 	txMaxRetries?: number;
 	trackTxLandRate?: boolean;
+	jetTxEndpoints?: string[];
 
 	rebalanceFiller?: boolean;
 
@@ -515,15 +516,6 @@ export function loadConfigFromOpts(opts: any): Config {
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
 			settlePnlThresholdUsdc: Number(opts.settlePnlThresholdUsdc) ?? 10,
 			maxUsersToConsider: Number(opts.maxUsersToConsider) ?? 50,
-		};
-	}
-	if (opts.userLpSettler) {
-		config.enabledBots.push('userLpSettler');
-		config.botConfigs!.userLpSettler = {
-			dryRun: opts.dryRun ?? false,
-			botId: process.env.BOT_ID ?? 'userLpSettler',
-			metricsPort: 9464,
-			runOnce: opts.runOnce ?? false,
 		};
 	}
 	if (opts.userIdleFlipper) {

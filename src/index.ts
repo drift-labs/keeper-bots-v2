@@ -52,7 +52,6 @@ import { FloatingPerpMakerBot } from './bots/floatingMaker';
 import { Bot } from './types';
 import { IFRevenueSettlerBot } from './bots/ifRevenueSettler';
 import { UserPnlSettlerBot } from './bots/userPnlSettler';
-import { UserLpSettlerBot } from './bots/userLpSettler';
 import { UserIdleFlipperBot } from './bots/userIdleFlipper';
 import {
 	getOrCreateAssociatedTokenAccount,
@@ -80,6 +79,9 @@ import { SwitchboardCrankerBot } from './bots/switchboardCranker';
 import { PythLazerCrankerBot } from './bots/pythLazerCranker';
 import { JitMaker } from './bots/jitMaker';
 import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
+import { JetProxyTxSender } from './bots/common/jetTxSender';
+import { Agent, setGlobalDispatcher } from 'undici';
+import { timedCacheableLookup } from './bots/common/timedLookup';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -233,11 +235,20 @@ logger.info(
 
 // @ts-ignore
 const sdkConfig = initialize({ env: config.global.driftEnv });
+const agent = new Agent({
+	connections: 200,
+	allowH2: false,
+	keepAliveTimeout: 60_000,
+	connect: { lookup: timedCacheableLookup },
+});
+
+setGlobalDispatcher(agent);
 setLogLevel(config.global.debug ? 'debug' : 'info');
 
 const endpoint = config.global.endpoint!;
 const wsEndpoint = config.global.wsEndpoint;
 const heliusEndpoint = config.global.heliusEndpoint;
+const jetTxEndpoints = config.global.jetTxEndpoints;
 logger.info(`RPC endpoint: ${endpoint}`);
 logger.info(`WS endpoint:  ${wsEndpoint}`);
 logger.info(`Helius endpoint:  ${heliusEndpoint}`);
@@ -352,6 +363,28 @@ const runBot = async () => {
 	} else if (txSenderType === 'while-valid') {
 		txSender = new WhileValidTxSender({
 			connection: sendTxConnection,
+			wallet,
+			opts,
+			retrySleep: 2000,
+			additionalConnections,
+			confirmationStrategy,
+			trackTxLandRate: config.global.trackTxLandRate,
+			throwOnTimeoutError: false,
+		});
+	} else if (txSenderType === 'jet') {
+		const endpoints = jetTxEndpoints ?? [endpoint];
+		const submitConnections = endpoints.map(
+			(ep) =>
+				new Connection(ep, {
+					wsEndpoint: wsEndpoint,
+					commitment: stateCommitment,
+					disableRetryOnRateLimit: true,
+				})
+		);
+
+		txSender = new JetProxyTxSender({
+			connection: sendTxConnection,
+			submitConnections,
 			wallet,
 			opts,
 			retrySleep: 2000,
@@ -527,10 +560,9 @@ const runBot = async () => {
 			priorityFeeMethod === PriorityFeeMethod.HELIUS
 				? {
 						calculate: (samples: HeliusPriorityFeeResponse) => {
-							return Math.min(
-								50_000,
-								samples.result.priorityFeeLevels![HeliusPriorityLevel.HIGH]
-							);
+							return samples.result.priorityFeeLevels![
+								HeliusPriorityLevel.HIGH
+							];
 						},
 				  }
 				: new AverageOverSlotsStrategy(),
@@ -564,6 +596,7 @@ const runBot = async () => {
 				config.global,
 				config.botConfigs!.pythCranker!,
 				driftClient,
+				slotSubscriber,
 				priorityFeeSubscriber,
 				bundleSender,
 				[]
@@ -816,18 +849,10 @@ const runBot = async () => {
 		bots.push(
 			new UserPnlSettlerBot(
 				driftClient,
-				slotSubscriber,
+				priorityFeeSubscriber,
 				config.botConfigs!.userPnlSettler!,
 				config.global
 			)
-		);
-	}
-
-	if (configHasBot(config, 'userLpSettler')) {
-		needDriftStateWatcher = true;
-		needPriorityFeeSubscriber = true;
-		bots.push(
-			new UserLpSettlerBot(driftClient, config.botConfigs!.userLpSettler!)
 		);
 	}
 
@@ -867,6 +892,7 @@ const runBot = async () => {
 
 	if (configHasBot(config, 'markTwapCrank')) {
 		needPythPriceSubscriber = true;
+		needBlockhashSubscriber = true;
 		needCheckDriftUser = true;
 		needUserMapSubscribe = true;
 		needDriftStateWatcher = true;
@@ -879,6 +905,7 @@ const runBot = async () => {
 				config.botConfigs!.markTwapCrank!,
 				config.global,
 				config.global.runOnce ?? false,
+				blockhashSubscriber,
 				pythPriceSubscriber,
 				[],
 				bundleSender

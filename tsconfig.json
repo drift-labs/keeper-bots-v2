@@ -5,7 +5,7 @@
 			"node",
 		],
 		"module": "commonjs",
-		"target": "es2019",
+		"target": "es2021",
 		"esModuleInterop": true,
 		"preserveConstEnums": true,
 		"sourceMap": true,

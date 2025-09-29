@@ -962,7 +962,7 @@ export class LiquidatorBot implements Bot {
 			return undefined;
 		}
 
-		const oracle = this.driftClient.getOracleDataForPerpMarket(
+		const oracle = this.driftClient.getMMOracleDataForPerpMarket(
 			position.marketIndex
 		);
 		const direction = findDirectionToClose(position);
@@ -2666,12 +2666,8 @@ export class LiquidatorBot implements Bot {
 						}
 					}
 
-					const baseAmountToLiquidate = this.calculateBaseAmountToLiquidate(
-						user.getPerpPositionWithLPSettle(
-							liquidateePosition.marketIndex,
-							liquidateePosition
-						)[0]
-					);
+					const baseAmountToLiquidate =
+						this.calculateBaseAmountToLiquidate(liquidateePosition);
 
 					const subAccountToLiqPerp = this.getSubAccountIdToLiquidatePerp(
 						liquidateePosition.marketIndex

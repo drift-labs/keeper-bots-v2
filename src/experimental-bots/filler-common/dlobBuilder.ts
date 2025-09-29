@@ -32,6 +32,8 @@ import {
 	BASE_PRECISION,
 	SignedMsgOrderParamsDelegateMessage,
 	OrderParamsBitFlag,
+	PerpMarketAccount,
+	SpotMarketAccount,
 } from '@drift-labs/sdk';
 import { Connection, PublicKey } from '@solana/web3.js';
 import dotenv from 'dotenv';
@@ -322,7 +324,7 @@ class DLOBBuilder {
 		const dlob = this.build();
 		const nodesToFill: NodeToFillWithContext[] = [];
 		for (const marketIndex of this.marketIndexes) {
-			let market;
+			let market: PerpMarketAccount | SpotMarketAccount | undefined;
 			let oraclePriceData: OraclePriceData;
 			let fallbackAsk: BN | undefined = undefined;
 			let fallbackBid: BN | undefined = undefined;
@@ -337,8 +339,16 @@ class DLOBBuilder {
 					this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
 				oraclePriceData =
 					this.driftClient.getOracleDataForPerpMarket(marketIndex);
-				fallbackBid = calculateBidPrice(market, mmOraclePriceData);
-				fallbackAsk = calculateAskPrice(market, mmOraclePriceData);
+				fallbackBid = calculateBidPrice(
+					market,
+					mmOraclePriceData,
+					new BN(this.slotSubscriber.getSlot())
+				);
+				fallbackAsk = calculateAskPrice(
+					market,
+					mmOraclePriceData,
+					new BN(this.slotSubscriber.getSlot())
+				);
 			} else {
 				market = this.driftClient.getSpotMarketAccount(marketIndex);
 				if (!market) {
@@ -390,17 +400,29 @@ class DLOBBuilder {
 
 			const stateAccount = this.driftClient.getStateAccount();
 			const slot = this.slotSubscriber.getSlot();
-			const nodesToFillForMarket = dlob.findNodesToFill(
-				marketIndex,
-				fallbackBid,
-				fallbackAsk,
-				slot,
-				this.clockSubscriber.getUnixTs() - EXPIRE_ORDER_BUFFER_SEC,
-				this.marketType,
-				oraclePriceData,
-				stateAccount,
-				market
-			);
+			const nodesToFillForMarket = isVariant(this.marketType, 'perp')
+				? dlob.findNodesToFill(
+						marketIndex,
+						fallbackBid,
+						fallbackAsk,
+						slot,
+						this.clockSubscriber.getUnixTs() - EXPIRE_ORDER_BUFFER_SEC,
+						MarketType.PERP,
+						this.driftClient.getMMOracleDataForPerpMarket(marketIndex),
+						stateAccount,
+						market as PerpMarketAccount
+				  )
+				: dlob.findNodesToFill(
+						marketIndex,
+						fallbackBid,
+						fallbackAsk,
+						slot,
+						this.clockSubscriber.getUnixTs() - EXPIRE_ORDER_BUFFER_SEC,
+						MarketType.SPOT,
+						oraclePriceData,
+						stateAccount,
+						market as SpotMarketAccount
+				  );
 
 			nodesToFill.push(
 				...nodesToFillForMarket.map((node) => {

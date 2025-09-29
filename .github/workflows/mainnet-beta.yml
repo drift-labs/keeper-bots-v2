@@ -64,10 +64,8 @@ jobs:
         run: |
           kubectl get deployments -n $BRANCH_NAME -o name | grep filler | xargs -I {} kubectl rollout restart {} -n $BRANCH_NAME
 
-          kubectl rollout restart -n $BRANCH_NAME deployment/funding-rate-updater-bot
+          kubectl rollout restart -n $BRANCH_NAME deployment/mark-twap-crank-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/liquidator-global-bot
-          kubectl rollout restart -n $BRANCH_NAME deployment/liquidator-global-2-bot
-          kubectl rollout restart -n $BRANCH_NAME deployment/user-lp-settler-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/user-pnl-settler-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/pyth-cranker-bot
           kubectl rollout restart -n $BRANCH_NAME deployment/pyth-lazer-cranker-bot

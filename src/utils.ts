@@ -48,6 +48,7 @@ import {
 	isFallbackAvailableLiquiditySource,
 	calculateBaseAssetAmountForAmmToFulfill,
 	isOrderExpired,
+	MMOraclePriceData,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -251,12 +252,14 @@ export async function waitForAllSubscribesToFinish(
 	}
 }
 
-export function getBestLimitBidExcludePubKey(
+export function getBestLimitBidExcludePubKey<T extends MarketType>(
 	dlob: DLOB,
 	marketIndex: number,
-	marketType: MarketType,
+	marketType: T,
 	slot: number,
-	oraclePriceData: OraclePriceData,
+	oraclePriceData: T extends { spot: unknown }
+		? OraclePriceData
+		: MMOraclePriceData,
 	excludedPubKey: string,
 	excludedUserAccountsAndOrder?: [string, number][]
 ): DLOBNode | undefined {
@@ -286,12 +289,14 @@ export function getBestLimitBidExcludePubKey(
 	return undefined;
 }
 
-export function getBestLimitAskExcludePubKey(
+export function getBestLimitAskExcludePubKey<T extends MarketType>(
 	dlob: DLOB,
 	marketIndex: number,
-	marketType: MarketType,
+	marketType: T,
 	slot: number,
-	oraclePriceData: OraclePriceData,
+	oraclePriceData: T extends { spot: unknown }
+		? OraclePriceData
+		: MMOraclePriceData,
 	excludedPubKey: string,
 	excludedUserAccountsAndOrder?: [string, number][]
 ): DLOBNode | undefined {
@@ -633,7 +638,8 @@ export function handleSimResultError(
 	simResult: SimulateAndGetTxWithCUsResponse,
 	errorCodesToSuppress: number[],
 	msgSuffix: string,
-	suppressOutOfCUsMessage = true
+	suppressOutOfCUsMessage = true,
+	suppressErrorString?: string
 ): undefined | number {
 	if (
 		(simResult.simError as ExtendedTransactionError).InstructionError ===
@@ -657,6 +663,11 @@ export function handleSimResultError(
 
 	let errorCode: number | undefined;
 
+	const shouldSuppressByString =
+		suppressErrorString !== undefined &&
+		Array.isArray(simResult.simTxLogs) &&
+		simResult.simTxLogs.some((line) => line.includes(suppressErrorString));
+
 	if (typeof err[1] === 'object' && 'Custom' in err[1]) {
 		const customErrorCode = Number((err[1] as CustomError).Custom);
 		errorCode = customErrorCode;
@@ -668,7 +679,9 @@ export function handleSimResultError(
 			)}, cuEstimate: ${simResult.cuEstimate}, sim logs:\n${
 				simResult.simTxLogs ? simResult.simTxLogs.join('\n') : 'none'
 			}`;
-			webhookMessage(msg, process.env.TX_LOG_WEBHOOK_URL);
+			if (!shouldSuppressByString) {
+				webhookMessage(msg, process.env.TX_LOG_WEBHOOK_URL);
+			}
 			logger.error(msg);
 		}
 	} else {
@@ -690,7 +703,9 @@ export function handleSimResultError(
 			return errorCode;
 		}
 
-		webhookMessage(msg, process.env.TX_LOG_WEBHOOK_URL);
+		if (!shouldSuppressByString) {
+			webhookMessage(msg, process.env.TX_LOG_WEBHOOK_URL);
+		}
 	}
 
 	return errorCode;
@@ -1581,7 +1596,7 @@ export function isSolLstToken(spotMarketIndex: number): boolean {
 export function isFillableByVAMMDetails(
 	order: Order,
 	market: PerpMarketAccount,
-	oraclePriceData: OraclePriceData,
+	mmOraclePriceData: MMOraclePriceData,
 	slot: number,
 	ts: number,
 	minAuctionDuration: number
@@ -1601,7 +1616,7 @@ export function isFillableByVAMMDetails(
 		calculateBaseAssetAmountForAmmToFulfill(
 			order,
 			market,
-			oraclePriceData,
+			mmOraclePriceData,
 			slot
 		);
 	const minOrderSize = market.amm.minOrderSize;

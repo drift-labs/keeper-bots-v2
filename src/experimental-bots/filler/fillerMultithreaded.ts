@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
+	AverageOverSlotsStrategy,
 	BlockhashSubscriber,
 	BN,
 	DataAndSlot,
@@ -19,7 +20,7 @@ import {
 	MarketType,
 	NodeToFill,
 	PerpMarkets,
-	PriorityFeeSubscriberMap,
+	PriorityFeeSubscriber,
 	QUOTE_PRECISION,
 	ReferrerInfo,
 	ReferrerMap,
@@ -178,7 +179,7 @@ export class FillerMultithreaded {
 	private lastSettlePnl = Date.now() - SETTLE_POSITIVE_PNL_COOLDOWN_MS;
 	private seenFillableOrders = new Set<string>();
 	private blockhashSubscriber: BlockhashSubscriber;
-	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
+	private priorityFeeSubscriber: PriorityFeeSubscriber;
 
 	private dlobHealthy = true;
 	private orderSubscriberHealthy = true;
@@ -314,9 +315,13 @@ export class FillerMultithreaded {
 			marketType: 'spot',
 			marketIndex: 1,
 		}); // For rebalancing
-		this.priorityFeeSubscriber = new PriorityFeeSubscriberMap({
-			driftMarkets: perpMarketsToWatchForFees,
-			driftPriorityFeeEndpoint: 'https://dlob.drift.trade',
+		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
+			connection: driftClient.connection,
+			frequencyMs: 5000,
+			customStrategy: new AverageOverSlotsStrategy(),
+			addresses: [],
+			maxFeeMicroLamports: this.globalConfig.maxPriorityFeeMicroLamports,
+			priorityFeeMultiplier: this.globalConfig.priorityFeeMultiplier ?? 1.0,
 		});
 
 		this.subaccount = config.subaccount ?? 0;
@@ -1383,8 +1388,8 @@ export class FillerMultithreaded {
 		}
 
 		const marketIndex = nodeToFill.node.order.marketIndex;
-		const oraclePriceData =
-			this.driftClient.getOracleDataForPerpMarket(marketIndex);
+		const mmOraclePriceData =
+			this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
 
 		if (isOrderExpired(nodeToFill.node.order, Date.now() / 1000, true)) {
 			if (isOneOfVariant(nodeToFill.node.order.orderType, ['limit'])) {
@@ -1403,7 +1408,7 @@ export class FillerMultithreaded {
 				this.driftClient.getPerpMarketAccount(
 					nodeToFill.node.order.marketIndex
 				)!,
-				oraclePriceData,
+				mmOraclePriceData,
 				this.slotSubscriber.getSlot(),
 				Date.now() / 1000,
 				this.driftClient.getStateAccount().minPerpAuctionDuration
@@ -1529,10 +1534,7 @@ export class FillerMultithreaded {
 				];
 
 				const priorityFeePrice = Math.floor(
-					this.priorityFeeSubscriber.getPriorityFees(
-						'perp',
-						nodeToFill.node.order!.marketIndex!
-					)!.high *
+					this.priorityFeeSubscriber.getAvgStrategyResult() *
 						this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 				);
 
@@ -1644,6 +1646,11 @@ export class FillerMultithreaded {
 				} catch (error) {
 					logger.error(`Error simulating tx: ${error}`);
 					return;
+				}
+				if (simResult.simError) {
+					logger.error(
+						`Error simulating tx result: ${simResult.simError.toString()}`
+					);
 				}
 
 				this.simulateTxHistogram?.record(simResult.simTxDuration, {
@@ -1759,10 +1766,8 @@ export class FillerMultithreaded {
 
 	protected async tryFillPerpNode(nodeToFill: NodeToFillWithBuffer) {
 		const priorityFeePrice = Math.floor(
-			this.priorityFeeSubscriber.getPriorityFees(
-				'perp',
-				nodeToFill.node.order!.marketIndex!
-			)!.high * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
+			this.priorityFeeSubscriber.getAvgStrategyResult() *
+				this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
 		);
 		const buildForBundle = this.shouldBuildForBundle();
 
@@ -1932,6 +1937,10 @@ export class FillerMultithreaded {
 		);
 
 		if (simResult.simError) {
+			for (const ix of pythIxs) {
+				console.log('pyth ix');
+				console.log(`pyth ixs: ${JSON.stringify(ix)}`);
+			}
 			logger.error(
 				`simError: ${JSON.stringify(
 					simResult.simError
@@ -2085,16 +2094,9 @@ export class FillerMultithreaded {
 				for (let i = 0; i < marketIds.length; i += chunk_size) {
 					const marketIdChunks = marketIds.slice(i, i + chunk_size);
 					try {
-						const priorityFeePrice = Math.floor(
-							Math.max(
-								...marketIdChunks.map((marketId) => {
-									return this.priorityFeeSubscriber.getPriorityFees(
-										'perp',
-										marketId
-									)!.medium;
-								})
-							) * this.driftClient.txSender.getSuggestedPriorityFeeMultiplier()
-						);
+						const priorityFeePrice =
+							Math.floor(this.priorityFeeSubscriber.getAvgStrategyResult()) *
+							this.driftClient.txSender.getSuggestedPriorityFeeMultiplier();
 						const buildForBundle = this.shouldBuildForBundle();
 
 						const ixs = [

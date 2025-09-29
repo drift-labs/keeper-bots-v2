@@ -31,11 +31,11 @@ import {
 	QUOTE_PRECISION,
 	ClockSubscriber,
 	DriftEnv,
-	OraclePriceData,
 	StateAccount,
 	getUserStatsAccountPublicKey,
 	PositionDirection,
 	PerpMarkets,
+	MMOraclePriceData,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -355,10 +355,6 @@ export class FillerBot extends TxThreaded implements Bot {
 		);
 
 		this.priorityFeeSubscriber = priorityFeeSubscriber;
-		this.priorityFeeSubscriber.updateAddresses([
-			new PublicKey('8BnEgHoWFysVcuFFX7QztDmzuH8r5ZFvyP3sYwn1XTh6'), // Openbook SOL/USDC
-			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
-		]);
 		this.blockhashSubscriber = blockhashSubscriber;
 
 		this.expiredNodesSet = new LRUCache<string, boolean>({
@@ -788,20 +784,19 @@ export class FillerBot extends TxThreaded implements Bot {
 	} {
 		const marketIndex = market.marketIndex;
 
-		const oraclePriceData =
-			this.driftClient.getOracleDataForPerpMarket(marketIndex);
 		const mmOraclePriceData =
 			this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
 
-		const vAsk = calculateAskPrice(market, mmOraclePriceData);
-		const vBid = calculateBidPrice(market, mmOraclePriceData);
+		const slot = new BN(this.slotSubscriber.getSlot());
+		const vAsk = calculateAskPrice(market, mmOraclePriceData, slot);
+		const vBid = calculateBidPrice(market, mmOraclePriceData, slot);
 
 		const fillSlot = this.getMaxSlot();
 		const nodesToTrigger = this.findTriggerableNodesWithMakers(
 			dlob,
 			marketIndex,
 			fillSlot,
-			oraclePriceData,
+			mmOraclePriceData,
 			MarketType.PERP,
 			this.driftClient.getStateAccount()
 		);
@@ -814,7 +809,7 @@ export class FillerBot extends TxThreaded implements Bot {
 				fillSlot,
 				this.clockSubscriber.getUnixTs() - EXPIRE_ORDER_BUFFER_SEC,
 				MarketType.PERP,
-				oraclePriceData,
+				mmOraclePriceData,
 				this.driftClient.getStateAccount(),
 				this.driftClient.getPerpMarketAccount(marketIndex)!
 			),
@@ -931,8 +926,8 @@ export class FillerBot extends TxThreaded implements Bot {
 		}
 
 		const marketIndex = nodeToFill.node.order.marketIndex;
-		const oraclePriceData =
-			this.driftClient.getOracleDataForPerpMarket(marketIndex);
+		const mmOraclePriceData =
+			this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
 
 		if (isOrderExpired(nodeToFill.node.order, Date.now() / 1000, true)) {
 			if (isOneOfVariant(nodeToFill.node.order.orderType, ['limit'])) {
@@ -946,7 +941,7 @@ export class FillerBot extends TxThreaded implements Bot {
 		const isVammFillable = isFillableByVAMMDetails(
 			nodeToFill.node.order,
 			this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex)!,
-			oraclePriceData,
+			mmOraclePriceData,
 			this.getMaxSlot(),
 			Date.now() / 1000,
 			this.driftClient.getStateAccount().minPerpAuctionDuration
@@ -973,7 +968,7 @@ export class FillerBot extends TxThreaded implements Bot {
 					this.driftClient.getPerpMarketAccount(
 						nodeToFill.node.order.marketIndex
 					)!,
-					oraclePriceData,
+					mmOraclePriceData,
 					this.getMaxSlot()
 				).toString()}`
 			);
@@ -2382,14 +2377,14 @@ export class FillerBot extends TxThreaded implements Bot {
 		dlob: DLOB,
 		marketIndex: number,
 		slot: number,
-		oraclePriceData: OraclePriceData,
+		mmOraclePriceData: MMOraclePriceData,
 		marketType: MarketType,
 		stateAccount: StateAccount
 	): NodeToTriggerWithMakers[] {
 		const baseTriggerable = dlob.findNodesToTrigger(
 			marketIndex,
 			slot,
-			oraclePriceData.price,
+			mmOraclePriceData.price,
 			marketType,
 			stateAccount
 		);
@@ -2411,7 +2406,7 @@ export class FillerBot extends TxThreaded implements Bot {
 					? PositionDirection.SHORT
 					: PositionDirection.LONG,
 				slot,
-				oraclePriceData,
+				oraclePriceData: mmOraclePriceData,
 				numMakers: NUM_MAKERS,
 			});
 			triggerWithMaker.push({
