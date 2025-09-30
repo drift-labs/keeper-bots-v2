@@ -33,6 +33,7 @@ export class LpPoolTargetBaseCranker {
 				type: 'websocket',
 				resubTimeoutMs: 30_000,
 			},
+			lpPoolName: lpPoolName,
 		});
 		this.lpPoolNameEncoded = encodeName(this.lpPoolName);
 		this.priorityFeeSubscriber = new PriorityFeeSubscriber({

@@ -3,37 +3,52 @@ FROM public.ecr.aws/docker/library/node:20 AS builder
 # Set working dir first so all paths are relative to /app
 WORKDIR /app
 
-# Copy dependencies and linked packages first for better caching
-COPY keeper-bots-v2/package.json keeper-bots-v2/yarn.lock ./
-COPY protocol-v2/sdk ./protocol-v2/sdk
-COPY keeper-bots-v2/drift-common ./drift-common
 
-# Build dependencies
+COPY ./keeper-bots-v2 .
+
 WORKDIR /app/drift-common/protocol/sdk
-RUN yarn install && yarn run build
+RUN rm -rf ../../../node_modules
+RUN yarn && yarn build
 
 WORKDIR /app/drift-common/common-ts
-RUN yarn install && yarn run build
+RUN yarn && yarn build
 
-# Copy the rest of keeper-bots-v2 AFTER deps are installed
 WORKDIR /app
-COPY keeper-bots-v2 .
-RUN yarn install
+COPY ./protocol-v2/sdk ./protocol-v2/sdk
+WORKDIR /app/protocol-v2/sdk
+RUN yarn && yarn build
 
-# Run your build script
-RUN node esbuild.config.js
+# Inject local dependency
+WORKDIR /app
+RUN node -e "\
+    const fs = require('fs'); \
+    const pkg = JSON.parse(fs.readFileSync('package.json')); \
+    pkg.dependencies = pkg.dependencies || {}; \
+    pkg.dependencies['@drift-labs/sdk'] = 'file:./protocol-v2/sdk'; \
+    fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));"
+
+RUN node -e "console.log(require('./package.json').dependencies['@drift-labs/sdk'])"
+
+WORKDIR /app
+RUN yarn && yarn build
 
 # Final minimal image
-FROM public.ecr.aws/docker/library/node:20.18.1-alpine
+FROM public.ecr.aws/docker/library/node:20-alpine
+WORKDIR /app
 
-# Optional native deps for performance
-RUN apk add python3 make g++ --virtual .build &&\
-    npm install -C /lib bigint-buffer @triton-one/yellowstone-grpc@1.3.0 helius-laserstream &&\
+COPY --from=builder /app/lib ./lib/
+# 'bigint-buffer' native lib for performance
+# @triton-one/yellowstone-grpc for .wasm lib
+RUN apk add --virtual .build python3 make g++ &&\
+    npm install bigint-buffer @triton-one/yellowstone-grpc@1.3.0 helius-laserstream@0.1.8 &&\
     apk del .build &&\
-    rm -rf /root/.cache/ /root/.npm /usr/local/lib/node_modules 
+    rm -rf /root/.cache/ /root/.npm /usr/local/lib/node_modules
 
-COPY --from=builder /app/lib/ ./lib/
+# Create a non-root user
+RUN addgroup -S nonroot && \
+    adduser -S -u 1001 -G root nonroot && \
+    chown -R nonroot:root /app && \
+    chmod 755 /app
+USER nonroot
 
-EXPOSE 9464
-
-CMD ["node", "./lib/index.js"]
+CMD [ "node", "./lib/index.js" ]
