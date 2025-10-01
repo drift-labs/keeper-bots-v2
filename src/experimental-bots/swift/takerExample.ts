@@ -105,23 +105,40 @@ export class SwiftTaker {
 				`Sending order in slot: ${slot}, time: ${Date.now()}, hash: ${hash}`
 			);
 
-			const response = await axios.default.post(
-				this.swiftUrl + '/orders',
-				{
-					market_index: marketIndex,
-					market_type: 'perp',
-					message: message.toString(),
-					signature: signature.toString('base64'),
-					taker_pubkey: this.driftClient.wallet.publicKey.toBase58(),
-				},
-				{
-					headers: {
-						'Content-Type': 'application/json',
+			try {
+				const response = await axios.default.post(
+					this.swiftUrl + '/orders',
+					{
+						market_index: marketIndex,
+						market_type: 'perp',
+						message: message.toString(),
+						signature: signature.toString('base64'),
+						taker_pubkey: this.driftClient.wallet.publicKey.toBase58(),
 					},
+					{
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						validateStatus: (_status) => true,
+					}
+				);
+				if (response.status !== 200) {
+					console.error('Failed to send order', {
+						status: response.status,
+						data: response.data,
+					});
+					return;
 				}
-			);
-			if (response.status !== 200) {
-				console.error('Failed to send order', response.data);
+			} catch (e) {
+				if (axios.isAxiosError(e)) {
+					console.error('Failed to send order', {
+						message: e.message,
+						status: e.response?.status,
+						data: e.response?.data,
+					});
+				} else {
+					console.error('Failed to send order', e);
+				}
 				return;
 			}
 
