@@ -112,26 +112,26 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.21.31":
-  version "0.21.31"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.31.tgz#90bc63b99bb5d729422b038e3db7cde19abeec63"
-  integrity sha512-XABO5qezVm4GGMFCkHP99K0l+mae2xdd2l14FGNA59ebl9kePS0aB/ckCCYdkLXMONrWbkvvJxTP2/+pB//l7A==
+"@drift-labs/jit-proxy@0.21.42":
+  version "0.21.42"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.42.tgz#ee644dc460e5d5b3b400e7258912688d099ec9e4"
+  integrity sha512-TD4ztiPFEjaGNd+O9N5OSOXhVbaGwrOB41dkrwuQRxPr/OzDlq6J2rdz9ocCk526cq7gfao64rGp92ntkFZhWA==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.141.0-beta.3"
+    "@drift-labs/sdk" "2.142.0-beta.4"
     "@solana/web3.js" "1.98.0"
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.141.0-beta.3":
-  version "2.141.0-beta.3"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.141.0-beta.3.tgz#3235f52c0c31f6d8e0ac2502f1375f3c8c770c95"
-  integrity sha512-gehyVS/4ftO/Ift+giqG2gKHLBf8krl+XYQ9QvxDZPb0apY+p8Pz5FyIE3UJ9LHhn9J906l4xBln/UgJjygqsA==
+"@drift-labs/sdk@2.142.0-beta.4":
+  version "2.142.0-beta.4"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.142.0-beta.4.tgz#39dc53238abe1ed00c072b8955182029cd2a9681"
+  integrity sha512-nxwLEDSt5/dlPxfddj+viGNCOiwyyVfhRXTaubxIA9QE1S0cMZG+jWpNVe8TRrrd0qNjDTYPXIpaUS9Gb16O7Q==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
     "@ellipsis-labs/phoenix-sdk" "1.4.5"
-    "@grpc/grpc-js" "1.12.6"
+    "@grpc/grpc-js" "1.14.0"
     "@openbook-dex/openbook-v2" "0.2.10"
     "@project-serum/serum" "0.13.65"
     "@pythnetwork/client" "2.5.3"
@@ -141,7 +141,7 @@
     "@solana/web3.js" "1.98.0"
     "@switchboard-xyz/common" "3.0.14"
     "@switchboard-xyz/on-demand" "2.4.1"
-    "@triton-one/yellowstone-grpc" "1.3.0"
+    "@triton-one/yellowstone-grpc" "1.4.1"
     anchor-bankrun "0.3.0"
     gill "^0.10.2"
     helius-laserstream "0.1.8"
@@ -336,12 +336,12 @@
     minimatch "^3.0.4"
     strip-json-comments "^3.1.1"
 
-"@grpc/grpc-js@1.12.6":
-  version "1.12.6"
-  resolved "https://registry.yarnpkg.com/@grpc/grpc-js/-/grpc-js-1.12.6.tgz#a3586ffdfb6a1f5cd5b4866dec9074c4a1e65472"
-  integrity sha512-JXUj6PI0oqqzTGvKtzOkxtpsyPRNsrmhh41TtIz/zEB6J+AUiZZ0dxWzcMwO9Ns5rmSPuMdghlTbUuqIM48d3Q==
+"@grpc/grpc-js@1.14.0":
+  version "1.14.0"
+  resolved "https://registry.yarnpkg.com/@grpc/grpc-js/-/grpc-js-1.14.0.tgz#a3c47e7816ca2b4d5490cba9e06a3cf324e675ad"
+  integrity sha512-N8Jx6PaYzcTRNzirReJCtADVoq4z7+1KQ4E70jTg/koQiMoUSN1kbNjPOqpPbhMFhfU1/l7ixspPl8dNY+FoUg==
   dependencies:
-    "@grpc/proto-loader" "^0.7.13"
+    "@grpc/proto-loader" "^0.8.0"
     "@js-sdsl/ordered-map" "^4.4.2"
 
 "@grpc/grpc-js@^1.7.1", "@grpc/grpc-js@^1.8.0", "@grpc/grpc-js@^1.8.13":
@@ -360,6 +360,16 @@
     lodash.camelcase "^4.3.0"
     long "^5.0.0"
     protobufjs "^7.2.5"
+    yargs "^17.7.2"
+
+"@grpc/proto-loader@^0.8.0":
+  version "0.8.0"
+  resolved "https://registry.yarnpkg.com/@grpc/proto-loader/-/proto-loader-0.8.0.tgz#b6c324dd909c458a0e4aa9bfd3d69cf78a4b9bd8"
+  integrity sha512-rc1hOQtjIWGxcxpb9aHAfLpIctjEnsDehj0DAiVfBlmT84uvR0uUtN2hEi/ecvWVjXUGf5qPF4qEgiLOx1YIMQ==
+  dependencies:
+    lodash.camelcase "^4.3.0"
+    long "^5.0.0"
+    protobufjs "^7.5.3"
     yargs "^17.7.2"
 
 "@humanwhocodes/config-array@^0.5.0":
@@ -2273,10 +2283,10 @@
     buffer "^6.0.3"
     js-yaml "^4.1.0"
 
-"@triton-one/yellowstone-grpc@1.3.0":
-  version "1.3.0"
-  resolved "https://registry.yarnpkg.com/@triton-one/yellowstone-grpc/-/yellowstone-grpc-1.3.0.tgz#7caa7006b525149b4780d1295c7d4c34bc6a6ff6"
-  integrity sha512-tuwHtoYzvqnahsMrecfNNkQceCYwgiY0qKS8RwqtaxvDEgjm0E+0bXwKz2eUD3ZFYifomJmRKDmSBx9yQzAeMQ==
+"@triton-one/yellowstone-grpc@1.4.1":
+  version "1.4.1"
+  resolved "https://registry.yarnpkg.com/@triton-one/yellowstone-grpc/-/yellowstone-grpc-1.4.1.tgz#b50434f68c3d73c6ce3e1f225656064c080f4b25"
+  integrity sha512-ZN49vooxFbOqWttll8u7AOsIVnX+srqX9ddhZ9ttE+OcehUo8c2p2suK8Gr2puab49cgsV0VGjiTn9Gua/ntIw==
   dependencies:
     "@grpc/grpc-js" "^1.8.0"
 
