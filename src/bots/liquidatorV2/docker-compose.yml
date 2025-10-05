@@ -1,0 +1,54 @@
+version: "3.9"
+services:
+  redis:
+    image: redis:7.2-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", "", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - ../../../dump.rdb:/data/dump.rdb
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  liquidator-leader:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+    image: keeper-bots:local
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - ../../../.env.demo
+    environment:
+      - ROLE=leader
+      - REDIS_URL=redis://redis:6379
+      - LIQ_V2=1
+      - NODE_OPTIONS=--max-old-space-size=8192
+    command: ["yarn", "run", "ts-node", "./src/bots/liquidatorV2/entry.js"]
+    volumes:
+      - ../../../config.yaml:/app/config.yaml:ro
+    ports:
+      - "9464:9464"
+
+  liquidator-worker:
+    image: keeper-bots:local
+    depends_on:
+      redis:
+        condition: service_healthy
+    env_file:
+      - ../../../.env.demo
+    environment:
+      - ROLE=worker
+      - REDIS_URL=redis://redis:6379
+      - LIQ_V2=1
+      - NODE_OPTIONS=--max-old-space-size=8192
+    command: ["yarn", "run", "ts-node", "./src/bots/liquidatorV2/entry.js"]
+    volumes:
+      - ../../../config.yaml:/app/config.yaml:ro
+    scale: 1
+
+
