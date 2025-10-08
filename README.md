@@ -128,12 +128,7 @@ When running the filler bots, you might see the following error codes in the tra
 
 The liquidator bot monitors spot and perp markets for bankrupt accounts, and attempts to liquidate positions according to the protocol's [liquidation process](https://docs.drift.trade/liquidators).
 
-### Notes on derisking (`useJupiter`)
-
-This liquidator implementation includes an option to `useJupiter` to derisk (sell) spot assets into USDC. The derisk loop will use
-the more favorable of Drift spot or Jupiter before executing. Set `useJupiter` under the liquidator config to enable this behavior
-(see below).
-
+### Notes on derisking
 You may also set `disableAutoDerisking` to `true`, to disable the derisking loop. You may want to do this as part of a larger strategy
 where you are ok with taking on risk at a favorable to market price (liquidation fee applied).
 
@@ -156,7 +151,6 @@ botConfigs:
   ...
   liquidator:
     ...
-    useJupiter: true
     perpSubAccountConfig:
       0:
         - 0
