@@ -88,12 +88,6 @@ interface UserToSettle {
 	pnl: number;
 }
 
-interface BuilderToSettle {
-	settleeUserAccountPublicKey: PublicKey;
-	settleeUserAccount: UserAccount;
-	marketIndex: number;
-}
-
 type IxsBuilder = (
 	users: UserToSettle[],
 	marketIndex: number
