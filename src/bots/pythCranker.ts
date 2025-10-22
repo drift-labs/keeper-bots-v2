@@ -37,7 +37,7 @@ import {
 } from '@solana/web3.js';
 import { convertPythPrice } from '@drift-labs/sdk';
 import { getFeedIdUint8Array, trimFeedId } from '@drift-labs/sdk';
-import { chunks, shuffle, simulateAndGetTxWithCUs, sleepMs } from '../utils';
+import { chunks, shuffle, simulateAndGetTxWithCUs } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
 import { TxRecorder } from './common/txRecorder';
 
