@@ -49,6 +49,7 @@ import {
 	calculateBaseAssetAmountForAmmToFulfill,
 	isOrderExpired,
 	MMOraclePriceData,
+	StateAccount,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -1599,7 +1600,7 @@ export function isFillableByVAMMDetails(
 	mmOraclePriceData: MMOraclePriceData,
 	slot: number,
 	ts: number,
-	minAuctionDuration: number
+	state: StateAccount
 ): {
 	fillable: boolean;
 	fallbackAvailableLiquiditySource: boolean;
@@ -1609,8 +1610,10 @@ export function isFillableByVAMMDetails(
 } {
 	const fallbackAvailableLiquiditySource = isFallbackAvailableLiquiditySource(
 		order,
-		minAuctionDuration,
-		slot
+		mmOraclePriceData,
+		slot,
+		state,
+		market
 	);
 	const baseAssetAmountForAmmToFulfill =
 		calculateBaseAssetAmountForAmmToFulfill(

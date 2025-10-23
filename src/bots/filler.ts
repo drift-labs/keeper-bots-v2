@@ -944,7 +944,7 @@ export class FillerBot extends TxThreaded implements Bot {
 			mmOraclePriceData,
 			this.getMaxSlot(),
 			Date.now() / 1000,
-			this.driftClient.getStateAccount().minPerpAuctionDuration
+			this.driftClient.getStateAccount()
 		);
 
 		if (
