@@ -142,7 +142,10 @@ export class SwiftPlacer {
 				) {
 					for (const perpMarket of PerpMarkets[
 						this.runtimeSpec.driftEnv as DriftEnv
-					])
+					]) {
+						console.log(
+							`Subscribing to perp market: ${perpMarket.marketIndex}`
+						);
 						ws.send(
 							JSON.stringify({
 								action: 'subscribe',
@@ -150,7 +153,8 @@ export class SwiftPlacer {
 								market_name: perpMarket.symbol,
 							})
 						);
-					await sleepMs(50);
+						await sleepMs(50);
+					}
 				}
 
 				if (message['order'] && this.driftClient.isSubscribed) {
