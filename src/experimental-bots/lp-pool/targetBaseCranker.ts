@@ -17,15 +17,13 @@ export class LpPoolTargetBaseCranker {
 	lpPoolAccount?: LPPoolAccount;
 	constituentMap: ConstituentMap;
 
-	lpPoolNameEncoded: number[];
-
 	priorityFeeSubscriber: PriorityFeeSubscriber;
 	blockhashSubscriber: BlockhashSubscriber;
 
 	public constructor(
 		private driftClient: DriftClient,
 		private intervalMs: number,
-		private lpPoolName: string
+		private lpPoolId: number
 	) {
 		this.constituentMap = new ConstituentMap({
 			driftClient: this.driftClient,
@@ -33,19 +31,15 @@ export class LpPoolTargetBaseCranker {
 				type: 'websocket',
 				resubTimeoutMs: 30_000,
 			},
-			lpPoolName: lpPoolName,
+			lpPoolId: lpPoolId,
 		});
-		this.lpPoolNameEncoded = encodeName(this.lpPoolName);
 		this.priorityFeeSubscriber = new PriorityFeeSubscriber({
 			connection: this.driftClient.connection,
 			frequencyMs: 30_000,
 			addresses: [
 				getConstituentTargetBasePublicKey(
 					this.driftClient.program.programId,
-					getLpPoolPublicKey(
-						this.driftClient.program.programId,
-						this.lpPoolNameEncoded
-					)
+					getLpPoolPublicKey(this.driftClient.program.programId, this.lpPoolId)
 				),
 			],
 			priorityFeeMethod: PriorityFeeMethod.SOLANA,
@@ -60,9 +54,7 @@ export class LpPoolTargetBaseCranker {
 	async init() {
 		await this.constituentMap.sync();
 		await this.constituentMap.subscribe();
-		this.lpPoolAccount = await this.driftClient.getLpPoolAccount(
-			this.lpPoolNameEncoded
-		);
+		this.lpPoolAccount = await this.driftClient.getLpPoolAccount(this.lpPoolId);
 		await this.blockhashSubscriber.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
 		await this.startInterval();
@@ -89,7 +81,7 @@ export class LpPoolTargetBaseCranker {
 	async startInterval() {
 		setInterval(async () => {
 			this.lpPoolAccount = await this.driftClient.getLpPoolAccount(
-				this.lpPoolNameEncoded
+				this.lpPoolId
 			);
 		}, 10_000);
 
@@ -100,13 +92,13 @@ export class LpPoolTargetBaseCranker {
 				.map((market) => market.marketIndex);
 			if (marketIndexes.length === 0) {
 				console.warn(
-					`No markets found with LP status for pool ${this.lpPoolName}. Skipping update.`
+					`No markets found with LP status for pool ${this.lpPoolId}. Skipping update.`
 				);
 				return;
 			}
 			if (!this.lpPoolAccount) {
 				this.lpPoolAccount = await this.driftClient.getLpPoolAccount(
-					this.lpPoolNameEncoded
+					this.lpPoolId
 				);
 			}
 			const ixs = [
