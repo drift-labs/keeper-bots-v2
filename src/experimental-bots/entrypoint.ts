@@ -451,7 +451,7 @@ const runBot = async () => {
 		const lpTargetBaseCranker = new LpPoolTargetBaseCranker(
 			driftClient,
 			config.botConfigs?.lpTargetBaseCranker?.intervalMs || 300_000,
-			config.botConfigs!.lpTargetBaseCranker!.lpPoolName
+			config.botConfigs!.lpTargetBaseCranker!.lpPoolId
 		);
 		bots.push(lpTargetBaseCranker);
 	}

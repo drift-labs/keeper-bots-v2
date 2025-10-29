@@ -153,7 +153,7 @@ export type SwitchboardCrankerBotConfig = BaseBotConfig & {
 
 export type LpPoolTargetBaseCrankerConfig = BaseBotConfig & {
 	intervalMs: number;
-	lpPoolName: string;
+	lpPoolId: number;
 };
 
 export type BotConfigMap = {
