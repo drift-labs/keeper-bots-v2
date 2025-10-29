@@ -5,7 +5,6 @@ import {
 	loadCommaDelimitToStringArray,
 	parsePositiveIntArray,
 } from './utils';
-import { OrderExecutionAlgoType } from './types';
 import {
 	BN,
 	ConfirmationStrategy,
@@ -75,7 +74,6 @@ export type SubaccountConfig = {
 
 export type LiquidatorConfig = BaseBotConfig & {
 	disableAutoDerisking: boolean;
-	useJupiter: boolean;
 	/// @deprecated, use {@link perpSubAccountConfig} to restrict markets
 	perpMarketIndicies?: Array<number>;
 	/// @deprecated, use {@link spotSubAccountConfig} to restrict markets
@@ -88,9 +86,6 @@ export type LiquidatorConfig = BaseBotConfig & {
 	maxSlippageBps?: number;
 
 	deriskAuctionDurationSlots?: number;
-	deriskAlgo?: OrderExecutionAlgoType;
-	deriskAlgoSpot?: OrderExecutionAlgoType;
-	deriskAlgoPerp?: OrderExecutionAlgoType;
 	twapDurationSec?: number;
 	minDepositToLiq?: Map<number, number>;
 	excludedAccounts?: Set<string>;
@@ -474,7 +469,6 @@ export function loadConfigFromOpts(opts: any): Config {
 			metricsPort: 9464,
 
 			disableAutoDerisking: opts.disableAutoDerisking ?? false,
-			useJupiter: opts.useJupiter ?? true,
 			perpMarketIndicies: loadCommaDelimitToArray(opts.perpMarketIndicies),
 			spotMarketIndicies: loadCommaDelimitToArray(opts.spotMarketIndicies),
 			runOnce: opts.runOnce ?? false,
@@ -482,7 +476,6 @@ export function loadConfigFromOpts(opts: any): Config {
 			maxSlippagePct: opts.maxSlippagePct ?? 50,
 			maxSlippageBps: opts.maxSlippageBps ?? 50,
 			deriskAuctionDurationSlots: opts.deriskAuctionDurationSlots ?? 100,
-			deriskAlgo: opts.deriskAlgo ?? OrderExecutionAlgoType.Market,
 			twapDurationSec: parseInt(opts.twapDurationSec ?? '300'),
 			notifyOnLiquidation: opts.notifyOnLiquidation ?? false,
 		};

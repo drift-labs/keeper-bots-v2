@@ -112,10 +112,12 @@ export class PythLazerCrankerBot implements Bot {
 				if (!ids || ids.length === 0) {
 					continue;
 				}
-				feedIdChunks.push({
-					priceFeedIds: ids,
-					channel: key as Channel,
-				});
+				for (const idChunk of chunks(ids, 11)) {
+					feedIdChunks.push({
+						priceFeedIds: idChunk,
+						channel: key as Channel,
+					});
+				}
 			}
 		} else {
 			feedIdChunks = chunks(

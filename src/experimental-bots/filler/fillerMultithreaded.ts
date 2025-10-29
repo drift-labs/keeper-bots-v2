@@ -1411,7 +1411,7 @@ export class FillerMultithreaded {
 				mmOraclePriceData,
 				this.slotSubscriber.getSlot(),
 				Date.now() / 1000,
-				this.driftClient.getStateAccount().minPerpAuctionDuration
+				this.driftClient.getStateAccount()
 			)
 		) {
 			return false;

@@ -26,6 +26,10 @@ import {
 	getVariant,
 	calculateUnsettledFundingPnl,
 	BlockhashSubscriber,
+	RevenueShareEscrowMap,
+	isBuilderOrderCompleted,
+	getUserAccountPublicKeySync,
+	SettlePnlMode,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -109,6 +113,7 @@ export class UserPnlSettlerBot implements Bot {
 	private lookupTableAccounts?: AddressLookupTableAccount[];
 	private userMap: UserMap;
 	private priorityFeeSubscriber?: PriorityFeeSubscriber;
+	private revenueShareEscrowMap?: RevenueShareEscrowMap;
 
 	// =============================================================================
 	// CONFIGURATION
@@ -162,6 +167,10 @@ export class UserPnlSettlerBot implements Bot {
 			skipInitialLoad: false,
 			includeIdle: false,
 		});
+		this.revenueShareEscrowMap = new RevenueShareEscrowMap(
+			this.driftClient,
+			true
+		);
 	}
 
 	public async init() {
@@ -179,7 +188,15 @@ export class UserPnlSettlerBot implements Bot {
 		await this.driftClient.subscribe();
 		await this.blockhashSubscriber.subscribe();
 
+		const start0 = Date.now();
 		await this.userMap.subscribe();
+		logger.info(`Subscribed to UserMap in ${Date.now() - start0}ms`);
+		const start1 = Date.now();
+		await this.revenueShareEscrowMap!.subscribe();
+		logger.info(
+			`Subscribed to RevenueShareEscrowMap in ${Date.now() - start1}ms`
+		);
+
 		this.lookupTableAccounts =
 			await this.driftClient.fetchAllLookupTableAccounts();
 
@@ -213,6 +230,7 @@ export class UserPnlSettlerBot implements Bot {
 			await this.trySettleUsersWithNoPositions();
 			await this.trySettlePositivePnlForLowMargin();
 			await this.trySettleFundingForMarketThenUsers();
+			await this.trySettleBuilderFees();
 		} else {
 			// Initial settlement on startup - only settle negative PnL
 			await this.trySettleNegativePnl();
@@ -279,6 +297,19 @@ export class UserPnlSettlerBot implements Bot {
 					this.intervalIds.push(
 						setInterval(
 							this.trySettleFundingForMarketThenUsers.bind(this),
+							FUNDING_SETTLE_INTERVAL_MS
+						)
+					);
+				}, delayUntilNextHourFirstMinute)
+			);
+
+			// Builder fees - Run around when funding runs
+			this.timeoutIds.push(
+				setTimeout(() => {
+					this.trySettleBuilderFees();
+					this.intervalIds.push(
+						setInterval(
+							this.trySettleBuilderFees.bind(this),
 							FUNDING_SETTLE_INTERVAL_MS
 						)
 					);
@@ -363,6 +394,240 @@ export class UserPnlSettlerBot implements Bot {
 		} catch (err) {
 			this.handleSettlementError(err, 'trySettleUsersWithNoPositions');
 		}
+	}
+
+	private async trySettleBuilderFees() {
+		try {
+			await this.trySettleBuilderFeesForUsers();
+		} catch (err) {
+			this.handleSettlementError(err, 'trySettleBuilderFees');
+		}
+	}
+
+	private async trySettleBuilderFeesForUsers() {
+		const logPrefix = '[trySettleBuilderFeesForUsers]';
+		const start = Date.now();
+		await this.revenueShareEscrowMap!.sync();
+		logger.info(
+			`${logPrefix} Synced revenue share escrow map in ${
+				Date.now() - start
+			}ms, found ${this.revenueShareEscrowMap!.size()} escrows`
+		);
+
+		// Group by user and accumulate market indexes with sweepable builder fees
+		const usersByAuthority: Map<
+			string,
+			{
+				settleeUserAccountPublicKey: PublicKey;
+				settleeUserAccount: UserAccount;
+				marketIndexes: Set<number>;
+			}
+		> = new Map();
+		for (const escrow of this.revenueShareEscrowMap!.getAll().values()) {
+			const sweepableFees = escrow.orders.filter(
+				(order) => isBuilderOrderCompleted(order) && order.feesAccrued.gt(ZERO)
+			);
+			for (const order of sweepableFees) {
+				logger.info(
+					`${logPrefix} ${escrow.authority.toBase58()} has sweepable fees for order in market: ${
+						order.marketIndex
+					}: ${order.feesAccrued.toString()}`
+				);
+				// sweeping builder feees doesn't require a user account, but we need one that exists, so just use the last one
+				// set in the RevenueShareOrder.
+				const user = getUserAccountPublicKeySync(
+					this.driftClient.program.programId,
+					escrow.authority,
+					order.subAccountId
+				);
+				const userKey = user.toBase58();
+				if (!usersByAuthority.has(userKey)) {
+					usersByAuthority.set(userKey, {
+						settleeUserAccountPublicKey: user,
+						settleeUserAccount: this.userMap!.get(userKey)!.getUserAccount(),
+						marketIndexes: new Set<number>(),
+					});
+				}
+				usersByAuthority.get(userKey)!.marketIndexes.add(order.marketIndex);
+			}
+		}
+
+		await this.processBuilderFeeSettlements(usersByAuthority, logPrefix);
+	}
+
+	private async processBuilderFeeSettlements(
+		usersByAuthority: Map<
+			string,
+			{
+				settleeUserAccountPublicKey: PublicKey;
+				settleeUserAccount: UserAccount;
+				marketIndexes: Set<number>;
+			}
+		>,
+		logPrefix = ''
+	) {
+		const MAX_MARKETS_PER_IX = 4;
+		for (const [
+			userKey,
+			{ settleeUserAccountPublicKey, settleeUserAccount, marketIndexes },
+		] of usersByAuthority) {
+			const markets = Array.from(new Set(Array.from(marketIndexes)));
+			if (markets.length === 0) {
+				continue;
+			}
+
+			logger.info(
+				`${logPrefix} TRY_SETTLE builder fees for user ${userKey} across ${
+					markets.length
+				} markets: [${markets.join(', ')}]`
+			);
+
+			for (let i = 0; i < markets.length; i += MAX_MARKETS_PER_IX) {
+				const marketChunk = markets.slice(i, i + MAX_MARKETS_PER_IX);
+				await this.trySendBuilderSettleForMarketChunk(
+					userKey,
+					settleeUserAccountPublicKey,
+					settleeUserAccount,
+					marketChunk,
+					logPrefix
+				);
+			}
+		}
+	}
+
+	private async trySendBuilderSettleForMarketChunk(
+		userKey: string,
+		settleeUserAccountPublicKey: PublicKey,
+		settleeUserAccount: UserAccount,
+		marketChunk: number[],
+		logPrefix: string
+	): Promise<void> {
+		const success = await this.sendBuilderSettleForMarketChunk(
+			userKey,
+			settleeUserAccountPublicKey,
+			settleeUserAccount,
+			marketChunk,
+			logPrefix
+		);
+		if (!success) {
+			const slice = Math.floor(marketChunk.length / 2);
+			if (slice < 1) {
+				return;
+			}
+			const slice0 = marketChunk.slice(0, slice);
+			const slice1 = marketChunk.slice(slice);
+			logger.info(
+				`${logPrefix} (builderSettle) Chunk failed for user ${userKey}: [${marketChunk.join(
+					', '
+				)}], retrying with\nslice0: [${slice0.join(
+					', '
+				)}]\nslice1: [${slice1.join(', ')}]`
+			);
+			await sleepMs(SLEEP_MS);
+			await this.sendBuilderSettleForMarketChunk(
+				userKey,
+				settleeUserAccountPublicKey,
+				settleeUserAccount,
+				slice0,
+				logPrefix
+			);
+			await sleepMs(SLEEP_MS);
+			await this.sendBuilderSettleForMarketChunk(
+				userKey,
+				settleeUserAccountPublicKey,
+				settleeUserAccount,
+				slice1,
+				logPrefix
+			);
+		}
+		await sleepMs(SLEEP_MS);
+	}
+
+	private async sendBuilderSettleForMarketChunk(
+		userKey: string,
+		settleeUserAccountPublicKey: PublicKey,
+		settleeUserAccount: UserAccount,
+		marketChunk: number[],
+		logPrefix: string
+	): Promise<boolean> {
+		if (marketChunk.length === 0) {
+			return true;
+		}
+		let success = false;
+		try {
+			const pfs = this.priorityFeeSubscriber!.getAvgStrategyResult();
+			let microLamports = 10_000;
+			if (pfs) {
+				microLamports = Math.floor(pfs);
+			}
+			const computeUnits = Math.min(300_000 * marketChunk.length, 1_400_000);
+
+			const ixs: TransactionInstruction[] = [
+				ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }),
+				ComputeBudgetProgram.setComputeUnitPrice({ microLamports }),
+				await this.driftClient.settleMultiplePNLsIx(
+					settleeUserAccountPublicKey,
+					settleeUserAccount,
+					marketChunk,
+					SettlePnlMode.TRY_SETTLE,
+					undefined,
+					this.revenueShareEscrowMap
+				),
+			];
+
+			const recentBlockhash = this.blockhashSubscriber.getLatestBlockhash(5);
+			if (!recentBlockhash) {
+				logger.error(
+					`${logPrefix} (builderSettle) No recent blockhash found for user ${userKey} markets: [${marketChunk.join(
+						', '
+					)}]`
+				);
+				throw new Error('No recent blockhash found');
+			}
+
+			const simResult = await simulateAndGetTxWithCUs({
+				ixs,
+				connection: this.driftClient.connection,
+				payerPublicKey: this.driftClient.wallet.publicKey,
+				lookupTableAccounts: this.lookupTableAccounts!,
+				cuLimitMultiplier: CU_EST_MULTIPLIER,
+				doSimulation: true,
+				recentBlockhash: recentBlockhash.blockhash,
+			});
+			if (simResult.simError !== null) {
+				logger.error(
+					`${logPrefix} (builderSettle) Sim error for user ${userKey} markets [${marketChunk.join(
+						', '
+					)}]: ${JSON.stringify(simResult.simError)}\n${
+						simResult.simTxLogs ? simResult.simTxLogs.join('\n') : ''
+					}`
+				);
+				handleSimResultError(
+					simResult,
+					errorCodesToSuppress,
+					'(builderSettle)'
+				);
+				success = false;
+			} else {
+				const sendTxStart = Date.now();
+				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
+					simResult.tx,
+					[],
+					this.driftClient.opts
+				);
+				logger.info(
+					`${logPrefix} (builderSettle) TRY_SETTLE for user ${userKey} markets [${marketChunk.join(
+						', '
+					)}] in ${Date.now() - sendTxStart}ms: https://solana.fm/tx/${
+						txSig.txSig
+					}`
+				);
+				success = true;
+			}
+		} catch (err) {
+			this.handleSettlementError(err, 'sendBuilderSettleForMarketChunk');
+		}
+		return success;
 	}
 
 	private async trySettleFundingForMarketThenUsers() {
@@ -1119,7 +1384,11 @@ export class UserPnlSettlerBot implements Bot {
 	) {
 		const allTxPromises = [];
 		const pnlIxsBuilder: IxsBuilder = async (usersArg, marketIdx) =>
-			this.driftClient.getSettlePNLsIxs(usersArg, [marketIdx]);
+			this.driftClient.getSettlePNLsIxs(
+				usersArg,
+				[marketIdx],
+				this.revenueShareEscrowMap
+			);
 		for (let i = 0; i < users.length; i += SETTLE_USER_CHUNKS) {
 			const usersChunk = users.slice(i, i + SETTLE_USER_CHUNKS);
 			allTxPromises.push(
@@ -1215,7 +1484,11 @@ export class UserPnlSettlerBot implements Bot {
 			try {
 				const extraIxs = buildIxs
 					? await buildIxs(users, marketIndex)
-					: await this.driftClient.getSettlePNLsIxs(users, [marketIndex]);
+					: await this.driftClient.getSettlePNLsIxs(
+							users,
+							[marketIndex],
+							this.revenueShareEscrowMap
+					  );
 				ixs.push(...extraIxs);
 			} catch (error) {
 				logger.error(
