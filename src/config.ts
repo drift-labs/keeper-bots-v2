@@ -146,6 +146,11 @@ export type SwitchboardCrankerBotConfig = BaseBotConfig & {
 	writableAccounts?: string[];
 };
 
+export type LpPoolTargetBaseCrankerConfig = BaseBotConfig & {
+	intervalMs: number;
+	lpPoolId: number;
+};
+
 export type BotConfigMap = {
 	fillerMultithreaded?: FillerMultiThreadedConfig;
 	spotFillerMultithreaded?: FillerMultiThreadedConfig;
@@ -167,6 +172,7 @@ export type BotConfigMap = {
 	swiftMaker?: BaseBotConfig;
 	swiftPlacer?: BaseBotConfig;
 	jitMaker?: JitMakerConfig;
+	lpTargetBaseCranker?: LpPoolTargetBaseCrankerConfig;
 };
 
 export interface GlobalConfig {

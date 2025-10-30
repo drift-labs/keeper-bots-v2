@@ -112,26 +112,27 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.21.77":
-  version "0.21.77"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.77.tgz#fa4f0997b49713f5a073edab750afacb2fa17c9c"
-  integrity sha512-cojQYfGoHrV5k7a7g9pAJNSx2cVNEWnsWLe2Ub+KH1Qp1cbXbL64nKgPfcH4kqu+NCVEhaqQmqiK7Dpq4MtfcQ==
+"@drift-labs/jit-proxy@0.21.86":
+  version "0.21.86"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.86.tgz#f7331d4a19ae30a98acd6256dc70563cd782b061"
+  integrity sha512-Du7Oqt70q6aRqdE5MHRkJPwk3iM/TgZTzTyvOmSFPyXQcIR6ckzWrfEqnHGJUIZHoIouFBX2qLDUA30wBrx6kQ==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.144.0-beta.1"
+    "@drift-labs/sdk" "2.145.0-beta.3"
     "@solana/web3.js" "1.98.0"
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.144.0-beta.1":
-  version "2.144.0-beta.1"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.144.0-beta.1.tgz#74c618379aee6c4f3f71369bb06ce113d0f7cf82"
-  integrity sha512-LH7kgkx06MIbJKoL6GjQIrKpv/eQzq7JUg//j7XBq3Mi4uDOjrIXnbLTfqTnGBknANCZx8j1RYQ5Kyt1YLIS3Q==
+"@drift-labs/sdk@2.145.0-beta.3":
+  version "2.145.0-beta.3"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.145.0-beta.3.tgz#ba42a36ad788d112c84400543bf110d5e007411b"
+  integrity sha512-wkIbDyODhBdTsgzcniOQxUUpSc81DF9RfpbZk7o0dNQs9jmkt/lpZg0KWK9r2Rd0oOIYU/sUQlLc2w7FCbShOA==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
     "@ellipsis-labs/phoenix-sdk" "1.4.5"
     "@grpc/grpc-js" "1.14.0"
+    "@msgpack/msgpack" "^3.1.2"
     "@openbook-dex/openbook-v2" "0.2.10"
     "@project-serum/serum" "0.13.65"
     "@pythnetwork/client" "2.5.3"
@@ -473,6 +474,11 @@
     prettier "^2.5.1"
     snake-case "^3.0.4"
     spok "^1.4.3"
+
+"@msgpack/msgpack@^3.1.2":
+  version "3.1.2"
+  resolved "https://registry.yarnpkg.com/@msgpack/msgpack/-/msgpack-3.1.2.tgz#fdd25cc2202297519798bbaf4689152ad9609e19"
+  integrity sha512-JEW4DEtBzfe8HvUYecLU9e6+XJnKDlUAIve8FvPzF3Kzs6Xo/KuZkZJsDH0wJXl/qEZbeeE7edxDNY3kMs39hQ==
 
 "@noble/curves@^1.0.0", "@noble/curves@^1.4.0", "@noble/curves@^1.4.2":
   version "1.9.7"

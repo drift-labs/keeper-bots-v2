@@ -41,6 +41,7 @@ import { SwiftMaker } from './swift/makerExample';
 import { SwiftTaker } from './swift/takerExample';
 import * as net from 'net';
 import { SwiftPlacer } from './swift/placerExample';
+import { LpPoolTargetBaseCranker } from './lp-pool/targetBaseCranker';
 
 setGlobalDispatcher(
 	new Agent({
@@ -444,6 +445,15 @@ const runBot = async () => {
 			1000
 		);
 		bots.push(signedMsgMaker);
+	}
+
+	if (configHasBot(config, 'lpTargetBaseCranker')) {
+		const lpTargetBaseCranker = new LpPoolTargetBaseCranker(
+			driftClient,
+			config.botConfigs?.lpTargetBaseCranker?.intervalMs || 300_000,
+			config.botConfigs!.lpTargetBaseCranker!.lpPoolId
+		);
+		bots.push(lpTargetBaseCranker);
 	}
 
 	// Initialize bots
