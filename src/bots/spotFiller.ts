@@ -996,7 +996,8 @@ export class SpotFillerBot implements Bot {
 		let healthy = false;
 		await this.watchdogTimerMutex.runExclusive(async () => {
 			healthy =
-				this.watchdogTimerLastPatTime > Date.now() - 5 * this.pollingIntervalMs;
+				this.watchdogTimerLastPatTime >
+				Date.now() - 10 * this.pollingIntervalMs;
 			if (!healthy) {
 				logger.warn(`${this.name} watchdog timer expired`);
 			}
@@ -2401,7 +2402,6 @@ export class SpotFillerBot implements Bot {
 					);
 				}
 				logger.debug(`trySpotFill done, took ${duration} ms`);
-
 				await this.watchdogTimerMutex.runExclusive(async () => {
 					this.watchdogTimerLastPatTime = Date.now();
 				});
