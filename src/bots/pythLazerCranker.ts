@@ -8,6 +8,7 @@ import {
 	DevnetSpotMarkets,
 	DriftClient,
 	getVariant,
+	isOneOfVariant,
 	MainnetPerpMarkets,
 	MainnetSpotMarkets,
 	PriorityFeeSubscriber,
@@ -84,6 +85,9 @@ export class PythLazerCrankerBot implements Bot {
 
 			const allFeedIds: number[] = [];
 			for (const market of [...spotMarkets, ...perpMarkets]) {
+				const onChainMarket = market.symbol.toUpperCase().includes('PERP')
+					? this.driftClient.getPerpMarketAccount(market.marketIndex)
+					: this.driftClient.getSpotMarketAccount(market.marketIndex);
 				if (
 					(this.crankConfigs.onlyCrankUsedOracles &&
 						!getVariant(market.oracleSource).toLowerCase().includes('lazer')) ||
@@ -91,7 +95,8 @@ export class PythLazerCrankerBot implements Bot {
 				)
 					continue;
 				if (
-					this.crankConfigs.ignorePythLazerIds?.includes(market.pythLazerId!)
+					this.crankConfigs.ignorePythLazerIds?.includes(market.pythLazerId!) ||
+					isOneOfVariant(onChainMarket?.status, ['delisted', 'settlement'])
 				) {
 					continue;
 				}
