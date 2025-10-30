@@ -2,7 +2,6 @@ import {
 	BlockhashSubscriber,
 	ConstituentMap,
 	DriftClient,
-	encodeName,
 	getConstituentTargetBasePublicKey,
 	getLpPoolPublicKey,
 	LPPoolAccount,
