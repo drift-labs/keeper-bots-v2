@@ -50,7 +50,7 @@ export async function webhookMessage(
 
 				await axios.post(webhook, data);
 			} catch (err) {
-				logger.info('webhook error');
+				logger.info(`webhook error: ${err}`);
 			}
 		}
 	}

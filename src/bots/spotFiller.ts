@@ -1979,10 +1979,6 @@ export class SpotFillerBot implements Bot {
 			if (cfg && isVariant(cfg.status, 'enabled')) {
 				fulfillmentConfig = cfg;
 			}
-		} else {
-			logger.error(
-				`unknown fallback source: ${fallbackSource} (fillTxId: ${fillTxId})`
-			);
 		}
 
 		logMessageForNodeToFill(
