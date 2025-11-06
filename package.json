@@ -5,8 +5,8 @@
 	"main": "lib/index.js",
 	"license": "Apache-2.0",
 	"dependencies": {
-		"@drift-labs/jit-proxy": "0.21.98",
-		"@drift-labs/sdk": "2.146.0-beta.11",
+		"@drift-labs/jit-proxy": "0.21.104",
+		"@drift-labs/sdk": "2.147.0-beta.1",
 		"@drift/common": "file:./drift-common/common-ts",
 		"@opentelemetry/api": "1.7.0",
 		"@opentelemetry/auto-instrumentations-node": "^0.62.1",
