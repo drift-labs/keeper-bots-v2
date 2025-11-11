@@ -368,7 +368,8 @@ export function loadConfigFromOpts(opts: any): Config {
 			hermesEndpoint: opts.hermesEndpoint ?? process.env.HERMES_ENDPOINT,
 			heliusEndpoint: opts.heliusEndpoint ?? process.env.HELIUS_ENDPOINT,
 			additionalSendTxEndpoints: loadCommaDelimitToStringArray(
-				opts.additionalSendTxEndpoints
+				opts.additionalSendTxEndpoints ??
+					process.env.ADDITIONAL_SEND_TX_ENDPOINTS
 			),
 			txConfirmationEndpoint:
 				opts.txConfirmationEndpoint ?? process.env.TX_CONFIRMATION_ENDPOINT,
