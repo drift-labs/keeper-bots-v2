@@ -96,6 +96,6 @@
 		"test": "mocha -r ts-node/register ./src/**/*.test.ts"
 	},
 	"engines": {
-		"node": ">=20.18.0"
+		"node": ">=22.14.0"
 	}
 }
