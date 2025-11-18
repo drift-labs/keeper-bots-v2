@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/node:20 AS builder
+FROM public.ecr.aws/docker/library/node:22.14 AS builder
 
 COPY package.json yarn.lock ./
 
@@ -18,7 +18,7 @@ WORKDIR /app
 RUN yarn install
 RUN node esbuild.config.js
 
-FROM public.ecr.aws/docker/library/node:20.18.1-alpine
+FROM public.ecr.aws/docker/library/node:22.14.0-alpine
 # 'bigint-buffer' native lib for performance
 RUN apk add python3 make g++ --virtual .build &&\
     npm install -C /lib bigint-buffer @triton-one/yellowstone-grpc@1.3.0 helius-laserstream &&\
