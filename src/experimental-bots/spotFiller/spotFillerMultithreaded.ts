@@ -1029,7 +1029,9 @@ export class SpotFillerMultithreaded {
 			logger.error(
 				`simError: ${JSON.stringify(
 					simResult.simError
-				)} (fillTxId: ${fillTxId})`
+				)} (fillTxId: ${fillTxId}), sim logs:\n${
+					simResult.simTxLogs ? simResult.simTxLogs.join('\n') : 'none'
+				}`
 			);
 			handleSimResultError(
 				simResult,
