@@ -486,7 +486,7 @@ export class TxSender {
 							simResult.cuEstimate
 						} simError: ${JSON.stringify(
 							simResult.simError
-						)}, sim tx logs:\n${JSON.stringify(simResult.simTxLogs, null, 2)}`
+						)}, sim logs:\n${JSON.stringify(simResult.simTxLogs, null, 2)}`
 					);
 				}
 				this.metrics.txAttempted++;

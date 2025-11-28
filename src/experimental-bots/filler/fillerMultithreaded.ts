@@ -1944,7 +1944,9 @@ export class FillerMultithreaded {
 			logger.error(
 				`simError: ${JSON.stringify(
 					simResult.simError
-				)} (fillTxId: ${fillTxId})`
+				)} (fillTxId: ${fillTxId}), sim logs:\n${
+					simResult.simTxLogs ? simResult.simTxLogs.join('\n') : 'none'
+				}`
 			);
 		} else {
 			if (this.hasEnoughSolToFill) {
@@ -2158,7 +2160,11 @@ export class FillerMultithreaded {
 
 						if (this.simulateTxForCUEstimate && simResult.simError) {
 							logger.info(
-								`settlePnls simError: ${JSON.stringify(simResult.simError)}`
+								`settlePnls simError: ${JSON.stringify(
+									simResult.simError
+								)}, sim logs:\n${
+									simResult.simTxLogs ? simResult.simTxLogs.join('\n') : 'none'
+								}`
 							);
 							handleSimResultError(
 								simResult,
