@@ -369,6 +369,23 @@ export class SwiftPlacer {
 						);
 					}
 
+					const hasPreDeposit = preDepositTx.length > 0;
+					if (hasPreDeposit) {
+						logger.info(`order with deposit: ${preDepositTx}`);
+						const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
+						this.driftClient.txSender
+							.sendRawTransaction(preDepositTxRaw, {
+								skipPreflight: true,
+								maxRetries: 0,
+							})
+							.then((res) => {
+								logger.info(`sent deposit tx: ${res.txSig}@${res.slot}`);
+							})
+							.catch((err) => {
+								logger.warn(`failed deposit tx: ${err}`);
+							});
+					}
+
 					let resp: SimulateAndGetTxWithCUsResponse | undefined;
 					try {
 						resp = await simulateAndGetTxWithCUs({
@@ -385,7 +402,9 @@ export class SwiftPlacer {
 						return;
 					}
 
-					if (resp.simError) {
+					// allow orders with pre-deposit to be submitted avoid race conditions
+					// with the sim
+					if (!hasPreDeposit && resp.simError) {
 						logger.info(
 							`${logPrefix}: ${JSON.stringify(resp.simError)}, ${
 								resp.simTxLogs
@@ -398,22 +417,6 @@ export class SwiftPlacer {
 						signedMessage.signedMsgOrderParams
 					);
 					logger.info(`${logPrefix}: placing order: ${orderStr}`);
-
-					if (preDepositTx.length > 0) {
-						logger.info(`order with deposit: ${preDepositTx}`);
-						const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
-						this.driftClient.txSender
-							.sendRawTransaction(preDepositTxRaw, {
-								skipPreflight: true,
-								maxRetries: 0,
-							})
-							.then((res) => {
-								logger.info(`sent deposit tx: ${res.txSig}@${res.slot}`);
-							})
-							.catch((err) => {
-								logger.warn(`failed deposit tx: ${err}`);
-							});
-					}
 
 					this.driftClient.txSender
 						.sendVersionedTransaction(resp.tx)
