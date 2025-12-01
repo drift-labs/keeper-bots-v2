@@ -159,7 +159,7 @@ export class SwiftPlacer {
 
 				if (message['order'] && this.driftClient.isSubscribed) {
 					const order = message['order'];
-					const preDepositTx: string | undefined = message['deposit'];
+					const preDepositTx: string = message['deposit'] || '';
 					const signedMsgOrderParamsBufHex = Buffer.from(
 						order['order_message']
 					);
@@ -399,8 +399,8 @@ export class SwiftPlacer {
 					);
 					logger.info(`${logPrefix}: placing order: ${orderStr}`);
 
-					if (preDepositTx) {
-						console.log('order with deposit: {deposit}');
+					if (preDepositTx.length > 0) {
+						logger.info(`order with deposit: ${preDepositTx}`);
 						const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
 						this.driftClient.txSender
 							.sendRawTransaction(preDepositTxRaw, {
