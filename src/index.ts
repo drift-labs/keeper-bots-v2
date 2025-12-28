@@ -918,7 +918,8 @@ const runBot = async () => {
 
 	// Run subscribe functions once
 	if (
-		(needDriftClient && needCheckDriftUser) ||
+		needDriftClient ||
+		needCheckDriftUser ||
 		needForceCollateral ||
 		eventSubscriber ||
 		needUserMapSubscribe ||
