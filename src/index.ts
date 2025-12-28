@@ -605,6 +605,8 @@ const runBot = async () => {
 	}
 	if (configHasBot(config, 'pythLazerCranker')) {
 		needPriorityFeeSubscriber = true;
+		needDriftStateWatcher = true;
+
 		bots.push(
 			new PythLazerCrankerBot(
 				config.global,
