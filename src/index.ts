@@ -585,6 +585,7 @@ const runBot = async () => {
 	});
 
 	let needDriftStateWatcher = false;
+	let needDriftClient = false;
 
 	if (configHasBot(config, 'pythCranker')) {
 		needPythPriceSubscriber = true;
@@ -605,7 +606,7 @@ const runBot = async () => {
 	}
 	if (configHasBot(config, 'pythLazerCranker')) {
 		needPriorityFeeSubscriber = true;
-		needDriftStateWatcher = true;
+		needDriftClient = true;
 
 		bots.push(
 			new PythLazerCrankerBot(
@@ -917,7 +918,7 @@ const runBot = async () => {
 
 	// Run subscribe functions once
 	if (
-		needCheckDriftUser ||
+		(needDriftClient && needCheckDriftUser) ||
 		needForceCollateral ||
 		eventSubscriber ||
 		needUserMapSubscribe ||
