@@ -41,7 +41,7 @@ const SIM_CU_ESTIMATE_MULTIPLIER = 1.5;
 const DEFAULT_INTEVAL_MS = 30000;
 
 export class PythLazerCrankerBot implements Bot {
-	private pythLazerClient: PythLazerSubscriber;
+	private pythLazerClient?: PythLazerSubscriber;
 	readonly decodeFunc: (name: string, data: Buffer) => PriceUpdateAccount;
 
 	public name: string;
@@ -68,7 +68,30 @@ export class PythLazerCrankerBot implements Bot {
 			throw new Error('Jito is not supported for pyth lazer cranker');
 		}
 
+		if (!this.globalConfig.lazerEndpoints || !this.globalConfig.lazerToken) {
+			throw new Error('Missing lazerEndpoint or lazerToken in global config');
+		}
+
+		this.decodeFunc =
+			this.driftClient.program.account.pythLazerOracle.coder.accounts.decodeUnchecked.bind(
+				this.driftClient.program.account.pythLazerOracle.coder.accounts
+			);
+
+		this.blockhashSubscriber = new BlockhashSubscriber({
+			connection: driftClient.connection,
+		});
+
+		this.txRecorder = new TxRecorder(
+			this.name,
+			crankConfigs.metricsPort,
+			false,
+			20_000
+		);
+	}
+
+	private buildFeedIdChunks(): PythLazerPriceFeedArray[] {
 		let feedIdChunks: PythLazerPriceFeedArray[] = [];
+
 		if (
 			!this.crankConfigs.pythLazerIds &&
 			!this.crankConfigs.pythLazerIdsByChannel
@@ -95,7 +118,53 @@ export class PythLazerCrankerBot implements Bot {
 				) {
 					continue;
 				}
+
+				// Check on-chain market status using driftClient
+				let marketStatus: string | undefined;
+				try {
+					if ('baseAssetSymbol' in market) {
+						// It's a perp market
+						const perpMarketAccount = this.driftClient.getPerpMarketAccount(
+							market.marketIndex
+						);
+						if (perpMarketAccount) {
+							marketStatus = getVariant(perpMarketAccount.status);
+							// Skip markets that are not active (e.g., initialized, delisted, etc.)
+							if (marketStatus !== 'active') {
+								logger.info(
+									`Skipping pyth lazer id ${market.pythLazerId} for perp market ${market.marketIndex} (status: ${marketStatus})`
+								);
+								continue;
+							}
+						}
+					} else {
+						// It's a spot market
+						const spotMarketAccount = this.driftClient.getSpotMarketAccount(
+							market.marketIndex
+						);
+						if (spotMarketAccount) {
+							marketStatus = getVariant(spotMarketAccount.status);
+							// Skip markets that are not active
+							if (marketStatus !== 'active') {
+								logger.info(
+									`Skipping pyth lazer id ${market.pythLazerId} for spot market ${market.marketIndex} (status: ${marketStatus})`
+								);
+								continue;
+							}
+						}
+					}
+				} catch (e) {
+					logger.warn(
+						`Could not get market status for market ${market.marketIndex}, including feed ${market.pythLazerId} anyway: ${e}`
+					);
+				}
+
 				allFeedIds.push(market.pythLazerId!);
+				logger.info(
+					`Adding pyth lazer id ${market.pythLazerId!} for market ${
+						market.marketIndex
+					} (status: ${marketStatus ?? 'unknown'})`
+				);
 			}
 			const allFeedIdsSet = new Set(allFeedIds);
 			feedIdChunks = chunks(Array.from(allFeedIdsSet), 11).map((ids) => {
@@ -130,37 +199,9 @@ export class PythLazerCrankerBot implements Bot {
 				};
 			});
 		}
-		console.log(feedIdChunks);
 
-		if (!this.globalConfig.lazerEndpoints || !this.globalConfig.lazerToken) {
-			throw new Error('Missing lazerEndpoint or lazerToken in global config');
-		}
-
-		console.log(this.crankConfigs.pythLazerChannel);
-		this.pythLazerClient = new PythLazerSubscriber(
-			this.globalConfig.lazerEndpoints,
-			this.globalConfig.lazerToken,
-			feedIdChunks,
-			this.globalConfig.driftEnv,
-			undefined,
-			undefined,
-			undefined
-		);
-		this.decodeFunc =
-			this.driftClient.program.account.pythLazerOracle.coder.accounts.decodeUnchecked.bind(
-				this.driftClient.program.account.pythLazerOracle.coder.accounts
-			);
-
-		this.blockhashSubscriber = new BlockhashSubscriber({
-			connection: driftClient.connection,
-		});
-
-		this.txRecorder = new TxRecorder(
-			this.name,
-			crankConfigs.metricsPort,
-			false,
-			20_000
-		);
+		logger.info(`Feed ID chunks: ${JSON.stringify(feedIdChunks)}`);
+		return feedIdChunks;
 	}
 
 	async init(): Promise<void> {
@@ -170,6 +211,26 @@ export class PythLazerCrankerBot implements Bot {
 			...(await this.driftClient.fetchAllLookupTableAccounts())
 		);
 
+		// Build feed ID chunks after driftClient is subscribed so we can check market statuses
+		const feedIdChunks = this.buildFeedIdChunks();
+
+		if (feedIdChunks.length === 0) {
+			throw new Error('No valid pyth lazer feeds to subscribe to');
+		}
+
+		logger.info(
+			`pythLazerChannel config: ${this.crankConfigs.pythLazerChannel}`
+		);
+		this.pythLazerClient = new PythLazerSubscriber(
+			this.globalConfig.lazerEndpoints!,
+			this.globalConfig.lazerToken!,
+			feedIdChunks,
+			this.globalConfig.driftEnv,
+			undefined,
+			undefined,
+			undefined
+		);
+
 		await this.pythLazerClient.subscribe();
 	}
 
@@ -177,7 +238,7 @@ export class PythLazerCrankerBot implements Bot {
 		logger.info(`Resetting ${this.name} bot`);
 		this.blockhashSubscriber.unsubscribe();
 		await this.driftClient.unsubscribe();
-		this.pythLazerClient.unsubscribe();
+		this.pythLazerClient?.unsubscribe();
 	}
 
 	async startIntervalLoop(intervalMs = this.defaultIntervalMs): Promise<void> {
@@ -205,6 +266,11 @@ export class PythLazerCrankerBot implements Bot {
 	}
 
 	async runCrankLoop() {
+		if (!this.pythLazerClient) {
+			logger.warn('pythLazerClient not initialized, skipping crank loop');
+			return;
+		}
+
 		for (const [
 			feedIdsStr,
 			priceMessage,
