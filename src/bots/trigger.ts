@@ -26,6 +26,7 @@ import {
 	PRICE_PRECISION,
 	getTriggerPrice,
 	useMedianTriggerPrice,
+	isOneOfVariant,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -86,7 +87,9 @@ function getPythLazerFeedIdChunks(
 	for (const market of [...spotMarkets, ...perpMarkets]) {
 		if (
 			!getVariant(market.oracleSource).toLowerCase().includes('lazer') ||
-			market.pythLazerId == undefined
+			market.pythLazerId == undefined ||
+			(market.marketStatus &&
+				isOneOfVariant(market.marketStatus, ['delisted', 'settlement']))
 		) {
 			continue;
 		}
