@@ -276,7 +276,8 @@ export class MakerBidAskTwapCrank implements Bot {
 		const markets = PerpMarkets[this.globalConfig.driftEnv!].filter(
 			(market) =>
 				market.pythLazerId !== undefined &&
-				!isOneOfVariant(market.marketStatus, ['delisted', 'settlement'])
+				(!market.marketStatus ||
+					!isOneOfVariant(market.marketStatus, ['delisted', 'settlement']))
 		);
 		const pythLazerIds = markets.map((m) => m.pythLazerId!);
 		const pythLazerIdsChunks = chunks(pythLazerIds, 4);
