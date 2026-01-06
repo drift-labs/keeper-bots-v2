@@ -905,10 +905,12 @@ export async function swapFillerHardEarnedUSDCForSOL(
 		const quoteInNum = convertToNumber(new BN(quote.inAmount), inPrecision);
 		const quoteOutNum = convertToNumber(new BN(quote.outAmount), outPrecision);
 		const swapPrice = quoteInNum / quoteOutNum;
-		const oraclePrice = convertToNumber(
-			driftClient.getOracleDataForSpotMarket(1).price,
-			PRICE_PRECISION
-		);
+		const oracleData = driftClient.getOracleDataForSpotMarket(1);
+		if (!oracleData) {
+			console.log('Oracle data not found, skipping...');
+			return;
+		}
+		const oraclePrice = convertToNumber(oracleData.price, PRICE_PRECISION);
 
 		if (swapPrice / oraclePrice - 1 > 0.01) {
 			console.log(`Swap price is 1% higher than oracle price, skipping...`);
@@ -1121,23 +1123,32 @@ export const getStaleOracleMarketIndexes = (
 	numFeeds = 2
 ) => {
 	let oracleInfos: { oracleInfo: OraclePriceData; marketIndex: number }[] =
-		markets.map((market) => {
-			if (isVariant(marketType, 'perp')) {
-				return {
-					oracleInfo: driftClient.getOracleDataForPerpMarket(
+		markets
+			.map((market) => {
+				if (isVariant(marketType, 'perp')) {
+					const oracleInfo = driftClient.getOracleDataForPerpMarket(
 						market.marketIndex
-					),
-					marketIndex: market.marketIndex,
-				};
-			} else {
-				return {
-					oracleInfo: driftClient.getOracleDataForSpotMarket(
+					);
+					if (!oracleInfo) return null;
+					return {
+						oracleInfo,
+						marketIndex: market.marketIndex,
+					};
+				} else {
+					const oracleInfo = driftClient.getOracleDataForSpotMarket(
 						market.marketIndex
-					),
-					marketIndex: market.marketIndex,
-				};
-			}
-		});
+					);
+					if (!oracleInfo) return null;
+					return {
+						oracleInfo,
+						marketIndex: market.marketIndex,
+					};
+				}
+			})
+			.filter(
+				(item): item is { oracleInfo: OraclePriceData; marketIndex: number } =>
+					item !== null
+			);
 	oracleInfos = oracleInfos.sort(
 		(a, b) => a.oracleInfo.slot.toNumber() - b.oracleInfo.slot.toNumber()
 	);
