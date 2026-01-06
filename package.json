@@ -32,7 +32,6 @@
 		"jito-ts": "4.1.1",
 		"lru-cache": "10.2.0",
 		"minimist": "1.2.8",
-		"rpc-websockets": "7.11.0",
 		"tweetnacl": "1.0.3",
 		"tweetnacl-util": "0.15.1",
 		"typescript": "4.5.4",

@@ -158,51 +158,14 @@
     zod "4.0.17"
     zstddec "0.1.0"
 
-"@drift-labs/sdk@^2.153.0-beta.0":
-  version "2.153.0-beta.0"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.153.0-beta.0.tgz#a3671d922abd0eb8be7c402aab13904db7bcb3b6"
-  integrity sha512-VXMaeEN7urO2Qg5W5G3YF7mwEDkeskj2Q1BG4oau2YUd3wUofi0/x9DIBZuf8AZCdhSy8ouhDpPPehOYQKOYRg==
-  dependencies:
-    "@coral-xyz/anchor" "0.29.0"
-    "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
-    "@ellipsis-labs/phoenix-sdk" "1.4.5"
-    "@grpc/grpc-js" "1.14.0"
-    "@msgpack/msgpack" "^3.1.2"
-    "@openbook-dex/openbook-v2" "0.2.10"
-    "@project-serum/serum" "0.13.65"
-    "@pythnetwork/client" "2.5.3"
-    "@pythnetwork/price-service-sdk" "1.7.1"
-    "@pythnetwork/pyth-solana-receiver" "0.7.0"
-    "@solana/spl-token" "0.4.13"
-    "@solana/web3.js" "1.98.0"
-    "@switchboard-xyz/common" "3.0.14"
-    "@switchboard-xyz/on-demand" "2.4.1"
-    "@triton-one/yellowstone-grpc" "1.4.1"
-    anchor-bankrun "0.3.0"
-    gill "^0.10.2"
-    helius-laserstream "0.1.8"
-    nanoid "3.3.4"
-    node-cache "5.1.2"
-    rpc-websockets "7.5.1"
-    solana-bankrun "0.3.1"
-    strict-event-emitter-types "2.0.0"
-    tweetnacl "1.0.3"
-    tweetnacl-util "0.15.1"
-    uuid "8.3.2"
-    yargs "17.7.2"
-    zod "4.0.17"
-    zstddec "0.1.0"
-
 "@drift/common@file:./drift-common/common-ts":
-  version "1.0.18"
+  version "1.0.9"
   dependencies:
-    "@drift-labs/sdk" "^2.153.0-beta.0"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
     "@solana/web3.js" "1.98.0"
     bcryptjs-react "2.4.6"
     cerializr "3.1.4"
-    dotenv "^17.2.2"
     immer "10.0.3"
     ioredis "5.4.1"
     isomorphic-ws "^5.0.0"
@@ -3348,11 +3311,6 @@ dotenv@^16.0.3:
   resolved "https://registry.yarnpkg.com/dotenv/-/dotenv-16.6.1.tgz#773f0e69527a8315c7285d5ee73c4459d20a8020"
   integrity sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==
 
-dotenv@^17.2.2:
-  version "17.2.3"
-  resolved "https://registry.yarnpkg.com/dotenv/-/dotenv-17.2.3.tgz#ad995d6997f639b11065f419a22fabf567cdb9a2"
-  integrity sha512-JVUnt+DUIzu87TABbhPmNfVdBDt18BLOWjMUFJMSi/Qqg7NTYtabbvSNJGOJ7afbRuv9D/lngizHtP7QyLQ+9w==
-
 dunder-proto@^1.0.1:
   version "1.0.1"
   resolved "https://registry.yarnpkg.com/dunder-proto/-/dunder-proto-1.0.1.tgz#d7ae667e1dc83482f8b70fd0f6eefc50da30f58a"
@@ -4975,18 +4933,6 @@ rimraf@^3.0.2:
   integrity sha512-JZkJMZkAGFFPP2YqXZXPbMlMBgsxzE8ILs4lMIX/2o0L9UBw9O/Y3o6wFw/i9YLapcUJWwqbi3kdxIPdC62TIA==
   dependencies:
     glob "^7.1.3"
-
-rpc-websockets@7.11.0:
-  version "7.11.0"
-  resolved "https://registry.yarnpkg.com/rpc-websockets/-/rpc-websockets-7.11.0.tgz#05451975963a7d1a4cf36d54e200bfc4402a56d7"
-  integrity sha512-IkLYjayPv6Io8C/TdCL5gwgzd1hFz2vmBZrjMw/SPEXo51ETOhnzgS4Qy5GWi2JQN7HKHa66J3+2mv0fgNh/7w==
-  dependencies:
-    eventemitter3 "^4.0.7"
-    uuid "^8.3.2"
-    ws "^8.5.0"
-  optionalDependencies:
-    bufferutil "^4.0.1"
-    utf-8-validate "^5.0.2"
 
 rpc-websockets@7.5.1:
   version "7.5.1"
