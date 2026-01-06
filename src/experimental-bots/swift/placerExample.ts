@@ -159,7 +159,7 @@ export class SwiftPlacer {
 
 				if (message['order'] && this.driftClient.isSubscribed) {
 					const order = message['order'];
-					const preDepositTx: string | undefined = message['deposit'];
+					const preDepositTx: string = message['deposit'] || '';
 					const signedMsgOrderParamsBufHex = Buffer.from(
 						order['order_message']
 					);
@@ -369,38 +369,9 @@ export class SwiftPlacer {
 						);
 					}
 
-					let resp: SimulateAndGetTxWithCUsResponse | undefined;
-					try {
-						resp = await simulateAndGetTxWithCUs({
-							connection: this.driftClient.connection,
-							payerPublicKey: this.driftClient.wallet.payer!.publicKey,
-							ixs: [...computeBudgetIxs, ...ixs, fillIx],
-							cuLimitMultiplier: 2,
-							lookupTableAccounts:
-								await this.driftClient.fetchAllLookupTableAccounts(),
-							doSimulation: true,
-						});
-					} catch (e) {
-						console.error(e);
-						return;
-					}
-
-					if (resp.simError) {
-						logger.info(
-							`${logPrefix}: ${JSON.stringify(resp.simError)}, ${
-								resp.simTxLogs
-							}`
-						);
-						return;
-					}
-
-					const orderStr = prettyPrintOrderParams(
-						signedMessage.signedMsgOrderParams
-					);
-					logger.info(`${logPrefix}: placing order: ${orderStr}`);
-
-					if (preDepositTx) {
-						console.log('order with deposit: {deposit}');
+					const hasPreDeposit = preDepositTx.length > 0;
+					if (hasPreDeposit) {
+						logger.info(`${logPrefix}: order with deposit: ${preDepositTx}`);
 						const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
 						this.driftClient.txSender
 							.sendRawTransaction(preDepositTxRaw, {
@@ -415,13 +386,65 @@ export class SwiftPlacer {
 							});
 					}
 
+					let resp: SimulateAndGetTxWithCUsResponse | undefined;
+					try {
+						resp = await simulateAndGetTxWithCUs({
+							connection: this.driftClient.connection,
+							payerPublicKey: this.driftClient.wallet.payer!.publicKey,
+							ixs: [...computeBudgetIxs, ...ixs, fillIx],
+							cuLimitMultiplier: 2,
+							lookupTableAccounts:
+								await this.driftClient.fetchAllLookupTableAccounts(),
+							doSimulation: true,
+						});
+					} catch (e) {
+						logger.error(`${logPrefix}: sim order failed: ${e}`);
+						return;
+					}
+
+					// retry sim without optimistic fill ix
+					const simError = resp.simError?.toString();
+					try {
+						if (simError?.includes('VersionedTransaction too large')) {
+							logger.info(`${logPrefix}: try place order w/out fill`);
+							resp = await simulateAndGetTxWithCUs({
+								connection: this.driftClient.connection,
+								payerPublicKey: this.driftClient.wallet.payer!.publicKey,
+								ixs: [...computeBudgetIxs, ...ixs],
+								cuLimitMultiplier: 2,
+								lookupTableAccounts:
+									await this.driftClient.fetchAllLookupTableAccounts(),
+								doSimulation: true,
+							});
+						}
+					} catch (e) {
+						logger.error(`${logPrefix}: sim order failed: ${e}`);
+						return;
+					}
+
+					// allow orders with pre-deposit to be submitted avoid race conditions
+					// with the sim
+					if (!hasPreDeposit && resp.simError) {
+						logger.info(
+							`${logPrefix}: ${JSON.stringify(resp.simError)}, ${
+								resp.simTxLogs
+							}`
+						);
+						return;
+					}
+
+					const orderStr = prettyPrintOrderParams(
+						signedMessage.signedMsgOrderParams
+					);
+					logger.info(`${logPrefix}: placing order: ${orderStr}`);
+
 					this.driftClient.txSender
 						.sendVersionedTransaction(resp.tx)
 						.then((r) => {
 							logger.info(`${logPrefix}: placed order: ${r.txSig}`);
 						})
 						.catch((error) => {
-							console.log(error);
+							logger.error(`${logPrefix}: place order failed: ${error}`);
 						});
 				}
 			});
@@ -468,21 +491,21 @@ export class SwiftPlacer {
 }
 
 function prettyPrintOrderParams(orderParams: OrderParams) {
-	const orderParamsStr = `marketIndex:${
+	const orderParamsStr = `marketIndex: ${
 		orderParams.marketIndex
-	}|orderType:${getVariant(
+	} | orderType: ${getVariant(
 		orderParams.orderType
-	)}|baseAssetAmount:${convertToNumber(
+	)}| baseAssetAmount:${convertToNumber(
 		orderParams.baseAssetAmount,
 		BASE_PRECISION
-	)}|auctionDuration:${
+	)}| auctionDuration:${
 		orderParams.auctionDuration
-	}|auctionStartPrice:${convertToNumber(
+	}| auctionStartPrice:${convertToNumber(
 		orderParams.auctionStartPrice!,
 		PRICE_PRECISION
-	)}|auctionEndPrice:${convertToNumber(
+	)}| auctionEndPrice:${convertToNumber(
 		orderParams.auctionEndPrice!,
 		PRICE_PRECISION
-	)}|`;
+	)}| `;
 	return orderParamsStr;
 }
