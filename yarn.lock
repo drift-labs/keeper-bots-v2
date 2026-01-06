@@ -123,7 +123,7 @@
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.153.0-beta.1":
+"@drift-labs/sdk@2.153.0-beta.1", "@drift-labs/sdk@^2.153.0-beta.0":
   version "2.153.0-beta.1"
   resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.153.0-beta.1.tgz#3f9177db14e8311c442344ca2290926515787759"
   integrity sha512-BlN79h/QZMT8ESkiNlTrM4Nuj+CMgRLcm3dlFSXN73gKqWkcdR05T0X30mGwEUH5rHJvjAlbYaf49nl6vUgixA==
@@ -159,13 +159,15 @@
     zstddec "0.1.0"
 
 "@drift/common@file:./drift-common/common-ts":
-  version "1.0.9"
+  version "1.0.18"
   dependencies:
+    "@drift-labs/sdk" "^2.153.0-beta.0"
     "@slack/web-api" "6.4.0"
     "@solana/spl-token" "0.3.8"
     "@solana/web3.js" "1.98.0"
     bcryptjs-react "2.4.6"
     cerializr "3.1.4"
+    dotenv "^17.2.2"
     immer "10.0.3"
     ioredis "5.4.1"
     isomorphic-ws "^5.0.0"
@@ -3310,6 +3312,11 @@ dotenv@^16.0.3:
   version "16.6.1"
   resolved "https://registry.yarnpkg.com/dotenv/-/dotenv-16.6.1.tgz#773f0e69527a8315c7285d5ee73c4459d20a8020"
   integrity sha512-uBq4egWHTcTt33a72vpSG0z3HnPuIl6NqYcTrKEg2azoEyl2hpW0zqlxysq2pK9HlDIHyHyakeYaYnSAwd8bow==
+
+dotenv@^17.2.2:
+  version "17.2.3"
+  resolved "https://registry.yarnpkg.com/dotenv/-/dotenv-17.2.3.tgz#ad995d6997f639b11065f419a22fabf567cdb9a2"
+  integrity sha512-JVUnt+DUIzu87TABbhPmNfVdBDt18BLOWjMUFJMSi/Qqg7NTYtabbvSNJGOJ7afbRuv9D/lngizHtP7QyLQ+9w==
 
 dunder-proto@^1.0.1:
   version "1.0.1"
