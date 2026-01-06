@@ -791,15 +791,23 @@ export class FillerBot extends TxThreaded implements Bot {
 			this.driftClient.getMMOracleDataForPerpMarket(marketIndex);
 
 		const slot = new BN(this.slotSubscriber.getSlot());
-		const vAsk = calculateAskPrice(market, mmOraclePriceData, slot);
-		const vBid = calculateBidPrice(market, mmOraclePriceData, slot);
+		const vAsk = calculateAskPrice(
+			market,
+			mmOraclePriceData as MMOraclePriceData,
+			slot
+		);
+		const vBid = calculateBidPrice(
+			market,
+			mmOraclePriceData as MMOraclePriceData,
+			slot
+		);
 
 		const fillSlot = this.getMaxSlot();
 		const nodesToTrigger = this.findTriggerableNodesWithMakers(
 			dlob,
 			marketIndex,
 			fillSlot,
-			mmOraclePriceData,
+			mmOraclePriceData as MMOraclePriceData,
 			MarketType.PERP,
 			this.driftClient.getStateAccount()
 		);
@@ -812,7 +820,7 @@ export class FillerBot extends TxThreaded implements Bot {
 				fillSlot,
 				this.clockSubscriber.getUnixTs() - EXPIRE_ORDER_BUFFER_SEC,
 				MarketType.PERP,
-				mmOraclePriceData,
+				mmOraclePriceData as MMOraclePriceData,
 				this.driftClient.getStateAccount(),
 				this.driftClient.getPerpMarketAccount(marketIndex)!
 			),
@@ -944,7 +952,7 @@ export class FillerBot extends TxThreaded implements Bot {
 		const isVammFillable = isFillableByVAMMDetails(
 			nodeToFill.node.order,
 			this.driftClient.getPerpMarketAccount(nodeToFill.node.order.marketIndex)!,
-			mmOraclePriceData,
+			mmOraclePriceData as MMOraclePriceData,
 			this.getMaxSlot(),
 			Date.now() / 1000,
 			this.driftClient.getStateAccount()
@@ -971,7 +979,7 @@ export class FillerBot extends TxThreaded implements Bot {
 					this.driftClient.getPerpMarketAccount(
 						nodeToFill.node.order.marketIndex
 					)!,
-					mmOraclePriceData,
+					mmOraclePriceData as MMOraclePriceData,
 					this.getMaxSlot()
 				).toString()}`
 			);
