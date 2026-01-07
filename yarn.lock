@@ -112,18 +112,53 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.21.128":
-  version "0.21.128"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.128.tgz#da41503ecbe7e17499f5119ef119d24a3d274ec9"
-  integrity sha512-UFzxyMCmzhl7yP2itTD0vFHX9RENOr1z0NwO0qt8VH3r3XKPeBuWHDuzIE7UEDokdMufhLsggEc0QkBXPMCXIg==
+"@drift-labs/jit-proxy@0.21.129":
+  version "0.21.129"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.129.tgz#ae345675cc238484b9876d193e10bbae6d0678e8"
+  integrity sha512-VSnmrz+It4aSkoxBr6pwWfbJSG3tNgwdRAfzbcKRq41gdZ3QAqGLRmMaPhhXsIcmkuDk1kfSv+qPuSdVkAnosw==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.153.0-beta.1"
+    "@drift-labs/sdk" "2.153.0-beta.2"
     "@solana/web3.js" "1.98.0"
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.153.0-beta.1", "@drift-labs/sdk@^2.153.0-beta.0":
+"@drift-labs/sdk@2.153.0-beta.2":
+  version "2.153.0-beta.2"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.153.0-beta.2.tgz#dbf6be457cd6ff0098b22062cb60c35a574ae942"
+  integrity sha512-NRJch2unUeR0YxMIRsPreszMhiM7iJU+XHo9Q7epbo21g19yveamYr3jd4sEWFHF5kTDd1pkX5IO1q05ZfgMKw==
+  dependencies:
+    "@coral-xyz/anchor" "0.29.0"
+    "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
+    "@ellipsis-labs/phoenix-sdk" "1.4.5"
+    "@grpc/grpc-js" "1.14.0"
+    "@msgpack/msgpack" "^3.1.2"
+    "@openbook-dex/openbook-v2" "0.2.10"
+    "@project-serum/serum" "0.13.65"
+    "@pythnetwork/client" "2.5.3"
+    "@pythnetwork/price-service-sdk" "1.7.1"
+    "@pythnetwork/pyth-solana-receiver" "0.7.0"
+    "@solana/spl-token" "0.4.13"
+    "@solana/web3.js" "1.98.0"
+    "@switchboard-xyz/common" "3.0.14"
+    "@switchboard-xyz/on-demand" "2.4.1"
+    "@triton-one/yellowstone-grpc" "1.4.1"
+    anchor-bankrun "0.3.0"
+    gill "^0.10.2"
+    helius-laserstream "0.1.8"
+    nanoid "3.3.4"
+    node-cache "5.1.2"
+    rpc-websockets "7.5.1"
+    solana-bankrun "0.3.1"
+    strict-event-emitter-types "2.0.0"
+    tweetnacl "1.0.3"
+    tweetnacl-util "0.15.1"
+    uuid "8.3.2"
+    yargs "17.7.2"
+    zod "4.0.17"
+    zstddec "0.1.0"
+
+"@drift-labs/sdk@^2.153.0-beta.0":
   version "2.153.0-beta.1"
   resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.153.0-beta.1.tgz#3f9177db14e8311c442344ca2290926515787759"
   integrity sha512-BlN79h/QZMT8ESkiNlTrM4Nuj+CMgRLcm3dlFSXN73gKqWkcdR05T0X30mGwEUH5rHJvjAlbYaf49nl6vUgixA==
