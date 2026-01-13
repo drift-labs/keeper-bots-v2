@@ -1,0 +1,49 @@
+# CI Test Config - Used to validate SDK updates don't break bot runtime
+# Runs bots in dry-run mode with run-once to test initialization and one loop iteration
+
+global:
+  driftEnv: devnet
+  endpoint: https://api.devnet.solana.com
+  wsEndpoint: wss://api.devnet.solana.com
+  
+  # Use solana priority fee method (doesn't require helius)
+  priorityFeeMethod: solana
+  maxPriorityFeeMicroLamports: 10000
+  
+  # Key will be provided via env var from CI
+  keeperPrivateKey:
+  
+  initUser: false
+  testLiveness: false
+  websocket: false
+  eventSubscriber: false
+  runOnce: true  # Exit after one loop iteration
+  debug: true    # Enable debug logging for CI visibility
+  
+  subaccounts:
+    - 0
+  
+  eventSubscriberPollingInterval: 5000
+  bulkAccountLoaderPollingInterval: 5000
+  
+  useJito: false
+  
+  disableMetrics: true
+
+# Run trigger and userPnlSettler bots - they're lightweight and exercise core SDK functionality
+enabledBots:
+  - trigger
+  - userPnlSettler
+
+botConfigs:
+  trigger:
+    botId: "ci-trigger-test"
+    dryRun: true
+    metricsPort: 9465
+
+  userPnlSettler:
+    botId: "ci-pnl-settler-test"
+    dryRun: true
+    metricsPort: 9466
+    settlePnlThresholdUsdc: 100
+    maxUsersToConsider: 50

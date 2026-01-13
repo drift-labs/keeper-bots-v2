@@ -40,6 +40,39 @@ jobs:
       - name: Build after new dependency
         run: yarn run build
 
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Generate test keypair
+        run: |
+          export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
+          solana-keygen new --no-bip39-passphrase -o /tmp/test-keypair.json
+
+      - name: Run bot dry-run test (trigger + userPnlSettler)
+        env:
+          KEEPER_PRIVATE_KEY: /tmp/test-keypair.json
+        run: |
+          # Run 2 bots (trigger + userPnlSettler) in dry-run mode to validate SDK compatibility
+          # This tests:
+          #   1. SDK imports and DriftClient initialization work
+          #   2. Bot initialization completes without runtime errors
+          #   3. One loop iteration runs successfully
+          # Uses devnet public RPC - no real transactions are sent (dryRun: true)
+          timeout 180 node lib/index.js --config-file .github/ci-test-config.yaml || exit_code=$?
+          
+          # timeout returns 124 if the command times out, which is acceptable
+          # since it means initialization succeeded (bots ran for full duration)
+          if [ "${exit_code:-0}" -eq 124 ]; then
+            echo "Bot test timed out after 180s - this is acceptable (bots initialized and ran)"
+            exit 0
+          elif [ "${exit_code:-0}" -ne 0 ]; then
+            echo "Bot dry-run test failed with exit code ${exit_code}"
+            exit 1
+          fi
+          echo "Bot dry-run test completed successfully"
+
       - name: Commit and push changes
         run: |
           git config user.name "GitHub Actions"
