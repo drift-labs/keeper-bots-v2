@@ -112,21 +112,21 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
-"@drift-labs/jit-proxy@0.21.134":
-  version "0.21.134"
-  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.134.tgz#92be8d640c8d92397763290483fe595d58047fd8"
-  integrity sha512-SE9Ts5zPGewXeODCeV5BQnIH/yP3gf8+CCi0wWvIyAwLLBAX7ODAjOXzFJ9P1lvolDT3Zawj/1Xhd2PeKlObiw==
+"@drift-labs/jit-proxy@0.21.135":
+  version "0.21.135"
+  resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.135.tgz#a0163e920357c348ccbe03998eddc2e94c2421d1"
+  integrity sha512-f4wHter26DMXQ1Ky33RxzeFligkHUUiiZGOQXqC78LJjfXby8cCO4qnB0pnYrPGsPiQTYpY+4ot8WbpFL0zk0g==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
-    "@drift-labs/sdk" "2.155.0-beta.2"
+    "@drift-labs/sdk" "2.155.0-beta.3"
     "@solana/web3.js" "1.98.0"
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.155.0-beta.2":
-  version "2.155.0-beta.2"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.155.0-beta.2.tgz#3a864d948774dbf577f0b68e186d4462d5045e66"
-  integrity sha512-+NHESKuZ+oMq7AH1StOuotknP73s3WWd8bRmp40bh9CyuN7gNuKg/M2DeQE1xcCgg2o7kdGxIao6KA7eB0wwYg==
+"@drift-labs/sdk@2.155.0-beta.3":
+  version "2.155.0-beta.3"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.155.0-beta.3.tgz#9666a2106a5ed648c9563a07897232897e7ff7d4"
+  integrity sha512-DLhJ5z75ewPoy7zymz61D4EivSiE99VWCbrLqWez2X7l7aLdUqgPcZI+VeAwqJYzdsrhO1LbG7WAUJr4tHjBzg==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -137,7 +137,6 @@
     "@project-serum/serum" "0.13.65"
     "@pythnetwork/client" "2.5.3"
     "@pythnetwork/price-service-sdk" "1.7.1"
-    "@pythnetwork/pyth-solana-receiver" "0.7.0"
     "@solana/spl-token" "0.4.13"
     "@solana/web3.js" "1.98.0"
     "@switchboard-xyz/common" "3.0.14"
