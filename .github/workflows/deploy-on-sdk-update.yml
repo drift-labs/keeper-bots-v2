@@ -47,10 +47,12 @@ jobs:
         if: github.event_name == 'repository_dispatch'
         run: yarn run build
 
-      - name: Install Solana CLI
+      - name: Fix rpc-websockets module resolution
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/stable/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+          # Create symlinks for .cjs -> .js to satisfy both import styles
+          # (same fix as in Dockerfile)
+          ln -s $(pwd)/node_modules/rpc-websockets/dist/lib/client.js $(pwd)/node_modules/rpc-websockets/dist/lib/client.cjs
+          ln -s $(pwd)/node_modules/rpc-websockets/dist/lib/client/websocket.js $(pwd)/node_modules/rpc-websockets/dist/lib/client/websocket.cjs
 
       - name: Run bot dry-run test (trigger + userPnlSettler)
         env:
