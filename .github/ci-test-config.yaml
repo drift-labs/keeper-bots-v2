@@ -2,9 +2,10 @@
 # Runs bots in dry-run mode with run-once to test initialization and one loop iteration
 
 global:
-  driftEnv: devnet
-  endpoint: https://api.devnet.solana.com
-  wsEndpoint: wss://api.devnet.solana.com
+  driftEnv: mainnet-beta
+  # Endpoint provided via ENDPOINT env var from CI (MAINNET_RPC_ENDPOINT secret)
+  endpoint:
+  wsEndpoint:
   
   # Use solana priority fee method (doesn't require helius)
   priorityFeeMethod: solana

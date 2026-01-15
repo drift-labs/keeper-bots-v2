@@ -57,13 +57,14 @@ jobs:
       - name: Run bot dry-run test (trigger + userPnlSettler)
         env:
           KEEPER_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY }}
+          ENDPOINT: ${{ secrets.MAINNET_RPC_ENDPOINT }}
         run: |
           # Run 2 bots (trigger + userPnlSettler) in dry-run mode to validate SDK compatibility
           # This tests:
           #   1. SDK imports and DriftClient initialization work
           #   2. Bot initialization completes without runtime errors
           #   3. One loop iteration runs successfully
-          # Uses devnet public RPC - no real transactions are sent (dryRun: true)
+          # Uses mainnet RPC - no real transactions are sent (dryRun: true)
           timeout 180 node lib/index.js --config-file .github/ci-test-config.yaml || exit_code=$?
 
           # timeout returns 124 if the command times out, which is acceptable
