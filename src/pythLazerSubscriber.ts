@@ -7,7 +7,10 @@ export type PythLazerPriceFeedArray = {
 	channel?: Channel;
 	priceFeedIds: number[];
 };
-
+/**
+ * @deprecated
+ * Deprecated - use PythLazerSubscriber from @drift-labs/sdk instead
+ */
 export class PythLazerSubscriber {
 	private pythLazerClient?: PythLazerClient;
 	feedIdChunkToPriceMessage: Map<string, string> = new Map();
@@ -72,14 +75,17 @@ export class PythLazerSubscriber {
 		}
 
 		this.pythLazerClient = await PythLazerClient.create({
-			urls: this.endpoints,
-			token: this.token,
-			numConnections: 2,
-			rwsConfig: {
-				heartbeatTimeoutDurationMs: 5000,
-				maxRetryDelayMs: 1000,
-				logAfterRetryCount: 10,
+			webSocketPoolConfig: {
+				urls: this.endpoints,
+				numConnections: 2,
+				rwsConfig: {
+					heartbeatTimeoutDurationMs: 5000,
+					maxRetryDelayMs: 1000,
+					logAfterRetryCount: 10,
+				},
 			},
+			token: this.token,
+			logger: console,
 		});
 		let subscriptionId = 1;
 		for (const priceFeedIds of this.priceFeedArrays) {

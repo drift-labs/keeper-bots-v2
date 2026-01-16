@@ -50,6 +50,7 @@ import {
 	isOrderExpired,
 	MMOraclePriceData,
 	StateAccount,
+	PythLazerSubscriber,
 } from '@drift-labs/sdk';
 import {
 	NATIVE_MINT,
@@ -73,7 +74,6 @@ import {
 import { webhookMessage } from './webhook';
 import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 import { FallbackLiquiditySource } from './experimental-bots/filler-common/types';
-import { PythLazerSubscriber } from './pythLazerSubscriber';
 
 // devnet only
 export const TOKEN_FAUCET_PROGRAM_ID = new PublicKey(

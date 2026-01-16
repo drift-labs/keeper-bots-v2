@@ -102,7 +102,7 @@ import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { TxThreaded } from './common/txThreaded';
 import { NodeToTriggerWithMakers } from '../experimental-bots/filler-common/types';
-import { PythLazerSubscriber } from '../pythLazerSubscriber';
+import { PythLazerSubscriber } from '@drift-labs/sdk';
 
 const TX_COUNT_COOLDOWN_ON_BURST = 10; // send this many tx before resetting burst mode
 const FILL_ORDER_THROTTLE_BACKOFF = 1000; // the time to wait before trying to fill a throttled (error filling) node again

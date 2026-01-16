@@ -104,8 +104,6 @@ const serializePerpPosition = (
 		openAsks: position.openAsks?.toString('hex'),
 		settledPnl: position.settledPnl?.toString('hex'),
 		lpShares: position.lpShares?.toString('hex'),
-		lastBaseAssetAmountPerLp:
-			position.lastBaseAssetAmountPerLp?.toString('hex'),
 		lastQuoteAssetAmountPerLp:
 			position.lastQuoteAssetAmountPerLp?.toString('hex'),
 	};
@@ -197,10 +195,6 @@ const deserializePerpPosition = (
 		openAsks: new BN(serializedPosition.openAsks, 'hex'),
 		settledPnl: new BN(serializedPosition.settledPnl, 'hex'),
 		lpShares: new BN(serializedPosition.lpShares, 'hex'),
-		lastBaseAssetAmountPerLp: new BN(
-			serializedPosition.lastBaseAssetAmountPerLp,
-			'hex'
-		),
 		lastQuoteAssetAmountPerLp: new BN(
 			serializedPosition.lastQuoteAssetAmountPerLp,
 			'hex'

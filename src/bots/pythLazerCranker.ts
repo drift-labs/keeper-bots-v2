@@ -12,6 +12,8 @@ import {
 	MainnetSpotMarkets,
 	PriorityFeeSubscriber,
 	TxSigAndSlot,
+	PythLazerSubscriber,
+	PythLazerPriceFeedArray,
 } from '@drift-labs/sdk';
 import {
 	AddressLookupTableAccount,
@@ -24,10 +26,6 @@ import {
 	sleepMs,
 } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
-import {
-	PythLazerPriceFeedArray,
-	PythLazerSubscriber,
-} from '../pythLazerSubscriber';
 import { Channel } from '@pythnetwork/pyth-lazer-sdk';
 import { TxRecorder } from './common/txRecorder';
 
@@ -226,8 +224,6 @@ export class PythLazerCrankerBot implements Bot {
 			this.globalConfig.lazerToken!,
 			feedIdChunks,
 			this.globalConfig.driftEnv,
-			undefined,
-			undefined,
 			undefined
 		);
 
