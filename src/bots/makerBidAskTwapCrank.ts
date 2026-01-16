@@ -40,7 +40,7 @@ import {
 	SimulateAndGetTxWithCUsResponse,
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
-import { PythLazerSubscriber } from '../pythLazerSubscriber';
+import { PythLazerSubscriber } from '@drift-labs/sdk';
 import { PythPullClient } from '@drift-labs/sdk';
 import { BundleSender } from '../bundleSender';
 
