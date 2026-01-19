@@ -609,30 +609,20 @@ export class UserPnlSettlerBot implements Bot {
 				);
 				success = false;
 			} else {
-				if (this.dryRun) {
-					logger.info(
-						`[DRY RUN] ${logPrefix} (builderSettle) Would settle for user ${userKey} markets [${marketChunk.join(
-							', '
-						)}]`
-					);
-					success = true;
-				} else {
-					const sendTxStart = Date.now();
-					const txSig =
-						await this.driftClient.txSender.sendVersionedTransaction(
-							simResult.tx,
-							[],
-							this.driftClient.opts
-						);
-					logger.info(
-						`${logPrefix} (builderSettle) TRY_SETTLE for user ${userKey} markets [${marketChunk.join(
-							', '
-						)}] in ${Date.now() - sendTxStart}ms: https://solana.fm/tx/${
-							txSig.txSig
-						}`
-					);
-					success = true;
-				}
+				const sendTxStart = Date.now();
+				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
+					simResult.tx,
+					[],
+					this.driftClient.opts
+				);
+				logger.info(
+					`${logPrefix} (builderSettle) TRY_SETTLE for user ${userKey} markets [${marketChunk.join(
+						', '
+					)}] in ${Date.now() - sendTxStart}ms: https://solana.fm/tx/${
+						txSig.txSig
+					}`
+				);
+				success = true;
 			}
 		} catch (err) {
 			this.handleSettlementError(err, 'sendBuilderSettleForMarketChunk');
@@ -783,26 +773,20 @@ export class UserPnlSettlerBot implements Bot {
 							continue;
 						}
 
-						if (this.dryRun) {
-							logger.info(
-								`[DRY RUN] ${logPrefix} Would update funding rate for market: ${perpMarket.marketIndex}`
+						const sendTxStart = Date.now();
+						const txSig =
+							await this.driftClient.txSender.sendVersionedTransaction(
+								simResult.tx,
+								[],
+								this.driftClient.opts
 							);
-						} else {
-							const sendTxStart = Date.now();
-							const txSig =
-								await this.driftClient.txSender.sendVersionedTransaction(
-									simResult.tx,
-									[],
-									this.driftClient.opts
-								);
-							logger.info(
-								`${logPrefix} UpdateFundingRate for market: ${
-									perpMarket.marketIndex
-								}, tx sent in ${
-									Date.now() - sendTxStart
-								}ms: https://solana.fm/tx/${txSig.txSig}`
-							);
-						}
+						logger.info(
+							`${logPrefix} UpdateFundingRate for market: ${
+								perpMarket.marketIndex
+							}, tx sent in ${
+								Date.now() - sendTxStart
+							}ms: https://solana.fm/tx/${txSig.txSig}`
+						);
 					} catch (err) {
 						this.handleSettlementError(err, 'trySettleFundingForMarkets.send');
 					}
@@ -1555,32 +1539,24 @@ export class UserPnlSettlerBot implements Bot {
 						.map((u) => u.settleeUserAccountPublicKey.toBase58())
 						.join(', ')})`
 				);
-				if (this.dryRun) {
-					logger.info(
-						`[DRY RUN] ${simLabel} Would settle PnL for ${users.length} users`
-					);
-					success = true;
-				} else {
-					const sendTxStart = Date.now();
-					const txSig =
-						await this.driftClient.txSender.sendVersionedTransaction(
-							simResult.tx,
-							[],
-							this.driftClient.opts
-						);
-					const sendTxDuration = Date.now() - sendTxStart;
-					success = true;
+				const sendTxStart = Date.now();
+				const txSig = await this.driftClient.txSender.sendVersionedTransaction(
+					simResult.tx,
+					[],
+					this.driftClient.opts
+				);
+				const sendTxDuration = Date.now() - sendTxStart;
+				success = true;
 
-					this.logTxAndSlotForUsers(
-						txSig,
-						marketIndex,
-						users.map(
-							({ settleeUserAccountPublicKey }) => settleeUserAccountPublicKey
-						),
-						sendTxDuration,
-						simLabel
-					);
-				}
+				this.logTxAndSlotForUsers(
+					txSig,
+					marketIndex,
+					users.map(
+						({ settleeUserAccountPublicKey }) => settleeUserAccountPublicKey
+					),
+					sendTxDuration,
+					simLabel
+				);
 			}
 		} catch (err) {
 			const userKeys = users
