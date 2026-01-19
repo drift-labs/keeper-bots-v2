@@ -1,5 +1,6 @@
 import {
 	BASE_PRECISION,
+	BlockhashSubscriber,
 	BN,
 	convertToNumber,
 	DriftClient,
@@ -61,6 +62,7 @@ export class SwiftPlacer {
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
 	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
 	private referrerMap: ReferrerMap;
+	private blockhashSubscriber: BlockhashSubscriber;
 	private readonly heartbeatIntervalMs = 80_000;
 	constructor(
 		private driftClient: DriftClient,
@@ -88,6 +90,11 @@ export class SwiftPlacer {
 		});
 
 		this.referrerMap = new ReferrerMap(driftClient, true);
+
+		this.blockhashSubscriber = new BlockhashSubscriber({
+			connection: driftClient.connection,
+			updateIntervalMs: 2000,
+		});
 	}
 
 	async init() {
@@ -95,6 +102,7 @@ export class SwiftPlacer {
 		await this.slotSubscriber.subscribe();
 		await this.referrerMap.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
+		await this.blockhashSubscriber.subscribe();
 	}
 
 	async subscribeWs() {
@@ -422,6 +430,13 @@ export class SwiftPlacer {
 						? [...computeBudgetIxs, ...ixs, fillIx]
 						: [...computeBudgetIxs, ...ixs];
 
+					const recentBlockhash =
+						this.blockhashSubscriber.getLatestBlockhash()?.blockhash;
+					if (!recentBlockhash) {
+						logger.error(`${logPrefix}: no blockhash available`);
+						return;
+					}
+
 					try {
 						resp = await simulateAndGetTxWithCUs({
 							connection: this.driftClient.connection,
@@ -430,6 +445,7 @@ export class SwiftPlacer {
 							cuLimitMultiplier: 2,
 							lookupTableAccounts,
 							doSimulation: true,
+							recentBlockhash,
 						});
 					} catch (e) {
 						const errorStr = (e as Error)?.message || String(e);
@@ -446,6 +462,7 @@ export class SwiftPlacer {
 									cuLimitMultiplier: 2,
 									lookupTableAccounts,
 									doSimulation: true,
+									recentBlockhash,
 								});
 								includeFillIx = false;
 							} catch (retryError) {
@@ -474,6 +491,7 @@ export class SwiftPlacer {
 								cuLimitMultiplier: 2,
 								lookupTableAccounts,
 								doSimulation: true,
+								recentBlockhash,
 							});
 						} catch (e) {
 							logger.error(`${logPrefix}: sim order failed on retry: ${e}`);
