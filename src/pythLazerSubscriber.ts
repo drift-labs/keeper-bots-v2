@@ -1,6 +1,6 @@
 import { Channel, PythLazerClient } from '@pythnetwork/pyth-lazer-sdk';
 import { DriftEnv, PerpMarkets } from '@drift-labs/sdk';
-import { RedisClient } from '@drift/common/clients';
+import { RedisClient } from '@drift-labs/common/clients';
 import * as axios from 'axios';
 
 export type PythLazerPriceFeedArray = {
