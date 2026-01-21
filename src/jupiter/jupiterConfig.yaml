@@ -1,0 +1,10 @@
+# market-cache: Jupiter market cache file path [env: MARKET_CACHE=]
+rpc-url: http://127.0.0.1:8899
+# yellowstone-grpc-endpoint: <YELLOWSTONE_GRPC_ENDPOINT>
+# yellowstone-grpc-x-token: --yellowstone-grpc-x-token
+# snapshot-poll-interval-ms: 200
+# sentry-dsn:
+# expose-quote-and-simulate:
+# limit-order:
+host: 127.0.0.1
+port: 8080
