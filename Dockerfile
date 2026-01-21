@@ -21,7 +21,7 @@ RUN node esbuild.config.js
 FROM public.ecr.aws/docker/library/node:22.14.0-alpine
 # 'bigint-buffer' native lib for performance
 RUN apk add python3 make g++ --virtual .build &&\
-    npm install -C /lib bigint-buffer @triton-one/yellowstone-grpc@1.3.0 helius-laserstream rpc-websockets@7.10.0 &&\
+    npm install -C /lib bigint-buffer @triton-one/yellowstone-grpc@5.0.1 helius-laserstream rpc-websockets@7.10.0 &&\
     apk del .build &&\
     rm -rf /root/.cache/ /root/.npm /usr/local/lib/node_modules
 # Create symlinks for .cjs -> .js to satisfy both import styles
