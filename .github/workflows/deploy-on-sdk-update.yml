@@ -14,7 +14,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
           persist-credentials: false
 
       - name: Setup node
@@ -25,13 +24,6 @@ jobs:
 
       - name: Install dependencies
         run: |
-          cd drift-common/protocol/sdk
-          yarn install
-          yarn build
-          cd ../../common-ts
-          yarn install
-          yarn build
-          cd ../../
           yarn install
           yarn build
 
