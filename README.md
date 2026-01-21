@@ -49,10 +49,10 @@ Here is a table defining the various fields and their usage/defaults:
 
 ### Install dependencies
 
-Run from repo root to install all npm dependencies for this repo + submodules:
+Run from repo root to install all npm dependencies:
 ```shell
-git submodule update --recursive --init
-./build_all.sh
+yarn install
+yarn build
 ```
 
 

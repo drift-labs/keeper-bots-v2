@@ -112,6 +112,28 @@
     enabled "2.0.x"
     kuler "^2.0.0"
 
+"@drift-labs/common@1.0.20":
+  version "1.0.20"
+  resolved "https://registry.yarnpkg.com/@drift-labs/common/-/common-1.0.20.tgz#9135da5d2dc11adfe7074afda45208e421d61a19"
+  integrity sha512-C1QYUstbOreNI+DHX84hjbwuZvPHDR3fE7P07GlBqsUSZt1bbsfzeZByH6Jhm1Zr7JSbg/jX9LBQ4c8ShxSBEA==
+  dependencies:
+    "@drift-labs/sdk" "^2.155.0-beta.5"
+    "@slack/web-api" "6.4.0"
+    "@solana/spl-token" "0.3.8"
+    "@solana/web3.js" "1.98.0"
+    bcryptjs-react "2.4.6"
+    cerializr "3.1.4"
+    dotenv "^17.2.2"
+    immer "10.0.3"
+    ioredis "5.4.1"
+    isomorphic-ws "^5.0.0"
+    localstorage-memory "1.0.3"
+    rxjs "7.8.2"
+    tiny-invariant "1.3.1"
+    tweetnacl "1.0.3"
+    winston "3.13.0"
+    winston-slack-webhook-transport "2.3.5"
+
 "@drift-labs/jit-proxy@0.21.138":
   version "0.21.138"
   resolved "https://registry.yarnpkg.com/@drift-labs/jit-proxy/-/jit-proxy-0.21.138.tgz#dc3503ae50a8b1500535519bb02ff03c7be380ac"
@@ -123,7 +145,7 @@
     tweetnacl-util "^0.15.1"
     typescript "5.4.5"
 
-"@drift-labs/sdk@2.155.0-beta.6":
+"@drift-labs/sdk@2.155.0-beta.6", "@drift-labs/sdk@^2.155.0-beta.5":
   version "2.155.0-beta.6"
   resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.155.0-beta.6.tgz#979a2cfeebbed92dbd2cb97f82a3cbda9623571d"
   integrity sha512-ttxjjIKbDumoSEQo5M4Cb4WJPcHuR8kYHoyOka3uAD5aHl0YXGyX1ckIARsUcL0mnpgExGN3tETY90whv5y+eQ==
@@ -157,10 +179,10 @@
     zod "4.0.17"
     zstddec "0.1.0"
 
-"@drift-labs/sdk@^2.153.0-beta.0":
-  version "2.153.0-beta.1"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.153.0-beta.1.tgz#3f9177db14e8311c442344ca2290926515787759"
-  integrity sha512-BlN79h/QZMT8ESkiNlTrM4Nuj+CMgRLcm3dlFSXN73gKqWkcdR05T0X30mGwEUH5rHJvjAlbYaf49nl6vUgixA==
+"@drift-labs/sdk@2.156.0-beta.0":
+  version "2.156.0-beta.0"
+  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.156.0-beta.0.tgz#685e060f288689c2e6dac5e629f1dff280f3903f"
+  integrity sha512-zUpguPfkMaW76E3/wiFVFJ9VaTIc83XVQ0Tte+iWefo86Ht0/iFOUnn7oFcl9boffxwtD8xH9nWZjkq243EkqA==
   dependencies:
     "@coral-xyz/anchor" "0.29.0"
     "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
@@ -171,7 +193,6 @@
     "@project-serum/serum" "0.13.65"
     "@pythnetwork/client" "2.5.3"
     "@pythnetwork/price-service-sdk" "1.7.1"
-    "@pythnetwork/pyth-solana-receiver" "0.7.0"
     "@solana/spl-token" "0.4.13"
     "@solana/web3.js" "1.98.0"
     "@switchboard-xyz/common" "3.0.14"
@@ -191,26 +212,6 @@
     yargs "17.7.2"
     zod "4.0.17"
     zstddec "0.1.0"
-
-"@drift/common@file:./drift-common/common-ts":
-  version "1.0.18"
-  dependencies:
-    "@drift-labs/sdk" "^2.153.0-beta.0"
-    "@slack/web-api" "6.4.0"
-    "@solana/spl-token" "0.3.8"
-    "@solana/web3.js" "1.98.0"
-    bcryptjs-react "2.4.6"
-    cerializr "3.1.4"
-    dotenv "^17.2.2"
-    immer "10.0.3"
-    ioredis "5.4.1"
-    isomorphic-ws "^5.0.0"
-    localstorage-memory "1.0.3"
-    rxjs "7.8.2"
-    tiny-invariant "1.3.1"
-    tweetnacl "1.0.3"
-    winston "3.13.0"
-    winston-slack-webhook-transport "2.3.5"
 
 "@ellipsis-labs/phoenix-sdk@1.4.5":
   version "1.4.5"
@@ -1560,7 +1561,7 @@
     ts-log "^2.2.4"
     ws "^8.6.0"
 
-"@pythnetwork/price-service-sdk@*", "@pythnetwork/price-service-sdk@>=1.6.0":
+"@pythnetwork/price-service-sdk@*":
   version "1.8.0"
   resolved "https://registry.yarnpkg.com/@pythnetwork/price-service-sdk/-/price-service-sdk-1.8.0.tgz#f5f01f654963eb9a0cf12127b4f1a89b60ef008a"
   integrity sha512-tFZ1thj3Zja06DzPIX2dEWSi7kIfIyqreoywvw5NQ3Z1pl5OJHQGMEhxt6Li3UCGSp2ooYZS9wl8/8XfrfrNSA==
@@ -1583,28 +1584,6 @@
     isomorphic-ws "^5.0.0"
     ts-log "^2.2.7"
     ws "^8.18.0"
-
-"@pythnetwork/pyth-solana-receiver@0.7.0":
-  version "0.7.0"
-  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-solana-receiver/-/pyth-solana-receiver-0.7.0.tgz#253a0d15a135d625ceca7ba1b47940dd03b9cab6"
-  integrity sha512-OoEAHh92RPRdKkfjkcKGrjC+t0F3SEL754iKFmixN9zyS8pIfZSVfFntmkHa9pWmqEMxdx/i925a8B5ny8Tuvg==
-  dependencies:
-    "@coral-xyz/anchor" "^0.29.0"
-    "@noble/hashes" "^1.4.0"
-    "@pythnetwork/price-service-sdk" ">=1.6.0"
-    "@pythnetwork/solana-utils" "*"
-    "@solana/web3.js" "^1.90.0"
-
-"@pythnetwork/solana-utils@*":
-  version "0.5.0"
-  resolved "https://registry.yarnpkg.com/@pythnetwork/solana-utils/-/solana-utils-0.5.0.tgz#7687f30d190cb65d6efa3977071a873d58f444f5"
-  integrity sha512-6F99H/FiLNcleLlagBbM5YKPEp7QGo+bk5IUf+PPfEdk64sflRVq74M4rRghm+LpK4TuTbCA2Gh4aKJUZLG08Q==
-  dependencies:
-    "@coral-xyz/anchor" "^0.29.0"
-    "@solana/web3.js" "^1.90.0"
-    bs58 "^5.0.0"
-    jito-ts "^3.0.1"
-    ts-log "^2.2.7"
 
 "@slack/logger@^3.0.0":
   version "3.0.0"
@@ -2209,7 +2188,7 @@
     rpc-websockets "^8.0.1"
     superstruct "^1.0.4"
 
-"@solana/web3.js@1.98.0", "@solana/web3.js@^1.17.0", "@solana/web3.js@^1.21.0", "@solana/web3.js@^1.30.2", "@solana/web3.js@^1.32.0", "@solana/web3.js@^1.36.0", "@solana/web3.js@^1.56.2", "@solana/web3.js@^1.68.0", "@solana/web3.js@^1.77.3", "@solana/web3.js@^1.90.0", "@solana/web3.js@^1.98.0", "@solana/web3.js@^1.98.2", "@solana/web3.js@~1.77.3":
+"@solana/web3.js@1.98.0", "@solana/web3.js@^1.17.0", "@solana/web3.js@^1.21.0", "@solana/web3.js@^1.30.2", "@solana/web3.js@^1.32.0", "@solana/web3.js@^1.36.0", "@solana/web3.js@^1.56.2", "@solana/web3.js@^1.68.0", "@solana/web3.js@^1.77.3", "@solana/web3.js@^1.98.0", "@solana/web3.js@^1.98.2", "@solana/web3.js@~1.77.3":
   version "1.98.0"
   resolved "https://registry.yarnpkg.com/@solana/web3.js/-/web3.js-1.98.0.tgz#21ecfe8198c10831df6f0cfde7f68370d0405917"
   integrity sha512-nz3Q5OeyGFpFCR+erX2f6JPt3sKhzhYcSycBCSPkWjzSVDh/Rr1FqTVMRe58FKO16/ivTUcuJjeS5MyBvpkbzA==
@@ -4245,20 +4224,6 @@ jito-ts@4.1.1:
     "@types/bs58" "^4.0.4"
     agentkeepalive "^4.3.0"
     bs58 "^6.0.0"
-    dotenv "^16.0.3"
-    jayson "^4.0.0"
-    node-fetch "^2.6.7"
-    superstruct "^1.0.3"
-
-jito-ts@^3.0.1:
-  version "3.0.1"
-  resolved "https://registry.yarnpkg.com/jito-ts/-/jito-ts-3.0.1.tgz#24126389896e042c26d303c4e802064b249ed27e"
-  integrity sha512-TSofF7KqcwyaWGjPaSYC8RDoNBY1TPRNBHdrw24bdIi7mQ5bFEDdYK3D//llw/ml8YDvcZlgd644WxhjLTS9yg==
-  dependencies:
-    "@grpc/grpc-js" "^1.8.13"
-    "@noble/ed25519" "^1.7.1"
-    "@solana/web3.js" "~1.77.3"
-    agentkeepalive "^4.3.0"
     dotenv "^16.0.3"
     jayson "^4.0.0"
     node-fetch "^2.6.7"

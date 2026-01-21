@@ -1,21 +1,11 @@
 FROM public.ecr.aws/docker/library/node:22.14 AS builder
 
-COPY package.json yarn.lock ./
-
 WORKDIR /app
+
+COPY package.json yarn.lock ./
+RUN yarn install
 
 COPY . .
-
-WORKDIR /app/drift-common/protocol/sdk
-RUN yarn install
-RUN yarn run build
-
-WORKDIR /app/drift-common/common-ts
-RUN yarn install
-RUN yarn run build
-
-WORKDIR /app
-RUN yarn install
 RUN node esbuild.config.js
 
 FROM public.ecr.aws/docker/library/node:22.14.0-alpine

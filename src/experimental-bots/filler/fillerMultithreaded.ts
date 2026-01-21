@@ -108,7 +108,7 @@ import { ChildProcess } from 'child_process';
 import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 import { PythLazerSubscriber } from '../../pythLazerSubscriber';
 import path from 'path';
-import { RedisClient, RedisClientPrefix } from '@drift/common/clients';
+import { RedisClient, RedisClientPrefix } from '@drift-labs/common/clients';
 
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;

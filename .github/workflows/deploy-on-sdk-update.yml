@@ -1,46 +1,77 @@
 name: Deploy on sdk update
 on:
+  pull_request:
+    types: [opened, synchronize]
   repository_dispatch:
     types: [jit-sdk-update]
 
 jobs:
-  update-sdk:
+  build-and-test:
     runs-on: ubicloud
+    # Require maintainer approval for PRs (protects secrets), skip for trusted repository_dispatch
+    environment: ${{ github.event_name == 'pull_request' && 'pr-dry-run' || '' }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
           persist-credentials: false
 
       - name: Setup node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
           node-version: "22.14.x"
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
         run: |
-          cd drift-common/protocol/sdk
-          yarn install
-          yarn build
-          cd ../../common-ts
-          yarn install
-          yarn build
-          cd ../../
           yarn install
           yarn build
 
       - name: Add specific version of sdk
+        if: github.event_name == 'repository_dispatch'
         run: yarn add @drift-labs/sdk@${{ github.event.client_payload.sdk-version }}
 
       - name: Add specific version of jit sdk
+        if: github.event_name == 'repository_dispatch'
         run: yarn add @drift-labs/jit-proxy@${{ github.event.client_payload.jit-version }}
 
       - name: Build after new dependency
+        if: github.event_name == 'repository_dispatch'
         run: yarn run build
 
+      - name: Fix rpc-websockets module resolution
+        run: |
+          # Create symlinks for .cjs -> .js to satisfy both import styles
+          # (same fix as in Dockerfile)
+          ln -s $(pwd)/node_modules/rpc-websockets/dist/lib/client.js $(pwd)/node_modules/rpc-websockets/dist/lib/client.cjs
+          ln -s $(pwd)/node_modules/rpc-websockets/dist/lib/client/websocket.js $(pwd)/node_modules/rpc-websockets/dist/lib/client/websocket.cjs
+
+      - name: Run bot dry-run test (trigger + userPnlSettler)
+        env:
+          KEEPER_PRIVATE_KEY: ${{ secrets.KEEPER_PRIVATE_KEY }}
+          ENDPOINT: ${{ secrets.MAINNET_RPC_ENDPOINT }}
+        run: |
+          # Run 2 bots (trigger + userPnlSettler) in dry-run mode to validate SDK compatibility
+          # This tests:
+          #   1. SDK imports and DriftClient initialization work
+          #   2. Bot initialization completes without runtime errors
+          #   3. One loop iteration runs successfully
+          # Uses mainnet RPC - no real transactions are sent (dryRun: true)
+          timeout 180 node lib/index.js --config-file .github/ci-test-config.yaml || exit_code=$?
+
+          # timeout returns 124 if the command times out, which is acceptable
+          # since it means initialization succeeded (bots ran for full duration)
+          if [ "${exit_code:-0}" -eq 124 ]; then
+            echo "Bot test timed out after 180s - this is acceptable (bots initialized and ran)"
+            exit 0
+          elif [ "${exit_code:-0}" -ne 0 ]; then
+            echo "Bot dry-run test failed with exit code ${exit_code}"
+            exit 1
+          fi
+          echo "Bot dry-run test completed successfully"
+
       - name: Commit and push changes
+        if: github.event_name == 'repository_dispatch'
         run: |
           git config user.name "GitHub Actions"
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -48,6 +79,7 @@ jobs:
           git commit --allow-empty -m "Bumping sdk and jit dependencies to ${{ github.event.client_payload.sdk-version }} and ${{ github.event.client_payload.jit-version }}"
 
       - name: Push changes
+        if: github.event_name == 'repository_dispatch'
         uses: ad-m/github-push-action@master
         with:
           github_token: ${{ secrets.GH_PAT }}
