@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/node:20 AS builder
+FROM public.ecr.aws/docker/library/node:24 AS builder
 
 # Set working dir first so all paths are relative to /app
 WORKDIR /app
@@ -24,7 +24,7 @@ WORKDIR /app
 RUN yarn && yarn build
 
 # Final minimal image
-FROM public.ecr.aws/docker/library/node:20-alpine
+FROM public.ecr.aws/docker/library/node:24-alpine
 WORKDIR /app
 
 COPY --from=builder /app/lib ./lib/
