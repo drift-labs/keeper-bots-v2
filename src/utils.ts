@@ -450,10 +450,7 @@ export function isSetComputeUnitsIx(ix: TransactionInstruction): boolean {
 	// Compute budget program discriminator is first byte
 	// 2: set compute unit limit
 	// 3: set compute unit price
-	if (
-		ix.programId.equals(ComputeBudgetProgram.programId) &&
-		ix.data.at(0) === 2
-	) {
+	if (ix.programId.equals(ComputeBudgetProgram.programId) && ix.data[0] === 2) {
 		return true;
 	}
 	return false;
