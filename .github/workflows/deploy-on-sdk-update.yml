@@ -19,8 +19,11 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: "22.14.x"
+          node-version: "24.x.x"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Setup yarn
+        run: corepack enable && corepack prepare yarn@4.5.1 --activate
 
       - name: Install dependencies
         run: |
