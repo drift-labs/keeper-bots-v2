@@ -179,40 +179,6 @@
     zod "4.0.17"
     zstddec "0.1.0"
 
-"@drift-labs/sdk@2.156.0-beta.0":
-  version "2.156.0-beta.0"
-  resolved "https://registry.yarnpkg.com/@drift-labs/sdk/-/sdk-2.156.0-beta.0.tgz#685e060f288689c2e6dac5e629f1dff280f3903f"
-  integrity sha512-zUpguPfkMaW76E3/wiFVFJ9VaTIc83XVQ0Tte+iWefo86Ht0/iFOUnn7oFcl9boffxwtD8xH9nWZjkq243EkqA==
-  dependencies:
-    "@coral-xyz/anchor" "0.29.0"
-    "@coral-xyz/anchor-30" "npm:@coral-xyz/anchor@0.30.1"
-    "@ellipsis-labs/phoenix-sdk" "1.4.5"
-    "@grpc/grpc-js" "1.14.0"
-    "@msgpack/msgpack" "^3.1.2"
-    "@openbook-dex/openbook-v2" "0.2.10"
-    "@project-serum/serum" "0.13.65"
-    "@pythnetwork/client" "2.5.3"
-    "@pythnetwork/price-service-sdk" "1.7.1"
-    "@solana/spl-token" "0.4.13"
-    "@solana/web3.js" "1.98.0"
-    "@switchboard-xyz/common" "3.0.14"
-    "@switchboard-xyz/on-demand" "2.4.1"
-    "@triton-one/yellowstone-grpc" "1.4.1"
-    anchor-bankrun "0.3.0"
-    gill "^0.10.2"
-    helius-laserstream "0.1.8"
-    nanoid "3.3.4"
-    node-cache "5.1.2"
-    rpc-websockets "7.5.1"
-    solana-bankrun "0.3.1"
-    strict-event-emitter-types "2.0.0"
-    tweetnacl "1.0.3"
-    tweetnacl-util "0.15.1"
-    uuid "8.3.2"
-    yargs "17.7.2"
-    zod "4.0.17"
-    zstddec "0.1.0"
-
 "@ellipsis-labs/phoenix-sdk@1.4.5":
   version "1.4.5"
   resolved "https://registry.yarnpkg.com/@ellipsis-labs/phoenix-sdk/-/phoenix-sdk-1.4.5.tgz#42cf8de8463b32c910ab8844eae71ca082a6773a"
@@ -1575,6 +1541,13 @@
   dependencies:
     bn.js "^5.2.1"
 
+"@pythnetwork/price-service-sdk@1.9.0":
+  version "1.9.0"
+  resolved "https://registry.yarnpkg.com/@pythnetwork/price-service-sdk/-/price-service-sdk-1.9.0.tgz#f9973fe643e1aadbb62c4bc9b01e21d2175e5f15"
+  integrity sha512-DX8N4VUqllyervqnCx/Z6Tjz130EcoczYYa96F1YjlbZf0rFyU8VCzX1yAf60q+b8EVcVFVeSkdzJTZD3n6+jQ==
+  dependencies:
+    bn.js "^5.2.1"
+
 "@pythnetwork/pyth-lazer-sdk@2.0.0":
   version "2.0.0"
   resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-lazer-sdk/-/pyth-lazer-sdk-2.0.0.tgz#29f82f239859b9a1a33b4aeded81239bd39ae184"
@@ -1584,6 +1557,28 @@
     isomorphic-ws "^5.0.0"
     ts-log "^2.2.7"
     ws "^8.18.0"
+
+"@pythnetwork/pyth-solana-receiver@^0.13.0":
+  version "0.13.0"
+  resolved "https://registry.yarnpkg.com/@pythnetwork/pyth-solana-receiver/-/pyth-solana-receiver-0.13.0.tgz#4f85d11806bf1fca8f47175f3e271efb658bc6e7"
+  integrity sha512-FE/4EJNWeo8V7MhY5U58/H2MRKV2V5RX2u73yFoD1frwohoI+k52QpG4BO9sITSUnOA1g8j+SG0bi/EYNTtGaQ==
+  dependencies:
+    "@coral-xyz/anchor" "^0.29.0"
+    "@noble/hashes" "^1.4.0"
+    "@pythnetwork/price-service-sdk" "1.9.0"
+    "@pythnetwork/solana-utils" "0.6.0"
+    "@solana/web3.js" "^1.90.0"
+
+"@pythnetwork/solana-utils@0.6.0":
+  version "0.6.0"
+  resolved "https://registry.yarnpkg.com/@pythnetwork/solana-utils/-/solana-utils-0.6.0.tgz#b657a96f15fa0f7964a687c100706a418fb2eb40"
+  integrity sha512-dkjenNL7fiLHnJoBBxZh+NC5CKeAUKJKhnuKQpR8dW3oX44cF1MyMaY3j1x+8I9GvaXa4jhoudriiJKBfYOZfQ==
+  dependencies:
+    "@coral-xyz/anchor" "^0.29.0"
+    "@solana/web3.js" "^1.90.0"
+    bs58 "^5.0.0"
+    jito-ts "^3.0.1"
+    ts-log "^2.2.7"
 
 "@slack/logger@^3.0.0":
   version "3.0.0"
@@ -2188,7 +2183,7 @@
     rpc-websockets "^8.0.1"
     superstruct "^1.0.4"
 
-"@solana/web3.js@1.98.0", "@solana/web3.js@^1.17.0", "@solana/web3.js@^1.21.0", "@solana/web3.js@^1.30.2", "@solana/web3.js@^1.32.0", "@solana/web3.js@^1.36.0", "@solana/web3.js@^1.56.2", "@solana/web3.js@^1.68.0", "@solana/web3.js@^1.77.3", "@solana/web3.js@^1.98.0", "@solana/web3.js@^1.98.2", "@solana/web3.js@~1.77.3":
+"@solana/web3.js@1.98.0", "@solana/web3.js@^1.17.0", "@solana/web3.js@^1.21.0", "@solana/web3.js@^1.30.2", "@solana/web3.js@^1.32.0", "@solana/web3.js@^1.36.0", "@solana/web3.js@^1.56.2", "@solana/web3.js@^1.68.0", "@solana/web3.js@^1.77.3", "@solana/web3.js@^1.90.0", "@solana/web3.js@^1.98.0", "@solana/web3.js@^1.98.2", "@solana/web3.js@~1.77.3":
   version "1.98.0"
   resolved "https://registry.yarnpkg.com/@solana/web3.js/-/web3.js-1.98.0.tgz#21ecfe8198c10831df6f0cfde7f68370d0405917"
   integrity sha512-nz3Q5OeyGFpFCR+erX2f6JPt3sKhzhYcSycBCSPkWjzSVDh/Rr1FqTVMRe58FKO16/ivTUcuJjeS5MyBvpkbzA==
@@ -4224,6 +4219,20 @@ jito-ts@4.1.1:
     "@types/bs58" "^4.0.4"
     agentkeepalive "^4.3.0"
     bs58 "^6.0.0"
+    dotenv "^16.0.3"
+    jayson "^4.0.0"
+    node-fetch "^2.6.7"
+    superstruct "^1.0.3"
+
+jito-ts@^3.0.1:
+  version "3.0.1"
+  resolved "https://registry.yarnpkg.com/jito-ts/-/jito-ts-3.0.1.tgz#24126389896e042c26d303c4e802064b249ed27e"
+  integrity sha512-TSofF7KqcwyaWGjPaSYC8RDoNBY1TPRNBHdrw24bdIi7mQ5bFEDdYK3D//llw/ml8YDvcZlgd644WxhjLTS9yg==
+  dependencies:
+    "@grpc/grpc-js" "^1.8.13"
+    "@noble/ed25519" "^1.7.1"
+    "@solana/web3.js" "~1.77.3"
+    agentkeepalive "^4.3.0"
     dotenv "^16.0.3"
     jayson "^4.0.0"
     node-fetch "^2.6.7"

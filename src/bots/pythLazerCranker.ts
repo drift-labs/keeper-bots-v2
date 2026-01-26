@@ -1,7 +1,7 @@
 import { Bot } from '../types';
 import { logger } from '../logger';
 import { GlobalConfig, PythLazerCrankerBotConfig } from '../config';
-import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSolanaReceiver';
+import type { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/dist/PythSolanaReceiver';
 import {
 	BlockhashSubscriber,
 	DevnetPerpMarkets,
