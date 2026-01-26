@@ -55,7 +55,7 @@ import {
 	ComputeBudgetProgram,
 	TransactionInstruction,
 } from '@solana/web3.js';
-import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSolanaReceiver';
+import type { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/dist/PythSolanaReceiver';
 import {
 	PythLazerPriceFeedArray,
 	PythLazerSubscriber,
