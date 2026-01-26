@@ -19,8 +19,11 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: "22.14.x"
+          node-version: "24.x.x"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Setup yarn
+        run: corepack enable && corepack prepare yarn@4.5.1 --activate
 
       - name: Install dependencies
         run: |
@@ -35,16 +38,29 @@ jobs:
         if: github.event_name == 'repository_dispatch'
         run: yarn add @drift-labs/jit-proxy@${{ github.event.client_payload.jit-version }}
 
+      - name: Sync SDK resolution with dependency version
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          # Get the SDK version from dependencies and update the resolution to match
+          # This prevents type conflicts between @drift-labs/sdk and the version bundled in @drift-labs/jit-proxy
+          SDK_VERSION=$(node -p "require('./package.json').dependencies['@drift-labs/sdk']")
+          echo "Syncing @drift-labs/sdk resolution to: $SDK_VERSION"
+          
+          # Update package.json resolution using node
+          node -e "
+            const fs = require('fs');
+            const pkg = require('./package.json');
+            pkg.resolutions = pkg.resolutions || {};
+            pkg.resolutions['@drift-labs/sdk'] = '$SDK_VERSION';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, '\t') + '\n');
+          "
+          
+          # Reinstall to apply the resolution
+          yarn install
+
       - name: Build after new dependency
         if: github.event_name == 'repository_dispatch'
         run: yarn run build
-
-      - name: Fix rpc-websockets module resolution
-        run: |
-          # Create symlinks for .cjs -> .js to satisfy both import styles
-          # (same fix as in Dockerfile)
-          ln -s $(pwd)/node_modules/rpc-websockets/dist/lib/client.js $(pwd)/node_modules/rpc-websockets/dist/lib/client.cjs
-          ln -s $(pwd)/node_modules/rpc-websockets/dist/lib/client/websocket.js $(pwd)/node_modules/rpc-websockets/dist/lib/client/websocket.cjs
 
       - name: Run bot dry-run test (trigger + userPnlSettler)
         env:

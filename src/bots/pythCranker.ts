@@ -9,7 +9,7 @@ import {
 	PriceFeed,
 	PriceServiceConnection,
 } from '@pythnetwork/price-service-client';
-import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSolanaReceiver';
+import type { PriceUpdateAccount } from '@drift-labs/sdk';
 import {
 	BlockhashSubscriber,
 	BN,

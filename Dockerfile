@@ -1,14 +1,28 @@
-FROM public.ecr.aws/docker/library/node:22.14 AS builder
+FROM public.ecr.aws/docker/library/node:24 AS builder
+
+COPY package.json yarn.lock ./
+
+# Enable Corepack for Yarn v4
+RUN corepack enable && corepack prepare yarn@4 --activate
 
 WORKDIR /app
 
 COPY package.json yarn.lock ./
-RUN yarn install
 
 COPY . .
+
+RUN yarn install --immutable
 RUN node esbuild.config.js
 
-FROM public.ecr.aws/docker/library/node:22.14.0-alpine
+WORKDIR /app/drift-common/common-ts
+RUN yarn install
+RUN yarn run build
+
+WORKDIR /app/drift-common/protocol/sdk
+RUN yarn install
+RUN yarn run build
+
+FROM public.ecr.aws/docker/library/node:24-alpine
 # 'bigint-buffer' native lib for performance
 RUN apk add python3 make g++ --virtual .build &&\
     npm install -C /lib bigint-buffer @triton-one/yellowstone-grpc@1.3.0 helius-laserstream rpc-websockets@7.10.0 &&\
