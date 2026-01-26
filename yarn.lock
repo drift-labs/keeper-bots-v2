@@ -189,7 +189,7 @@ __metadata:
   dependencies:
     "@drift-labs/common": "npm:1.0.20"
     "@drift-labs/jit-proxy": "npm:0.21.138"
-    "@drift-labs/sdk": "npm:2.156.0-beta.3"
+    "@drift-labs/sdk": "npm:2.156.0-beta.6"
     "@opentelemetry/api": "npm:1.7.0"
     "@opentelemetry/auto-instrumentations-node": "npm:^0.62.1"
     "@opentelemetry/exporter-prometheus": "npm:0.31.0"
@@ -237,7 +237,7 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@drift-labs/sdk@npm:2.155.0-beta.6, @drift-labs/sdk@npm:^2.155.0-beta.5":
+"@drift-labs/sdk@npm:2.155.0-beta.6":
   version: 2.155.0-beta.6
   resolution: "@drift-labs/sdk@npm:2.155.0-beta.6"
   dependencies:
@@ -273,9 +273,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@drift-labs/sdk@npm:2.156.0-beta.3":
-  version: 2.156.0-beta.3
-  resolution: "@drift-labs/sdk@npm:2.156.0-beta.3"
+"@drift-labs/sdk@npm:2.156.0-beta.6":
+  version: 2.156.0-beta.6
+  resolution: "@drift-labs/sdk@npm:2.156.0-beta.6"
   dependencies:
     "@coral-xyz/anchor": "npm:0.29.0"
     "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
@@ -305,7 +305,43 @@ __metadata:
     yargs: "npm:17.7.2"
     zod: "npm:4.0.17"
     zstddec: "npm:0.1.0"
-  checksum: 10c0/90f14745997d8eaa7039aaa37c02ee3233a2d1bdc20fade8ec28a2b24f237ac0d29eb089fa5cb16858f4d939955500271dd759bdc7e7624a9bf67aefd5f64f62
+  checksum: 10c0/292dc71323bfa5813a83ca674a3e59e1547e933e7d73067bc765ee39736795925bee7946071883deba9320bca9fd03448de78f131f26ee19076babffd779edc7
+  languageName: node
+  linkType: hard
+
+"@drift-labs/sdk@npm:^2.155.0-beta.5":
+  version: 2.155.0
+  resolution: "@drift-labs/sdk@npm:2.155.0"
+  dependencies:
+    "@coral-xyz/anchor": "npm:0.29.0"
+    "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
+    "@ellipsis-labs/phoenix-sdk": "npm:1.4.5"
+    "@grpc/grpc-js": "npm:1.14.0"
+    "@msgpack/msgpack": "npm:^3.1.2"
+    "@openbook-dex/openbook-v2": "npm:0.2.10"
+    "@project-serum/serum": "npm:0.13.65"
+    "@pythnetwork/client": "npm:2.5.3"
+    "@pythnetwork/price-service-sdk": "npm:1.7.1"
+    "@solana/spl-token": "npm:0.4.13"
+    "@solana/web3.js": "npm:1.98.0"
+    "@switchboard-xyz/common": "npm:3.0.14"
+    "@switchboard-xyz/on-demand": "npm:2.4.1"
+    "@triton-one/yellowstone-grpc": "npm:1.4.1"
+    anchor-bankrun: "npm:0.3.0"
+    gill: "npm:^0.10.2"
+    helius-laserstream: "npm:0.1.8"
+    nanoid: "npm:3.3.4"
+    node-cache: "npm:5.1.2"
+    rpc-websockets: "npm:7.5.1"
+    solana-bankrun: "npm:0.3.1"
+    strict-event-emitter-types: "npm:2.0.0"
+    tweetnacl: "npm:1.0.3"
+    tweetnacl-util: "npm:0.15.1"
+    uuid: "npm:8.3.2"
+    yargs: "npm:17.7.2"
+    zod: "npm:4.0.17"
+    zstddec: "npm:0.1.0"
+  checksum: 10c0/1934d2bbf555b4600bdf7e3e19c031e3de6932d52855b38c885b1c1cce5311c536144e64c12371ac626eebcec177f6aa76cfb25fd930ae15f75e271ec564b13d
   languageName: node
   linkType: hard
 
@@ -3883,13 +3919,13 @@ __metadata:
   linkType: hard
 
 "axios@npm:^1.5.1, axios@npm:^1.6.8, axios@npm:^1.8.3, axios@npm:^1.9.0":
-  version: 1.13.2
-  resolution: "axios@npm:1.13.2"
+  version: 1.13.3
+  resolution: "axios@npm:1.13.3"
   dependencies:
     follow-redirects: "npm:^1.15.6"
     form-data: "npm:^4.0.4"
     proxy-from-env: "npm:^1.1.0"
-  checksum: 10c0/e8a42e37e5568ae9c7a28c348db0e8cf3e43d06fcbef73f0048669edfe4f71219664da7b6cc991b0c0f01c28a48f037c515263cb79be1f1ae8ff034cd813867b
+  checksum: 10c0/86f0770624d9f14a3f8f8738c8b8f7f7fbb7b0d4ad38757db1de2d71007a0311bc597661c5ff4b4a9ee6350c6956a7282e3a281fcdf7b5b32054e35a8801e2ce
   languageName: node
   linkType: hard
 
@@ -6237,9 +6273,9 @@ __metadata:
   linkType: hard
 
 "lru-cache@npm:^11.0.0, lru-cache@npm:^11.1.0, lru-cache@npm:^11.2.1":
-  version: 11.2.4
-  resolution: "lru-cache@npm:11.2.4"
-  checksum: 10c0/4a24f9b17537619f9144d7b8e42cd5a225efdfd7076ebe7b5e7dc02b860a818455201e67fbf000765233fe7e339d3c8229fc815e9b58ee6ede511e07608c19b2
+  version: 11.2.5
+  resolution: "lru-cache@npm:11.2.5"
+  checksum: 10c0/cc98958d25dddf1c8a8cbdc49588bd3b24450e8dfa78f32168fd188a20d4a0331c7406d0f3250c86a46619ee288056fd7a1195e8df56dc8a9592397f4fbd8e1d
   languageName: node
   linkType: hard
 
@@ -7830,9 +7866,9 @@ __metadata:
   linkType: hard
 
 "undici-types@npm:^7.11.0":
-  version: 7.19.0
-  resolution: "undici-types@npm:7.19.0"
-  checksum: 10c0/4baabf85209d157be4ce02ec9071b5c28612719ead0f5b4722114b6ad4eca9e7cb8722d617ae1ff4fadc6b34ce47c4bdb9820d9224aa72c5c0b1253aefe2a48b
+  version: 7.19.1
+  resolution: "undici-types@npm:7.19.1"
+  checksum: 10c0/71ec634773be40f6db432444265b500f16ec722de38e90a15f24b5de9cfe026f774e30724b9a78b53949adafd7c99f18bd0163aae8fdf900bc1650ba11b14bc6
   languageName: node
   linkType: hard
 

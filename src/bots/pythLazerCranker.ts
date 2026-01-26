@@ -1,7 +1,6 @@
 import { Bot } from '../types';
 import { logger } from '../logger';
 import { GlobalConfig, PythLazerCrankerBotConfig } from '../config';
-import type { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/dist/PythSolanaReceiver';
 import {
 	BlockhashSubscriber,
 	DevnetPerpMarkets,
@@ -14,6 +13,7 @@ import {
 	TxSigAndSlot,
 	PythLazerSubscriber,
 	PythLazerPriceFeedArray,
+	PriceUpdateAccount,
 } from '@drift-labs/sdk';
 import {
 	AddressLookupTableAccount,
