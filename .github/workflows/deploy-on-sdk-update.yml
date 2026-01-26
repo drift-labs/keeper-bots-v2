@@ -19,8 +19,11 @@ jobs:
       - name: Setup node
         uses: actions/setup-node@v4
         with:
-          node-version: "22.14.x"
+          node-version: "24.x.x"
           registry-url: "https://registry.npmjs.org"
+
+      - name: Setup yarn
+        run: corepack enable && corepack prepare yarn@4.5.1 --activate
 
       - name: Install dependencies
         run: |
@@ -58,13 +61,6 @@ jobs:
       - name: Build after new dependency
         if: github.event_name == 'repository_dispatch'
         run: yarn run build
-
-      - name: Fix rpc-websockets module resolution
-        run: |
-          # Create symlinks for .cjs -> .js to satisfy both import styles
-          # (same fix as in Dockerfile)
-          ln -s $(pwd)/node_modules/rpc-websockets/dist/lib/client.js $(pwd)/node_modules/rpc-websockets/dist/lib/client.cjs
-          ln -s $(pwd)/node_modules/rpc-websockets/dist/lib/client/websocket.js $(pwd)/node_modules/rpc-websockets/dist/lib/client/websocket.cjs
 
       - name: Run bot dry-run test (trigger + userPnlSettler)
         env:

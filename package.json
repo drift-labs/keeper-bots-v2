@@ -7,7 +7,7 @@
 	"dependencies": {
 		"@drift-labs/common": "1.0.20",
 		"@drift-labs/jit-proxy": "0.21.138",
-		"@drift-labs/sdk": "2.155.0-beta.6",
+		"@drift-labs/sdk": "2.156.0-beta.6",
 		"@opentelemetry/api": "1.7.0",
 		"@opentelemetry/auto-instrumentations-node": "^0.62.1",
 		"@opentelemetry/exporter-prometheus": "0.31.0",
@@ -15,14 +15,13 @@
 		"@project-serum/anchor": "0.19.1-beta.1",
 		"@project-serum/serum": "0.13.65",
 		"@pythnetwork/price-service-client": "1.9.0",
-		"@pythnetwork/pyth-lazer-sdk": "2.0.0",
-		"@pythnetwork/pyth-solana-receiver": "^0.13.0",
+		"@pythnetwork/pyth-lazer-sdk": "5.2.1",
 		"@solana/spl-token": "0.3.7",
 		"@solana/web3.js": "1.92.3",
 		"@types/bn.js": "5.1.5",
 		"@types/minimist": "1.2.5",
 		"@types/mocha": "10.0.6",
-		"@types/node": "20.12.7",
+		"@types/node": "24.0.0",
 		"async": "3.2.5",
 		"async-mutex": "0.3.2",
 		"aws-sdk": "2.1511.0",
@@ -35,14 +34,13 @@
 		"minimist": "1.2.8",
 		"tweetnacl": "1.0.3",
 		"tweetnacl-util": "0.15.1",
-		"typescript": "4.5.4",
+		"typescript": "5.9.3",
 		"undici": "6.19.2",
 		"winston": "3.11.0",
 		"ws": "8.18.0",
 		"yaml": "2.3.4"
 	},
 	"resolutions": {
-		"@drift-labs/sdk": "2.155.0-beta.6",
 		"@solana/web3.js": "1.98.0",
 		"chalk": "4.1.2",
 		"debug": "4.4.1",
@@ -61,6 +59,7 @@
 	"devDependencies": {
 		"@types/chai": "4.3.11",
 		"@types/mocha": "10.0.6",
+		"@types/node": "^24.0.0",
 		"@typescript-eslint/eslint-plugin": "5.62.0",
 		"@typescript-eslint/parser": "4.33.0",
 		"chai": "4.3.10",
@@ -72,7 +71,7 @@
 		"mocha": "10.2.0",
 		"prettier": "3.0.1",
 		"tiny-glob": "0.2.9",
-		"ts-node": "10.9.1"
+		"ts-node": "10.9.2"
 	},
 	"scripts": {
 		"prepare": "husky install",
@@ -97,6 +96,7 @@
 		"test": "mocha -r ts-node/register ./src/**/*.test.ts"
 	},
 	"engines": {
-		"node": ">=22.14.0"
-	}
+		"node": "^24.0.0"
+	},
+	"packageManager": "yarn@4.5.1"
 }

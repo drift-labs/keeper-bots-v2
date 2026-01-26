@@ -1,7 +1,6 @@
 import { Bot } from '../types';
 import { logger } from '../logger';
 import { GlobalConfig, PythLazerCrankerBotConfig } from '../config';
-import type { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/dist/PythSolanaReceiver';
 import {
 	BlockhashSubscriber,
 	DevnetPerpMarkets,
@@ -12,6 +11,9 @@ import {
 	MainnetSpotMarkets,
 	PriorityFeeSubscriber,
 	TxSigAndSlot,
+	PythLazerSubscriber,
+	PythLazerPriceFeedArray,
+	PriceUpdateAccount,
 } from '@drift-labs/sdk';
 import {
 	AddressLookupTableAccount,
@@ -24,10 +26,6 @@ import {
 	sleepMs,
 } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
-import {
-	PythLazerPriceFeedArray,
-	PythLazerSubscriber,
-} from '../pythLazerSubscriber';
 import { Channel } from '@pythnetwork/pyth-lazer-sdk';
 import { TxRecorder } from './common/txRecorder';
 
@@ -226,8 +224,6 @@ export class PythLazerCrankerBot implements Bot {
 			this.globalConfig.lazerToken!,
 			feedIdChunks,
 			this.globalConfig.driftEnv,
-			undefined,
-			undefined,
 			undefined
 		);
 

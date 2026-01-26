@@ -55,7 +55,7 @@ import {
 	ComputeBudgetProgram,
 	TransactionInstruction,
 } from '@solana/web3.js';
-import type { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/dist/PythSolanaReceiver';
+import type { PriceUpdateAccount } from '@drift-labs/sdk';
 import {
 	PythLazerPriceFeedArray,
 	PythLazerSubscriber,
