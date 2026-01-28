@@ -170,16 +170,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@drift-labs/jit-proxy@npm:0.21.138":
-  version: 0.21.138
-  resolution: "@drift-labs/jit-proxy@npm:0.21.138"
+"@drift-labs/jit-proxy@npm:0.21.140":
+  version: 0.21.140
+  resolution: "@drift-labs/jit-proxy@npm:0.21.140"
   dependencies:
     "@coral-xyz/anchor": "npm:0.29.0"
-    "@drift-labs/sdk": "npm:2.155.0-beta.6"
+    "@drift-labs/sdk": "npm:2.156.0-beta.0"
     "@solana/web3.js": "npm:1.98.0"
     tweetnacl-util: "npm:^0.15.1"
     typescript: "npm:5.4.5"
-  checksum: 10c0/1d16ffcb41280e56cf5d073dafc7a87df284fb43f8ad5ba25b5a87ebd627019f5d55909fb54f5b1be1639e56172d0352fd5bfc040905d278a8173283346cedaf
+  checksum: 10c0/e03b205fa9a16eeec7647c013ef19bc63d5ce3bae5e9116dfe8211006fd1ded2c3001f061bc1b9d5e9b9817f01a1c23f3c79b38d07a06272b755f2ee3f97a7de
   languageName: node
   linkType: hard
 
@@ -188,8 +188,8 @@ __metadata:
   resolution: "@drift-labs/keeper-bots-v2@workspace:."
   dependencies:
     "@drift-labs/common": "npm:1.0.20"
-    "@drift-labs/jit-proxy": "npm:0.21.138"
-    "@drift-labs/sdk": "npm:2.156.0-beta.6"
+    "@drift-labs/jit-proxy": "npm:0.21.140"
+    "@drift-labs/sdk": "npm:2.157.0-beta.1"
     "@opentelemetry/api": "npm:1.7.0"
     "@opentelemetry/auto-instrumentations-node": "npm:^0.62.1"
     "@opentelemetry/exporter-prometheus": "npm:0.31.0"
@@ -237,9 +237,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@drift-labs/sdk@npm:2.155.0-beta.6":
-  version: 2.155.0-beta.6
-  resolution: "@drift-labs/sdk@npm:2.155.0-beta.6"
+"@drift-labs/sdk@npm:2.156.0-beta.0":
+  version: 2.156.0-beta.0
+  resolution: "@drift-labs/sdk@npm:2.156.0-beta.0"
   dependencies:
     "@coral-xyz/anchor": "npm:0.29.0"
     "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
@@ -269,13 +269,13 @@ __metadata:
     yargs: "npm:17.7.2"
     zod: "npm:4.0.17"
     zstddec: "npm:0.1.0"
-  checksum: 10c0/998aaea19e63c416d9c398d445f56f3c43fde2bc34ce8d79779f40c1dc3133f07ce3bcca28b75f692a6ba7f47bc577f3f0b103c70d1bb75f9ea11971524e5a5c
+  checksum: 10c0/641afcbe4ccfa137b5cdd27e8f176fc25cbc309bb5d910b103086e0d90b42d76491e555761524b0af90e86c83cb76f43e0d7f885cadb2f019d1b59b94d80899d
   languageName: node
   linkType: hard
 
-"@drift-labs/sdk@npm:2.156.0-beta.6":
-  version: 2.156.0-beta.6
-  resolution: "@drift-labs/sdk@npm:2.156.0-beta.6"
+"@drift-labs/sdk@npm:2.157.0-beta.1":
+  version: 2.157.0-beta.1
+  resolution: "@drift-labs/sdk@npm:2.157.0-beta.1"
   dependencies:
     "@coral-xyz/anchor": "npm:0.29.0"
     "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
@@ -305,7 +305,10 @@ __metadata:
     yargs: "npm:17.7.2"
     zod: "npm:4.0.17"
     zstddec: "npm:0.1.0"
-  checksum: 10c0/292dc71323bfa5813a83ca674a3e59e1547e933e7d73067bc765ee39736795925bee7946071883deba9320bca9fd03448de78f131f26ee19076babffd779edc7
+  dependenciesMeta:
+    helius-laserstream:
+      optional: true
+  checksum: 10c0/ac98df39f8f3c699c1a98d040614d8b4d825e933a55aa85dfbde1be6bcfd1c44e086d9d529432532d3380eb32c03dab0d73daf620936d44d3e09884b7a497a1d
   languageName: node
   linkType: hard
 
