@@ -33,7 +33,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@babel/runtime@npm:^7.10.5, @babel/runtime@npm:^7.15.4, @babel/runtime@npm:^7.17.2, @babel/runtime@npm:^7.25.0":
+"@babel/runtime@npm:^7.10.5, @babel/runtime@npm:^7.15.4, @babel/runtime@npm:^7.25.0":
   version: 7.28.6
   resolution: "@babel/runtime@npm:7.28.6"
   checksum: 10c0/358cf2429992ac1c466df1a21c1601d595c46930a13c1d4662fde908d44ee78ec3c183aaff513ecb01ef8c55c3624afe0309eeeb34715672dbfadb7feedb2c0d
@@ -170,16 +170,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@drift-labs/jit-proxy@npm:0.21.140":
-  version: 0.21.140
-  resolution: "@drift-labs/jit-proxy@npm:0.21.140"
+"@drift-labs/jit-proxy@npm:0.21.141":
+  version: 0.21.141
+  resolution: "@drift-labs/jit-proxy@npm:0.21.141"
   dependencies:
     "@coral-xyz/anchor": "npm:0.29.0"
-    "@drift-labs/sdk": "npm:2.156.0-beta.0"
+    "@drift-labs/sdk": "npm:2.157.0-beta.2"
     "@solana/web3.js": "npm:1.98.0"
     tweetnacl-util: "npm:^0.15.1"
     typescript: "npm:5.4.5"
-  checksum: 10c0/e03b205fa9a16eeec7647c013ef19bc63d5ce3bae5e9116dfe8211006fd1ded2c3001f061bc1b9d5e9b9817f01a1c23f3c79b38d07a06272b755f2ee3f97a7de
+  checksum: 10c0/c9986f34339dca837759077469ba31e07531dbb19365a1c22bccffa529464644f032a1922f22fd06844663e3d7842e71fb7c89d6f1c5e5993c3931d0e3b8e836
   languageName: node
   linkType: hard
 
@@ -188,8 +188,8 @@ __metadata:
   resolution: "@drift-labs/keeper-bots-v2@workspace:."
   dependencies:
     "@drift-labs/common": "npm:1.0.20"
-    "@drift-labs/jit-proxy": "npm:0.21.140"
-    "@drift-labs/sdk": "npm:2.157.0-beta.1"
+    "@drift-labs/jit-proxy": "npm:0.21.141"
+    "@drift-labs/sdk": "npm:2.157.0-beta.2"
     "@opentelemetry/api": "npm:1.7.0"
     "@opentelemetry/auto-instrumentations-node": "npm:^0.62.1"
     "@opentelemetry/exporter-prometheus": "npm:0.31.0"
@@ -237,45 +237,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@drift-labs/sdk@npm:2.156.0-beta.0":
-  version: 2.156.0-beta.0
-  resolution: "@drift-labs/sdk@npm:2.156.0-beta.0"
-  dependencies:
-    "@coral-xyz/anchor": "npm:0.29.0"
-    "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
-    "@ellipsis-labs/phoenix-sdk": "npm:1.4.5"
-    "@grpc/grpc-js": "npm:1.14.0"
-    "@msgpack/msgpack": "npm:^3.1.2"
-    "@openbook-dex/openbook-v2": "npm:0.2.10"
-    "@project-serum/serum": "npm:0.13.65"
-    "@pythnetwork/client": "npm:2.5.3"
-    "@pythnetwork/price-service-sdk": "npm:1.7.1"
-    "@solana/spl-token": "npm:0.4.13"
-    "@solana/web3.js": "npm:1.98.0"
-    "@switchboard-xyz/common": "npm:3.0.14"
-    "@switchboard-xyz/on-demand": "npm:2.4.1"
-    "@triton-one/yellowstone-grpc": "npm:1.4.1"
-    anchor-bankrun: "npm:0.3.0"
-    gill: "npm:^0.10.2"
-    helius-laserstream: "npm:0.1.8"
-    nanoid: "npm:3.3.4"
-    node-cache: "npm:5.1.2"
-    rpc-websockets: "npm:7.5.1"
-    solana-bankrun: "npm:0.3.1"
-    strict-event-emitter-types: "npm:2.0.0"
-    tweetnacl: "npm:1.0.3"
-    tweetnacl-util: "npm:0.15.1"
-    uuid: "npm:8.3.2"
-    yargs: "npm:17.7.2"
-    zod: "npm:4.0.17"
-    zstddec: "npm:0.1.0"
-  checksum: 10c0/641afcbe4ccfa137b5cdd27e8f176fc25cbc309bb5d910b103086e0d90b42d76491e555761524b0af90e86c83cb76f43e0d7f885cadb2f019d1b59b94d80899d
-  languageName: node
-  linkType: hard
-
-"@drift-labs/sdk@npm:2.157.0-beta.1":
-  version: 2.157.0-beta.1
-  resolution: "@drift-labs/sdk@npm:2.157.0-beta.1"
+"@drift-labs/sdk@npm:2.157.0-beta.2":
+  version: 2.157.0-beta.2
+  resolution: "@drift-labs/sdk@npm:2.157.0-beta.2"
   dependencies:
     "@coral-xyz/anchor": "npm:0.29.0"
     "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
@@ -308,43 +272,7 @@ __metadata:
   dependenciesMeta:
     helius-laserstream:
       optional: true
-  checksum: 10c0/ac98df39f8f3c699c1a98d040614d8b4d825e933a55aa85dfbde1be6bcfd1c44e086d9d529432532d3380eb32c03dab0d73daf620936d44d3e09884b7a497a1d
-  languageName: node
-  linkType: hard
-
-"@drift-labs/sdk@npm:^2.155.0-beta.5":
-  version: 2.155.0
-  resolution: "@drift-labs/sdk@npm:2.155.0"
-  dependencies:
-    "@coral-xyz/anchor": "npm:0.29.0"
-    "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
-    "@ellipsis-labs/phoenix-sdk": "npm:1.4.5"
-    "@grpc/grpc-js": "npm:1.14.0"
-    "@msgpack/msgpack": "npm:^3.1.2"
-    "@openbook-dex/openbook-v2": "npm:0.2.10"
-    "@project-serum/serum": "npm:0.13.65"
-    "@pythnetwork/client": "npm:2.5.3"
-    "@pythnetwork/price-service-sdk": "npm:1.7.1"
-    "@solana/spl-token": "npm:0.4.13"
-    "@solana/web3.js": "npm:1.98.0"
-    "@switchboard-xyz/common": "npm:3.0.14"
-    "@switchboard-xyz/on-demand": "npm:2.4.1"
-    "@triton-one/yellowstone-grpc": "npm:1.4.1"
-    anchor-bankrun: "npm:0.3.0"
-    gill: "npm:^0.10.2"
-    helius-laserstream: "npm:0.1.8"
-    nanoid: "npm:3.3.4"
-    node-cache: "npm:5.1.2"
-    rpc-websockets: "npm:7.5.1"
-    solana-bankrun: "npm:0.3.1"
-    strict-event-emitter-types: "npm:2.0.0"
-    tweetnacl: "npm:1.0.3"
-    tweetnacl-util: "npm:0.15.1"
-    uuid: "npm:8.3.2"
-    yargs: "npm:17.7.2"
-    zod: "npm:4.0.17"
-    zstddec: "npm:0.1.0"
-  checksum: 10c0/1934d2bbf555b4600bdf7e3e19c031e3de6932d52855b38c885b1c1cce5311c536144e64c12371ac626eebcec177f6aa76cfb25fd930ae15f75e271ec564b13d
+  checksum: 10c0/0ef5911a4dae42ae09aed20e2823451699a1589f81d0ad04c31c78d13deb14366351d447444dc164bc66e321ff35ab38a65c7f619050e303bba7526d662752ab
   languageName: node
   linkType: hard
 
@@ -5621,7 +5549,6 @@ __metadata:
       optional: true
     helius-laserstream-linux-x64-musl:
       optional: true
-  checksum: 10c0/b5f5bf3e39bb442a44b79098cff916a72c9be7f9fdbf0bb8b030ccb61c6688cb41fbae18a4091841ae8f6cce787b23177bac3b5dd5e92d9daef24f347bc29e73
   conditions: (os=darwin | os=linux) & (cpu=x64 | cpu=arm64)
   languageName: node
   linkType: hard
@@ -7185,25 +7112,6 @@ __metadata:
   bin:
     rimraf: bin.js
   checksum: 10c0/9cb7757acb489bd83757ba1a274ab545eafd75598a9d817e0c3f8b164238dd90eba50d6b848bd4dcc5f3040912e882dc7ba71653e35af660d77b25c381d402e8
-  languageName: node
-  linkType: hard
-
-"rpc-websockets@npm:7.5.1":
-  version: 7.5.1
-  resolution: "rpc-websockets@npm:7.5.1"
-  dependencies:
-    "@babel/runtime": "npm:^7.17.2"
-    bufferutil: "npm:^4.0.1"
-    eventemitter3: "npm:^4.0.7"
-    utf-8-validate: "npm:^5.0.2"
-    uuid: "npm:^8.3.2"
-    ws: "npm:^8.5.0"
-  dependenciesMeta:
-    bufferutil:
-      optional: true
-    utf-8-validate:
-      optional: true
-  checksum: 10c0/19294000528d857cfcf27ebda8d8ba2f1889f070bfca58f9c92de18efd80cdd764274eed09d44d37dfb2a0aedd9614c5d1d07f3bcfffc19bcb4c1aff8ace728b
   languageName: node
   linkType: hard
 
