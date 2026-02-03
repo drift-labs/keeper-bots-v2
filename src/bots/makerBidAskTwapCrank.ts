@@ -40,7 +40,7 @@ import {
 	SimulateAndGetTxWithCUsResponse,
 } from '../utils';
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
-import { PythLazerSubscriber } from '../pythLazerSubscriber';
+import { PythLazerSubscriber } from '@drift-labs/sdk';
 import { PythPullClient } from '@drift-labs/sdk';
 import { BundleSender } from '../bundleSender';
 
@@ -173,15 +173,15 @@ function buildCrankIntervalToMarketIds(
 			marketIndex: perpMarket.marketIndex,
 		});
 
-		let crankPeriodMs = 30_000;
+		let crankPeriodMs = 10_000;
 		if (perpMarket.marketIndex in overrideMarketIndexToCrankingInterval) {
 			crankPeriodMs =
 				overrideMarketIndexToCrankingInterval[perpMarket.marketIndex];
 		} else {
 			if (isOneOfVariant(perpMarket.contractTier, ['a', 'b'])) {
-				crankPeriodMs = 30_000;
+				crankPeriodMs = 10_000;
 			} else if (isVariant(perpMarket.amm.oracleSource, 'prelaunch')) {
-				crankPeriodMs = 60_000;
+				crankPeriodMs = 30_000;
 			}
 		}
 		logger.info(

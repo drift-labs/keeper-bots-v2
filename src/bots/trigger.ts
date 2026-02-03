@@ -55,7 +55,7 @@ import {
 	ComputeBudgetProgram,
 	TransactionInstruction,
 } from '@solana/web3.js';
-import { PriceUpdateAccount } from '@pythnetwork/pyth-solana-receiver/lib/PythSolanaReceiver';
+import type { PriceUpdateAccount } from '@drift-labs/sdk';
 import {
 	PythLazerPriceFeedArray,
 	PythLazerSubscriber,
@@ -710,51 +710,57 @@ export class TriggerBot implements Bot {
 					);
 					continue;
 				} else {
-					this.driftClient
-						.sendTransaction(resp.tx)
-						.then((txSig) => {
-							this.triggerCounter!.add(1, {
-								marketType: marketTypeStr,
-								auth: this.driftClient.wallet.publicKey.toString(),
-							});
-							logger.info(
-								`Triggered ${marketTypeStr}. user: ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}: ${
-									txSig.txSig
-								}, cuUnits: ${cuUnits}, activePositions: ${activePositions}, openOrders: ${openOrders}`
-							);
-						})
-						.catch((error) => {
-							nodeToTrigger.node.haveTrigger = false;
+					if (this.dryRun) {
+						logger.info(
+							`[DRY RUN] Would trigger ${marketTypeStr} order for user ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}`
+						);
+					} else {
+						this.driftClient
+							.sendTransaction(resp.tx)
+							.then((txSig) => {
+								this.triggerCounter!.add(1, {
+									marketType: marketTypeStr,
+									auth: this.driftClient.wallet.publicKey.toString(),
+								});
+								logger.info(
+									`Triggered ${marketTypeStr}. user: ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}: ${
+										txSig.txSig
+									}, cuUnits: ${cuUnits}, activePositions: ${activePositions}, openOrders: ${openOrders}`
+								);
+							})
+							.catch((error) => {
+								nodeToTrigger.node.haveTrigger = false;
 
-							const errorCode = getErrorCode(error);
-							if (
-								errorCode &&
-								!errorCodesToSuppress.includes(errorCode) &&
-								!(error as Error).message.includes(
-									'Transaction was not confirmed'
-								)
-							) {
-								if (errorCode) {
-									this.errorCounter!.add(1, {
-										errorCode: errorCode.toString(),
-									});
+								const errorCode = getErrorCode(error);
+								if (
+									errorCode &&
+									!errorCodesToSuppress.includes(errorCode) &&
+									!(error as Error).message.includes(
+										'Transaction was not confirmed'
+									)
+								) {
+									if (errorCode) {
+										this.errorCounter!.add(1, {
+											errorCode: errorCode.toString(),
+										});
+									}
+									logger.error(
+										`Error (${errorCode}) triggering ${marketTypeStr} order for user ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}`
+									);
+									logger.error(error);
+									webhookMessage(
+										`[${
+											this.name
+										}]: :x: Error (${errorCode}) triggering ${marketTypeStr} order for user (account: ${nodeToTrigger.node.userAccount.toString()}) ${marketTypeStr} order: ${nodeToTrigger.node.order.orderId.toString()}\n${
+											error.stack ? error.stack : error.message
+										}`
+									);
 								}
-								logger.error(
-									`Error (${errorCode}) triggering ${marketTypeStr} order for user ${nodeToTrigger.node.userAccount.toString()}-${nodeToTrigger.node.order.orderId.toString()}`
-								);
-								logger.error(error);
-								webhookMessage(
-									`[${
-										this.name
-									}]: :x: Error (${errorCode}) triggering ${marketTypeStr} order for user (account: ${nodeToTrigger.node.userAccount.toString()}) ${marketTypeStr} order: ${nodeToTrigger.node.order.orderId.toString()}\n${
-										error.stack ? error.stack : error.message
-									}`
-								);
-							}
-						})
-						.finally(() => {
-							this.removeTriggeringNodes([nodeToTrigger]);
-						});
+							})
+							.finally(() => {
+								this.removeTriggeringNodes([nodeToTrigger]);
+							});
+					}
 				}
 			}
 		} catch (e) {

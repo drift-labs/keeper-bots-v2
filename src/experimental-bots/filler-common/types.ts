@@ -92,9 +92,10 @@ export type SerializedPerpPosition = {
 	settledPnl: string;
 	lpShares: string;
 	remainderBaseAssetAmount: number;
-	lastBaseAssetAmountPerLp: string;
 	lastQuoteAssetAmountPerLp: string;
 	perLpBase: number;
+	isolatedPositionScaledBalance: string;
+	positionFlag: number;
 };
 
 export type SerializedNodeToTrigger = {

@@ -1,5 +1,6 @@
 import {
 	BASE_PRECISION,
+	BlockhashSubscriber,
 	BN,
 	convertToNumber,
 	DriftClient,
@@ -50,6 +51,7 @@ import { logger } from '../../logger';
 import { sha256 } from '@noble/hashes/sha256';
 
 const MAX_ACCOUNTS_PER_TX = 64;
+const TX_SIZE_SAFETY_MARGIN = 20; // bytes - to account for size estimation inaccuracies
 const IGNORE_AUTHORITIES = ['CTh4Q6xooiaJMWCwKP5KLQ4j7X3NEJPf3Uq6rX8UsKSi'];
 
 export class SwiftPlacer {
@@ -60,6 +62,7 @@ export class SwiftPlacer {
 	private heartbeatTimeout: NodeJS.Timeout | null = null;
 	private priorityFeeSubscriber: PriorityFeeSubscriberMap;
 	private referrerMap: ReferrerMap;
+	private blockhashSubscriber: BlockhashSubscriber;
 	private readonly heartbeatIntervalMs = 80_000;
 	constructor(
 		private driftClient: DriftClient,
@@ -87,6 +90,11 @@ export class SwiftPlacer {
 		});
 
 		this.referrerMap = new ReferrerMap(driftClient, true);
+
+		this.blockhashSubscriber = new BlockhashSubscriber({
+			connection: driftClient.connection,
+			updateIntervalMs: 2000,
+		});
 	}
 
 	async init() {
@@ -94,6 +102,7 @@ export class SwiftPlacer {
 		await this.slotSubscriber.subscribe();
 		await this.referrerMap.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
+		await this.blockhashSubscriber.subscribe();
 	}
 
 	async subscribeWs() {
@@ -339,17 +348,20 @@ export class SwiftPlacer {
 						true
 					);
 
+					const lookupTableAccounts =
+						await this.driftClient.fetchAllLookupTableAccounts();
+
 					let txSize = getSizeOfTransaction(
 						[...computeBudgetIxs, ...ixs, fillIx],
 						true,
-						await this.driftClient.fetchAllLookupTableAccounts()
+						lookupTableAccounts
 					);
 					while (
-						txSize.bytes > PACKET_DATA_SIZE ||
+						txSize.bytes > PACKET_DATA_SIZE - TX_SIZE_SAFETY_MARGIN ||
 						txSize.accounts > MAX_ACCOUNTS_PER_TX
 					) {
 						if (makerInfos.length === 0) {
-							console.log('No more makers to try');
+							logger.info(`${logPrefix}: No more makers to try`);
 							break;
 						}
 						makerInfos.pop();
@@ -365,8 +377,35 @@ export class SwiftPlacer {
 						txSize = getSizeOfTransaction(
 							[...computeBudgetIxs, ...ixs, fillIx],
 							true,
-							await this.driftClient.fetchAllLookupTableAccounts()
+							lookupTableAccounts
 						);
+					}
+
+					// After pruning makers, check if tx is still too large - if so, try without fillIx
+					let includeFillIx = true;
+					if (
+						txSize.bytes > PACKET_DATA_SIZE - TX_SIZE_SAFETY_MARGIN ||
+						txSize.accounts > MAX_ACCOUNTS_PER_TX
+					) {
+						const sizeWithoutFill = getSizeOfTransaction(
+							[...computeBudgetIxs, ...ixs],
+							true,
+							lookupTableAccounts
+						);
+						if (
+							sizeWithoutFill.bytes >
+								PACKET_DATA_SIZE - TX_SIZE_SAFETY_MARGIN ||
+							sizeWithoutFill.accounts > MAX_ACCOUNTS_PER_TX
+						) {
+							logger.error(
+								`${logPrefix}: tx too large even without fill ix (${sizeWithoutFill.bytes} bytes, ${sizeWithoutFill.accounts} accounts), skipping`
+							);
+							return;
+						}
+						logger.info(
+							`${logPrefix}: tx too large with fill ix, proceeding without fill`
+						);
+						includeFillIx = false;
 					}
 
 					const hasPreDeposit = preDepositTx.length > 0;
@@ -387,39 +426,77 @@ export class SwiftPlacer {
 					}
 
 					let resp: SimulateAndGetTxWithCUsResponse | undefined;
+					const simIxs = includeFillIx
+						? [...computeBudgetIxs, ...ixs, fillIx]
+						: [...computeBudgetIxs, ...ixs];
+
+					const recentBlockhash =
+						this.blockhashSubscriber.getLatestBlockhash()?.blockhash;
+					if (!recentBlockhash) {
+						logger.error(`${logPrefix}: no blockhash available`);
+						return;
+					}
+
 					try {
 						resp = await simulateAndGetTxWithCUs({
 							connection: this.driftClient.connection,
 							payerPublicKey: this.driftClient.wallet.payer!.publicKey,
-							ixs: [...computeBudgetIxs, ...ixs, fillIx],
+							ixs: simIxs,
 							cuLimitMultiplier: 2,
-							lookupTableAccounts:
-								await this.driftClient.fetchAllLookupTableAccounts(),
+							lookupTableAccounts,
 							doSimulation: true,
+							recentBlockhash,
 						});
 					} catch (e) {
-						logger.error(`${logPrefix}: sim order failed: ${e}`);
-						return;
+						const errorStr = (e as Error)?.message || String(e);
+						// If tx too large error is thrown and we included fillIx, retry without it
+						if (errorStr.includes('too large') && includeFillIx) {
+							logger.info(
+								`${logPrefix}: sim threw too large error, retrying without fill ix`
+							);
+							try {
+								resp = await simulateAndGetTxWithCUs({
+									connection: this.driftClient.connection,
+									payerPublicKey: this.driftClient.wallet.payer!.publicKey,
+									ixs: [...computeBudgetIxs, ...ixs],
+									cuLimitMultiplier: 2,
+									lookupTableAccounts,
+									doSimulation: true,
+									recentBlockhash,
+								});
+								includeFillIx = false;
+							} catch (retryError) {
+								logger.error(
+									`${logPrefix}: sim order failed on retry: ${retryError}`
+								);
+								return;
+							}
+						} else {
+							logger.error(`${logPrefix}: sim order failed: ${e}`);
+							return;
+						}
 					}
 
-					// retry sim without optimistic fill ix
+					// Also check simError response for too large errors (in case RPC returns it instead of throwing)
 					const simError = resp.simError?.toString();
-					try {
-						if (simError?.includes('VersionedTransaction too large')) {
-							logger.info(`${logPrefix}: try place order w/out fill`);
+					if (simError?.includes('too large') && includeFillIx) {
+						logger.info(
+							`${logPrefix}: sim returned too large error, retrying without fill ix`
+						);
+						try {
 							resp = await simulateAndGetTxWithCUs({
 								connection: this.driftClient.connection,
 								payerPublicKey: this.driftClient.wallet.payer!.publicKey,
 								ixs: [...computeBudgetIxs, ...ixs],
 								cuLimitMultiplier: 2,
-								lookupTableAccounts:
-									await this.driftClient.fetchAllLookupTableAccounts(),
+								lookupTableAccounts,
 								doSimulation: true,
+								recentBlockhash,
 							});
+						} catch (e) {
+							logger.error(`${logPrefix}: sim order failed on retry: ${e}`);
+							return;
 						}
-					} catch (e) {
-						logger.error(`${logPrefix}: sim order failed: ${e}`);
-						return;
 					}
 
 					// allow orders with pre-deposit to be submitted avoid race conditions
