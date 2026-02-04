@@ -40,12 +40,14 @@ jobs:
 
       - name: Sync SDK resolution with dependency version
         if: github.event_name == 'repository_dispatch'
+        env:
+          YARN_ENABLE_IMMUTABLE_INSTALLS: false
         run: |
           # Get the SDK version from dependencies and update the resolution to match
           # This prevents type conflicts between @drift-labs/sdk and the version bundled in @drift-labs/jit-proxy
           SDK_VERSION=$(node -p "require('./package.json').dependencies['@drift-labs/sdk']")
           echo "Syncing @drift-labs/sdk resolution to: $SDK_VERSION"
-          
+
           # Update package.json resolution using node
           node -e "
             const fs = require('fs');
@@ -54,7 +56,7 @@ jobs:
             pkg.resolutions['@drift-labs/sdk'] = '$SDK_VERSION';
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, '\t') + '\n');
           "
-          
+
           # Reinstall to apply the resolution
           yarn install
 
