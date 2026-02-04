@@ -6,8 +6,8 @@
 	"license": "Apache-2.0",
 	"dependencies": {
 		"@drift-labs/common": "1.0.20",
-		"@drift-labs/jit-proxy": "0.21.145",
-		"@drift-labs/sdk": "2.157.0-beta.6",
+		"@drift-labs/jit-proxy": "0.21.146",
+		"@drift-labs/sdk": "2.157.0-beta.7",
 		"@opentelemetry/api": "1.7.0",
 		"@opentelemetry/auto-instrumentations-node": "^0.62.1",
 		"@opentelemetry/exporter-prometheus": "0.31.0",
@@ -55,7 +55,7 @@
 		"simple-swizzle": "0.2.2",
 		"is-arrayish": "0.3.2",
 		"log-symbols": "4.1.0",
-		"@drift-labs/sdk": "2.157.0-beta.6"
+		"@drift-labs/sdk": "2.157.0-beta.7"
 	},
 	"devDependencies": {
 		"@types/chai": "4.3.11",
