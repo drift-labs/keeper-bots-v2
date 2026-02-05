@@ -350,6 +350,8 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.intervalIds = [];
 
 		await this.userMap?.unsubscribe();
+		await this.pythLazerSubscriber?.unsubscribe();
+		await this.priorityFeeSubscriberMap?.unsubscribe();
 
 		// Reset tx timeout tracking and health on reset
 		this.txSendTimeoutCount = 0;
