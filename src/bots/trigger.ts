@@ -27,6 +27,9 @@ import {
 	getTriggerPrice,
 	useMedianTriggerPrice,
 	isOneOfVariant,
+	PythLazerPriceFeedArray,
+	PythLazerSubscriber,
+	type PriceUpdateAccount,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -55,11 +58,6 @@ import {
 	ComputeBudgetProgram,
 	TransactionInstruction,
 } from '@solana/web3.js';
-import type { PriceUpdateAccount } from '@drift-labs/sdk';
-import {
-	PythLazerPriceFeedArray,
-	PythLazerSubscriber,
-} from '../pythLazerSubscriber';
 import { PriceServiceConnection } from '@pythnetwork/price-service-client';
 
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
