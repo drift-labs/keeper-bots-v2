@@ -43,7 +43,6 @@ import {
 import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { PythPullClient } from '@drift-labs/sdk';
 import { BundleSender } from '../bundleSender';
-import { PythLazerSubscriber } from 'src/pythLazerSubscriber';
 
 const CU_EST_MULTIPLIER = 1.4;
 const DEFAULT_INTERVAL_GROUP = -1;
