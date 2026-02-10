@@ -14,6 +14,7 @@ import {
 	getVariant,
 	PerpMarkets,
 	BlockhashSubscriber,
+	PythLazerSubscriber,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
