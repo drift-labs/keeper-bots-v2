@@ -1,5 +1,6 @@
 import {
 	DLOB,
+	DLOBNode,
 	DriftClient,
 	UserMap,
 	SlotSubscriber,
@@ -15,6 +16,7 @@ import {
 	PerpMarkets,
 	BlockhashSubscriber,
 	PythLazerSubscriber,
+	ZERO,
 } from '@drift-labs/sdk';
 import { Mutex } from 'async-mutex';
 
@@ -62,6 +64,8 @@ const TX_LAND_RATE_THRESHOLD = process.env.TX_LAND_RATE_THRESHOLD
 	? parseFloat(process.env.TX_LAND_RATE_THRESHOLD) || 0.5
 	: 0.5;
 const NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK = 2;
+// Exclude resting orders that are this percent or more away from oracle price
+const ORACLE_PRICE_FILTER_THRESHOLD_PERCENT = 15;
 const TX_PER_JITO_BUNDLE = 3;
 
 const CONCURRENCY_LIMIT = 3;
@@ -428,6 +432,89 @@ export class MakerBidAskTwapCrank implements Bot {
 		return combinedList;
 	}
 
+	/**
+	 * Get best makers for bids/asks, excluding orders that are 15% or more away
+	 * from the current oracle price.
+	 */
+	private getBestMakersWithinOraclePriceRange(params: {
+		marketIndex: number;
+		marketType: MarketType;
+		direction: PositionDirection;
+		slot: number;
+		oraclePriceData: Parameters<DLOB['getRestingLimitBids']>[3];
+		numMakers: number;
+	}): { makers: PublicKey[]; ordersFilteredOut: number; ordersKept: number } {
+		const {
+			marketIndex,
+			marketType,
+			direction,
+			slot,
+			oraclePriceData,
+			numMakers,
+		} = params;
+
+		const oraclePrice = oraclePriceData.price;
+		let ordersFilteredOut = 0;
+		let ordersKept = 0;
+		const innerFilter = (node: DLOBNode): boolean => {
+			if (oraclePrice.lte(ZERO)) {
+				return false;
+			}
+			const orderPrice = node.getPrice(oraclePriceData, slot);
+			const lowerBound = oraclePrice
+				.muln(100 - ORACLE_PRICE_FILTER_THRESHOLD_PERCENT)
+				.divn(100);
+			const upperBound = oraclePrice
+				.muln(100 + ORACLE_PRICE_FILTER_THRESHOLD_PERCENT)
+				.divn(100);
+			return orderPrice.gte(lowerBound) && orderPrice.lte(upperBound);
+		};
+		const filterFcn = (node: DLOBNode): boolean => {
+			const passes = innerFilter(node);
+			if (passes) {
+				ordersKept++;
+				return true;
+			}
+			ordersFilteredOut++;
+			return false;
+		};
+
+		const makers = new Map<string, PublicKey>();
+		const generator = isVariant(direction, 'long')
+			? this.dlob!.getRestingLimitBids(
+					marketIndex,
+					slot,
+					marketType,
+					oraclePriceData,
+					filterFcn
+			  )
+			: this.dlob!.getRestingLimitAsks(
+					marketIndex,
+					slot,
+					marketType,
+					oraclePriceData,
+					filterFcn
+			  );
+
+		for (const node of generator) {
+			if (!makers.has(node.userAccount!.toString())) {
+				makers.set(
+					node.userAccount!.toString(),
+					new PublicKey(node.userAccount!)
+				);
+			}
+			if (makers.size >= numMakers) {
+				break;
+			}
+		}
+
+		return {
+			makers: Array.from(makers.values()),
+			ordersFilteredOut,
+			ordersKept,
+		};
+	}
+
 	private async sendSingleTx(
 		marketIndex: number,
 		tx: VersionedTransaction
@@ -661,7 +748,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				const mmOraclePriceData =
 					this.driftClient.getMMOracleDataForPerpMarket(mi);
 
-				const bidMakers = this.dlob!.getBestMakers({
+				const bidResult = this.getBestMakersWithinOraclePriceRange({
 					marketIndex: mi,
 					marketType: MarketType.PERP,
 					direction: PositionDirection.LONG,
@@ -670,7 +757,7 @@ export class MakerBidAskTwapCrank implements Bot {
 					numMakers: NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK,
 				});
 
-				const askMakers = this.dlob!.getBestMakers({
+				const askResult = this.getBestMakersWithinOraclePriceRange({
 					marketIndex: mi,
 					marketType: MarketType.PERP,
 					direction: PositionDirection.SHORT,
@@ -678,8 +765,15 @@ export class MakerBidAskTwapCrank implements Bot {
 					oraclePriceData: mmOraclePriceData,
 					numMakers: NUM_MAKERS_TO_LOOK_AT_FOR_TWAP_CRANK,
 				});
+
+				const bidMakers = bidResult.makers;
+				const askMakers = askResult.makers;
+				const totalFilteredOut =
+					bidResult.ordersFilteredOut + askResult.ordersFilteredOut;
+				const totalKept = bidResult.ordersKept + askResult.ordersKept;
+
 				logger.info(
-					`[${this.name}] loaded makers for market ${mi}: ${bidMakers.length} bids, ${askMakers.length} asks`
+					`[${this.name}] market ${mi}: ${totalKept} orders kept, ${totalFilteredOut} thrown out (15%+ from oracle)`
 				);
 
 				const usingSwitchboardOnDemand = isVariant(
