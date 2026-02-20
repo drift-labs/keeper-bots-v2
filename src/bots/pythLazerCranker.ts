@@ -271,12 +271,7 @@ export class PythLazerCrankerBot implements Bot {
 			feedIdsStr,
 			priceMessage,
 		] of this.pythLazerClient.feedIdChunkToPriceMessage.entries()) {
-			const feedIds = this.pythLazerClient
-				.getPriceFeedIdsFromHash(feedIdsStr)
-				.filter(
-					(feedId) =>
-						feedId != null && !this.pythLazerClient?.isFeedIdStale(feedId)
-				);
+			const feedIds = this.pythLazerClient.getPriceFeedIdsFromHash(feedIdsStr);
 
 			const cus = Math.max(0, feedIds.length - 3) * 6_000 + 30_000;
 			const ixs = [
