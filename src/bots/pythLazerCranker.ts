@@ -22,12 +22,11 @@ import {
 import {
 	chunks,
 	getVersionedTransaction,
-	loadCommaDelimitToStringArray,
 	simulateAndGetTxWithCUs,
 	sleepMs,
 } from '../utils';
 import { Agent, setGlobalDispatcher } from 'undici';
-import { Channel, PriceFeedProperty } from '@pythnetwork/pyth-lazer-sdk';
+import { Channel } from '@pythnetwork/pyth-lazer-sdk';
 import { TxRecorder } from './common/txRecorder';
 
 setGlobalDispatcher(
@@ -38,10 +37,6 @@ setGlobalDispatcher(
 
 const SIM_CU_ESTIMATE_MULTIPLIER = 1.5;
 const DEFAULT_INTEVAL_MS = 30000;
-const FEED_PROPERTIES = process.env.PYTH_LAZER_FEED_PROPERTIES;
-const feedPropertiesParsed = FEED_PROPERTIES
-	? loadCommaDelimitToStringArray(FEED_PROPERTIES)
-	: undefined;
 
 export class PythLazerCrankerBot implements Bot {
 	private pythLazerClient?: PythLazerSubscriber;
@@ -224,6 +219,13 @@ export class PythLazerCrankerBot implements Bot {
 		logger.info(
 			`pythLazerChannel config: ${this.crankConfigs.pythLazerChannel}`
 		);
+		if (this.crankConfigs.feedProperties?.length) {
+			logger.info(
+				`pythLazerFeedProperties override: ${JSON.stringify(
+					this.crankConfigs.feedProperties
+				)}`
+			);
+		}
 		this.pythLazerClient = new PythLazerSubscriber(
 			this.globalConfig.lazerEndpoints!,
 			this.globalConfig.lazerToken!,
@@ -231,8 +233,7 @@ export class PythLazerCrankerBot implements Bot {
 			this.globalConfig.driftEnv,
 			undefined,
 			undefined,
-			this.crankConfigs.feedProperties ??
-				(feedPropertiesParsed as PriceFeedProperty[])
+			this.crankConfigs.feedProperties
 		);
 
 		await this.pythLazerClient.subscribe();
