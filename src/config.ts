@@ -13,6 +13,7 @@ import {
 	PerpMarkets,
 } from '@drift-labs/sdk';
 import { JitMakerConfig } from './bots/jitMaker';
+import { PriceFeedProperty } from '@pythnetwork/pyth-lazer-sdk';
 
 export type BaseBotConfig = {
 	botId: string;
@@ -133,6 +134,7 @@ export type PythLazerCrankerBotConfig = BaseBotConfig & {
 	txSuccessRateThreshold: number;
 	intervalMs: number;
 	onlyCrankUsedOracles?: boolean;
+	feedProperties?: PriceFeedProperty[];
 };
 
 export type SwitchboardCrankerBotConfig = BaseBotConfig & {

@@ -219,12 +219,21 @@ export class PythLazerCrankerBot implements Bot {
 		logger.info(
 			`pythLazerChannel config: ${this.crankConfigs.pythLazerChannel}`
 		);
+		if (this.crankConfigs.feedProperties?.length) {
+			logger.info(
+				`pythLazerFeedProperties override: ${JSON.stringify(
+					this.crankConfigs.feedProperties
+				)}`
+			);
+		}
 		this.pythLazerClient = new PythLazerSubscriber(
 			this.globalConfig.lazerEndpoints!,
 			this.globalConfig.lazerToken!,
 			feedIdChunks,
 			this.globalConfig.driftEnv,
-			undefined
+			undefined,
+			undefined,
+			this.crankConfigs.feedProperties
 		);
 
 		await this.pythLazerClient.subscribe();
