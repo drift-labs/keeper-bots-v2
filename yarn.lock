@@ -204,7 +204,7 @@ __metadata:
     "@project-serum/anchor": "npm:0.19.1-beta.1"
     "@project-serum/serum": "npm:0.13.65"
     "@pythnetwork/price-service-client": "npm:1.9.0"
-    "@pythnetwork/pyth-lazer-sdk": "npm:5.2.1"
+    "@pythnetwork/pyth-lazer-sdk": "npm:6.0.0"
     "@solana/spl-token": "npm:0.3.7"
     "@solana/web3.js": "npm:1.92.3"
     "@types/bn.js": "npm:5.1.5"
@@ -2193,6 +2193,19 @@ __metadata:
     ts-log: "npm:^2.2.7"
     ws: "npm:^8.18.0"
   checksum: 10c0/3ddbf963ff9f831b0e12a71094ed3a18625ff54666c9e83b8375da157e6cc753b946d9f1a8629c56d0c6b97961e36a194d1740defbabc65719b9cc6d77fa3565
+  languageName: node
+  linkType: hard
+
+"@pythnetwork/pyth-lazer-sdk@npm:6.0.0":
+  version: 6.0.0
+  resolution: "@pythnetwork/pyth-lazer-sdk@npm:6.0.0"
+  dependencies:
+    "@isaacs/ttlcache": "npm:^1.4.1"
+    buffer: "npm:^6.0.3"
+    isomorphic-ws: "npm:^5.0.0"
+    ts-log: "npm:^2.2.7"
+    ws: "npm:^8.18.0"
+  checksum: 10c0/2f364d168948ac18bdc62020845e1bcbc20d0ff69db036d2789f2fe223ca1c74886aaa07ecbcd68bb28cd927965d478e1ffad45146d5a19850ca04ba0499f38f
   languageName: node
   linkType: hard
 
