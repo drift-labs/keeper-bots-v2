@@ -119,7 +119,7 @@ enabledBots:
 # below are bot configs
 botConfigs:
   filler:
-    botId: "filler"
+    botId: 'filler'
     dryRun: false
     fillerPollingInterval: 6000
     metricsPort: 9464
@@ -134,7 +134,7 @@ botConfigs:
     simulateTxForCUEstimate: true
 
   spotFiller:
-    botId: "spot-filler"
+    botId: 'spot-filler'
     dryRun: false
     fillerPollingInterval: 6000
     metricsPort: 9464
@@ -142,7 +142,7 @@ botConfigs:
     simulateTxForCUEstimate: true
 
   liquidator:
-    botId: "liquidator"
+    botId: 'liquidator'
     dryRun: false
     metricsPort: 9465
     # if true will NOT attempt to sell off any inherited positions
@@ -194,12 +194,12 @@ botConfigs:
     spotDustValueThreshold: 10
 
   trigger:
-    botId: "trigger"
+    botId: 'trigger'
     dryRun: false
     metricsPort: 9465
 
   markTwapCrank:
-    botId: "mark-twap-cranker"
+    botId: 'mark-twap-cranker'
     dryRun: false
     metricsPort: 9465
     crankIntervalToMarketIndicies:
@@ -222,3 +222,21 @@ botConfigs:
         - 14
         - 15
         - 16
+
+  pythLazerCranker:
+    botId: 'pyth-lazer-cranker'
+    dryRun: false
+    intervalMs: 300
+    skipSimulation: true
+    onlyCrankUsedOracles: true
+    slotStalenessThresholdRestart: 150
+    txSuccessRateThreshold: 0.7
+    # Optional: override Pyth Lazer subscription feed properties (e.g. for new program deploys).
+    # feedProperties:
+    #   - price
+    #   - bestAskPrice
+    #   - bestBidPrice
+    #   - exponent
+    #   - feedUpdateTimestamp
+    pythLazerIdsByChannel:
+      'fixed_rate@200ms': [6]
