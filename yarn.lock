@@ -177,16 +177,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@drift-labs/jit-proxy@npm:0.21.156":
-  version: 0.21.156
-  resolution: "@drift-labs/jit-proxy@npm:0.21.156"
+"@drift-labs/jit-proxy@npm:0.21.157":
+  version: 0.21.157
+  resolution: "@drift-labs/jit-proxy@npm:0.21.157"
   dependencies:
     "@coral-xyz/anchor": "npm:0.29.0"
-    "@drift-labs/sdk": "npm:2.159.0-beta.4"
+    "@drift-labs/sdk": "npm:2.160.0-beta.0"
     "@solana/web3.js": "npm:1.98.0"
     tweetnacl-util: "npm:^0.15.1"
     typescript: "npm:5.4.5"
-  checksum: 10c0/b075e8eb1dca12b130d4c21593cbad704eaf0e3026f6efea12340888ed5ebd73b184b67a4eff3ab1ab0bfc5f451485fa5c0d290cc8f66d5f5c4cf5470fe42399
+  checksum: 10c0/47c31e3a0f965b9650930930e519c413dec07c75ab100be2403ed78c59eb21cf8f5b668ddba9dd78391c4bae10a450453ee7e59851043fcf4180bac13d4b1d05
   languageName: node
   linkType: hard
 
@@ -195,8 +195,8 @@ __metadata:
   resolution: "@drift-labs/keeper-bots-v2@workspace:."
   dependencies:
     "@drift-labs/common": "npm:1.0.20"
-    "@drift-labs/jit-proxy": "npm:0.21.156"
-    "@drift-labs/sdk": "npm:2.159.0-beta.4"
+    "@drift-labs/jit-proxy": "npm:0.21.157"
+    "@drift-labs/sdk": "npm:2.160.0-beta.0"
     "@opentelemetry/api": "npm:1.7.0"
     "@opentelemetry/auto-instrumentations-node": "npm:^0.62.1"
     "@opentelemetry/exporter-prometheus": "npm:0.31.0"
@@ -244,9 +244,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@drift-labs/sdk@npm:2.159.0-beta.4":
-  version: 2.159.0-beta.4
-  resolution: "@drift-labs/sdk@npm:2.159.0-beta.4"
+"@drift-labs/sdk@npm:2.160.0-beta.0":
+  version: 2.160.0-beta.0
+  resolution: "@drift-labs/sdk@npm:2.160.0-beta.0"
   dependencies:
     "@coral-xyz/anchor": "npm:0.29.0"
     "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
@@ -279,7 +279,7 @@ __metadata:
   dependenciesMeta:
     helius-laserstream:
       optional: true
-  checksum: 10c0/2e95340368e32ea3cdd99b8cd8693430c4f4a9c1ace8c71640db83b9c29df1ae3f75a126f699cfa5414d7020f713c191b326fd96506f74878e2f672f7ef34f95
+  checksum: 10c0/e2d221f6b9925a772ede2e681909cde68d259875edac075ed34602c2eb5987e1973d7683b0dd59e39fbbe490f2a00a28bd2e8121972e702d6eebb9d653b3bc23
   languageName: node
   linkType: hard
 
