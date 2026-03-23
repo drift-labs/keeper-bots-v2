@@ -153,6 +153,12 @@ export type LpPoolTargetBaseCrankerConfig = BaseBotConfig & {
 	lpPoolId: number;
 };
 
+export type FunXyzGasDropperConfig = BaseBotConfig & {
+	lamportsPerDrop?: number;
+	minAuthorityLamportsToSkip?: number;
+	maxSeenTxSigs?: number;
+};
+
 export type BotConfigMap = {
 	fillerMultithreaded?: FillerMultiThreadedConfig;
 	spotFillerMultithreaded?: FillerMultiThreadedConfig;
@@ -175,6 +181,7 @@ export type BotConfigMap = {
 	swiftPlacer?: BaseBotConfig;
 	jitMaker?: JitMakerConfig;
 	lpTargetBaseCranker?: LpPoolTargetBaseCrankerConfig;
+	funXyzGasDropper?: FunXyzGasDropperConfig;
 };
 
 export interface GlobalConfig {
@@ -539,6 +546,28 @@ export function loadConfigFromOpts(opts: any): Config {
 			botId: process.env.BOT_ID ?? 'crank',
 			metricsPort: 9464,
 			runOnce: opts.runOnce ?? false,
+		};
+	}
+
+	if (opts.funXyzGasDropper) {
+		config.enabledBots.push('funXyzGasDropper');
+		config.botConfigs!.funXyzGasDropper = {
+			dryRun: opts.dryRun ?? false,
+			botId: process.env.BOT_ID ?? 'funXyzGasDropper',
+			metricsPort: 9464,
+			runOnce: opts.runOnce ?? false,
+			lamportsPerDrop:
+				opts.funXyzLamportsPerDrop !== undefined
+					? parseInt(opts.funXyzLamportsPerDrop)
+					: 10_000,
+			minAuthorityLamportsToSkip:
+				opts.funXyzMinLamportsToSkip !== undefined
+					? parseInt(opts.funXyzMinLamportsToSkip)
+					: 0,
+			maxSeenTxSigs:
+				opts.funXyzMaxSeenTxSigs !== undefined
+					? parseInt(opts.funXyzMaxSeenTxSigs)
+					: 10_000,
 		};
 	}
 	return mergeDefaults(defaultConfig, config) as Config;

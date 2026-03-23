@@ -82,6 +82,7 @@ import { JitProxyClient, JitterSniper } from '@drift-labs/jit-proxy/lib';
 import { JetProxyTxSender } from './bots/common/jetTxSender';
 import { Agent, setGlobalDispatcher } from 'undici';
 import { timedCacheableLookup } from './bots/common/timedLookup';
+import { FunXyzGasDropperBot } from './bots/funXyzGasDropper';
 
 require('dotenv').config();
 const commitHash = process.env.COMMIT ?? '';
@@ -112,6 +113,25 @@ program
 	.option('--user-pnl-settler', 'Enable User PnL settler bot')
 	.option('--user-lp-settler', 'Settle active LP positions')
 	.option('--user-idle-flipper', 'Flips eligible users to idle')
+	.option(
+		'--fun-xyz-gas-dropper',
+		'Enable bot that sends small SOL top-ups after Fun.xyz deposits'
+	)
+	.option(
+		'--fun-xyz-lamports-per-drop <number>',
+		'Lamports to transfer per detected Fun.xyz deposit',
+		'10000'
+	)
+	.option(
+		'--fun-xyz-min-lamports-to-skip <number>',
+		'Skip transfer when authority already has at least this many lamports',
+		'0'
+	)
+	.option(
+		'--fun-xyz-max-seen-tx-sigs <number>',
+		'Maximum recent deposit tx signatures to cache for dedupe',
+		'10000'
+	)
 	.option('--mark-twap-crank', 'Enable bid/ask twap crank bot')
 	.option('--test-liveness', 'Purposefully fail liveness test after 1 minute')
 	.option(
@@ -451,7 +471,9 @@ const runBot = async () => {
 	});
 
 	let eventSubscriber: EventSubscriber | undefined = undefined;
-	if (config.global.eventSubscriber) {
+	const needsEventSubscriber =
+		config.global.eventSubscriber || configHasBot(config, 'funXyzGasDropper');
+	if (needsEventSubscriber) {
 		eventSubscriber = new EventSubscriber(connection, driftClient.program, {
 			maxTx: 4096,
 			maxEventsPerType: 4096,
@@ -913,6 +935,23 @@ const runBot = async () => {
 				pythPriceSubscriber,
 				[],
 				bundleSender
+			)
+		);
+	}
+
+	if (configHasBot(config, 'funXyzGasDropper')) {
+		needDriftClient = true;
+		if (!eventSubscriber) {
+			throw new Error(
+				'funXyzGasDropper requires eventSubscriber to be enabled'
+			);
+		}
+		bots.push(
+			new FunXyzGasDropperBot(
+				driftClient,
+				eventSubscriber,
+				config.botConfigs!.funXyzGasDropper!,
+				config.global.driftEnv
 			)
 		);
 	}
