@@ -177,16 +177,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@drift-labs/jit-proxy@npm:0.21.163":
-  version: 0.21.163
-  resolution: "@drift-labs/jit-proxy@npm:0.21.163"
+"@drift-labs/jit-proxy@npm:0.21.164":
+  version: 0.21.164
+  resolution: "@drift-labs/jit-proxy@npm:0.21.164"
   dependencies:
     "@coral-xyz/anchor": "npm:0.29.0"
-    "@drift-labs/sdk": "npm:2.161.0-beta.1"
+    "@drift-labs/sdk": "npm:2.161.0-beta.2"
     "@solana/web3.js": "npm:1.98.0"
     tweetnacl-util: "npm:^0.15.1"
     typescript: "npm:5.4.5"
-  checksum: 10c0/825d12cf1b180324c8a0e0415777556c4bf0047bb7f3771aaf168f545de0064454d0afbe8f259e9e3eacaa157985bfb01b4a8670e4e405c825c102915f00432d
+  checksum: 10c0/0afb0a751cfc78c21d64c7be3eb7bd8766f4701955d72468e296cf5482825fc78b99b4529a5a7cc2e941821ac1d763848fe9e7cb2f2a2a6f53e1e09a833dcfb6
   languageName: node
   linkType: hard
 
@@ -195,8 +195,8 @@ __metadata:
   resolution: "@drift-labs/keeper-bots-v2@workspace:."
   dependencies:
     "@drift-labs/common": "npm:1.0.20"
-    "@drift-labs/jit-proxy": "npm:0.21.163"
-    "@drift-labs/sdk": "npm:2.161.0-beta.1"
+    "@drift-labs/jit-proxy": "npm:0.21.164"
+    "@drift-labs/sdk": "npm:2.161.0-beta.2"
     "@opentelemetry/api": "npm:1.7.0"
     "@opentelemetry/auto-instrumentations-node": "npm:^0.62.1"
     "@opentelemetry/exporter-prometheus": "npm:0.31.0"
@@ -244,9 +244,9 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@drift-labs/sdk@npm:2.161.0-beta.1":
-  version: 2.161.0-beta.1
-  resolution: "@drift-labs/sdk@npm:2.161.0-beta.1"
+"@drift-labs/sdk@npm:2.161.0-beta.2":
+  version: 2.161.0-beta.2
+  resolution: "@drift-labs/sdk@npm:2.161.0-beta.2"
   dependencies:
     "@coral-xyz/anchor": "npm:0.29.0"
     "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
@@ -261,7 +261,7 @@ __metadata:
     "@solana/web3.js": "npm:1.98.0"
     "@switchboard-xyz/common": "npm:3.0.14"
     "@switchboard-xyz/on-demand": "npm:2.4.1"
-    "@triton-one/yellowstone-grpc": "npm:5.0.4"
+    "@triton-one/yellowstone-grpc": "npm:5.0.5"
     anchor-bankrun: "npm:0.3.0"
     gill: "npm:^0.10.2"
     helius-laserstream: "npm:0.1.8"
@@ -278,7 +278,7 @@ __metadata:
   dependenciesMeta:
     helius-laserstream:
       optional: true
-  checksum: 10c0/b5618fe22afbac0980a7d7e4a6b29db10e9686127b742074cce92470d49672a5f7eed38f6c2113947c6b079e7a787271f9a72a8ef51c6f445896d53958a0aefa
+  checksum: 10c0/b979f64a4b1b30a4efd1c6c70586fefe787f05e68d70cf411db3c6c78c19df36d95f0b012934b46f18064cb551c951250be5868649fb2b4e126596a9fd6aa53e
   languageName: node
   linkType: hard
 
@@ -3371,46 +3371,46 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@triton-one/yellowstone-grpc-napi-darwin-arm64@npm:0.0.8":
-  version: 0.0.8
-  resolution: "@triton-one/yellowstone-grpc-napi-darwin-arm64@npm:0.0.8"
+"@triton-one/yellowstone-grpc-napi-darwin-arm64@npm:0.0.10":
+  version: 0.0.10
+  resolution: "@triton-one/yellowstone-grpc-napi-darwin-arm64@npm:0.0.10"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"@triton-one/yellowstone-grpc-napi-darwin-x64@npm:0.0.8":
-  version: 0.0.8
-  resolution: "@triton-one/yellowstone-grpc-napi-darwin-x64@npm:0.0.8"
+"@triton-one/yellowstone-grpc-napi-darwin-x64@npm:0.0.10":
+  version: 0.0.10
+  resolution: "@triton-one/yellowstone-grpc-napi-darwin-x64@npm:0.0.10"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"@triton-one/yellowstone-grpc-napi-linux-x64-gnu@npm:0.0.8":
-  version: 0.0.8
-  resolution: "@triton-one/yellowstone-grpc-napi-linux-x64-gnu@npm:0.0.8"
+"@triton-one/yellowstone-grpc-napi-linux-x64-gnu@npm:0.0.10":
+  version: 0.0.10
+  resolution: "@triton-one/yellowstone-grpc-napi-linux-x64-gnu@npm:0.0.10"
   conditions: os=linux & cpu=x64
   languageName: node
   linkType: hard
 
-"@triton-one/yellowstone-grpc-napi-linux-x64-musl@npm:0.0.8":
-  version: 0.0.8
-  resolution: "@triton-one/yellowstone-grpc-napi-linux-x64-musl@npm:0.0.8"
+"@triton-one/yellowstone-grpc-napi-linux-x64-musl@npm:0.0.10":
+  version: 0.0.10
+  resolution: "@triton-one/yellowstone-grpc-napi-linux-x64-musl@npm:0.0.10"
   conditions: os=linux & cpu=x64
   languageName: node
   linkType: hard
 
-"@triton-one/yellowstone-grpc@npm:5.0.4":
-  version: 5.0.4
-  resolution: "@triton-one/yellowstone-grpc@npm:5.0.4"
+"@triton-one/yellowstone-grpc@npm:5.0.5":
+  version: 5.0.5
+  resolution: "@triton-one/yellowstone-grpc@npm:5.0.5"
   dependencies:
     "@bufbuild/protobuf": "npm:=2.10.2"
     "@solana/addresses": "npm:=5.1.0"
     "@solana/rpc-api": "npm:=5.1.0"
     "@solana/rpc-types": "npm:=5.1.0"
-    "@triton-one/yellowstone-grpc-napi-darwin-arm64": "npm:0.0.8"
-    "@triton-one/yellowstone-grpc-napi-darwin-x64": "npm:0.0.8"
-    "@triton-one/yellowstone-grpc-napi-linux-x64-gnu": "npm:0.0.8"
-    "@triton-one/yellowstone-grpc-napi-linux-x64-musl": "npm:0.0.8"
+    "@triton-one/yellowstone-grpc-napi-darwin-arm64": "npm:0.0.10"
+    "@triton-one/yellowstone-grpc-napi-darwin-x64": "npm:0.0.10"
+    "@triton-one/yellowstone-grpc-napi-linux-x64-gnu": "npm:0.0.10"
+    "@triton-one/yellowstone-grpc-napi-linux-x64-musl": "npm:0.0.10"
   dependenciesMeta:
     "@triton-one/yellowstone-grpc-napi-darwin-arm64":
       optional: true
@@ -3420,7 +3420,7 @@ __metadata:
       optional: true
     "@triton-one/yellowstone-grpc-napi-linux-x64-musl":
       optional: true
-  checksum: 10c0/8c8828c286e1a2eeeb9ae32d99cbe09cdfb545c92d3d79991c9f5d93c8942a759f4641438155c80032c0adf06a188d8b1983a5d40303fb07405b791f83f72229
+  checksum: 10c0/85dde15d93627cf761e2f7915e96592a60f726bbd20d1ac46ae08fa9d5b5a93d2a7b2a4b9a5b3f5b83a97d586ac028a936797b3173b1e65624e466e188f2496f
   languageName: node
   linkType: hard
 
