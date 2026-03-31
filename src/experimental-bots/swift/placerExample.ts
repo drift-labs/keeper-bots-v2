@@ -258,17 +258,9 @@ export class SwiftPlacer {
 								);
 								return;
 							}
-						} else {
-							if (signedMsgOrderParams.price.eq(ZERO)) {
-								console.error(
-									`${logPrefix}: limit order has no price: ${JSON.stringify(
-										signedMsgOrderParams
-									)}`
-								);
-								return;
-							}
 						}
 					}
+
 					const computeBudgetIxs: Array<TransactionInstruction> = [
 						ComputeBudgetProgram.setComputeUnitLimit({
 							units: 1_400_000,
