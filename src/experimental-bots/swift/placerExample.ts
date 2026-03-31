@@ -8,6 +8,7 @@ import {
 	getUserAccountPublicKey,
 	getUserStatsAccountPublicKey,
 	getVariant,
+	isOneOfVariant,
 	isVariant,
 	MakerInfo,
 	MarketType,
@@ -218,11 +219,58 @@ export class SwiftPlacer {
 					);
 					const takerUserAccount = takerUser.getUserAccount();
 
-					if (!signedMsgOrderParams.price) {
-						console.error(
-							`order has no price: ${JSON.stringify(signedMsgOrderParams)}`
+					const hasAuctionParams =
+						signedMsgOrderParams.auctionDuration &&
+						signedMsgOrderParams.auctionStartPrice &&
+						signedMsgOrderParams.auctionEndPrice;
+
+					if (hasAuctionParams) {
+						if (!signedMsgOrderParams.price) {
+							console.error(
+								`${logPrefix}: auction order has no price: ${JSON.stringify(
+									signedMsgOrderParams
+								)}`
+							);
+							return;
+						}
+					} else {
+						if (signedMsgOrderParams.baseAssetAmount.eq(ZERO)) {
+							console.error(
+								`${logPrefix}: order has zero baseAssetAmount: ${JSON.stringify(
+									signedMsgOrderParams
+								)}`
+							);
+							return;
+						}
+						const isTriggerOrder = isOneOfVariant(
+							signedMsgOrderParams.orderType,
+							['triggerMarket', 'triggerLimit']
 						);
-						return;
+						if (isTriggerOrder) {
+							if (
+								!signedMsgOrderParams.triggerPrice ||
+								signedMsgOrderParams.triggerPrice.eq(ZERO)
+							) {
+								console.error(
+									`${logPrefix}: trigger order has no triggerPrice: ${JSON.stringify(
+										signedMsgOrderParams
+									)}`
+								);
+								return;
+							}
+						} else {
+							if (
+								!signedMsgOrderParams.price ||
+								signedMsgOrderParams.price.eq(ZERO)
+							) {
+								console.error(
+									`${logPrefix}: limit order has no price: ${JSON.stringify(
+										signedMsgOrderParams
+									)}`
+								);
+								return;
+							}
+						}
 					}
 					const computeBudgetIxs: Array<TransactionInstruction> = [
 						ComputeBudgetProgram.setComputeUnitLimit({
@@ -255,6 +303,60 @@ export class SwiftPlacer {
 						},
 						computeBudgetIxs
 					);
+
+					if (!hasAuctionParams) {
+						// Place-only path: no fill ix, no maker fetching
+						const orderStr = prettyPrintOrderParams(
+							signedMessage.signedMsgOrderParams
+						);
+						logger.info(`${logPrefix}: placing order (no fill): ${orderStr}`);
+
+						const lookupTableAccounts =
+							await this.driftClient.fetchAllLookupTableAccounts();
+						const recentBlockhash =
+							this.blockhashSubscriber.getLatestBlockhash()?.blockhash;
+						if (!recentBlockhash) {
+							logger.error(`${logPrefix}: no blockhash available`);
+							return;
+						}
+
+						let resp: SimulateAndGetTxWithCUsResponse | undefined;
+						try {
+							resp = await simulateAndGetTxWithCUs({
+								connection: this.driftClient.connection,
+								payerPublicKey: this.driftClient.wallet.payer!.publicKey,
+								ixs: [...computeBudgetIxs, ...ixs],
+								cuLimitMultiplier: 2,
+								lookupTableAccounts,
+								doSimulation: true,
+								recentBlockhash,
+							});
+						} catch (e) {
+							logger.error(`${logPrefix}: sim place-only order failed: ${e}`);
+							return;
+						}
+
+						if (resp.simError) {
+							logger.info(
+								`${logPrefix}: ${JSON.stringify(resp.simError)}, ${
+									resp.simTxLogs
+								}`
+							);
+							return;
+						}
+
+						this.driftClient.txSender
+							.sendVersionedTransaction(resp.tx)
+							.then((r) => {
+								logger.info(`${logPrefix}: placed order (no fill): ${r.txSig}`);
+							})
+							.catch((error) => {
+								logger.error(
+									`${logPrefix}: place order (no fill) failed: ${error}`
+								);
+							});
+						return;
+					}
 
 					const isOrderLong = isVariant(signedMsgOrderParams.direction, 'long');
 					let topMakers: string[] = [];
