@@ -684,21 +684,44 @@ export class SwiftPlacer {
 }
 
 function prettyPrintOrderParams(orderParams: OrderParams) {
-	const orderParamsStr = `marketIndex: ${
+	const base = `marketIndex: ${
 		orderParams.marketIndex
-	} | orderType: ${getVariant(
-		orderParams.orderType
-	)}| baseAssetAmount:${convertToNumber(
+	} | orderType: ${getVariant(orderParams.orderType)} | direction: ${getVariant(
+		orderParams.direction
+	)} | baseAssetAmount: ${convertToNumber(
 		orderParams.baseAssetAmount,
 		BASE_PRECISION
-	)}| auctionDuration:${
-		orderParams.auctionDuration
-	}| auctionStartPrice:${convertToNumber(
-		orderParams.auctionStartPrice!,
+	)}`;
+
+	if (
+		orderParams.auctionDuration != null &&
+		orderParams.auctionStartPrice != null &&
+		orderParams.auctionEndPrice != null
+	) {
+		return `${base} | auctionDuration: ${
+			orderParams.auctionDuration
+		} | auctionStartPrice: ${convertToNumber(
+			orderParams.auctionStartPrice,
+			PRICE_PRECISION
+		)} | auctionEndPrice: ${convertToNumber(
+			orderParams.auctionEndPrice,
+			PRICE_PRECISION
+		)}`;
+	}
+
+	const isTriggerOrder = isOneOfVariant(orderParams.orderType, [
+		'triggerMarket',
+		'triggerLimit',
+	]);
+	if (isTriggerOrder) {
+		return `${base} | triggerPrice: ${convertToNumber(
+			orderParams.triggerPrice!,
+			PRICE_PRECISION
+		)} | triggerCondition: ${getVariant(orderParams.triggerCondition)}`;
+	}
+
+	return `${base} | price: ${convertToNumber(
+		orderParams.price,
 		PRICE_PRECISION
-	)}| auctionEndPrice:${convertToNumber(
-		orderParams.auctionEndPrice!,
-		PRICE_PRECISION
-	)}| `;
-	return orderParamsStr;
+	)}`;
 }
