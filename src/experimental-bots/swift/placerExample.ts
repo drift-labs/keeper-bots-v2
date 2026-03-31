@@ -302,7 +302,6 @@ export class SwiftPlacer {
 					);
 
 					if (!hasAuctionParams) {
-						// Place-only path: no fill ix, no maker fetching
 						const orderStr = prettyPrintOrderParams(
 							signedMessage.signedMsgOrderParams
 						);
@@ -317,22 +316,10 @@ export class SwiftPlacer {
 							return;
 						}
 
-						const hasPreDeposit = preDepositTx.length > 0;
-						if (hasPreDeposit) {
-							logger.info(`${logPrefix}: order with deposit: ${preDepositTx}`);
-							const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
-							this.driftClient.txSender
-								.sendRawTransaction(preDepositTxRaw, {
-									skipPreflight: true,
-									maxRetries: 0,
-								})
-								.then((res) => {
-									logger.info(`sent deposit tx: ${res.txSig}@${res.slot}`);
-								})
-								.catch((err) => {
-									logger.warn(`failed deposit tx: ${err}`);
-								});
-						}
+						const hasPreDeposit = this.maybeSendPreDepositTx(
+							logPrefix,
+							preDepositTx
+						);
 
 						let resp: SimulateAndGetTxWithCUsResponse | undefined;
 						try {
@@ -524,22 +511,10 @@ export class SwiftPlacer {
 						includeFillIx = false;
 					}
 
-					const hasPreDeposit = preDepositTx.length > 0;
-					if (hasPreDeposit) {
-						logger.info(`${logPrefix}: order with deposit: ${preDepositTx}`);
-						const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
-						this.driftClient.txSender
-							.sendRawTransaction(preDepositTxRaw, {
-								skipPreflight: true,
-								maxRetries: 0,
-							})
-							.then((res) => {
-								logger.info(`sent deposit tx: ${res.txSig}@${res.slot}`);
-							})
-							.catch((err) => {
-								logger.warn(`failed deposit tx: ${err}`);
-							});
-					}
+					const hasPreDeposit = this.maybeSendPreDepositTx(
+						logPrefix,
+						preDepositTx
+					);
 
 					let resp: SimulateAndGetTxWithCUsResponse | undefined;
 					const simIxs = includeFillIx
@@ -668,6 +643,27 @@ export class SwiftPlacer {
 			console.warn('No heartbeat received within 60 seconds, reconnecting...');
 			this.reconnect();
 		}, this.heartbeatIntervalMs);
+	}
+
+	private maybeSendPreDepositTx(
+		logPrefix: string,
+		preDepositTx: string
+	): boolean {
+		if (!preDepositTx.length) return false;
+		logger.info(`${logPrefix}: order with deposit: ${preDepositTx}`);
+		const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
+		this.driftClient.txSender
+			.sendRawTransaction(preDepositTxRaw, {
+				skipPreflight: true,
+				maxRetries: 0,
+			})
+			.then((res) => {
+				logger.info(`sent deposit tx: ${res.txSig}@${res.slot}`);
+			})
+			.catch((err) => {
+				logger.warn(`failed deposit tx: ${err}`);
+			});
+		return true;
 	}
 
 	private reconnect() {
