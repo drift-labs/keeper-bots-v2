@@ -220,9 +220,9 @@ export class SwiftPlacer {
 					const takerUserAccount = takerUser.getUserAccount();
 
 					const hasAuctionParams =
-						signedMsgOrderParams.auctionDuration &&
-						signedMsgOrderParams.auctionStartPrice &&
-						signedMsgOrderParams.auctionEndPrice;
+						signedMsgOrderParams.auctionDuration != null &&
+						signedMsgOrderParams.auctionStartPrice != null &&
+						signedMsgOrderParams.auctionEndPrice != null;
 
 					if (hasAuctionParams) {
 						if (!signedMsgOrderParams.price) {
@@ -259,10 +259,7 @@ export class SwiftPlacer {
 								return;
 							}
 						} else {
-							if (
-								!signedMsgOrderParams.price ||
-								signedMsgOrderParams.price.eq(ZERO)
-							) {
+							if (signedMsgOrderParams.price.eq(ZERO)) {
 								console.error(
 									`${logPrefix}: limit order has no price: ${JSON.stringify(
 										signedMsgOrderParams
@@ -320,6 +317,23 @@ export class SwiftPlacer {
 							return;
 						}
 
+						const hasPreDeposit = preDepositTx.length > 0;
+						if (hasPreDeposit) {
+							logger.info(`${logPrefix}: order with deposit: ${preDepositTx}`);
+							const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
+							this.driftClient.txSender
+								.sendRawTransaction(preDepositTxRaw, {
+									skipPreflight: true,
+									maxRetries: 0,
+								})
+								.then((res) => {
+									logger.info(`sent deposit tx: ${res.txSig}@${res.slot}`);
+								})
+								.catch((err) => {
+									logger.warn(`failed deposit tx: ${err}`);
+								});
+						}
+
 						let resp: SimulateAndGetTxWithCUsResponse | undefined;
 						try {
 							resp = await simulateAndGetTxWithCUs({
@@ -336,7 +350,7 @@ export class SwiftPlacer {
 							return;
 						}
 
-						if (resp.simError) {
+						if (!hasPreDeposit && resp.simError) {
 							logger.info(
 								`${logPrefix}: ${JSON.stringify(resp.simError)}, ${
 									resp.simTxLogs
