@@ -8,6 +8,7 @@ import {
 	getUserAccountPublicKey,
 	getUserStatsAccountPublicKey,
 	getVariant,
+	isOneOfVariant,
 	isVariant,
 	MakerInfo,
 	MarketType,
@@ -218,12 +219,48 @@ export class SwiftPlacer {
 					);
 					const takerUserAccount = takerUser.getUserAccount();
 
-					if (!signedMsgOrderParams.price) {
-						console.error(
-							`order has no price: ${JSON.stringify(signedMsgOrderParams)}`
+					const hasAuctionParams =
+						signedMsgOrderParams.auctionDuration != null &&
+						signedMsgOrderParams.auctionStartPrice != null &&
+						signedMsgOrderParams.auctionEndPrice != null;
+
+					if (hasAuctionParams) {
+						if (!signedMsgOrderParams.price) {
+							console.error(
+								`${logPrefix}: auction order has no price: ${JSON.stringify(
+									signedMsgOrderParams
+								)}`
+							);
+							return;
+						}
+					} else {
+						if (signedMsgOrderParams.baseAssetAmount.eq(ZERO)) {
+							console.error(
+								`${logPrefix}: order has zero baseAssetAmount: ${JSON.stringify(
+									signedMsgOrderParams
+								)}`
+							);
+							return;
+						}
+						const isTriggerOrder = isOneOfVariant(
+							signedMsgOrderParams.orderType,
+							['triggerMarket', 'triggerLimit']
 						);
-						return;
+						if (isTriggerOrder) {
+							if (
+								!signedMsgOrderParams.triggerPrice ||
+								signedMsgOrderParams.triggerPrice.eq(ZERO)
+							) {
+								console.error(
+									`${logPrefix}: trigger order has no triggerPrice: ${JSON.stringify(
+										signedMsgOrderParams
+									)}`
+								);
+								return;
+							}
+						}
 					}
+
 					const computeBudgetIxs: Array<TransactionInstruction> = [
 						ComputeBudgetProgram.setComputeUnitLimit({
 							units: 1_400_000,
@@ -255,6 +292,64 @@ export class SwiftPlacer {
 						},
 						computeBudgetIxs
 					);
+
+					if (!hasAuctionParams) {
+						const orderStr = prettyPrintOrderParams(
+							signedMessage.signedMsgOrderParams
+						);
+						logger.info(`${logPrefix}: placing order (no fill): ${orderStr}`);
+
+						const lookupTableAccounts =
+							await this.driftClient.fetchAllLookupTableAccounts();
+						const recentBlockhash =
+							this.blockhashSubscriber.getLatestBlockhash()?.blockhash;
+						if (!recentBlockhash) {
+							logger.error(`${logPrefix}: no blockhash available`);
+							return;
+						}
+
+						const hasPreDeposit = this.maybeSendPreDepositTx(
+							logPrefix,
+							preDepositTx
+						);
+
+						let resp: SimulateAndGetTxWithCUsResponse | undefined;
+						try {
+							resp = await simulateAndGetTxWithCUs({
+								connection: this.driftClient.connection,
+								payerPublicKey: this.driftClient.wallet.payer!.publicKey,
+								ixs: [...computeBudgetIxs, ...ixs],
+								cuLimitMultiplier: 2,
+								lookupTableAccounts,
+								doSimulation: true,
+								recentBlockhash,
+							});
+						} catch (e) {
+							logger.error(`${logPrefix}: sim place-only order failed: ${e}`);
+							return;
+						}
+
+						if (!hasPreDeposit && resp.simError) {
+							logger.info(
+								`${logPrefix}: ${JSON.stringify(resp.simError)}, ${
+									resp.simTxLogs
+								}`
+							);
+							return;
+						}
+
+						this.driftClient.txSender
+							.sendVersionedTransaction(resp.tx)
+							.then((r) => {
+								logger.info(`${logPrefix}: placed order (no fill): ${r.txSig}`);
+							})
+							.catch((error) => {
+								logger.error(
+									`${logPrefix}: place order (no fill) failed: ${error}`
+								);
+							});
+						return;
+					}
 
 					const isOrderLong = isVariant(signedMsgOrderParams.direction, 'long');
 					let topMakers: string[] = [];
@@ -408,22 +503,10 @@ export class SwiftPlacer {
 						includeFillIx = false;
 					}
 
-					const hasPreDeposit = preDepositTx.length > 0;
-					if (hasPreDeposit) {
-						logger.info(`${logPrefix}: order with deposit: ${preDepositTx}`);
-						const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
-						this.driftClient.txSender
-							.sendRawTransaction(preDepositTxRaw, {
-								skipPreflight: true,
-								maxRetries: 0,
-							})
-							.then((res) => {
-								logger.info(`sent deposit tx: ${res.txSig}@${res.slot}`);
-							})
-							.catch((err) => {
-								logger.warn(`failed deposit tx: ${err}`);
-							});
-					}
+					const hasPreDeposit = this.maybeSendPreDepositTx(
+						logPrefix,
+						preDepositTx
+					);
 
 					let resp: SimulateAndGetTxWithCUsResponse | undefined;
 					const simIxs = includeFillIx
@@ -554,6 +637,27 @@ export class SwiftPlacer {
 		}, this.heartbeatIntervalMs);
 	}
 
+	private maybeSendPreDepositTx(
+		logPrefix: string,
+		preDepositTx: string
+	): boolean {
+		if (!preDepositTx.length) return false;
+		logger.info(`${logPrefix}: order with deposit: ${preDepositTx}`);
+		const preDepositTxRaw = Buffer.from(preDepositTx, 'base64');
+		this.driftClient.txSender
+			.sendRawTransaction(preDepositTxRaw, {
+				skipPreflight: true,
+				maxRetries: 0,
+			})
+			.then((res) => {
+				logger.info(`sent deposit tx: ${res.txSig}@${res.slot}`);
+			})
+			.catch((err) => {
+				logger.warn(`failed deposit tx: ${err}`);
+			});
+		return true;
+	}
+
 	private reconnect() {
 		if (this.ws) {
 			this.ws.removeAllListeners();
@@ -568,21 +672,44 @@ export class SwiftPlacer {
 }
 
 function prettyPrintOrderParams(orderParams: OrderParams) {
-	const orderParamsStr = `marketIndex: ${
+	const base = `marketIndex: ${
 		orderParams.marketIndex
-	} | orderType: ${getVariant(
-		orderParams.orderType
-	)}| baseAssetAmount:${convertToNumber(
+	} | orderType: ${getVariant(orderParams.orderType)} | direction: ${getVariant(
+		orderParams.direction
+	)} | baseAssetAmount: ${convertToNumber(
 		orderParams.baseAssetAmount,
 		BASE_PRECISION
-	)}| auctionDuration:${
-		orderParams.auctionDuration
-	}| auctionStartPrice:${convertToNumber(
-		orderParams.auctionStartPrice!,
+	)}`;
+
+	if (
+		orderParams.auctionDuration != null &&
+		orderParams.auctionStartPrice != null &&
+		orderParams.auctionEndPrice != null
+	) {
+		return `${base} | auctionDuration: ${
+			orderParams.auctionDuration
+		} | auctionStartPrice: ${convertToNumber(
+			orderParams.auctionStartPrice,
+			PRICE_PRECISION
+		)} | auctionEndPrice: ${convertToNumber(
+			orderParams.auctionEndPrice,
+			PRICE_PRECISION
+		)}`;
+	}
+
+	const isTriggerOrder = isOneOfVariant(orderParams.orderType, [
+		'triggerMarket',
+		'triggerLimit',
+	]);
+	if (isTriggerOrder) {
+		return `${base} | triggerPrice: ${convertToNumber(
+			orderParams.triggerPrice!,
+			PRICE_PRECISION
+		)} | triggerCondition: ${getVariant(orderParams.triggerCondition)}`;
+	}
+
+	return `${base} | price: ${convertToNumber(
+		orderParams.price,
 		PRICE_PRECISION
-	)}| auctionEndPrice:${convertToNumber(
-		orderParams.auctionEndPrice!,
-		PRICE_PRECISION
-	)}| `;
-	return orderParamsStr;
+	)}`;
 }
