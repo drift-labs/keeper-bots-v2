@@ -24,8 +24,8 @@
 		"@types/node": "24.0.0",
 		"async": "3.2.5",
 		"async-mutex": "0.3.2",
-		"aws-sdk": "2.1511.0",
-		"axios": "1.7.7",
+		"aws-sdk": "2.1693.0",
+		"axios": "1.15.2",
 		"cacheable-lookup": "6",
 		"commander": "9.5.0",
 		"dotenv": "10.0.0",
@@ -35,10 +35,10 @@
 		"tweetnacl": "1.0.3",
 		"tweetnacl-util": "0.15.1",
 		"typescript": "5.9.3",
-		"undici": "6.19.2",
+		"undici": "6.24.0",
 		"winston": "3.11.0",
 		"ws": "8.18.0",
-		"yaml": "2.3.4"
+		"yaml": "2.8.3"
 	},
 	"resolutions": {
 		"@solana/web3.js": "1.98.0",
@@ -64,7 +64,7 @@
 		"@typescript-eslint/eslint-plugin": "5.62.0",
 		"@typescript-eslint/parser": "4.33.0",
 		"chai": "4.3.10",
-		"esbuild": "0.24.0",
+		"esbuild": "0.25.0",
 		"eslint": "7.32.0",
 		"eslint-config-prettier": "8.10.0",
 		"eslint-plugin-prettier": "3.4.1",
