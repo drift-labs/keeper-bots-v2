@@ -72,7 +72,6 @@ import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 import { BundleSender } from './bundleSender';
 import { DriftStateWatcher, StateChecks } from './driftStateWatcher';
 import { webhookMessage } from './webhook';
-import { PythCrankerBot } from './bots/pythCranker';
 import { SwitchboardCrankerBot } from './bots/switchboardCranker';
 import { PythLazerCrankerBot } from './bots/pythLazerCranker';
 import { JitMaker } from './bots/jitMaker';
@@ -573,23 +572,6 @@ const runBot = async () => {
 	let needDriftStateWatcher = false;
 	let needDriftClient = false;
 
-	if (configHasBot(config, 'pythCranker')) {
-		needPythPriceSubscriber = true;
-		needPriorityFeeSubscriber = true;
-		needDriftStateWatcher = true;
-
-		bots.push(
-			new PythCrankerBot(
-				config.global,
-				config.botConfigs!.pythCranker!,
-				driftClient,
-				slotSubscriber,
-				priorityFeeSubscriber,
-				bundleSender,
-				[]
-			)
-		);
-	}
 	if (configHasBot(config, 'pythLazerCranker')) {
 		needPriorityFeeSubscriber = true;
 		needDriftClient = true;
