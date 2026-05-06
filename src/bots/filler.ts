@@ -98,7 +98,6 @@ import { BundleSender, JITO_METRIC_TYPES } from '../bundleSender';
 import { Metrics } from '../metrics';
 import { LRUCache } from 'lru-cache';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
-import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { TxThreaded } from './common/txThreaded';
 import { NodeToTriggerWithMakers } from '../experimental-bots/filler-common/types';
 import { PythLazerSubscriber } from '../pythLazerSubscriber';
@@ -242,7 +241,6 @@ export class FillerBot extends TxThreaded implements Bot {
 	protected minGasBalanceToFill: number;
 	protected rebalanceSettledPnlThreshold: BN;
 
-	pythPriceSubscriber?: PythPriceFeedSubscriber;
 	pythLazerSubscriber?: PythLazerSubscriber;
 
 	constructor(
@@ -256,7 +254,6 @@ export class FillerBot extends TxThreaded implements Bot {
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
 		bundleSender?: BundleSender,
-		pythPriceSubscriber?: PythPriceFeedSubscriber,
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		super();
@@ -309,7 +306,6 @@ export class FillerBot extends TxThreaded implements Bot {
 			`${this.name}: jito enabled: ${this.bundleSender !== undefined}`
 		);
 
-		this.pythPriceSubscriber = pythPriceSubscriber;
 		this.lutAccounts = lookupTableAccounts;
 
 		if (
@@ -1731,7 +1727,6 @@ export class FillerBot extends TxThreaded implements Bot {
 
 			let removeLastIxPostSim = this.revertOnFailure;
 			if (
-				this.pythPriceSubscriber &&
 				this.pythLazerSubscriber &&
 				((makerInfos.length == 2 && !referrerInfo) || makerInfos.length < 2)
 			) {
@@ -1964,7 +1959,7 @@ export class FillerBot extends TxThreaded implements Bot {
 			}
 
 			let removeLastIxPostSim = this.revertOnFailure;
-			if (this.pythPriceSubscriber) {
+			if (this.pythLazerSubscriber) {
 				const pythIxs = await this.getPythIxsFromNode(nodeToTrigger, ixs);
 				ixs.push(...pythIxs);
 				removeLastIxPostSim = false;

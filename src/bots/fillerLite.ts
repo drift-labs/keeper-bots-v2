@@ -20,7 +20,6 @@ import { FillerBot } from './filler';
 
 import { sleepMs } from '../utils';
 import { BundleSender } from '../bundleSender';
-import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 
 export class FillerLiteBot extends FillerBot {
 	protected orderSubscriber: OrderSubscriber;
@@ -34,7 +33,6 @@ export class FillerLiteBot extends FillerBot {
 		priorityFeeSubscriber: PriorityFeeSubscriber,
 		blockhashSubscriber: BlockhashSubscriber,
 		bundleSender?: BundleSender,
-		pythPriceFeedSubscriber?: PythPriceFeedSubscriber,
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		super(
@@ -48,7 +46,6 @@ export class FillerLiteBot extends FillerBot {
 			priorityFeeSubscriber,
 			blockhashSubscriber,
 			bundleSender,
-			pythPriceFeedSubscriber,
 			lookupTableAccounts
 		);
 

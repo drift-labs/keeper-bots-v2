@@ -104,7 +104,6 @@ import {
 } from '../../bots/common/txLogParse';
 import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { ChildProcess } from 'child_process';
-import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 import { PythLazerSubscriber } from '../../pythLazerSubscriber';
 import path from 'path';
 import { RedisClient, RedisClientPrefix } from '@drift/common/clients';
@@ -244,9 +243,6 @@ export class FillerMultithreaded {
 	protected marketIndexes: Array<number[]>;
 	protected marketIndexesFlattened: number[];
 
-	protected pythPriceSubscriber?: PythPriceFeedSubscriber;
-	protected latestPythVaas?: Map<string, string>; // priceFeedId -> vaa
-	protected marketIndexesToPriceIds = new Map<number, string>();
 	protected pythLazerSubscriber?: PythLazerSubscriber;
 
 	constructor(
@@ -256,7 +252,6 @@ export class FillerMultithreaded {
 		slotSubscriber: SlotSubscriber,
 		runtimeSpec: RuntimeSpec,
 		bundleSender?: BundleSender,
-		pythPriceSubscriber?: PythPriceFeedSubscriber,
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
@@ -277,9 +272,6 @@ export class FillerMultithreaded {
 			);
 		} else {
 			this.txConfirmationConnection = this.driftClient.connection;
-		}
-		if (pythPriceSubscriber) {
-			this.pythPriceSubscriber = pythPriceSubscriber;
 		}
 		this.lookupTableAccounts = lookupTableAccounts;
 
@@ -427,21 +419,6 @@ export class FillerMultithreaded {
 		await this.blockhashSubscriber.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
 		await this.pythLazerSubscriber?.subscribe();
-
-		const feedIds: string[] = PerpMarkets[this.globalConfig.driftEnv!]
-			.filter(
-				(market) =>
-					this.marketIndexesFlattened.includes(market.marketIndex) &&
-					isOneOfVariant(market.oracleSource, [
-						'pyth1MPull',
-						'pyth1KPull',
-						'pythPull',
-					])
-			)
-			.map((m) => m.pythFeedId) as string[];
-		if (feedIds.length > 0) {
-			await this.pythPriceSubscriber?.subscribe(feedIds);
-		}
 
 		const fillerSolBalance = await this.driftClient.connection.getBalance(
 			this.driftClient.authority
@@ -1109,10 +1086,6 @@ export class FillerMultithreaded {
 			return [];
 		}
 
-		if (!this.pythPriceSubscriber) {
-			throw new Error('Pyth price subscriber not initialized');
-		}
-
 		let pythIxs: TransactionInstruction[] = [];
 		if (
 			isVariant(
@@ -1543,7 +1516,7 @@ export class FillerMultithreaded {
 				let removeLastIxPostSim = this.revertOnFailure;
 				const pythIxs: TransactionInstruction[] = [];
 				if (
-					this.pythPriceSubscriber &&
+					this.pythLazerSubscriber &&
 					((makerInfos.length === 2 && !referrerInfo) || makerInfos.length < 2)
 				) {
 					const ixs = await this.getPythIxsFromNode(nodeToFill);
@@ -1607,7 +1580,7 @@ export class FillerMultithreaded {
 					true,
 					this.lookupTableAccounts
 				).bytes;
-				if (txSize > PACKET_DATA_SIZE && this.pythPriceSubscriber) {
+				if (txSize > PACKET_DATA_SIZE && this.pythLazerSubscriber) {
 					logger.info(`tx too large, removing pyth ixs.
 							keys: ${ixsToUse.map((ix) => ix.keys.map((key) => key.pubkey.toString()))}
 							total number of maker positions: ${makerInfos.reduce(
@@ -1795,7 +1768,7 @@ export class FillerMultithreaded {
 
 		let removeLastIxPostSim = this.revertOnFailure && !isSignedMsg;
 		const pythIxs: TransactionInstruction[] = [];
-		if (this.pythPriceSubscriber && makerInfos.length <= 2) {
+		if (this.pythLazerSubscriber && makerInfos.length <= 2) {
 			pythIxs.push(
 				...(await this.getPythIxsFromNode(
 					nodeToFill,

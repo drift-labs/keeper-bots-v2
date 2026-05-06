@@ -39,9 +39,7 @@ import {
 	simulateAndGetTxWithCUs,
 	SimulateAndGetTxWithCUsResponse,
 } from '../utils';
-import { PythPriceFeedSubscriber } from '../pythPriceFeedSubscriber';
 import { PythLazerSubscriber } from '../pythLazerSubscriber';
-import { PythPullClient } from '@drift-labs/sdk';
 import { BundleSender } from '../bundleSender';
 
 const CU_EST_MULTIPLIER = 1.4;
@@ -54,10 +52,6 @@ const MAX_PRIORITY_FEE = process.env.MAX_PRIORITY_FEE
 
 const CACHED_BLOCKHASH_OFFSET = 5;
 
-const SLOT_STALENESS_THRESHOLD_RESTART = process.env
-	.SLOT_STALENESS_THRESHOLD_RESTART
-	? parseInt(process.env.SLOT_STALENESS_THRESHOLD_RESTART) || 300
-	: 300;
 const TX_LAND_RATE_THRESHOLD = process.env.TX_LAND_RATE_THRESHOLD
 	? parseFloat(process.env.TX_LAND_RATE_THRESHOLD) || 0.5
 	: 0.5;
@@ -230,9 +224,7 @@ export class MakerBidAskTwapCrank implements Bot {
 
 	private watchdogTimerMutex = new Mutex();
 	private watchdogTimerLastPatTime = Date.now();
-	private pythPriceSubscriber?: PythPriceFeedSubscriber;
 	private pythLazerSubscriber?: PythLazerSubscriber;
-	private pythPullOracleClient: PythPullClient;
 	private pythHealthy: boolean = true;
 	private lookupTableAccounts: AddressLookupTableAccount[];
 	private blockhashSubscriber: BlockhashSubscriber;
@@ -250,7 +242,6 @@ export class MakerBidAskTwapCrank implements Bot {
 		globalConfig: GlobalConfig,
 		runOnce: boolean,
 		blockhashSubscriber: BlockhashSubscriber,
-		pythPriceSubscriber?: PythPriceFeedSubscriber,
 		lookupTableAccounts: AddressLookupTableAccount[] = [],
 		bundleSender?: BundleSender
 	) {
@@ -261,9 +252,7 @@ export class MakerBidAskTwapCrank implements Bot {
 		this.globalConfig = globalConfig;
 		this.driftClient = driftClient;
 		this.userMap = userMap;
-		this.pythPriceSubscriber = pythPriceSubscriber;
 		this.lookupTableAccounts = lookupTableAccounts;
-		this.pythPullOracleClient = new PythPullClient(this.driftClient.connection);
 		this.bundleSender = bundleSender;
 		this.crankIntervalToMarketIndicies = config.crankIntervalToMarketIndicies;
 		this.blockhashSubscriber = blockhashSubscriber;
@@ -734,26 +723,15 @@ export class MakerBidAskTwapCrank implements Bot {
 					);
 				}
 
-				let pythIxsPushed = false;
 				if (
-					this.pythPriceSubscriber &&
+					this.pythLazerSubscriber &&
 					isOneOfVariant(
 						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-						[
-							'pythPull',
-							'pyth1KPull',
-							'pyth1MPull',
-							'pythStableCoinPull',
-							'pythLazer',
-							'pythLazer1K',
-							'pythLazer1M',
-							'pythLazerStableCoin',
-						]
+						['pythLazer', 'pythLazer1K', 'pythLazer1M', 'pythLazerStableCoin']
 					)
 				) {
 					const pythIxs = await this.getPythIxsFromTwapCrankInfo(mi, ixs);
 					ixs.push(...pythIxs);
-					pythIxsPushed = true;
 				}
 
 				const concatenatedList = [
@@ -812,48 +790,7 @@ export class MakerBidAskTwapCrank implements Bot {
 				}
 				// logger.info(`[${this.name}] sent tx for market: ${mi}`);
 
-				let restartSignal = false;
-				// Check if this change caused the pyth price to update
-				// TODO: move into own loop
-				if (
-					pythIxsPushed &&
-					isOneOfVariant(
-						this.driftClient.getPerpMarketAccount(mi)!.amm.oracleSource,
-						['pythPull', 'pyth1KPull', 'pyth1MPull', 'pythStableCoinPull']
-					)
-				) {
-					const tuple = await promiseTimeout(
-						Promise.all([
-							this.driftClient.connection.getAccountInfo(
-								this.driftClient.getPerpMarketAccount(mi)!.amm.oracle
-							),
-							this.driftClient.connection.getSlot(),
-						]),
-						RPC_TIMEOUT_MS
-					);
-					if (tuple) {
-						const [data, currentSlot] = tuple;
-						if (data) {
-							const pythData =
-								this.pythPullOracleClient.getOraclePriceDataFromBuffer(
-									data.data
-								);
-							const slotDelay = currentSlot - pythData.slot.toNumber();
-							if (slotDelay > SLOT_STALENESS_THRESHOLD_RESTART) {
-								logger.info(
-									`[${this.name}] oracle slot stale for market: ${mi}, slot delay: ${slotDelay}`
-								);
-								restartSignal = true;
-							}
-						}
-					} else {
-						logger.warn(
-							`[${this.name}] getAccountInfo/getSlot timed out after ${RPC_TIMEOUT_MS}ms (market: ${mi})`
-						);
-					}
-				}
-
-				return { restartSignal };
+				return { restartSignal: false };
 			};
 
 			if (useJitoGlobal) {

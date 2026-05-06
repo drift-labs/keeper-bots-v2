@@ -18,7 +18,6 @@ import {
 	UserAccount,
 	decodeUser,
 	PriorityFeeSubscriberMap,
-	SpotMarkets,
 	OpenbookV2FulfillmentConfigAccount,
 } from '@drift-labs/sdk';
 import {
@@ -93,7 +92,6 @@ import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { getErrorCode } from '../../error';
 import { webhookMessage } from '../../webhook';
 import { selectMakers } from '../../makerSelection';
-import { PythPriceFeedSubscriber } from 'src/pythPriceFeedSubscriber';
 import path from 'path';
 
 enum METRIC_TYPES {
@@ -253,7 +251,6 @@ export class SpotFillerMultithreaded {
 	private dlobHealthy = true;
 	private orderSubscriberHealthy = true;
 
-	private pythPriceSubscriber?: PythPriceFeedSubscriber;
 	private lookupTableAccounts: AddressLookupTableAccount[];
 
 	constructor(
@@ -263,7 +260,6 @@ export class SpotFillerMultithreaded {
 		globalConfig: GlobalConfig,
 		config: FillerMultiThreadedConfig,
 		bundleSender?: BundleSender,
-		pythPriceSubscriber?: PythPriceFeedSubscriber,
 		lookupTableAccounts: AddressLookupTableAccount[] = []
 	) {
 		this.globalConfig = globalConfig;
@@ -285,7 +281,6 @@ export class SpotFillerMultithreaded {
 			this.txConfirmationConnection = this.driftClient.connection;
 		}
 		this.runtimeSpec = runtimeSpec;
-		this.pythPriceSubscriber = pythPriceSubscriber;
 		this.lookupTableAccounts = lookupTableAccounts;
 
 		this.initializeMetrics(config.metricsPort ?? this.globalConfig.metricsPort);
@@ -389,11 +384,6 @@ export class SpotFillerMultithreaded {
 		logger.info(`${this.name}: Initializing`);
 		await this.blockhashSubscriber.subscribe();
 		await this.priorityFeeSubscriber.subscribe();
-
-		const feedIds: string[] = SpotMarkets[this.globalConfig.driftEnv!]
-			.map((m) => m.pythFeedId)
-			.filter((id) => id !== undefined) as string[];
-		await this.pythPriceSubscriber?.subscribe(feedIds);
 
 		this.lookupTableAccounts.push(
 			...(await this.driftClient.fetchAllLookupTableAccounts())

@@ -35,7 +35,6 @@ import {
 	AverageOverSlotsStrategy,
 	BlockhashSubscriber,
 	WhileValidTxSender,
-	PerpMarkets,
 	configs,
 	AuctionSubscriber,
 	SwiftOrderSubscriber,
@@ -73,7 +72,6 @@ import { MakerBidAskTwapCrank } from './bots/makerBidAskTwapCrank';
 import { BundleSender } from './bundleSender';
 import { DriftStateWatcher, StateChecks } from './driftStateWatcher';
 import { webhookMessage } from './webhook';
-import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 import { PythCrankerBot } from './bots/pythCranker';
 import { SwitchboardCrankerBot } from './bots/switchboardCranker';
 import { PythLazerCrankerBot } from './bots/pythLazerCranker';
@@ -485,18 +483,6 @@ const runBot = async () => {
 		logger.info(`Failed to load USDC token account: ${e}`);
 	}
 
-	let pythPriceSubscriber: PythPriceFeedSubscriber | undefined;
-	if (config.global.hermesEndpoint) {
-		pythPriceSubscriber = new PythPriceFeedSubscriber(
-			config.global.hermesEndpoint,
-			{
-				priceFeedRequestConfig: {
-					binary: true,
-				},
-			}
-		);
-	}
-
 	/**
 	 * Jito info here
 	 */
@@ -710,7 +696,6 @@ const runBot = async () => {
 				priorityFeeSubscriber,
 				blockhashSubscriber,
 				bundleSender,
-				pythPriceSubscriber,
 				[]
 			)
 		);
@@ -740,7 +725,6 @@ const runBot = async () => {
 				priorityFeeSubscriber,
 				blockhashSubscriber,
 				bundleSender,
-				pythPriceSubscriber,
 				[]
 			)
 		);
@@ -909,7 +893,6 @@ const runBot = async () => {
 				config.global,
 				config.global.runOnce ?? false,
 				blockhashSubscriber,
-				pythPriceSubscriber,
 				[],
 				bundleSender
 			)
@@ -953,25 +936,6 @@ const runBot = async () => {
 		await userMap.subscribe();
 		const hrEnd = process.hrtime(hrStart);
 		logger.info(`userMap.subscribe took: ${hrEnd[0]}s ${hrEnd[1] / 1e6}ms`);
-	}
-
-	logger.info(`Checking if need pythConnection: ${needPythPriceSubscriber}`);
-	if (needPythPriceSubscriber && pythPriceSubscriber) {
-		const feedIds: string[] = Array.from(
-			new Set([
-				...PerpMarkets[config.global.driftEnv!]
-					.map((m) => m.pythFeedId)
-					.filter((id) => id !== undefined),
-				...SpotMarkets[config.global.driftEnv!]
-					.map((m) => m.pythFeedId)
-					.filter((id) => id !== undefined),
-			])
-		) as string[];
-		await pythPriceSubscriber!.subscribe(feedIds);
-	} else if (needPythPriceSubscriber && !pythPriceSubscriber) {
-		logger.warn(
-			'Running a bot that should have hermes endpoint set in config, but doesnt'
-		);
 	}
 
 	logger.info(
