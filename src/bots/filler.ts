@@ -30,7 +30,6 @@ import {
 	BN,
 	QUOTE_PRECISION,
 	ClockSubscriber,
-	DriftEnv,
 	StateAccount,
 	getUserStatsAccountPublicKey,
 	PositionDirection,
@@ -1437,14 +1436,8 @@ export class FillerBot extends TxThreaded implements Bot {
 			return [];
 		}
 
-		if (!this.pythPriceSubscriber) {
-			throw new Error('Pyth price subscriber not initialized');
-		}
 		const pythIxs = await getAllPythOracleUpdateIxs(
-			this.runtimeSpec.driftEnv as DriftEnv,
 			marketIndex,
-			MarketType.PERP,
-			this.pythPriceSubscriber!,
 			this.driftClient,
 			this.pythLazerSubscriber,
 			precedingIxs

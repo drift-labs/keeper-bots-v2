@@ -37,8 +37,6 @@ import {
 	isVariant,
 	SpotMarketConfig,
 	PerpMarketConfig,
-	PerpMarkets,
-	SpotMarkets,
 	DRIFT_ORACLE_RECEIVER_ID,
 	OpenbookV2FulfillmentConfigAccount,
 	OpenbookV2Subscriber,
@@ -71,7 +69,6 @@ import {
 	VersionedTransaction,
 } from '@solana/web3.js';
 import { webhookMessage } from './webhook';
-import { PythPriceFeedSubscriber } from './pythPriceFeedSubscriber';
 import { FallbackLiquiditySource } from './experimental-bots/filler-common/types';
 import { PythLazerSubscriber } from './pythLazerSubscriber';
 
@@ -1090,32 +1087,6 @@ export function validRebalanceSettledPnlThreshold(
 	return true;
 }
 
-export const getPythPriceFeedIdForMarket = (
-	marketIndex: number,
-	markets: Array<SpotMarketConfig | PerpMarketConfig>,
-	throwOnNotFound = true,
-	lazer = false
-): string | number | undefined => {
-	const market = markets.find((market) => market.marketIndex === marketIndex);
-	if (!market) {
-		if (throwOnNotFound) {
-			throw new Error(`Pyth feedID for market ${marketIndex} not found`);
-		} else {
-			logger.warn(`Pyth feedID for market ${marketIndex} not found`);
-			return undefined;
-		}
-	}
-	return lazer ? market.pythLazerId : market.pythFeedId;
-};
-
-export const getPythUpdateIxsForVaa = async (
-	vaa: string,
-	feedId: string,
-	driftClient: DriftClient
-) => {
-	return await driftClient.getPostPythPullOracleUpdateAtomicIxs(vaa, feedId);
-};
-
 export const getStaleOracleMarketIndexes = (
 	driftClient: DriftClient,
 	markets: (PerpMarketConfig | SpotMarketConfig)[],
@@ -1158,53 +1129,27 @@ export const getStaleOracleMarketIndexes = (
 };
 
 export const getAllPythOracleUpdateIxs = async (
-	driftEnv: DriftEnv,
 	marketIndex: number,
-	marketType: MarketType,
-	pythPriceSubscriber: PythPriceFeedSubscriber,
 	driftClient: DriftClient,
 	pythLazerSubscriber?: PythLazerSubscriber,
 	precedingIxs: TransactionInstruction[] = []
 ): Promise<TransactionInstruction[]> => {
-	const markets = isVariant(marketType, 'perp')
-		? PerpMarkets[driftEnv]
-		: SpotMarkets[driftEnv];
-	const oracleSource = isVariant(marketType, 'perp')
-		? driftClient.getPerpMarketAccount(marketIndex)?.amm.oracleSource
-		: driftClient.getSpotMarketAccount(marketIndex)?.oracleSource;
-
-	const oracleSourceStr = getVariant(oracleSource).toLowerCase();
-	if (oracleSourceStr.includes('pyth') && oracleSourceStr.includes('pull')) {
-		const feedId = getPythPriceFeedIdForMarket(marketIndex, markets, false);
-		const vaa = pythPriceSubscriber.getLatestCachedVaa(feedId as string);
-		if (!vaa) {
-			logger.debug('No VAA found for feedId', feedId);
-			return [];
-		}
-		return await driftClient.getPostPythPullOracleUpdateAtomicIxs(
-			vaa,
-			feedId as string
+	const updateMessage =
+		await pythLazerSubscriber?.getLatestPriceMessageForMarketIndex(marketIndex);
+	const feedIds =
+		pythLazerSubscriber?.getPriceFeedIdsFromMarketIndex(marketIndex);
+	if (!updateMessage || !feedIds) {
+		logger.debug(
+			'No update message or feed ids found for marketIndex',
+			marketIndex
 		);
-	} else {
-		const updateMessage =
-			await pythLazerSubscriber?.getLatestPriceMessageForMarketIndex(
-				marketIndex
-			);
-		const feedIds =
-			pythLazerSubscriber?.getPriceFeedIdsFromMarketIndex(marketIndex);
-		if (!updateMessage || !feedIds) {
-			logger.debug(
-				'No update message or feed ids found for marketIndex',
-				marketIndex
-			);
-			return [];
-		}
-		return await driftClient.getPostPythLazerOracleUpdateIxs(
-			feedIds,
-			updateMessage,
-			precedingIxs
-		);
+		return [];
 	}
+	return await driftClient.getPostPythLazerOracleUpdateIxs(
+		feedIds,
+		updateMessage,
+		precedingIxs
+	);
 };
 
 export function canFillSpotMarket(spotMarket: SpotMarketAccount): boolean {

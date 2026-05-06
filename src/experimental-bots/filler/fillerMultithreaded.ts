@@ -7,7 +7,6 @@ import {
 	decodeUser,
 	DLOBNode,
 	DriftClient,
-	DriftEnv,
 	FeeTier,
 	getUserStatsAccountPublicKey,
 	getUserWithoutOrderFilter,
@@ -1148,10 +1147,7 @@ export class FillerMultithreaded {
 			);
 		} else if (!isSignedMsg) {
 			pythIxs = await getAllPythOracleUpdateIxs(
-				this.runtimeSpec.driftEnv as DriftEnv,
 				marketIndex,
-				MarketType.PERP,
-				this.pythPriceSubscriber!,
 				this.driftClient,
 				this.pythLazerSubscriber,
 				precedingIxs

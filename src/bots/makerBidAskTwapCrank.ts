@@ -568,14 +568,8 @@ export class MakerBidAskTwapCrank implements Bot {
 		if (crankMarketIndex === undefined) {
 			throw new Error('Market index not found on node');
 		}
-		if (!this.pythPriceSubscriber) {
-			throw new Error('Pyth price subscriber not initialized');
-		}
 		const pythIxs = await getAllPythOracleUpdateIxs(
-			this.globalConfig.driftEnv,
 			crankMarketIndex,
-			MarketType.PERP,
-			this.pythPriceSubscriber!,
 			this.driftClient,
 			this.pythLazerSubscriber,
 			precedingIxs
