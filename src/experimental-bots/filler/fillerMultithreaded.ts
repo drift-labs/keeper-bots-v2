@@ -106,7 +106,6 @@ import { bs58 } from '@project-serum/anchor/dist/cjs/utils/bytes';
 import { ChildProcess } from 'child_process';
 import { PythLazerSubscriber } from '../../pythLazerSubscriber';
 import path from 'path';
-import { RedisClient, RedisClientPrefix } from '@drift/common/clients';
 
 const logPrefix = '[Filler]';
 export type MakerNodeMap = Map<string, DLOBNode[]>;
@@ -402,11 +401,7 @@ export class FillerMultithreaded {
 						channel: 'fixed_rate@200ms',
 					};
 				}),
-				this.globalConfig.driftEnv,
-				new RedisClient({
-					prefix: RedisClientPrefix.DLOB,
-				}),
-				this.globalConfig.lazerHttpEndpoints
+				this.globalConfig.driftEnv
 			);
 		} else {
 			logger.info(
