@@ -18,8 +18,6 @@ import {
 	DevnetSpotMarkets,
 	MainnetPerpMarkets,
 	DevnetPerpMarkets,
-	getFeedIdUint8Array,
-	getPythPullOraclePublicKey,
 	convertToNumber,
 	BN,
 	convertToBN,
@@ -27,9 +25,6 @@ import {
 	getTriggerPrice,
 	useMedianTriggerPrice,
 	isOneOfVariant,
-	PythLazerPriceFeedArray,
-	PythLazerSubscriber,
-	type PriceUpdateAccount,
 } from '@drift-labs/sdk';
 import { Mutex, tryAcquire, E_ALREADY_LOCKED } from 'async-mutex';
 
@@ -38,7 +33,6 @@ import { Bot } from '../types';
 import { getErrorCode } from '../error';
 import { webhookMessage } from '../webhook';
 import { GlobalConfig, TriggerConfig } from '../config';
-import { FeedIdToCrankInfo } from './pythCranker';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { Counter, Histogram, Meter, ObservableGauge } from '@opentelemetry/api';
 import {
@@ -58,7 +52,10 @@ import {
 	ComputeBudgetProgram,
 	TransactionInstruction,
 } from '@solana/web3.js';
-import { PriceServiceConnection } from '@pythnetwork/price-service-client';
+import {
+	PythLazerPriceFeedArray,
+	PythLazerSubscriber,
+} from '../pythLazerSubscriber';
 
 const TRIGGER_ORDER_COOLDOWN_MS = 10000; // time to wait between triggering an order
 
@@ -103,59 +100,6 @@ function getPythLazerFeedIdChunks(
 	});
 }
 
-function getPythPullFeedIdsToCrank(
-	programId: PublicKey,
-	spotMarkets: SpotMarketConfig[],
-	perpMarkets: PerpMarketConfig[]
-): [FeedIdToCrankInfo[], Map<string, string>] {
-	const feedIdsToCrank: FeedIdToCrankInfo[] = [];
-	const marketIdToFeedId: Map<string, string> = new Map();
-
-	for (const market of [...spotMarkets, ...perpMarkets]) {
-		if (!getVariant(market.oracleSource).toLowerCase().includes('pull')) {
-			continue;
-		}
-		if (market.pythFeedId === undefined) {
-			logger.warn(
-				`No pyth feed id for market ${
-					market.symbol
-				} with oracleSource ${getVariant(market.oracleSource)}`
-			);
-			continue;
-		}
-
-		const isSpotMarket = 'precision' in market;
-		const marketId = isSpotMarket
-			? `spot-${market.marketIndex}`
-			: `perp-${market.marketIndex}`;
-		marketIdToFeedId.set(marketId, market.pythFeedId);
-
-		const idx = feedIdsToCrank.findIndex((x) => x.feedId === market.pythFeedId);
-		if (idx !== -1) {
-			continue;
-		}
-
-		feedIdsToCrank.push({
-			baseSymbol: market.symbol.toUpperCase(),
-			feedId: market.pythFeedId,
-			updateConfig: {
-				timeDiffMs: 0,
-				priceDiffPct: 0,
-			},
-			earlyUpdateConfig: {
-				timeDiffMs: 0,
-				priceDiffPct: 0,
-			},
-			accountAddress: getPythPullOraclePublicKey(
-				programId,
-				getFeedIdUint8Array(market.pythFeedId)
-			),
-		});
-	}
-
-	return [feedIdsToCrank, marketIdToFeedId];
-}
-
 export class TriggerBot implements Bot {
 	public readonly name: string;
 	public readonly dryRun: boolean;
@@ -193,28 +137,10 @@ export class TriggerBot implements Bot {
 
 	private updateOracleWithTrigger: boolean = false;
 
-	readonly pythPullDecodeFunc?: (
-		name: string,
-		data: Buffer
-	) => PriceUpdateAccount;
-	readonly pythLazerDecodeFunc?: (
-		name: string,
-		data: Buffer
-	) => PriceUpdateAccount;
-
 	private pythLazerClient?: PythLazerSubscriber;
-	private pythPullFeedIdsToCrank: FeedIdToCrankInfo[] = [];
-	private pythPullClient?: PriceServiceConnection;
 
-	// map from marketId (i.e. perp-0 or spot-0) to pyth feed id
-	private marketIdToPythPullFeedId: Map<string, string> = new Map();
-	// private feedIdToMarketId: Map<string, string> = new Map();
-	private pythPullFeedIdToPrice: Map<string, number> = new Map();
 	// map from marketId (i.e. perp-0 or spot-0) to multiplier (1, 10, 1000, etc.)
-	private marketIdToMultiplier: Map<
-		string,
-		{ oracleSource: 'pull' | 'lazer'; multiplier: number }
-	> = new Map();
+	private marketIdToMultiplier: Map<string, number> = new Map();
 
 	constructor(
 		driftClient: DriftClient,
@@ -246,24 +172,9 @@ export class TriggerBot implements Bot {
 			new PublicKey('8UJgxaiQx5nTrdDgph5FiahMmzduuLTLf5WmsPegYA6W'), // sol-perp
 		]);
 
-		if (
-			this.globalConfig.lazerEndpoints &&
-			this.globalConfig.lazerToken &&
-			this.globalConfig.hermesEndpoint
-		) {
+		if (this.globalConfig.lazerEndpoints && this.globalConfig.lazerToken) {
 			logger.info('Updating pyth oracles with trigger');
 			this.updateOracleWithTrigger = true;
-
-			this.pythPullDecodeFunc = this.driftClient
-				.getReceiverProgram()
-				.account.priceUpdateV2.coder.accounts.decodeUnchecked.bind(
-					this.driftClient.getReceiverProgram().account.priceUpdateV2.coder
-						.accounts
-				);
-			this.pythLazerDecodeFunc =
-				this.driftClient.program.account.pythLazerOracle.coder.accounts.decodeUnchecked.bind(
-					this.driftClient.program.account.pythLazerOracle.coder.accounts
-				);
 
 			const spotMarkets =
 				this.globalConfig.driftEnv === 'mainnet-beta'
@@ -280,56 +191,26 @@ export class TriggerBot implements Bot {
 				this.globalConfig.driftEnv
 			);
 
-			this.pythPullClient = new PriceServiceConnection(
-				this.globalConfig.hermesEndpoint,
-				{
-					timeout: 10_000,
-				}
-			);
-			[this.pythPullFeedIdsToCrank, this.marketIdToPythPullFeedId] =
-				getPythPullFeedIdsToCrank(
-					this.driftClient.program.programId,
-					spotMarkets,
-					perpMarkets
-				);
-
 			for (const market of [...spotMarkets, ...perpMarkets]) {
+				const oracleSource = getVariant(market.oracleSource);
+				if (!oracleSource.toLowerCase().includes('lazer')) {
+					continue;
+				}
 				const isSpotMarket = 'precision' in market;
 				const marketId = isSpotMarket
 					? `spot-${market.marketIndex}`
 					: `perp-${market.marketIndex}`;
-				const oracleSource = getVariant(market.oracleSource);
-				let oracleSourceType: 'pull' | 'lazer';
-				if (oracleSource.toLowerCase().includes('lazer')) {
-					oracleSourceType = 'lazer';
-				} else if (oracleSource.toLowerCase().includes('pull')) {
-					oracleSourceType = 'pull';
-				} else {
-					logger.warn(
-						`Not updating oracle pre-trigger for market ${marketId} with oracleSource ${oracleSource}`
-					);
-					continue;
-				}
 				if (oracleSource.toLowerCase().includes('1k')) {
-					this.marketIdToMultiplier.set(marketId, {
-						oracleSource: oracleSourceType,
-						multiplier: 1000,
-					});
+					this.marketIdToMultiplier.set(marketId, 1000);
 				} else if (oracleSource.toLowerCase().includes('1m')) {
-					this.marketIdToMultiplier.set(marketId, {
-						oracleSource: oracleSourceType,
-						multiplier: 1000000,
-					});
+					this.marketIdToMultiplier.set(marketId, 1000000);
 				} else {
-					this.marketIdToMultiplier.set(marketId, {
-						oracleSource: oracleSourceType,
-						multiplier: 1,
-					});
+					this.marketIdToMultiplier.set(marketId, 1);
 				}
 			}
 		} else {
 			logger.info(
-				'Not updating pyth oracles with trigger (globalConfig missing lazerEndpoints, lazerToken, or hermesEndpoint)'
+				'Not updating pyth oracles with trigger (globalConfig missing lazerEndpoints or lazerToken)'
 			);
 		}
 	}
@@ -419,19 +300,8 @@ export class TriggerBot implements Bot {
 		this.lookupTableAccounts =
 			await this.driftClient.fetchAllLookupTableAccounts();
 
-		if (
-			this.updateOracleWithTrigger &&
-			this.pythLazerClient &&
-			this.pythPullClient
-		) {
+		if (this.updateOracleWithTrigger && this.pythLazerClient) {
 			await this.pythLazerClient.subscribe();
-			await this.pythPullClient.subscribePriceFeedUpdates(
-				this.pythPullFeedIdsToCrank.map((x) => x.feedId),
-				(priceFeed) => {
-					const p = priceFeed.getPriceUnchecked().getPriceAsNumberUnchecked();
-					this.pythPullFeedIdToPrice.set('0x' + priceFeed.id, p);
-				}
-			);
 		}
 	}
 
@@ -488,27 +358,16 @@ export class TriggerBot implements Bot {
 			return undefined;
 		}
 		const marketId = `perp-${marketIndex}`;
-		const oracleInfo = this.marketIdToMultiplier.get(marketId);
-		if (!oracleInfo) {
+		const multiplier = this.marketIdToMultiplier.get(marketId);
+		if (multiplier === undefined) {
 			return undefined;
 		}
-		if (oracleInfo.oracleSource === 'pull') {
-			const price = this.pythPullFeedIdToPrice.get(
-				this.marketIdToPythPullFeedId.get(marketId)!
-			);
-			if (!price) {
-				logger.warn(`No price for market ${marketId}`);
-				return undefined;
-			}
-			return convertToBN(price * oracleInfo.multiplier, PRICE_PRECISION);
-		} else {
-			const price = this.pythLazerClient?.getPriceFromMarketIndex(marketIndex);
-			if (!price) {
-				logger.warn(`No price for market ${marketId}`);
-				return undefined;
-			}
-			return convertToBN(price * oracleInfo.multiplier, PRICE_PRECISION);
+		const price = this.pythLazerClient?.getPriceFromMarketIndex(marketIndex);
+		if (!price) {
+			logger.warn(`No price for market ${marketId}`);
+			return undefined;
 		}
+		return convertToBN(price * multiplier, PRICE_PRECISION);
 	}
 
 	private async getOracleUpdateIxs(
@@ -523,47 +382,28 @@ export class TriggerBot implements Bot {
 			return [];
 		}
 		const marketId = `perp-${marketIndex}`;
-		const oracleInfo = this.marketIdToMultiplier.get(marketId);
-		if (!oracleInfo) {
+		if (!this.marketIdToMultiplier.has(marketId)) {
 			return [];
 		}
 
-		if (oracleInfo.oracleSource === 'pull') {
-			const feedId = this.marketIdToPythPullFeedId.get(marketId);
-			if (!feedId) {
-				return [];
-			}
-			const vaa = await this.pythPullClient?.getLatestVaas([feedId]);
-			if (!vaa) {
-				return [];
-			}
-			ixs.push(
-				...(await this.driftClient.getPostPythPullOracleUpdateAtomicIxs(
-					vaa[0],
-					feedId
-				))
-			);
-		} else {
-			const msg =
-				await this.pythLazerClient?.getLatestPriceMessageForMarketIndex(
-					marketIndex
-				);
-			if (!msg) {
-				return [];
-			}
-			const feedIds =
-				this.pythLazerClient?.getPriceFeedIdsFromMarketIndex(marketIndex);
-			if (!feedIds) {
-				return [];
-			}
-			ixs.push(
-				...(await this.driftClient.getPostPythLazerOracleUpdateIxs(
-					feedIds,
-					msg,
-					ixs
-				))
-			);
+		const msg = await this.pythLazerClient?.getLatestPriceMessageForMarketIndex(
+			marketIndex
+		);
+		if (!msg) {
+			return [];
 		}
+		const feedIds =
+			this.pythLazerClient?.getPriceFeedIdsFromMarketIndex(marketIndex);
+		if (!feedIds) {
+			return [];
+		}
+		ixs.push(
+			...(await this.driftClient.getPostPythLazerOracleUpdateIxs(
+				feedIds,
+				msg,
+				ixs
+			))
+		);
 
 		return ixs;
 	}

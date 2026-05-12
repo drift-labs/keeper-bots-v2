@@ -1,0 +1,14 @@
+diff --git a/lib/constants/predictionMarket.js b/lib/constants/predictionMarket.js
+index a793f63eac266c7c3bd5bfc7cdd125e089c30414..111eb5bcdc4e457af7942889441258573795bffb 100644
+--- a/lib/constants/predictionMarket.js
++++ b/lib/constants/predictionMarket.js
+@@ -2,6 +2,7 @@
+ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.MAX_PREDICTION_PRICE_BIG_NUM = exports.MAX_PREDICTION_PRICE_NUM = void 0;
+ const sdk_1 = require("@drift-labs/sdk");
+-exports.MAX_PREDICTION_PRICE_NUM = sdk_1.MAX_PREDICTION_PRICE.div(sdk_1.PRICE_PRECISION).toNumber();
+-exports.MAX_PREDICTION_PRICE_BIG_NUM = sdk_1.BigNum.from(sdk_1.MAX_PREDICTION_PRICE, sdk_1.PRICE_PRECISION_EXP);
++const MAX_PREDICTION_PRICE = sdk_1.MAX_PREDICTION_PRICE || sdk_1.PRICE_PRECISION;
++exports.MAX_PREDICTION_PRICE_NUM = MAX_PREDICTION_PRICE.div(sdk_1.PRICE_PRECISION).toNumber();
++exports.MAX_PREDICTION_PRICE_BIG_NUM = sdk_1.BigNum.from(MAX_PREDICTION_PRICE, sdk_1.PRICE_PRECISION_EXP);
+ //# sourceMappingURL=predictionMarket.js.map

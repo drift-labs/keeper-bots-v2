@@ -54,37 +54,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@coral-xyz/anchor-30@npm:@coral-xyz/anchor@0.30.1":
-  version: 0.30.1
-  resolution: "@coral-xyz/anchor@npm:0.30.1"
-  dependencies:
-    "@coral-xyz/anchor-errors": "npm:^0.30.1"
-    "@coral-xyz/borsh": "npm:^0.30.1"
-    "@noble/hashes": "npm:^1.3.1"
-    "@solana/web3.js": "npm:^1.68.0"
-    bn.js: "npm:^5.1.2"
-    bs58: "npm:^4.0.1"
-    buffer-layout: "npm:^1.2.2"
-    camelcase: "npm:^6.3.0"
-    cross-fetch: "npm:^3.1.5"
-    crypto-hash: "npm:^1.3.0"
-    eventemitter3: "npm:^4.0.7"
-    pako: "npm:^2.0.3"
-    snake-case: "npm:^3.0.4"
-    superstruct: "npm:^0.15.4"
-    toml: "npm:^3.0.0"
-  checksum: 10c0/ed0e5903e72d11884015bd8c21199604f56c20a4570972323133011172677b7dcfa8c7054055d827f914b61ad5b70378343809a83a06f3f6010e9d08707fd4c5
-  languageName: node
-  linkType: hard
-
-"@coral-xyz/anchor-errors@npm:^0.30.1":
-  version: 0.30.1
-  resolution: "@coral-xyz/anchor-errors@npm:0.30.1"
-  checksum: 10c0/cb6749b68c12df54041d1be47df7a7b7f1d4ad2c54759bca7964c22a5dd892de0deb004100ac81cf70278e373d228a99d648013225613b5de85854530c41f501
-  languageName: node
-  linkType: hard
-
-"@coral-xyz/anchor@npm:0.29.0, @coral-xyz/anchor@npm:^0.29.0":
+"@coral-xyz/anchor-29@npm:@coral-xyz/anchor@0.29.0, @coral-xyz/anchor@npm:0.29.0, @coral-xyz/anchor@npm:^0.29.0":
   version: 0.29.0
   resolution: "@coral-xyz/anchor@npm:0.29.0"
   dependencies:
@@ -106,6 +76,34 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@coral-xyz/anchor-errors@npm:^0.31.1":
+  version: 0.31.1
+  resolution: "@coral-xyz/anchor-errors@npm:0.31.1"
+  checksum: 10c0/d359d6244a89bcfb606e6d31d545c3be8e32dccd47b78dac6ec0091a51b2eb6c78aad9601f39db2659d8e66db8fffc36477247d58d570bc9d866e7ec3e40b5b2
+  languageName: node
+  linkType: hard
+
+"@coral-xyz/anchor@npm:@coral-xyz/anchor@0.32.1":
+  version: 0.32.1
+  resolution: "@coral-xyz/anchor@npm:0.32.1"
+  dependencies:
+    "@coral-xyz/anchor-errors": "npm:^0.31.1"
+    "@coral-xyz/borsh": "npm:^0.31.1"
+    "@noble/hashes": "npm:^1.3.1"
+    "@solana/web3.js": "npm:^1.69.0"
+    bn.js: "npm:^5.1.2"
+    bs58: "npm:^4.0.1"
+    buffer-layout: "npm:^1.2.2"
+    camelcase: "npm:^6.3.0"
+    cross-fetch: "npm:^3.1.5"
+    eventemitter3: "npm:^4.0.7"
+    pako: "npm:^2.0.3"
+    superstruct: "npm:^0.15.4"
+    toml: "npm:^3.0.0"
+  checksum: 10c0/669b6f54efb0a5a96dad9e055d30b3b803f691b1b058379efefb87c11f97a9d369d513b2f200082c0b55b4cb31540dc5404e244c6f23f0a14b6d2ad2e18f08b7
+  languageName: node
+  linkType: hard
+
 "@coral-xyz/borsh@npm:^0.29.0":
   version: 0.29.0
   resolution: "@coral-xyz/borsh@npm:0.29.0"
@@ -118,15 +116,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@coral-xyz/borsh@npm:^0.30.1":
-  version: 0.30.1
-  resolution: "@coral-xyz/borsh@npm:0.30.1"
+"@coral-xyz/borsh@npm:^0.31.1":
+  version: 0.31.1
+  resolution: "@coral-xyz/borsh@npm:0.31.1"
   dependencies:
     bn.js: "npm:^5.1.2"
     buffer-layout: "npm:^1.2.0"
   peerDependencies:
-    "@solana/web3.js": ^1.68.0
-  checksum: 10c0/eaad9c59647ba58faecc408a30416f17b0cab56bce907cc54654f7a0b151526954c71cedadce7ed38830b731244d918e87b7c3fb19c56a26c2b140c5ccef27dd
+    "@solana/web3.js": ^1.69.0
+  checksum: 10c0/3d6d40a1476df5eb0635d8687a640de89fd7e7ffd135f733907f13ff2569a2a07f65f64768d632fb45ed55006d9c9ee94e40fd775813a9cf1211fefa567f98dd
   languageName: node
   linkType: hard
 
@@ -177,6 +175,33 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@drift-labs/common@patch:@drift-labs/common@npm%3A1.0.20#~/.yarn/patches/@drift-labs-common-npm-1.0.20-cf92dd0082.patch":
+  version: 1.0.20
+  resolution: "@drift-labs/common@patch:@drift-labs/common@npm%3A1.0.20#~/.yarn/patches/@drift-labs-common-npm-1.0.20-cf92dd0082.patch::version=1.0.20&hash=f45918"
+  dependencies:
+    "@drift-labs/sdk": "npm:^2.155.0-beta.5"
+    "@slack/web-api": "npm:6.4.0"
+    "@solana/spl-token": "npm:0.3.8"
+    "@solana/web3.js": "npm:1.98.0"
+    bcryptjs-react: "npm:2.4.6"
+    cerializr: "npm:3.1.4"
+    dotenv: "npm:^17.2.2"
+    immer: "npm:10.0.3"
+    ioredis: "npm:5.4.1"
+    isomorphic-ws: "npm:^5.0.0"
+    localstorage-memory: "npm:1.0.3"
+    rxjs: "npm:7.8.2"
+    tiny-invariant: "npm:1.3.1"
+    tweetnacl: "npm:1.0.3"
+    winston: "npm:3.13.0"
+    winston-slack-webhook-transport: "npm:2.3.5"
+  peerDependencies:
+    "@drift-labs/sdk": ^2.155.0-beta.6
+    "@solana/web3.js": 1.98.0
+  checksum: 10c0/7d33bc7c1d3bd5f6018ca1dd9c3c3b580662ba250e1934f0fa037d16cf80a77af1cbac94f71041472aac1067e2882a8f06d58f799c3e155851000b4bd2ced9fe
+  languageName: node
+  linkType: hard
+
 "@drift-labs/jit-proxy@npm:0.21.171":
   version: 0.21.171
   resolution: "@drift-labs/jit-proxy@npm:0.21.171"
@@ -194,9 +219,9 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@drift-labs/keeper-bots-v2@workspace:."
   dependencies:
-    "@drift-labs/common": "npm:1.0.20"
+    "@drift-labs/common": "patch:@drift-labs/common@npm%3A1.0.20#~/.yarn/patches/@drift-labs-common-npm-1.0.20-cf92dd0082.patch"
     "@drift-labs/jit-proxy": "npm:0.21.171"
-    "@drift-labs/sdk": "npm:2.163.0-beta.0"
+    "@drift-labs/sdk": "npm:2.163.0-beta.12"
     "@opentelemetry/api": "npm:1.7.0"
     "@opentelemetry/auto-instrumentations-node": "npm:^0.62.1"
     "@opentelemetry/exporter-prometheus": "npm:0.31.0"
@@ -244,12 +269,12 @@ __metadata:
   languageName: unknown
   linkType: soft
 
-"@drift-labs/sdk@npm:2.163.0-beta.0":
-  version: 2.163.0-beta.0
-  resolution: "@drift-labs/sdk@npm:2.163.0-beta.0"
+"@drift-labs/sdk@npm:2.163.0-beta.12":
+  version: 2.163.0-beta.12
+  resolution: "@drift-labs/sdk@npm:2.163.0-beta.12"
   dependencies:
-    "@coral-xyz/anchor": "npm:0.29.0"
-    "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
+    "@coral-xyz/anchor": "npm:@coral-xyz/anchor@0.32.1"
+    "@coral-xyz/anchor-29": "npm:@coral-xyz/anchor@0.29.0"
     "@ellipsis-labs/phoenix-sdk": "npm:1.4.5"
     "@msgpack/msgpack": "npm:^3.1.2"
     "@openbook-dex/openbook-v2": "npm:0.2.10"
@@ -259,15 +284,13 @@ __metadata:
     "@pythnetwork/pyth-lazer-sdk": "npm:6.0.0"
     "@solana/spl-token": "npm:0.4.13"
     "@solana/web3.js": "npm:1.98.0"
-    "@switchboard-xyz/common": "npm:3.0.14"
-    "@switchboard-xyz/on-demand": "npm:2.4.1"
     "@triton-one/yellowstone-grpc": "npm:5.0.5"
-    anchor-bankrun: "npm:0.3.0"
+    anchor-bankrun: "npm:0.5.0"
     gill: "npm:^0.10.2"
     helius-laserstream: "npm:0.1.8"
     nanoid: "npm:3.3.4"
     node-cache: "npm:5.1.2"
-    solana-bankrun: "npm:0.3.1"
+    solana-bankrun: "npm:0.4.0"
     strict-event-emitter-types: "npm:2.0.0"
     tweetnacl: "npm:1.0.3"
     tweetnacl-util: "npm:0.15.1"
@@ -278,7 +301,7 @@ __metadata:
   dependenciesMeta:
     helius-laserstream:
       optional: true
-  checksum: 10c0/51016d8cf9330e7960e88440470743be0b93f70ace77c93f411a992d1889c01d9a3c0047bd9211a885c9b053214adf9713b383b42bc851f64f97e9d1f467fb55
+  checksum: 10c0/6383965cdfa5c8eb08b7320fa21660d8880a794f005a3bf69af693dea39fb447112d044248f306d214b7c479cebff5b38c2365b3c7bf6c0b58693c5c7afaff5f
   languageName: node
   linkType: hard
 
@@ -3319,58 +3342,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@switchboard-xyz/common@npm:3.0.14":
-  version: 3.0.14
-  resolution: "@switchboard-xyz/common@npm:3.0.14"
-  dependencies:
-    "@solana/web3.js": "npm:^1.98.0"
-    axios: "npm:^1.8.3"
-    big.js: "npm:^6.2.2"
-    bn.js: "npm:^5.2.1"
-    bs58: "npm:^6.0.0"
-    buffer: "npm:^6.0.3"
-    decimal.js: "npm:^10.4.3"
-    js-sha256: "npm:^0.11.0"
-    protobufjs: "npm:^7.4.0"
-    yaml: "npm:^2.6.1"
-  checksum: 10c0/8e7af32e661ab9b6b32c26bc9918c26f9ce37375d2e1df079e441d03c71a2fa3c5ac9cf878f1c29b001a1e9f43ab334a68923e67f1a7bb78caf4dc457268e519
-  languageName: node
-  linkType: hard
-
-"@switchboard-xyz/common@npm:>=3.0.0":
-  version: 5.6.1
-  resolution: "@switchboard-xyz/common@npm:5.6.1"
-  dependencies:
-    "@solana/web3.js": "npm:^1.98.2"
-    axios: "npm:^1.9.0"
-    big.js: "npm:^6.2.2"
-    bn.js: "npm:^5.2.1"
-    bs58: "npm:^6.0.0"
-    buffer: "npm:^6.0.3"
-    decimal.js: "npm:^10.4.3"
-    js-sha256: "npm:^0.11.0"
-    protobufjs: "npm:^7.4.0"
-  checksum: 10c0/d038841a1b0c8d730734a7854781bf71eb273f62149e0d7a95685320d09e1ce88aefe42380799baf3079b782e6371fd927cc587e08db746ac203596d227e43c5
-  languageName: node
-  linkType: hard
-
-"@switchboard-xyz/on-demand@npm:2.4.1":
-  version: 2.4.1
-  resolution: "@switchboard-xyz/on-demand@npm:2.4.1"
-  dependencies:
-    "@coral-xyz/anchor-30": "npm:@coral-xyz/anchor@0.30.1"
-    "@isaacs/ttlcache": "npm:^1.4.1"
-    "@switchboard-xyz/common": "npm:>=3.0.0"
-    axios: "npm:^1.8.3"
-    bs58: "npm:^6.0.0"
-    buffer: "npm:^6.0.3"
-    js-yaml: "npm:^4.1.0"
-  peerDependencies:
-    "@switchboard-xyz/common": ">=3.0.0"
-  checksum: 10c0/4d4c4ea1297a4fca80d57c40fe466ada0641eb4982ddfb04dfbdcab7212593e56b8ea6010f521cc6728265aa4165443d07762dd721d0bfcdb4bae6b928b6be5c
-  languageName: node
-  linkType: hard
-
 "@triton-one/yellowstone-grpc-napi-darwin-arm64@npm:0.0.10":
   version: 0.0.10
   resolution: "@triton-one/yellowstone-grpc-napi-darwin-arm64@npm:0.0.10"
@@ -3947,14 +3918,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"anchor-bankrun@npm:0.3.0":
-  version: 0.3.0
-  resolution: "anchor-bankrun@npm:0.3.0"
+"anchor-bankrun@npm:0.5.0":
+  version: 0.5.0
+  resolution: "anchor-bankrun@npm:0.5.0"
   peerDependencies:
-    "@coral-xyz/anchor": ^0.28.0
-    "@solana/web3.js": ^1.78.4
-    solana-bankrun: ^0.2.0
-  checksum: 10c0/7210d0b6fa9ce0ba8355532246874ab6322ec13ab1c67b067f685ec9750230290607f990ebe5629c919dea7c2ed61a9e563a5f5ab56f066ae99a0018a130553f
+    "@coral-xyz/anchor": ^0.30.0
+    "@solana/web3.js": ">1.92.0"
+    solana-bankrun: ">=0.2.0 <0.5.0"
+  checksum: 10c0/10702c47035eb5ea7d8edbb2fba68a666f7dad5c25cccd65e4641f5b61d74ad96d04cb59fea7f3b21c0c61ea1eb539c31b7e84141f2e594073c7789f12b48194
   languageName: node
   linkType: hard
 
@@ -4163,7 +4134,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"axios@npm:^1.5.1, axios@npm:^1.6.8, axios@npm:^1.8.3, axios@npm:^1.9.0":
+"axios@npm:^1.5.1, axios@npm:^1.6.8":
   version: 1.13.3
   resolution: "axios@npm:1.13.3"
   dependencies:
@@ -4220,7 +4191,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"big.js@npm:^6.2.1, big.js@npm:^6.2.2":
+"big.js@npm:^6.2.1":
   version: 6.2.2
   resolution: "big.js@npm:6.2.2"
   checksum: 10c0/58d204f6a1a92508dc2eb98d964e2cc6dabb37a3d9fc8a1f0b77a34dead7c11e17b173d9a6df2d5a7a0f78d5c80853a9ce6df29852da59ab10b088e981195165
@@ -4700,13 +4671,6 @@ __metadata:
   version: 4.0.0
   resolution: "decamelize@npm:4.0.0"
   checksum: 10c0/e06da03fc05333e8cd2778c1487da67ffbea5b84e03ca80449519b8fa61f888714bbc6f459ea963d5641b4aa98832130eb5cd193d90ae9f0a27eee14be8e278d
-  languageName: node
-  linkType: hard
-
-"decimal.js@npm:^10.4.3":
-  version: 10.6.0
-  resolution: "decimal.js@npm:10.6.0"
-  checksum: 10c0/07d69fbcc54167a340d2d97de95f546f9ff1f69d2b45a02fd7a5292412df3cd9eb7e23065e532a318f5474a2e1bccf8392fdf0443ef467f97f3bf8cb0477e5aa
   languageName: node
   linkType: hard
 
@@ -6270,13 +6234,6 @@ __metadata:
   languageName: node
   linkType: hard
 
-"js-sha256@npm:^0.11.0":
-  version: 0.11.1
-  resolution: "js-sha256@npm:0.11.1"
-  checksum: 10c0/ef8e294b6f38f218e4834cb653471dd1a76808cea93dc66eaffcb04124116bc36d6cebc4e8866753e184ab4e57892b6ef21918e8ab0450179a7e093ea962d974
-  languageName: node
-  linkType: hard
-
 "js-sha256@npm:^0.9.0":
   version: 0.9.0
   resolution: "js-sha256@npm:0.9.0"
@@ -6311,17 +6268,6 @@ __metadata:
   bin:
     js-yaml: bin/js-yaml.js
   checksum: 10c0/3261f25912f5dd76605e5993d0a126c2b6c346311885d3c483706cd722efe34f697ea0331f654ce27c00a42b426e524518ec89d65ed02ea47df8ad26dcc8ce69
-  languageName: node
-  linkType: hard
-
-"js-yaml@npm:^4.1.0":
-  version: 4.1.1
-  resolution: "js-yaml@npm:4.1.1"
-  dependencies:
-    argparse: "npm:^2.0.1"
-  bin:
-    js-yaml: bin/js-yaml.js
-  checksum: 10c0/561c7d7088c40a9bb53cc75becbfb1df6ae49b34b5e6e5a81744b14ae8667ec564ad2527709d1a6e7d5e5fa6d483aa0f373a50ad98d42fde368ec4a190d4fae7
   languageName: node
   linkType: hard
 
@@ -7221,7 +7167,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"protobufjs@npm:^7.3.0, protobufjs@npm:^7.4.0, protobufjs@npm:^7.5.3":
+"protobufjs@npm:^7.3.0, protobufjs@npm:^7.5.3":
   version: 7.5.4
   resolution: "protobufjs@npm:7.5.4"
   dependencies:
@@ -7635,52 +7581,52 @@ __metadata:
   languageName: node
   linkType: hard
 
-"solana-bankrun-darwin-arm64@npm:0.3.1":
-  version: 0.3.1
-  resolution: "solana-bankrun-darwin-arm64@npm:0.3.1"
+"solana-bankrun-darwin-arm64@npm:0.4.0":
+  version: 0.4.0
+  resolution: "solana-bankrun-darwin-arm64@npm:0.4.0"
   conditions: os=darwin & cpu=arm64
   languageName: node
   linkType: hard
 
-"solana-bankrun-darwin-universal@npm:0.3.1":
-  version: 0.3.1
-  resolution: "solana-bankrun-darwin-universal@npm:0.3.1"
+"solana-bankrun-darwin-universal@npm:0.4.0":
+  version: 0.4.0
+  resolution: "solana-bankrun-darwin-universal@npm:0.4.0"
   conditions: os=darwin
   languageName: node
   linkType: hard
 
-"solana-bankrun-darwin-x64@npm:0.3.1":
-  version: 0.3.1
-  resolution: "solana-bankrun-darwin-x64@npm:0.3.1"
+"solana-bankrun-darwin-x64@npm:0.4.0":
+  version: 0.4.0
+  resolution: "solana-bankrun-darwin-x64@npm:0.4.0"
   conditions: os=darwin & cpu=x64
   languageName: node
   linkType: hard
 
-"solana-bankrun-linux-x64-gnu@npm:0.3.1":
-  version: 0.3.1
-  resolution: "solana-bankrun-linux-x64-gnu@npm:0.3.1"
+"solana-bankrun-linux-x64-gnu@npm:0.4.0":
+  version: 0.4.0
+  resolution: "solana-bankrun-linux-x64-gnu@npm:0.4.0"
   conditions: os=linux & cpu=x64 & libc=glibc
   languageName: node
   linkType: hard
 
-"solana-bankrun-linux-x64-musl@npm:0.3.1":
-  version: 0.3.1
-  resolution: "solana-bankrun-linux-x64-musl@npm:0.3.1"
+"solana-bankrun-linux-x64-musl@npm:0.4.0":
+  version: 0.4.0
+  resolution: "solana-bankrun-linux-x64-musl@npm:0.4.0"
   conditions: os=linux & cpu=x64 & libc=musl
   languageName: node
   linkType: hard
 
-"solana-bankrun@npm:0.3.1":
-  version: 0.3.1
-  resolution: "solana-bankrun@npm:0.3.1"
+"solana-bankrun@npm:0.4.0":
+  version: 0.4.0
+  resolution: "solana-bankrun@npm:0.4.0"
   dependencies:
     "@solana/web3.js": "npm:^1.68.0"
     bs58: "npm:^4.0.1"
-    solana-bankrun-darwin-arm64: "npm:0.3.1"
-    solana-bankrun-darwin-universal: "npm:0.3.1"
-    solana-bankrun-darwin-x64: "npm:0.3.1"
-    solana-bankrun-linux-x64-gnu: "npm:0.3.1"
-    solana-bankrun-linux-x64-musl: "npm:0.3.1"
+    solana-bankrun-darwin-arm64: "npm:0.4.0"
+    solana-bankrun-darwin-universal: "npm:0.4.0"
+    solana-bankrun-darwin-x64: "npm:0.4.0"
+    solana-bankrun-linux-x64-gnu: "npm:0.4.0"
+    solana-bankrun-linux-x64-musl: "npm:0.4.0"
   dependenciesMeta:
     solana-bankrun-darwin-arm64:
       optional: true
@@ -7692,7 +7638,7 @@ __metadata:
       optional: true
     solana-bankrun-linux-x64-musl:
       optional: true
-  checksum: 10c0/bc63b7e01a7c2d15076fe755fb7ff4e45f644f6a0e0fc8ecb17d57933b24e7505aaf3e8c67cdab7d696f2ef8bd2e7322e29665ace87802893c082322e52ceda2
+  checksum: 10c0/806f3e281d89e306de659ac996c212ad43f13731732be8d49800a62a184f6facad76a9571fb103db201a09f3cdf63ec3ad90e9a8c6d9314fd7cd0e8c4d0b9f8b
   languageName: node
   linkType: hard
 
@@ -8465,15 +8411,6 @@ __metadata:
   version: 2.3.4
   resolution: "yaml@npm:2.3.4"
   checksum: 10c0/cf03b68f8fef5e8516b0f0b54edaf2459f1648317fc6210391cf606d247e678b449382f4bd01f77392538429e306c7cba8ff46ff6b37cac4de9a76aff33bd9e1
-  languageName: node
-  linkType: hard
-
-"yaml@npm:^2.6.1":
-  version: 2.8.2
-  resolution: "yaml@npm:2.8.2"
-  bin:
-    yaml: bin.mjs
-  checksum: 10c0/703e4dc1e34b324aa66876d63618dcacb9ed49f7e7fe9b70f1e703645be8d640f68ab84f12b86df8ac960bac37acf5513e115de7c970940617ce0343c8c9cd96
   languageName: node
   linkType: hard
 

@@ -101,25 +101,6 @@ export type LiquidatorConfig = BaseBotConfig & {
 	spotDustValueThresholdBN?: BN;
 };
 
-export type PythUpdateConfigs = {
-	timeDiffMs: number;
-	priceDiffPct: number;
-};
-
-export type PythCrankerBotConfig = BaseBotConfig & {
-	slotStalenessThresholdRestart: number;
-	txSuccessRateThreshold: number;
-	intervalMs: number;
-	updateConfigs: {
-		[key: string]: {
-			update: PythUpdateConfigs;
-			earlyUpdate: PythUpdateConfigs;
-		};
-	};
-	onlyCrankUsedOracles?: boolean;
-	overridePythIds?: string[];
-};
-
 export type PythLazerCrankerBotConfig = BaseBotConfig & {
 	skipSimulation?: boolean;
 	pythLazerChannel?: string;
@@ -167,7 +148,6 @@ export type BotConfigMap = {
 	userPnlSettler?: UserPnlSettlerConfig;
 	userIdleFlipper?: BaseBotConfig;
 	markTwapCrank?: MakerBidAskTwapCrankConfig;
-	pythCranker?: PythCrankerBotConfig;
 	pythLazerCranker?: PythLazerCrankerBotConfig;
 	switchboardCranker?: SwitchboardCrankerBotConfig;
 	swiftTaker?: BaseBotConfig;
