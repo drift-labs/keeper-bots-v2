@@ -1495,6 +1495,41 @@ export function getMarketsAndOracleInfosToLoad(
 		sdkConfig.SPOT_MARKETS.map((m: SpotMarketConfig) => [m.marketIndex, m])
 	);
 
+	perpIndexes = (perpIndexes ?? []).filter((idx) => {
+		const perpMarketConfig = perpMarketConfigsByIndex.get(idx);
+		if (
+			perpMarketConfig &&
+			getVariant(perpMarketConfig.oracleSource)
+				.toLowerCase()
+				.includes('switchboard')
+		) {
+			logger.warn(
+				`Skipping perp market ${idx}; ${getVariant(
+					perpMarketConfig.oracleSource
+				)} oracle support has been removed from the SDK`
+			);
+			return false;
+		}
+		return true;
+	});
+	spotIndexes = (spotIndexes ?? []).filter((idx) => {
+		const spotMarketConfig = spotMarketConfigsByIndex.get(idx);
+		if (
+			spotMarketConfig &&
+			getVariant(spotMarketConfig.oracleSource)
+				.toLowerCase()
+				.includes('switchboard')
+		) {
+			logger.warn(
+				`Skipping spot market ${idx}; ${getVariant(
+					spotMarketConfig.oracleSource
+				)} oracle support has been removed from the SDK`
+			);
+			return false;
+		}
+		return true;
+	});
+
 	if (perpIndexes && perpIndexes.length > 0) {
 		for (const idx of perpIndexes) {
 			const perpMarketConfig = perpMarketConfigsByIndex.get(idx);
