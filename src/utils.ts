@@ -1488,9 +1488,16 @@ export function getMarketsAndOracleInfosToLoad(
 		}
 	}
 
+	const perpMarketConfigsByIndex = new Map<number, PerpMarketConfig>(
+		sdkConfig.PERP_MARKETS.map((m: PerpMarketConfig) => [m.marketIndex, m])
+	);
+	const spotMarketConfigsByIndex = new Map<number, SpotMarketConfig>(
+		sdkConfig.SPOT_MARKETS.map((m: SpotMarketConfig) => [m.marketIndex, m])
+	);
+
 	if (perpIndexes && perpIndexes.length > 0) {
 		for (const idx of perpIndexes) {
-			const perpMarketConfig = sdkConfig.PERP_MARKETS[idx] as PerpMarketConfig;
+			const perpMarketConfig = perpMarketConfigsByIndex.get(idx);
 			if (!perpMarketConfig) {
 				throw new Error(`Perp market config for ${idx} not found`);
 			}
@@ -1511,7 +1518,7 @@ export function getMarketsAndOracleInfosToLoad(
 
 	if (spotIndexes && spotIndexes.length > 0) {
 		for (const idx of spotIndexes) {
-			const spotMarketConfig = sdkConfig.SPOT_MARKETS[idx] as SpotMarketConfig;
+			const spotMarketConfig = spotMarketConfigsByIndex.get(idx);
 			if (!spotMarketConfig) {
 				throw new Error(`Spot market config for ${idx} not found`);
 			}
