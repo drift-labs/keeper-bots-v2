@@ -7,7 +7,7 @@
 	"dependencies": {
 		"@drift-labs/common": "patch:@drift-labs/common@npm%3A1.0.20#~/.yarn/patches/@drift-labs-common-npm-1.0.20-cf92dd0082.patch",
 		"@drift-labs/jit-proxy": "0.21.171",
-		"@drift-labs/sdk": "2.163.0-beta.12",
+		"@drift-labs/sdk": "2.163.0-beta.13",
 		"@opentelemetry/api": "1.7.0",
 		"@opentelemetry/auto-instrumentations-node": "^0.62.1",
 		"@opentelemetry/exporter-prometheus": "0.31.0",
@@ -55,7 +55,7 @@
 		"simple-swizzle": "0.2.2",
 		"is-arrayish": "0.3.2",
 		"log-symbols": "4.1.0",
-		"@drift-labs/sdk": "2.163.0-beta.12"
+		"@drift-labs/sdk": "2.163.0-beta.13"
 	},
 	"devDependencies": {
 		"@types/chai": "4.3.11",
