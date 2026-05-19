@@ -5,6 +5,10 @@ on:
     branches: [master]
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   build:
     runs-on: ubicloud
@@ -15,8 +19,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_NON_PROD }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY_NON_PROD }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_NONPROD }}
+          role-session-name: gha-${{ github.run_id }}
           aws-region: ${{ secrets.EKS_NON_PROD_REGION }}
 
       - name: Log in to Amazon ECR
@@ -44,8 +48,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_NON_PROD }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY_NON_PROD }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_NONPROD }}
+          role-session-name: gha-${{ github.run_id }}
           aws-region: ${{ secrets.EKS_NON_PROD_REGION }}
 
       - name: Install kubectl
